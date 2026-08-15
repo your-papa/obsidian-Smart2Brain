@@ -16,6 +16,7 @@ import { getProviderDefinition } from "../../providers/index";
 import { DEFAULT_AGENT_ID, getData } from "../../stores/dataStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
 import { DEFAULT_AGENT_ICON, type ChatOpenLocation } from "../../types/plugin";
+import { isMobileUI } from "../../utils/platform";
 
 const pluginData = getData();
 const plugin = getPlugin();
@@ -120,7 +121,7 @@ function getAgentSkillsSummary(agentId: string): { icons: string[]; overflow: nu
   >
     {#snippet actions()}
       <div class="flex items-center justify-end">
-        <Button buttonText="Add Agent" cta={true} onClick={createNewAgent} />
+        <Button buttonText="Add agent" cta={true} onClick={createNewAgent} />
       </div>
     {/snippet}
 
@@ -194,7 +195,7 @@ function getAgentSkillsSummary(agentId: string): { icons: string[]; overflow: nu
 
   <SettingGroup heading="Agents Storage">
     <SettingItem
-      name="Agents Folder"
+      name="Agents folder"
       desc="Vault folder holding agent context — skills, memories, and base prompts. Changing it seeds the new location; existing files are left in place."
     >
       <FolderSuggest
@@ -212,7 +213,7 @@ function getAgentSkillsSummary(agentId: string): { icons: string[]; overflow: nu
   </SettingGroup>
 
   <SettingGroup heading="Chats">
-    <SettingItem name="Chats Folder" desc="Folder to store chat files and related data">
+    <SettingItem name="Chats folder" desc="Folder to store chat files and related data">
       <FolderSuggest
         app={plugin.app}
         value={pluginData.targetFolder}
@@ -227,7 +228,7 @@ function getAgentSkillsSummary(agentId: string): { icons: string[]; overflow: nu
     </SettingItem>
 
     <SettingItem
-      name="Attachment Folder"
+      name="Attachment folder"
       desc="Folder for chat file attachments. Leave empty to use Obsidian's attachment folder."
     >
       <FolderSuggest
@@ -261,6 +262,18 @@ function getAgentSkillsSummary(agentId: string): { icons: string[]; overflow: nu
         onchange={(checked) => (pluginData.showActiveAgentsInStatusBar = checked)}
       />
     </SettingItem>
+
+    {#if isMobileUI()}
+      <SettingItem
+        name="Use S2B search in the navbar"
+        desc="Make the search button in the bottom navbar open Smart Second Brain search instead of Obsidian's. Only that button changes — Obsidian's search still opens from the command palette and its hotkey."
+      >
+        <Toggle
+          checked={pluginData.overrideMobileNavbarSearch}
+          onchange={(checked) => (pluginData.overrideMobileNavbarSearch = checked)}
+        />
+      </SettingItem>
+    {/if}
   </SettingGroup>
 </div>
 

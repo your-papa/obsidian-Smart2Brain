@@ -16,6 +16,7 @@ import {
 import { getData } from "../../stores/dataStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
 import { isAgentFilePath } from "../../utils/fileFiltering";
+import { icon as iconDirective } from "../../utils/utils";
 import type { PrivacyMode } from "../../types/plugin";
 import Button from "../ui/Button.svelte";
 import type { PrivacyListModal } from "./PrivacyListModal";
@@ -83,6 +84,21 @@ function ensureGroup(filter: ViewFilter): ViewFilter {
 const initialParsed = parseSpaceMembershipFilter(data.privacyFilter);
 let privacyFilter = $state<ViewFilter>(ensureGroup(data.privacyFilter ?? createEmptySpaceFilter()));
 let showFilters = $state(initialParsed.draft.autoIncludeRules.length > 0);
+/** Whether the mode explanation + path-visibility caveat are expanded. */
+let showModeDetails = $state(false);
+
+/**
+ * Which side of the split is listed.
+ *
+ * "managed" is the set the rules below build — the one this modal edits. But
+ * that is only ever one half of the vault, and the question a user actually
+ * arrives with ("is this note private?") is just as often about the other half.
+ * Previously only the managed side was visible and the other was unlistable, so
+ * confirming a file was NOT exposed meant scanning the managed list and
+ * reasoning about the absence. This switch lists either side.
+ */
+type PrivacyListSide = "managed" | "complement";
+let listSide = $state<PrivacyListSide>("managed");
 
 // Working copy — edits only touch this local state. `data.setPrivacyFilter` /
 // `data.setPrivacyMode` are called once, from `saveChanges`, so a half-typed
@@ -151,6 +167,37 @@ const excludedEntries = $derived.by(() =>
 		contextLabel: getParentPath(path) || null,
 	})),
 );
+
+/**
+ * Everything the rules do NOT select: the vault minus the managed set. Derived
+ * rather than stored, so it always agrees with the rules as they are edited.
+ * These rows are read-only — a file leaves this side by being added to the
+ * managed set, which is what the other tab is for.
+ */
+const complementEntries = $derived.by(() => {
+	const managed = resolvedPrivacy.paths;
+	return [...privacyUniverse]
+		.filter((path) => !managed.has(path))
+		.sort((left, right) => left.localeCompare(right))
+		.map((path) => ({
+			path,
+			displayName: path.split("/").pop() ?? path,
+			contextLabel: getParentPath(path) || null,
+			searchable: path.toLowerCase(),
+		}));
+});
+
+const showingManaged = $derived(listSide === "managed");
+
+/**
+ * `FileSetEditor` renders every row it is given — no virtualization. The managed
+ * set is a deliberate, user-built list so it stays small, but the complement can
+ * be the entire vault, and mounting thousands of hover-enabled rows locks the
+ * modal. Cap the rows there; the editor applies the cap after its search filter,
+ * so anything past it is still reachable by typing.
+ */
+const COMPLEMENT_ROW_LIMIT = 300;
+const activeEntries = $derived(showingManaged ? includedEntries : complementEntries);
 
 function updatePrivacyFilter(nextFilter: ViewFilter) {
 	privacyFilter = ensureGroup(nextFilter);
@@ -269,13 +316,25 @@ const introBody = $derived.by(() =>
 const pathVisibilityNote =
 	"This controls file content, not file or folder names — those can still appear to any provider. " +
 	"Rules here follow renames automatically, so you can freely rename or move files without breaking this list.";
-const sectionTitle = $derived.by(() =>
+const managedTitle = $derived.by(() =>
 	privacyMode === "private-by-default" ? "Files exposed to untrusted providers" : "Private files",
 );
-const includedEmptyText = $derived.by(() =>
+/** The other half of the vault, named for what it means rather than "not managed". */
+const complementTitle = $derived.by(() =>
+	privacyMode === "private-by-default" ? "Private files" : "Files exposed to untrusted providers",
+);
+const sectionTitle = $derived(showingManaged ? managedTitle : complementTitle);
+const managedEmptyText = $derived.by(() =>
 	privacyMode === "private-by-default"
 		? "No files are exposed to untrusted providers yet."
 		: "No private files selected yet.",
+);
+const includedEmptyText = $derived(
+	showingManaged
+		? managedEmptyText
+		: privacyMode === "private-by-default"
+			? "Every file is exposed to untrusted providers."
+			: "No files are exposed to untrusted providers.",
 );
 const pickerModalTitle = $derived.by(() =>
 	privacyMode === "private-by-default" ? "Expose files" : "Add private files",
@@ -306,17 +365,32 @@ const excludedTitle = $derived.by(() => (privacyMode === "private-by-default" ? 
 
 <div class="privacy-modal-shell">
   <div class="privacy-modal-content">
+    <!-- The mode switch and a one-line count are what this panel is for; the
+         explanations sit behind the info disclosure. Four stacked paragraphs of
+         always-on prose pushed the file list — the thing being edited — most of
+         the way off the modal. -->
     <div class="privacy-mode-panel">
       <div class="privacy-mode-copy">
-        <div class="privacy-mode-title">{introTitle}</div>
-        <p>{introBody}</p>
-        <p>
-          Untrusted providers can currently access {accessibleFileCount} of {totalVaultFiles} vault file{totalVaultFiles ===
-          1
-            ? ""
-            : "s"}. {privateFileCount} file{privateFileCount === 1 ? "" : "s"} remain private.
+        <div class="privacy-mode-headline">
+          <div class="privacy-mode-title">{introTitle}</div>
+          <button
+            type="button"
+            class="clickable-icon privacy-mode-info-toggle"
+            aria-label={showModeDetails ? "Hide details" : "What does this mean?"}
+            aria-expanded={showModeDetails}
+            onclick={() => (showModeDetails = !showModeDetails)}
+          >
+            <span use:iconDirective={"info"}></span>
+          </button>
+        </div>
+        <p class="privacy-mode-summary">
+          {accessibleFileCount} of {totalVaultFiles} file{totalVaultFiles === 1 ? "" : "s"} readable
+          by untrusted providers · {privateFileCount} private
         </p>
-        <p class="privacy-mode-note">{pathVisibilityNote}</p>
+        {#if showModeDetails}
+          <p>{introBody}</p>
+          <p class="privacy-mode-note">{pathVisibilityNote}</p>
+        {/if}
       </div>
 
       <div class="privacy-mode-toggle" role="tablist" aria-label="Privacy mode">
@@ -341,26 +415,53 @@ const excludedTitle = $derived.by(() => (privacyMode === "private-by-default" ? 
       </div>
     </div>
 
+    <!-- Which half of the vault the list below shows. Editing always applies to
+         the managed side, so the add/filter controls only appear there. -->
+    <div class="privacy-list-switch" role="tablist" aria-label="File list">
+      <button
+        type="button"
+        class="privacy-list-switch-button"
+        class:privacy-list-switch-button--active={showingManaged}
+        aria-pressed={showingManaged}
+        onclick={() => (listSide = "managed")}
+      >
+        {managedTitle}
+        <span class="privacy-list-switch-count">{includedEntries.length}</span>
+      </button>
+      <button
+        type="button"
+        class="privacy-list-switch-button"
+        class:privacy-list-switch-button--active={!showingManaged}
+        aria-pressed={!showingManaged}
+        onclick={() => (listSide = "complement")}
+      >
+        {complementTitle}
+        <span class="privacy-list-switch-count">{complementEntries.length}</span>
+      </button>
+    </div>
+
     <FileSetEditor
       {app}
       {sourcePath}
       hoverSource="smart-second-brain-privacy-editor"
       {sectionTitle}
-      {includedEntries}
+      includedEntries={activeEntries}
       {includedEmptyText}
+      searchPlaceholder="Filter files"
+      maxVisibleEntries={showingManaged ? undefined : COMPLEMENT_ROW_LIMIT}
       addButtonText="Add files"
       {pickerModalTitle}
       {pickerText}
       pickerExistingPaths={!parsedMembership.isAdvanced ? parsedMembership.draft.manualPaths : []}
       pickerIncludedPaths={includedFiles}
-      onAddPaths={!parsedMembership.isAdvanced ? handleAddPaths : undefined}
-      showFilterToggle={true}
+      onAddPaths={showingManaged && !parsedMembership.isAdvanced ? handleAddPaths : undefined}
+      showFilterToggle={showingManaged}
       filtersButtonText="Filters"
       filterToggleAriaLabel="Toggle privacy filters"
       isFilterActive={hasFilters}
       filterCount={parsedMembership.isAdvanced ? 1 : parsedMembership.draft.autoIncludeRules.length}
       onToggleFilters={() => (showFilters = !showFilters)}
-      showFilterPanel={showFilters}
+      showFilterPanel={showingManaged && showFilters}
       filterPanelLabel="Filters"
       filterBuilderFilter={parsedMembership.isAdvanced
   		? ensureGroup(cloneViewFilter(privacyFilter))
@@ -369,9 +470,9 @@ const excludedTitle = $derived.by(() => (privacyMode === "private-by-default" ? 
       {availableTags}
       {availableProperties}
       onFilterChange={handleRulesFilterChange}
-      {excludedEntries}
+      excludedEntries={showingManaged ? excludedEntries : []}
       {excludedTitle}
-      resolveIncludedActions={getIncludedFileActions}
+      resolveIncludedActions={showingManaged ? getIncludedFileActions : undefined}
       resolveExcludedActions={getExcludedFileActions}
     />
   </div>
@@ -419,6 +520,62 @@ const excludedTitle = $derived.by(() => (privacyMode === "private-by-default" ? 
 
   .privacy-mode-copy p {
     margin: 0;
+  }
+
+  .privacy-mode-headline {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  /* `.clickable-icon` already supplies the transparent-at-rest → hover-highlight
+     treatment and native rounding; only the glyph size is set here. */
+  .privacy-mode-info-toggle :global(svg) {
+    width: 14px;
+    height: 14px;
+  }
+
+  .privacy-mode-summary {
+    color: var(--text-muted);
+    font-size: var(--font-smaller);
+  }
+
+  .privacy-list-switch {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  .privacy-list-switch-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
+    background: var(--background-secondary);
+    color: var(--text-muted);
+    font-size: var(--font-ui-small);
+    cursor: pointer;
+  }
+
+  .privacy-list-switch-button:hover {
+    background: var(--background-modifier-hover);
+    color: var(--text-normal);
+  }
+
+  .privacy-list-switch-button--active {
+    border-color: var(--interactive-accent);
+    background: color-mix(in srgb, var(--interactive-accent) 15%, var(--background-secondary));
+    color: var(--text-normal);
+  }
+
+  .privacy-list-switch-count {
+    padding: 0 5px;
+    border-radius: var(--radius-s);
+    background: var(--background-primary);
+    color: var(--text-muted);
+    font-size: var(--font-smallest);
   }
 
   .privacy-mode-note {

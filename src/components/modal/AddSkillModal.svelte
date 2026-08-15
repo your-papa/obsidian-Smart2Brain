@@ -8,8 +8,11 @@ import {
 	validateDescription,
 	parseFrontmatter,
 } from "../../skills";
+import { Tabs } from "bits-ui";
 import { createObsidianFetch } from "../../lib/obsidianFetch";
+import SettingContainer from "../settings/SettingContainer.svelte";
 import Button from "../ui/Button.svelte";
+import SlidingTabs, { type SlidingTab } from "../ui/SlidingTabs.svelte";
 import Text from "../ui/Text.svelte";
 import type { AddSkillModal } from "./AddSkillModal";
 
@@ -25,6 +28,11 @@ const { modal, plugin, agentId, onSave }: Props = $props();
 // Mode: "create" or "import"
 type Mode = "create" | "import";
 let mode = $state<Mode>("create");
+
+const SKILL_MODE_TABS: SlidingTab<Mode>[] = [
+	{ id: "create", label: "Create new", icon: "plus" },
+	{ id: "import", label: "Import from URL", icon: "download" },
+];
 
 let skillName = $state("");
 let skillDescription = $state("");
@@ -168,102 +176,80 @@ async function handleSave() {
 </script>
 
 <div class="add-skill-modal-content">
-  <!-- Mode Toggle -->
-  <div class="add-skill-tabs">
-    <button
-      class="add-skill-tab"
-      class:active={mode === "create"}
-      onclick={() => (mode = "create")}
-    >
-      Create New
-    </button>
-    <button
-      class="add-skill-tab"
-      class:active={mode === "import"}
-      onclick={() => (mode = "import")}
-    >
-      Import from URL
-    </button>
-    <div class="flex-1"></div>
-    <button class="add-skill-marketplace-link" onclick={openSkillsMarketplace}>
-      Browse SkillsMP →
-    </button>
-  </div>
+  <SlidingTabs bind:value={mode} tabs={SKILL_MODE_TABS}>
+    <Tabs.Content value="create">
+      <SettingContainer
+        name="Name"
+        desc={skillSlug && skillSlug !== skillName.toLowerCase()
+          ? `Saved as: ${skillSlug}`
+          : "The skill's display name."}
+      >
+        <Text
+          id="add-skill-name"
+          inputType="text"
+          value={skillName}
+          placeholder="e.g., Code Review, Writing Style"
+          onchange={(val) => (skillName = val)}
+        />
+      </SettingContainer>
 
-  {#if mode === "import"}
-    <!-- Import Mode -->
-    <div class="add-skill-field">
-      <label class="add-skill-label" for="add-skill-import-url">SKILL.md URL</label>
-      <Text
-        id="add-skill-import-url"
-        inputType="text"
-        value={importUrl}
-        placeholder="https://github.com/owner/repo/blob/main/skills/my-skill/SKILL.md"
-        onchange={(val) => (importUrl = val)}
-      />
-      <p class="add-skill-description">
-        Paste a GitHub URL to a SKILL.md file. Supports github.com and raw.githubusercontent.com
-        URLs. Find skills at <button class="inline-link" onclick={openSkillsMarketplace}
-          >skillsmp.com</button
-        >
-      </p>
-    </div>
+      <SettingContainer
+        name="Description"
+        desc="What this skill does and when to use it. After you add it, the skill's note opens so you can write the full instructions."
+      >
+        <Text
+          id="add-skill-description"
+          inputType="text"
+          value={skillDescription}
+          placeholder="Describe when to use this skill..."
+          onchange={(val) => (skillDescription = val)}
+        />
+      </SettingContainer>
 
-    {#if importError}
-      <div class="add-skill-error">{importError}</div>
-    {/if}
+      {#if validationError}
+        <div class="add-skill-error">{validationError}</div>
+      {/if}
+    </Tabs.Content>
 
-    <div class="add-skill-actions">
-      <div class="flex-1"></div>
-      <Button buttonText="Cancel" onClick={() => modal.close()} />
+    <Tabs.Content value="import">
+      <SettingContainer
+        name="SKILL.md URL"
+        desc="Paste a GitHub URL to a SKILL.md file. Supports github.com and raw.githubusercontent.com URLs."
+      >
+        <Text
+          id="add-skill-import-url"
+          inputType="text"
+          value={importUrl}
+          placeholder="https://github.com/owner/repo/blob/main/skills/my-skill/SKILL.md"
+          onchange={(val) => (importUrl = val)}
+        />
+      </SettingContainer>
+
+      <SettingContainer name="Browse skills" desc="Find community skills on skillsmp.com.">
+        <Button buttonText="Open SkillsMP" onClick={openSkillsMarketplace} />
+      </SettingContainer>
+
+      {#if importError}
+        <div class="add-skill-error">{importError}</div>
+      {/if}
+    </Tabs.Content>
+  </SlidingTabs>
+
+  <!-- Obsidian's own footer class, so the buttons sit where they do in every
+       core modal instead of in a hand-rolled row. -->
+  <div class="modal-button-container">
+    <Button buttonText="Cancel" onClick={() => modal.close()} />
+    {#if mode === "import"}
       <Button
         buttonText={importLoading ? "Importing..." : "Import"}
         cta={true}
         onClick={handleImport}
         disabled={importLoading || !importUrl.trim()}
       />
-    </div>
-  {:else}
-    <!-- Create Mode -->
-    <div class="add-skill-field">
-      <label class="add-skill-label" for="add-skill-name">Skill Name</label>
-      <Text
-        id="add-skill-name"
-        inputType="text"
-        value={skillName}
-        placeholder="e.g., Code Review, Writing Style"
-        onchange={(val) => (skillName = val)}
-      />
-      {#if skillSlug && skillSlug !== skillName.toLowerCase()}
-        <p class="add-skill-hint">Will be saved as: {skillSlug}</p>
-      {/if}
-    </div>
-
-    <div class="add-skill-field">
-      <label class="add-skill-label" for="add-skill-description">Description</label>
-      <Text
-        id="add-skill-description"
-        inputType="text"
-        value={skillDescription}
-        placeholder="Describe when to use this skill..."
-        onchange={(val) => (skillDescription = val)}
-      />
-      <p class="add-skill-description">
-        A short description of what this skill does and when to use it. After you add it, the
-        skill's note opens so you can write the full instructions.
-      </p>
-    </div>
-
-    {#if validationError}
-      <div class="add-skill-error">{validationError}</div>
+    {:else}
+      <Button buttonText="Add & open note" cta={true} onClick={handleSave} disabled={!isValid} />
     {/if}
-
-    <div class="add-skill-actions">
-      <div class="flex-1"></div>
-      <Button buttonText="Cancel" onClick={() => modal.close()} />
-      <Button buttonText="Add & Open Note" cta={true} onClick={handleSave} disabled={!isValid} />
-    </div>
-  {/if}
+  </div>
 </div>
 
 <style>
@@ -271,30 +257,6 @@ async function handleSave() {
     display: flex;
     flex-direction: column;
     gap: 12px;
-  }
-
-  .add-skill-field {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-
-  .add-skill-label {
-    font-weight: 500;
-    color: var(--text-normal);
-  }
-
-  .add-skill-description {
-    margin: 0;
-    color: var(--text-muted);
-    font-size: var(--font-ui-small);
-  }
-
-  .add-skill-hint {
-    margin: 0;
-    color: var(--text-muted);
-    font-size: var(--font-ui-smaller);
-    font-style: italic;
   }
 
   .add-skill-error {
@@ -305,69 +267,9 @@ async function handleSave() {
     border-radius: 6px;
   }
 
-  .add-skill-actions {
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .add-skill-tabs {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    padding-bottom: 8px;
-    border-bottom: 1px solid var(--background-modifier-border);
-    margin-bottom: 4px;
-  }
-
-  .add-skill-tab {
-    padding: 6px 12px;
-    border: none;
-    background: transparent;
-    color: var(--text-muted);
-    font-size: var(--font-ui-small);
-    cursor: pointer;
-    border-radius: 4px;
-    transition: all 0.15s ease;
-  }
-
-  .add-skill-tab:hover {
-    background: var(--background-modifier-hover);
-    color: var(--text-normal);
-  }
-
-  .add-skill-tab.active {
-    background: var(--interactive-accent);
-    color: var(--text-on-accent);
-  }
-
-  .add-skill-marketplace-link {
-    padding: 6px 12px;
-    border: none;
-    background: transparent;
-    color: var(--text-accent);
-    font-size: var(--font-ui-small);
-    cursor: pointer;
-    text-decoration: none;
-    transition: all 0.15s ease;
-  }
-
-  .add-skill-marketplace-link:hover {
-    text-decoration: underline;
-  }
-
-  .inline-link {
-    background: none;
-    border: none;
-    padding: 0;
-    color: var(--text-accent);
-    cursor: pointer;
-    font-size: inherit;
-    text-decoration: underline;
-  }
-
-  .inline-link:hover {
-    color: var(--text-accent-hover);
+  /* The tab strip owns the spacing above; without this the first SettingContainer's
+     own top border sits directly under it with no breathing room. */
+  .add-skill-modal-content :global([data-tabs-content]) {
+    padding-top: 4px;
   }
 </style>

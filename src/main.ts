@@ -4,6 +4,7 @@ import "./lib/i18n";
 import "./lib/langgraphContext";
 import { Logger as Log, applyVerboseLogging } from "./utils/logging";
 import { isAgentFilePath } from "./utils/fileFiltering";
+import { isMobileUI } from "./utils/platform";
 import { StartupProfiler } from "./utils/startupProfiler";
 import { persistStartupRecord, recordStartupEnvironment } from "./utils/startupTimingsStore";
 import "./styles.css";
@@ -68,9 +69,9 @@ export default class SecondBrainPlugin extends Plugin {
 
 	private getAddToChatMenuLabel(selectedCount: number): string {
 		if (selectedCount <= 1) {
-			return "Add to Chat";
+			return "Add to chat";
 		}
-		return `Add ${selectedCount} files to Chat`;
+		return `Add ${selectedCount} files to chat`;
 	}
 
 	/** Thread path for pending-change navigation: the focused chat if there is one,
@@ -256,6 +257,77 @@ export default class SecondBrainPlugin extends Plugin {
 		await this.pluginData.clearRecentNotes();
 	}
 
+	/**
+	 * Mobile only: route the search button in Obsidian's bottom navbar to S2B
+	 * search, when `overrideMobileNavbarSearch` is on.
+	 *
+	 * That button has no plugin-facing hook — it invokes the `global-search:open`
+	 * command — so the interception has to happen on the command. But the command
+	 * is shared: the palette, any hotkey, and our own tag-click handler in
+	 * `MarkdownRenderer` all route through it, and those must still reach CORE
+	 * search (a tag click that opened S2B search instead of the tag's results
+	 * would be a plain regression). So the wrapper redirects only while a
+	 * navbar-originated invocation is in flight, flagged by a capture-phase
+	 * pointer listener on the navbar button; every other caller falls through to
+	 * the original callback untouched.
+	 *
+	 * The flag is armed on pointerdown and disarmed on a microtask, so it spans
+	 * the synchronous command dispatch the tap triggers and nothing later.
+	 */
+	private registerMobileNavbarSearchOverride(): void {
+		if (!isMobileUI()) return;
+
+		const commands = (
+			this.app as unknown as {
+				commands?: { commands?: Record<string, { callback?: () => unknown }> };
+			}
+		).commands?.commands;
+		const searchCommand = commands?.["global-search:open"];
+		const originalCallback = searchCommand?.callback;
+		if (!searchCommand || typeof originalCallback !== "function") {
+			Log.warn("[S2B] Could not hook global-search:open — mobile navbar search override unavailable.");
+			return;
+		}
+
+		let navbarTapInFlight = false;
+		this.registerDomEvent(
+			document,
+			"pointerdown",
+			(evt) => {
+				const target = evt.target;
+				if (!(target instanceof Element)) return;
+				// The navbar's search action; `.mobile-navbar-action` is the button
+				// wrapper core renders. Matching on the ancestor keeps this working
+				// whether the tap lands on the button or its inner icon/svg.
+				if (!target.closest(".mobile-navbar .mobile-navbar-action, .mobile-navbar [data-icon='search']")) {
+					return;
+				}
+				navbarTapInFlight = true;
+				queueMicrotask(() => {
+					navbarTapInFlight = false;
+				});
+			},
+			{ capture: true },
+		);
+
+		const ourCallback = () => {
+			if (!navbarTapInFlight || !getData().overrideMobileNavbarSearch) {
+				return originalCallback.call(searchCommand);
+			}
+			new SearchModal(this.app).open();
+		};
+		searchCommand.callback = ourCallback;
+
+		this.register(() => {
+			// Restore only if OUR wrapper is still the installed callback. If someone
+			// else hooked the command after us, theirs is live and writing the
+			// original back would silently uninstall it.
+			if (searchCommand.callback === ourCallback) {
+				searchCommand.callback = originalCallback;
+			}
+		});
+	}
+
 	async onload() {
 		StartupProfiler.mark("onload:start", true);
 		// Time (ms) since the renderer process began until our onload ran. A large value
@@ -355,8 +427,8 @@ export default class SecondBrainPlugin extends Plugin {
 			throw new Error("Cannot localize plugin directory.");
 		}
 
-		this.addRibbonIcon("message-square", "New Chat", () => this.createNewChat());
-		this.addRibbonIcon("search", "Search Notes", () => new SearchModal(this.app).open());
+		this.addRibbonIcon("message-square", "New chat", () => this.createNewChat());
+		this.addRibbonIcon("search", "Search notes", () => new SearchModal(this.app).open());
 		this.addRibbonIcon("git-fork", "Graph", () => this.activateSmartGraphView());
 
 		// Create Agent Manager (v2) + session registry BEFORE mounting the status-bar
@@ -375,28 +447,30 @@ export default class SecondBrainPlugin extends Plugin {
 
 		this.addCommand({
 			id: "open-chat",
-			name: "Open Chat",
+			name: "Open chat",
 			icon: "message-square",
 			callback: async () => await this.agentManager.openLatestChat(),
 		});
 
 		this.addCommand({
 			id: "new-chat",
-			name: "New Chat",
+			name: "New chat",
 			icon: "plus",
 			callback: async () => await this.agentManager.createNewChat(),
 		});
 
 		this.addCommand({
 			id: "search-notes",
-			name: "Search Notes",
+			name: "Search notes",
 			icon: "search",
 			callback: () => new SearchModal(this.app).open(),
 		});
 
+		this.registerMobileNavbarSearchOverride();
+
 		this.addCommand({
 			id: "open-smart-graph",
-			name: "Open Graph",
+			name: "Open graph",
 			icon: "git-fork",
 			callback: () => this.activateSmartGraphView(),
 		});
@@ -411,7 +485,7 @@ export default class SecondBrainPlugin extends Plugin {
 
 		this.addCommand({
 			id: "open-onboarding",
-			name: "Show Welcome",
+			name: "Show welcome",
 			icon: "zap",
 			callback: () => this.activateOnboardingView(),
 		});

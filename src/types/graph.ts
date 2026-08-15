@@ -218,6 +218,8 @@ export interface SmartGraphSettings {
 	highlightIsolated: boolean;
 	/** Highlight bridge notes (nodes spanning multiple communities) in the graph */
 	highlightBridges: boolean;
+	/** Whether to draw the cluster/topic label pills over the graph */
+	showClusterLabels: boolean;
 }
 
 /**
@@ -248,6 +250,7 @@ export const DEFAULT_SMART_GRAPH_SETTINGS: SmartGraphSettings = {
 	outlineViewDetail: 30,
 	highlightIsolated: false,
 	highlightBridges: false,
+	showClusterLabels: true,
 };
 
 /**

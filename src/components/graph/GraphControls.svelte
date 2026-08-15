@@ -228,6 +228,16 @@ const lassoTooltip = onMobile ? "Lasso selection" : "Lasso selection (or hold Sh
         />
       </SettingContainer>
       <SettingContainer
+        name="Topic labels"
+        desc="Show the topic name pills over the graph"
+        compact
+      >
+        <Toggle
+          checked={settings.showClusterLabels ?? true}
+          onchange={(value) => onSettingsChange({ showClusterLabels: value })}
+        />
+      </SettingContainer>
+      <SettingContainer
         name="Direction arrows"
         desc="Show arrows for directed wiki links"
         compact

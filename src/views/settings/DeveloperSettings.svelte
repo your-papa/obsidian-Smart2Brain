@@ -197,7 +197,7 @@ async function handleCheckLangSmithConnection() {
 <!-- Observability -->
 <SettingGroup heading="Observability">
   <SettingItem
-    name="LangSmith Integration"
+    name="LangSmith integration"
     desc="Enable LangSmith telemetry for debugging and tracing"
   >
     <Toggle
@@ -208,7 +208,7 @@ async function handleCheckLangSmithConnection() {
 
   {#if pluginData.enableLangSmith}
     <SettingItem
-      name="API Key"
+      name="API key"
       desc="Select an Obsidian keychain secret for LangSmith authentication"
     >
       <SecretSelect
@@ -217,7 +217,7 @@ async function handleCheckLangSmithConnection() {
       />
     </SettingItem>
 
-    <SettingItem name="Project Name" desc="Project name to attribute runs">
+    <SettingItem name="Project name" desc="Project name to attribute runs">
       <Text
         placeholder="obsidian-agent"
         inputType="text"

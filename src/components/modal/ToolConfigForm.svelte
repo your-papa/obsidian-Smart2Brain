@@ -683,7 +683,7 @@ function openProcessorSelectionModal(currentProcessor: ChatModel | null, onSelec
       <Button buttonText="Cancel" onClick={() => onCancel?.()} />
       <div class="flex-1"></div>
       {#if showResetToDefault}
-        <Button buttonText="Reset to Default" onClick={handleResetToDefault} />
+        <Button buttonText="Reset to default" onClick={handleResetToDefault} />
       {/if}
       {#if isDirty}
         <Button buttonText="Save" cta={true} onClick={handleSave} />

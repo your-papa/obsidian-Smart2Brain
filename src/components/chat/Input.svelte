@@ -1329,6 +1329,8 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
   }
 
   .chat-input-container.chat-input-fullscreen {
+    /* Breathing room between the expanded panel and the chat pane's edges. */
+    --s2b-fs-gutter: 12px;
     position: absolute;
     top: var(--fs-top, 0px);
     left: var(--fs-left, 0px);
@@ -1355,40 +1357,30 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
     will-change: top, left, width, height, border-radius;
   }
 
+  /* Expanded geometry. The toggle that reaches this state is desktop-only (see
+     the `{#if !isMobileUI()}` guard on the fullscreen button), so this sizes
+     against the chat pane, not the phone viewport.
+
+     `.chat-input-container` is `position: absolute` inside `.chat-root`, which
+     is `position: relative` — so percentages here resolve against the chat pane
+     and the panel stays inside it instead of escaping to the window. An earlier
+     `height: 100vh - <mobile keyboard/navbar bands>` measured the whole viewport
+     while the top offset was relative to the pane, so in any pane shorter than
+     the window the panel overhung its bottom edge and the send row was clipped —
+     the reported "cut off slightly at the bottom". */
   .chat-input-container.chat-input-fullscreen.chat-input-fullscreen-visible {
     opacity: 1;
-    /* On mobile this sits flush against .chat-root's top (0), which underflows
-       the status bar / dynamic island — clear it with the safe-area inset,
-       same treatment as .s2b-provider-setup-modal-container. Harmless 0px on
-       desktop where neither var is set. */
-    top: max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px));
-    /* Small side margin so the panel isn't flush with the screen edges (matches
-       the 12px gutter the collapsed/portaled composer already uses). */
-    left: 12px;
-    width: calc(100% - 24px);
-    /* `height: calc(100% - ...)` resolves against the portal host
-       (.workspace-split.mod-root), which — like .app-container — only reflows
-       to account for the keyboard ~420ms after --keyboard-height itself flips
-       to the real value in a single frame (see the on-device timing notes on
-       .chat-root/`--s2b-composer-*` below and in Chat.svelte). Sizing off that
-       stale 100% briefly renders the panel too tall, so its bottom row (send
-       button/toolbar) sits underneath where the keyboard is about to appear.
-       Size off `100vh` directly instead — same fix already used for the
-       collapsed composer and `.chat-root` in Chat.svelte — so the send row is
-       never mid-transition-hidden behind the keyboard.
-
-       Bottom clearance mirrors `.s2b-composer-portaled`'s `top` calc in
-       Chat.svelte exactly: with the keyboard UP, core's `.mobile-toolbar` owns
-       that band (`--keyboard-height + --mobile-toolbar-height`); with it DOWN,
-       the floating `.mobile-navbar` does (52px + safe-area-bottom). Without
-       this, keyboard-down leaves --keyboard-height at 0 and the panel stretches
-       to the literal viewport bottom, landing the send row behind the navbar. */
-    height: calc(
-      100vh - max(var(--safe-area-inset-top, 0px), env(safe-area-inset-top, 0px)) -
-        max(
-          calc(var(--keyboard-height, 0px) + var(--mobile-toolbar-height, 52px)),
-          calc(52px + env(safe-area-inset-bottom))
-        )
+    top: var(--s2b-fs-gutter);
+    height: calc(100% - (2 * var(--s2b-fs-gutter)));
+    /* Match the collapsed composer's readable measure (`max-w-[--file-line-width]`,
+       centered) rather than stretching edge to edge: a full-width editor gives
+       lines far longer than the messages above it, so text written here does not
+       wrap where it will once sent. Centering is done with `left` + `width`
+       because `margin: 0 !important` above rules out `margin-inline: auto`. */
+    width: min(calc(100% - (2 * var(--s2b-fs-gutter))), var(--file-line-width));
+    left: max(
+      var(--s2b-fs-gutter),
+      calc((100% - min(calc(100% - (2 * var(--s2b-fs-gutter))), var(--file-line-width))) / 2)
     );
     /* Keep in step with the wrapper radius, as above. */
     border-radius: 22px;

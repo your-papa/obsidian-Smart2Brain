@@ -28,6 +28,7 @@ type EmbedCreator = (ctx: ChatEmbedContext, file: TFile) => MarkdownRenderChild;
 
 interface EmbedRegistry {
 	registerExtensions?: (extensions: string[], creator: EmbedCreator) => void;
+	unregisterExtensions?: (extensions: string[]) => void;
 }
 
 let warnedMissingRegistry = false;
@@ -146,9 +147,12 @@ class ChatEmbed extends MarkdownRenderChild {
  * embed registry (`app.embedRegistry`). This powers both `![[chat.chat]]` inline
  * embeds and hover previews (the Page Preview core plugin reuses embed renderers).
  *
- * The embed registry is not part of the public API and has no unregister hook, so
- * registration is process-lifetime and guarded defensively — if it's ever absent
- * the plugin still loads, just without chat previews.
+ * The embed registry is not part of the public API and registration is not torn
+ * down by Obsidian's Component lifecycle, so it's paired with
+ * {@link unregisterChatEmbed} in onunload — without that, disabling and
+ * re-enabling the plugin throws "Attempting to register an embed for an already
+ * registered extension" on the second onload. Guarded defensively either way — if
+ * the registry is ever absent the plugin still loads, just without chat previews.
  */
 export function registerChatEmbed(plugin: SecondBrainPlugin): void {
 	const registry = (plugin.app as unknown as { embedRegistry?: EmbedRegistry }).embedRegistry;
@@ -161,4 +165,10 @@ export function registerChatEmbed(plugin: SecondBrainPlugin): void {
 	}
 
 	registry.registerExtensions(["chat"], (ctx, file) => new ChatEmbed(ctx.containerEl, plugin, file));
+}
+
+/** Reverses {@link registerChatEmbed}; call from onunload. See its doc comment. */
+export function unregisterChatEmbed(plugin: SecondBrainPlugin): void {
+	const registry = (plugin.app as unknown as { embedRegistry?: EmbedRegistry }).embedRegistry;
+	registry?.unregisterExtensions?.(["chat"]);
 }
