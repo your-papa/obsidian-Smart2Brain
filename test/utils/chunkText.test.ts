@@ -432,4 +432,24 @@ describe("chunkText heading levels", () => {
 		expect(chunks).toHaveLength(2);
 		expect(chunks.find((c) => c.content.includes("y"))?.content).not.toContain("# c");
 	});
+
+
+	it("splits a note that opens with a fenced block before its first heading", () => {
+		// Review finding: countSections skipped fence lines without recording that
+		// content existed, so a note opening with a code block and then one heading
+		// counted as a single section and took the whole-note fast path — merging the
+		// code block into the headed section, the exact dilution this feature exists
+		// to prevent.
+		const body = ["```bash", "echo hello", "```", "", "## Usage", "How to use it."].join("\n");
+
+		const chunks = chunkText(body, "Leading Fence", 32_764);
+
+		expect(chunks).toHaveLength(2);
+		expect(chunks.find((c) => c.content.includes("echo hello"))?.content).not.toContain("How to use it.");
+	});
+
+	it("keeps a note whose only content is a fenced block in one chunk", () => {
+		// The counterpart: leading code with no heading after it is still one topic.
+		expect(chunkText(["```bash", "echo hello", "```"].join("\n"), "Only Fence", 32_764)).toHaveLength(1);
+	});
 });

@@ -105,11 +105,15 @@ function countSections(content: string): number {
 
 	for (const line of content.split("\n")) {
 		const nextFence = nextFenceState(line, openFence);
-		if (nextFence !== openFence) {
+		const insideFence = openFence !== null || nextFence !== openFence;
+		if (insideFence) {
+			// Fenced code before the first heading is still leading content: a note
+			// that opens with a code block and then has one heading holds two
+			// topics, and must not take the single-chunk fast path.
+			if (!seenHeading && line.trim()) sawLeadingProse = true;
 			openFence = nextFence;
 			continue;
 		}
-		if (openFence !== null) continue;
 
 		if (HEADING_RE.test(line)) {
 			seenHeading = true;
