@@ -26,8 +26,8 @@ interface HeadingFrame {
 	text: string;
 }
 
-/** Matches a fenced code block delimiter, capturing the full run of ` or ~. */
-const FENCE_RE = /^\s*(`{3,}|~{3,})/;
+/** Matches a fenced code block delimiter, capturing the run and any trailing text. */
+const FENCE_RE = /^\s*(`{3,}|~{3,})(.*)$/;
 
 /** The delimiter that opened the current fenced block. */
 interface OpenFence {
@@ -50,6 +50,11 @@ interface OpenFence {
  *     three-backtick line inside a four-backtick block is content too. That is
  *     the ordinary way to show fenced code inside fenced code, so it turns up in
  *     real notes rather than only in edge cases.
+ *   - **Trailing text.** An info string (```` ```text ````) is legal only on the
+ *     *opening* delimiter; a closer permits nothing but whitespace after the run.
+ *     So a ```` ```text ```` line inside an open block is content, and treating
+ *     it as a closer would additionally let the *real* closer re-open a fence and
+ *     swallow every following section.
  *
  * @param line The line to inspect.
  * @param open The fence currently open, or null when outside one.
@@ -60,11 +65,18 @@ function nextFenceState(line: string, open: OpenFence | null): OpenFence | null 
 	if (!match) return open;
 
 	const run = match[1];
-	const fence: OpenFence = { char: run[0], length: run.length };
-	if (open === null) return fence;
+	const trailing = match[2];
+	if (open === null) {
+		// Opening delimiter: an info string is allowed. A backtick fence's info
+		// string may not itself contain a backtick (it would be inline code).
+		if (run[0] === "`" && trailing.includes("`")) return null;
+		return { char: run[0], length: run.length };
+	}
 
-	// Anything shorter, or of the other character, is code content.
-	return fence.char === open.char && fence.length >= open.length ? null : open;
+	// Closing delimiter: same character, at least as long, nothing but whitespace
+	// after it. Anything else is code content inside the open block.
+	const closes = run[0] === open.char && run.length >= open.length && trailing.trim() === "";
+	return closes ? null : open;
 }
 
 /**

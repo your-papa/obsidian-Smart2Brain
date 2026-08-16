@@ -356,4 +356,42 @@ describe("chunkText heading levels", () => {
 
 		expect(chunkText(body, "Longer Close", 32_764)).toHaveLength(2);
 	});
+
+
+	it("does not treat an info-string line inside a fence as a closer", () => {
+		// Review finding: an info string is legal only on the *opening* delimiter, so
+		// a ```text line inside an open block is content. Treating it as a closer also
+		// let the real closer re-open a fence, which swallowed the following section.
+		const body = [
+			"## Setup",
+			"Install it.",
+			"",
+			"```markdown",
+			"```text",
+			"# not a heading",
+			"```",
+			"",
+			"## Usage",
+			"Run it.",
+		].join("\n");
+
+		const chunks = chunkText(body, "Info String", 32_764);
+
+		// `## Usage` must still own a chunk rather than being absorbed into code.
+		const usage = chunks.find((c) => c.content.includes("Run it."));
+		expect(usage?.content).toContain("## Usage");
+		expect(usage?.content).not.toContain("not a heading");
+	});
+
+	it("accepts a closing fence followed only by whitespace", () => {
+		const body = ["## Setup", "x", "", "```bash", "# c", "```   ", "", "## Usage", "y"].join("\n");
+
+		expect(chunkText(body, "Trailing Space", 32_764)).toHaveLength(2);
+	});
+
+	it("does not mistake inline code spans for fences", () => {
+		const body = ["## Setup", "see ```code``` inline", "", "## Usage", "y"].join("\n");
+
+		expect(chunkText(body, "Inline", 32_764)).toHaveLength(2);
+	});
 });
