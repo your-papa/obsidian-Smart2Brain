@@ -26,8 +26,32 @@ interface HeadingFrame {
 	text: string;
 }
 
-/** Matches a fenced code block delimiter (``` or ~~~), with optional indent. */
+/** Matches a fenced code block delimiter (``` or ~~~), capturing the marker. */
 const FENCE_RE = /^\s*(```|~~~)/;
+
+/**
+ * Track fenced-code state across lines, remembering *which* marker opened the
+ * block.
+ *
+ * A naive boolean toggle is wrong: CommonMark only closes a fence with the same
+ * marker that opened it, so a `~~~` line inside a ```` ```markdown ```` block is
+ * content, not a delimiter. Toggling on it would end the fence early and leave a
+ * following `# comment` looking like a real heading — which then becomes a
+ * breadcrumb ancestor of every later section.
+ *
+ * @param line The line to inspect.
+ * @param openMarker The marker that opened the current fence, or null when outside one.
+ * @returns The new open marker (null when the line closed the fence).
+ */
+function nextFenceState(line: string, openMarker: string | null): string | null {
+	const match = line.match(FENCE_RE);
+	if (!match) return openMarker;
+
+	const marker = match[1];
+	if (openMarker === null) return marker;
+	// Only the matching marker closes the block; anything else is code content.
+	return marker === openMarker ? null : openMarker;
+}
 
 /**
  * Count the markdown sections in a note body.
@@ -42,16 +66,17 @@ const FENCE_RE = /^\s*(```|~~~)/;
  */
 function countSections(content: string): number {
 	let sections = 0;
-	let inFence = false;
+	let fenceMarker: string | null = null;
 	let sawLeadingProse = false;
 	let seenHeading = false;
 
 	for (const line of content.split("\n")) {
-		if (FENCE_RE.test(line)) {
-			inFence = !inFence;
+		const nextMarker = nextFenceState(line, fenceMarker);
+		if (nextMarker !== fenceMarker) {
+			fenceMarker = nextMarker;
 			continue;
 		}
-		if (inFence) continue;
+		if (fenceMarker !== null) continue;
 
 		if (HEADING_RE.test(line)) {
 			seenHeading = true;
@@ -237,16 +262,17 @@ export function chunkText(content: string, title: string, maxChars: number): Tex
 	// shell comment onto the breadcrumb stack, where it becomes a permanent
 	// ancestor of every following real section, and would split the fence markers
 	// across separate chunks.
-	let inFence = false;
+	let fenceMarker: string | null = null;
 
 	for (const line of lines) {
-		if (FENCE_RE.test(line)) {
-			inFence = !inFence;
+		const nextMarker = nextFenceState(line, fenceMarker);
+		if (nextMarker !== fenceMarker) {
+			fenceMarker = nextMarker;
 			buffer.push(line);
 			continue;
 		}
 
-		const m = inFence ? null : line.match(HEADING_RE);
+		const m = fenceMarker !== null ? null : line.match(HEADING_RE);
 		if (m) {
 			flushBuffer();
 			const level = m[1].length;

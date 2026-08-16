@@ -269,4 +269,58 @@ describe("chunkText heading levels", () => {
 		const usage = chunks.find((c) => c.content.includes("Run it."));
 		expect(usage?.content).not.toContain("not a heading");
 	});
+
+
+	it("only closes a fence with the marker that opened it", () => {
+		// Review finding: a shared boolean toggled on *any* fence marker, so a `~~~`
+		// line inside a ```markdown block ended the fence early and the following
+		// `#` line became a heading — and then a breadcrumb ancestor of every later
+		// section. CommonMark closes a fence only with its own marker.
+		const tildeInsideBacktick = [
+			"## Setup",
+			"Install it.",
+			"",
+			"```markdown",
+			"~~~",
+			"# not a heading",
+			"~~~",
+			"```",
+			"",
+			"## Usage",
+			"Run it.",
+		].join("\n");
+
+		const chunks = chunkText(tildeInsideBacktick, "Nested Fence", 32_764);
+
+		expect(chunks).toHaveLength(2);
+		expect(chunks.find((c) => c.content.includes("Run it."))?.content).not.toContain("not a heading");
+	});
+
+	it("handles a backtick fence nested inside a tilde fence", () => {
+		const backtickInsideTilde = [
+			"## Setup",
+			"Install it.",
+			"",
+			"~~~markdown",
+			"```",
+			"# not a heading",
+			"```",
+			"~~~",
+			"",
+			"## Usage",
+			"Run it.",
+		].join("\n");
+
+		const chunks = chunkText(backtickInsideTilde, "Nested Fence", 32_764);
+
+		expect(chunks).toHaveLength(2);
+		expect(chunks.find((c) => c.content.includes("Run it."))?.content).not.toContain("not a heading");
+	});
+
+	it("treats an unclosed fence as running to the end of the note", () => {
+		// Everything after the opener is code, so no further headings are recognised.
+		const body = ["## Setup", "Install it.", "", "```bash", "# c", "", "## Usage", "Run it."].join("\n");
+
+		expect(chunkText(body, "Unclosed", 32_764)).toHaveLength(1);
+	});
 });
