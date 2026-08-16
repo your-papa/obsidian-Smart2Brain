@@ -292,16 +292,29 @@ function previewChange(evt: Event, entry: PendingChangeEntry) {
   .pcb-container {
     display: flex;
     flex-direction: column;
-    border: 1px solid var(--background-modifier-border);
-    border-radius: var(--radius-s);
+    /* Matches `.chat-input-wrapper`, which this bar sits directly above: a
+       transparent 1px border (so the box still reserves the same layout space
+       as a bordered one) and the wrapper's literal 22px pill. 22px is hardcoded
+       rather than a --radius-* token because Obsidian's largest, --radius-l, is
+       only 12px — still visibly squarer than the composer next to it. */
+    border: 1px solid transparent;
+    border-radius: 22px;
     overflow: hidden;
     background: var(--background-secondary);
+    /* Cap the whole bar, not just the list, so a long run of changes can't grow
+       past the composer. The summary row is a flex sibling that never shrinks,
+       so it stays pinned and Accept/Reject All remain reachable at any length. */
+    min-height: 0;
+    max-height: 45vh;
   }
 
   .pcb-summary {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    /* Never give up height to the scrolling list below — the accept/reject-all
+       controls have to stay reachable however many changes are pending. */
+    flex-shrink: 0;
     padding: 6px 10px;
     background: var(--background-secondary);
     border: none;
@@ -396,6 +409,12 @@ function previewChange(evt: Event, entry: PendingChangeEntry) {
     display: flex;
     flex-direction: column;
     border-top: 1px solid var(--background-modifier-border);
+    /* The scroller. `min-height: 0` is required for a flex child to shrink below
+       its content size — without it the list wins over the container's
+       max-height and the bar overflows the composer instead of scrolling. */
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
   }
 
   .pcb-entry {
