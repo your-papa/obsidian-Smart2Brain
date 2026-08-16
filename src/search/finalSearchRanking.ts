@@ -363,16 +363,6 @@ export function rankSearchResults({
 	// recently-opened near-duplicates can march past a better answer. (Measured:
 	// three recent siblings pushed the correct note from rank 1 to rank 4.)
 	//
-	// Attenuate quadratically in the number of recent contenders: each rival both
-	// dilutes the signal (1/n, it no longer identifies a single note) and raises
-	// the bar for acting on it (1/n again, since promoting one of n interchangeable
-	// notes is n times more likely to be wrong). A lone recent note in a field of
-	// stale ones keeps full strength.
-	const recentContenders = scored.filter(
-		(entry) => (recentBoostByPath.get(entry.result.path)?.boost ?? 0) > 0,
-	).length;
-	const recentCrowdingFactor = recentContenders > 0 ? 1 / recentContenders ** 2 : 1;
-
 	// Adaptive lift ceiling: scale recency to how tightly *this* result set is
 	// packed. The median adjacent gap is used rather than the mean so a single
 	// outlier (one very strong match, or a long tail of near-zeroes) cannot skew
@@ -404,6 +394,23 @@ export function rankSearchResults({
 		// enough match to earn a recency lift.
 		return 0;
 	};
+
+	// Attenuate quadratically in the number of recent contenders: each rival both
+	// dilutes the signal (1/n, it no longer identifies a single note) and raises
+	// the bar for acting on it (1/n again, since promoting one of n interchangeable
+	// notes is n times more likely to be wrong). A lone recent note in a field of
+	// stale ones keeps full strength.
+	//
+	// Only *eligible* notes count. A recently-opened note that failed the relevance
+	// gate receives no lift at all, so it is not competing for the tiebreaker and
+	// must not dilute it — otherwise opening a few irrelevant notes would silently
+	// suppress recency for the one note it should actually help.
+	const recentContenders = scored.filter(
+		(entry) =>
+			(recentBoostByPath.get(entry.result.path)?.boost ?? 0) > 0 &&
+			rawRelativeRelevance(entry) >= RECENT_RELATIVE_ELIGIBILITY,
+	).length;
+	const recentCrowdingFactor = recentContenders > 0 ? 1 / recentContenders ** 2 : 1;
 
 	return scored
 		.map((entry) => {

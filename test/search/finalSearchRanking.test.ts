@@ -398,4 +398,35 @@ describe("rankSearchResults", () => {
 
         expect(results[0]?.rankingDebug?.adaptiveRecentLift ?? 0).toBeGreaterThan(0);
     });
+    it("does not let recency-gated notes dilute an eligible note's tiebreaker", () => {
+        // Review finding: crowding counted every recently-opened note, including
+        // ones below the relevance gate that receive no lift at all. Opening a few
+        // irrelevant notes therefore suppressed recency for the one note it should
+        // have helped, flipping the winner.
+        const run = (withGatedRecent: boolean) => {
+            const recent = new Map([["near.md", { boost: 4.5, recentRank: 1 }]]);
+            if (withGatedRecent) {
+                recent.set("junk1.md", { boost: 4.0, recentRank: 2 });
+                recent.set("junk2.md", { boost: 3.5, recentRank: 3 });
+            }
+            return rankSearchResults({
+                query: "topic",
+                lexicalResults: [
+                    { path: "lead.md", name: "Lead", score: 100 },
+                    { path: "near.md", name: "Near", score: 96 },
+                    { path: "junk1.md", name: "Junk1", score: 12 },
+                    { path: "junk2.md", name: "Junk2", score: 10 },
+                ],
+                recentBoostByPath: recent,
+            });
+        };
+
+        const scoreOf = (results: ReturnType<typeof run>) =>
+            results.find((r) => r.path === "near.md")?.score ?? 0;
+
+        // The gated notes are far below the eligibility threshold, so they neither
+        // gain a lift nor may they cost one.
+        expect(scoreOf(run(true))).toBeCloseTo(scoreOf(run(false)), 10);
+        expect(run(true)[0]?.path).toBe(run(false)[0]?.path);
+    });
 });

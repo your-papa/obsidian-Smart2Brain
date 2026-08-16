@@ -241,4 +241,32 @@ describe("chunkText heading levels", () => {
 		expect(install?.content).toContain("### Install");
 		expect(install?.content).not.toContain("Edit the config file");
 	});
+	it("does not treat heading-like lines inside code fences as sections", () => {
+		// Review finding: countSections tracked fence state but the splitting loop
+		// did not, so a shell comment became a real breadcrumb frame — a permanent
+		// ancestor of every following section — and split the fence markers apart.
+		const body = [
+			"## Setup",
+			"Install it.",
+			"",
+			"```bash",
+			"# not a heading",
+			"echo hi",
+			"```",
+			"",
+			"## Usage",
+			"Run it.",
+		].join("\n");
+
+		const chunks = chunkText(body, "Script Notes", 32_764);
+
+		expect(chunks).toHaveLength(2);
+		// The fenced block stays whole, inside its own section.
+		const setup = chunks.find((c) => c.content.includes("echo hi"));
+		expect(setup?.content).toContain("## Setup");
+		expect(setup?.content).toContain("```bash");
+		// The later section must not inherit the code comment as an ancestor.
+		const usage = chunks.find((c) => c.content.includes("Run it."));
+		expect(usage?.content).not.toContain("not a heading");
+	});
 });

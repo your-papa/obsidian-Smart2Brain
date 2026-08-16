@@ -232,8 +232,21 @@ export function chunkText(content: string, title: string, maxChars: number): Tex
 		}
 	};
 
+	// Fence state must be tracked here as well as in `countSections`. A `#` line
+	// inside a fenced block is code, not a heading: treating it as one would push a
+	// shell comment onto the breadcrumb stack, where it becomes a permanent
+	// ancestor of every following real section, and would split the fence markers
+	// across separate chunks.
+	let inFence = false;
+
 	for (const line of lines) {
-		const m = line.match(HEADING_RE);
+		if (FENCE_RE.test(line)) {
+			inFence = !inFence;
+			buffer.push(line);
+			continue;
+		}
+
+		const m = inFence ? null : line.match(HEADING_RE);
 		if (m) {
 			flushBuffer();
 			const level = m[1].length;
