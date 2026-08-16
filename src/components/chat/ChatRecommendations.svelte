@@ -166,12 +166,16 @@ async function enablePlugin(nudge: PluginNudge): Promise<void> {
 	// AgentEditorModal.toggleAutoIntegration, shared via confirmEnableIntegrationPrivacy.
 	if (!(await confirmEnableIntegrationPrivacy(plugin.app, data, nudge.displayName))) return;
 
-	// Mirror AgentEditorModal.toggleAutoIntegration exactly: for an auto-discovered
-	// plugin with no documenting skill yet (nudge.skillId absent), seed one on demand
-	// (prewritten bundled skill if available, else an introspect-first template) and
-	// re-discover so it enters the cache — otherwise enabling only the exec tool leaves
-	// the integration with no editable skill note (no pencil / generic description).
-	let skillId = nudge.skillId;
+	// Mirror AgentEditorModal.toggleAutoIntegration: resolve the skill from what is actually
+	// *discovered on disk*, not from the nudge's id. A curated integration carries a hardcoded
+	// skillId in CURATED_PLUGIN_INTEGRATIONS even before its SKILL.md is seeded (community
+	// integration skills seed on demand, not at startup), so trusting nudge.skillId here would
+	// flip the skill on for an agent while no skill file exists (issue #382).
+	let skillId = plugin.skillsService?.isDiscovered()
+		? [...plugin.skillsService.getCachedSkills()].find(
+				([, metadata]) => metadata.linkedPluginId === nudge.pluginId,
+			)?.[0]
+		: undefined;
 	if (!skillId) {
 		const service = plugin.skillsService;
 		if (!service) {
