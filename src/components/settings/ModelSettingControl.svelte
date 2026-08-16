@@ -13,6 +13,8 @@ interface Props {
 	onSelect: () => void;
 	secondaryLabel?: string;
 	onSecondary?: () => void;
+	/** Shown next to the configure button when `available` is false, explaining why. */
+	unavailableHint?: string;
 }
 
 let {
@@ -26,18 +28,26 @@ let {
 	onSelect,
 	secondaryLabel,
 	onSecondary,
+	unavailableHint,
 }: Props = $props();
 </script>
 
 {#if loading}
   <span class="text-[--text-muted] text-sm">Loading models…</span>
 {:else if !available && configureLabel && onConfigure}
-  <Button
-    iconId="settings"
-    ariaLabel={configureLabel}
-    tooltip={configureLabel}
-    onClick={() => onConfigure()}
-  />
+  <!-- Labelled, not icon-only: a bare gear reads as "configure this dropdown" and its meaning
+       lived only in the tooltip/aria-label, which touch devices never surface. -->
+  <div class="model-setting-unavailable">
+    {#if unavailableHint}
+      <span class="model-setting-hint text-sm text-[--text-muted]">{unavailableHint}</span>
+    {/if}
+    <Button
+      iconId="settings"
+      buttonText={configureLabel}
+      tooltip={configureLabel}
+      onClick={() => onConfigure()}
+    />
+  </div>
 {:else}
   <div class="model-setting-control">
     <Button onClick={onSelect}>
@@ -61,6 +71,23 @@ let {
 {/if}
 
 <style>
+  /* Wraps on narrow (mobile) widths so the hint never squeezes the button to an unreadable size. */
+  .model-setting-unavailable {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 8px;
+    width: 100%;
+  }
+
+  .model-setting-hint {
+    flex: 1 1 12ch;
+    min-width: 0;
+    text-align: right;
+    line-height: 1.35;
+  }
+
   .model-setting-control {
     display: flex;
     align-items: center;

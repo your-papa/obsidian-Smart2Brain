@@ -847,7 +847,8 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
             available={models.hasProviders && models.hasModels}
             loading={models.hasProviders && models.isLoadingModels}
             configureLabel={!models.hasProviders ? "Configure Provider" : "Configure Models"}
-            onConfigure={models.openSettings}
+            unavailableHint={!models.hasProviders ? "No AI provider is configured yet." : undefined}
+            onConfigure={() => models.openSettings(() => modal.close())}
             placeholder="Select a model"
             selectedLabel={currentModelDisplay?.model ?? null}
             selectedLogo={currentModelDisplay?.logo ?? null}
@@ -931,7 +932,10 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
               available={models.hasProviders && models.hasModels}
               loading={models.hasProviders && models.isLoadingModels}
               configureLabel={!models.hasProviders ? "Configure Provider" : "Configure Models"}
-              onConfigure={models.openSettings}
+              unavailableHint={!models.hasProviders
+                ? "No AI provider is configured yet."
+                : undefined}
+              onConfigure={() => models.openSettings(() => modal.close())}
               placeholder="Auto (same as chat model)"
               selectedLabel={currentSummarizationModelDisplay?.model ?? null}
               selectedLogo={currentSummarizationModelDisplay?.logo ?? null}
@@ -953,7 +957,8 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
             available={models.hasProviders && models.hasModels}
             loading={models.hasProviders && models.isLoadingModels}
             configureLabel={!models.hasProviders ? "Configure Provider" : "Configure Models"}
-            onConfigure={models.openSettings}
+            unavailableHint={!models.hasProviders ? "No AI provider is configured yet." : undefined}
+            onConfigure={() => models.openSettings(() => modal.close())}
             placeholder="Auto (same as chat model)"
             selectedLabel={currentTitleModelDisplay?.model ?? null}
             selectedLogo={currentTitleModelDisplay?.logo ?? null}

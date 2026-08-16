@@ -346,7 +346,15 @@ export class AvailableModels {
 		invalidateAllProviders();
 	};
 
-	openSettings = () => {
+	/**
+	 * Opens the plugin's settings tab so the user can configure a provider.
+	 *
+	 * `dismiss` MUST be passed when calling from inside a modal. Obsidian's settings window is
+	 * itself a modal at the same z-index, so opening it from a modal that stays put just stacks it
+	 * underneath the caller — on mobile it is fully occluded and the tap reads as a dead button.
+	 * Closing the caller first is the only way the settings window actually becomes visible.
+	 */
+	openSettings = (dismiss?: () => void) => {
 		const app = this.#plugin.app as unknown as {
 			setting?: { open: () => void; openTabById: (id: string) => void };
 		};
@@ -356,6 +364,8 @@ export class AvailableModels {
 		} else if (!this.hasModels) {
 			new Notice("No models found. Check that your provider is running and reachable.");
 		}
+
+		dismiss?.();
 
 		requestSettingsTab("general");
 		app.setting?.open();
