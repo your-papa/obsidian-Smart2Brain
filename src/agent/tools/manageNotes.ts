@@ -370,11 +370,18 @@ export async function stageNoteOperations(
 				return `Error in operation ${operationNumber}: The path "${normalizedPath}" is excluded by your vault filter settings.`;
 			}
 
-			// Privacy check for create target
-			const currentProvider = (getData().getAgent(agentId) ?? getData().getSelectedAgent()).chatModel?.provider;
-			if (currentProvider && store.shouldBlockFile(normalizedPath, currentProvider)) {
-				return `Error in operation ${operationNumber}: The path "${normalizedPath}" is private for the current provider. Switch to a trusted provider or adjust provider access settings.`;
-			}
+			// No privacy check here, deliberately. The privacy filter is an
+			// exfiltration control: it stops vault content reaching an untrusted
+			// provider. A create flows the other way — the content originates from
+			// the model, so nothing private leaves the vault. Write authorization is
+			// already covered by `settings.allowCreate` plus the staged-review step
+			// in `pendingChangesStore`, where the user sees the path and content
+			// before `vault.create` ever runs. Gating creates on `shouldBlockFile`
+			// also made behaviour depend on `privacyMode`: under `public-by-default`
+			// tag/property rules silently missed (the file doesn't exist yet, so
+			// there's no frontmatter to match), while `private-by-default` blocked
+			// every create outright. `update`/`delete`/`move` keep their checks —
+			// those read existing notes into the model's context.
 
 			const existing = app.vault.getAbstractFileByPath(normalizedPath);
 			if (existing) {
