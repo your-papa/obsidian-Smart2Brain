@@ -204,6 +204,21 @@ export function getAllTags(cache: CachedMetadata | null): string[] {
 	return tags;
 }
 
+export interface RequestUrlParam {
+	url: string;
+	method?: string;
+	headers?: Record<string, string>;
+	body?: string | ArrayBuffer;
+	throw?: boolean;
+}
+
+export const requestUrl = vi.fn(async (_param: RequestUrlParam) => ({
+	status: 200,
+	headers: {} as Record<string, string>,
+	text: "{}",
+	json: {},
+}));
+
 // Types (matching Obsidian's types)
 export interface CachedMetadata {
 	tags?: { tag: string; position: { start: { line: number } } }[];

@@ -40,14 +40,28 @@ export function createObsidianFetch(
 		}
 
 		const method = init?.method || "GET";
-		const headers = (init?.headers as Record<string, string>) || {};
 		const body = init?.body;
 
-		// Convert Headers object to record if needed
-		if (init?.headers instanceof Headers) {
-			init.headers.forEach((value, key) => {
+		// Normalize HeadersInit (Headers | [k,v][] | Record) into the plain record requestUrl
+		// expects. This MUST build a new object rather than casting `init.headers` and writing
+		// onto it: a `Headers` instance cast to Record aliases itself, so the copy loop below
+		// set properties on the Headers object instead of a record, and requestUrl — which
+		// only reads own enumerable string props — saw no headers at all. With the auth header
+		// silently dropped the request never completed and the returned promise never settled,
+		// hanging every caller forever (observed as indexing stuck at 0/N: the OpenAI SDK
+		// always passes a Headers instance, so every embedding call wedged).
+		const headers: Record<string, string> = {};
+		const rawHeaders = init?.headers;
+		if (rawHeaders instanceof Headers) {
+			rawHeaders.forEach((value, key) => {
 				headers[key] = value;
 			});
+		} else if (Array.isArray(rawHeaders)) {
+			for (const [key, value] of rawHeaders) {
+				headers[key] = value;
+			}
+		} else if (rawHeaders) {
+			Object.assign(headers, rawHeaders);
 		}
 
 		// If the body is a byte array (Uint8Array), requestUrl expects it as an ArrayBuffer
