@@ -82,9 +82,20 @@ function toggleApiKey() {
 	handleAuthModeChange(revealApiKey ? "codex" : "apiKey");
 }
 
+// `authMode` is really two things at once: which auth path the UI reveals, and (for OpenAI)
+// whether this instance uses ChatGPT/Codex auth. Only the latter belongs in storage. Writing
+// "codex" for any OAuth provider stamped an OpenAI-specific flag onto e.g. OpenRouter, where
+// isProviderEmbeddingAvailable read it as "no embeddings" and hid every embedding model the
+// provider had. Keep the reveal state local; persist the mode only where codex is meaningful.
+const persistsCodexAuthMode = $derived(
+	data.getProviderTemplateId(providerId) === "openai" || data.getProviderTemplateId(providerId) === "openai-codex",
+);
+
 function handleAuthModeChange(mode: OpenAIAuthMode) {
 	authMode = mode;
-	data.setProviderAuthMode(providerId, mode);
+	if (persistsCodexAuthMode || mode === "apiKey") {
+		data.setProviderAuthMode(providerId, mode);
+	}
 	signInError = null;
 	invalidateAuthState(providerId);
 }

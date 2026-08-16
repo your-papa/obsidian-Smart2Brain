@@ -354,15 +354,25 @@ export class AvailableModels {
 	 * underneath the caller — on mobile it is fully occluded and the tap reads as a dead button.
 	 * Closing the caller first is the only way the settings window actually becomes visible.
 	 */
-	openSettings = (dismiss?: () => void) => {
+	openSettings = (dismiss?: () => void, { needsEmbedding = false }: { needsEmbedding?: boolean } = {}) => {
 		const app = this.#plugin.app as unknown as {
 			setting?: { open: () => void; openTabById: (id: string) => void };
 		};
 
+		// Every branch must produce a Notice, or the button appears to do nothing: it navigates to
+		// a settings tab that looks unremarkable, with no statement of what was wrong. The
+		// embedding case in particular fell through silently — a provider with chat models but no
+		// embedding models satisfies both checks below.
 		if (!this.hasProviders) {
 			new Notice("Add an AI provider first to use model features.");
-		} else if (!this.hasModels) {
+		} else if (needsEmbedding && !this.hasEmbedModels) {
+			new Notice(
+				"No embedding models available. Add a provider that offers embeddings, or check that this one exposes them.",
+			);
+		} else if (!needsEmbedding && !this.hasModels) {
 			new Notice("No models found. Check that your provider is running and reachable.");
+		} else {
+			new Notice("Opening provider settings.");
 		}
 
 		dismiss?.();

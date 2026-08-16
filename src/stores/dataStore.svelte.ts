@@ -401,7 +401,7 @@ function createDefaultAgent(): AgentConfig {
 // ---------------------------------------------------------------------------
 
 /** Increment this when making any breaking change to PluginData. Add a corresponding entry to MIGRATIONS. */
-const CURRENT_SCHEMA_VERSION = 8;
+const CURRENT_SCHEMA_VERSION = 9;
 
 type Migration = (data: PluginData) => void;
 
@@ -513,6 +513,23 @@ const MIGRATIONS: Migration[] = [
 			if (skills && "update-skills" in skills) {
 				skills["manage-skills"] = skills["update-skills"];
 				skills["update-skills"] = undefined;
+			}
+		}
+	},
+	// v8 → v9: clear `authMode: "codex"` from non-OpenAI providers. ProviderSetup's API-key
+	//          toggle writes the literal "codex" to mean "not the API-key path" for ANY
+	//          OAuth-capable provider, so simply signing in to OpenRouter persisted an OpenAI
+	//          ChatGPT-auth flag onto it. isProviderUsingCodexAuth then read that as real codex
+	//          auth and suppressed every embedding model the provider offers. The predicate is
+	//          now template-scoped, but stored data keeps the bogus flag — and it would still
+	//          reopen ProviderSetup with the API-key field hidden — so strip it here.
+	(data) => {
+		for (const [providerId, config] of Object.entries(data.providerConfig ?? {})) {
+			const templateId = data.providerMeta?.[providerId]?.templateId;
+			if (templateId === "openai" || templateId === "openai-codex") continue;
+			const auth = config?.auth as unknown as Record<string, unknown> | undefined;
+			if (auth && auth.authMode === "codex") {
+				auth.authMode = "apiKey";
 			}
 		}
 	},
@@ -2110,6 +2127,18 @@ export class PluginDataStore {
 		// template switched to ChatGPT sign-in (auth.authMode === "codex"). A template-only
 		// check would miss the latter, letting codex-mode providers be offered for
 		// embeddings — which they don't support (createEmbeddingInstance throws).
+		//
+		// Scoped to OpenAI-family templates on purpose. `authMode` is a two-value flag
+		// ("apiKey" | "codex") shared by every OAuth-capable provider, and ProviderSetup's
+		// API-key toggle writes the literal "codex" to mean "not the API-key path" — so a
+		// non-OpenAI OAuth provider (OpenRouter) ends up stored as authMode: "codex" merely
+		// by signing in. Matching on the string alone then read that as ChatGPT auth and hid
+		// every embedding model the provider offers (OpenRouter serves 32 via its dedicated
+		// /embeddings/models endpoint). Codex auth only actually exists for OpenAI.
+		const templateId = this.#data.providerMeta[providerId]?.templateId;
+		if (templateId !== "openai" && templateId !== "openai-codex") {
+			return false;
+		}
 		return this.getProviderAuthMode(providerId) === "codex";
 	}
 

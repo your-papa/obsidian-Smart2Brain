@@ -122,8 +122,8 @@ function handleSave() {
         configureLabel={!availableModels.hasProviders ? "Configure Provider" : "Configure Models"}
         unavailableHint={!availableModels.hasProviders
           ? "No AI provider is configured yet."
-          : "None of your providers offer embedding models."}
-        onConfigure={() => availableModels.openSettings(() => modal.close())}
+          : "No embedding models found for your providers."}
+        onConfigure={() => availableModels.openSettings(() => modal.close(), { needsEmbedding: true })}
         placeholder="Select a model"
         selectedLabel={selectedModelLabel}
         selectedLogo={selectedModelLogo}
