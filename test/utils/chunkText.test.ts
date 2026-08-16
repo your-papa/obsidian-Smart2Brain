@@ -394,4 +394,42 @@ describe("chunkText heading levels", () => {
 
 		expect(chunkText(body, "Inline", 32_764)).toHaveLength(2);
 	});
+
+
+	it("does not open a fence from an indented code block", () => {
+		// Review finding: four or more leading spaces make a line an *indented* code
+		// block, not a fence. Accepting any indentation let a ``` inside indented
+		// example code open a fence that never closed, swallowing every later
+		// heading — three sections collapsed into a single chunk.
+		const body = [
+			"## Setup",
+			"Example of an indented code block:",
+			"",
+			"    ```",
+			"    some code",
+			"",
+			"## Usage",
+			"Run it.",
+			"",
+			"## Notes",
+			"More.",
+		].join("\n");
+
+		const chunks = chunkText(body, "Indented", 32_764);
+
+		expect(chunks).toHaveLength(3);
+		expect(chunks.some((c) => c.content.includes("## Usage"))).toBe(true);
+		expect(chunks.some((c) => c.content.includes("## Notes"))).toBe(true);
+	});
+
+	it("still treats up to three spaces of indentation as a fence", () => {
+		// The boundary is exactly three: this is a real fence and must suppress the
+		// `#` line inside it.
+		const body = ["## Setup", "x", "", "   ```bash", "# c", "   ```", "", "## Usage", "y"].join("\n");
+
+		const chunks = chunkText(body, "Three Spaces", 32_764);
+
+		expect(chunks).toHaveLength(2);
+		expect(chunks.find((c) => c.content.includes("y"))?.content).not.toContain("# c");
+	});
 });

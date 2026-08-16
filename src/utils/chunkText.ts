@@ -26,8 +26,15 @@ interface HeadingFrame {
 	text: string;
 }
 
-/** Matches a fenced code block delimiter, capturing the run and any trailing text. */
-const FENCE_RE = /^\s*(`{3,}|~{3,})(.*)$/;
+/**
+ * Matches a fenced code block delimiter, capturing the run and any trailing text.
+ *
+ * At most three leading spaces: four or more make the line an *indented* code
+ * block, not a fence. Accepting arbitrary indentation let a ``` inside indented
+ * example code open a fence that never closed, swallowing every heading after it
+ * — a note with three sections collapsed into one chunk.
+ */
+const FENCE_RE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
 
 /** The delimiter that opened the current fenced block. */
 interface OpenFence {
