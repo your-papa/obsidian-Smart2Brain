@@ -136,6 +136,24 @@ globalThis.onmessage = async (e: MessageEvent<HNSWWorkerRequest>) => {
 				result = await requireStore().search(qv, topK, threshold);
 				break;
 			}
+			case "getGraphStats": {
+				// Graph health, for diagnosing recall problems. `nodeCount` far
+				// exceeding `mappedIdCount` means the persisted graph has retained
+				// nodes from earlier indexing runs, whose numeric ids now collide
+				// with freshly assigned ones — search then silently drops results.
+				const s = requireStore() as unknown as {
+					dimensions: number | null;
+					hnswIndex: { nodes?: Map<number, unknown> } | null;
+					numericToId: Map<number, string>;
+				};
+				result = {
+					dimensions: s.dimensions,
+					hasIndex: !!s.hnswIndex,
+					nodeCount: s.hnswIndex?.nodes?.size ?? null,
+					mappedIdCount: s.numericToId.size,
+				};
+				break;
+			}
 			default:
 				throw new Error(`Unknown method: ${method}`);
 		}

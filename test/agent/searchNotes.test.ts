@@ -135,17 +135,15 @@ describe("performSearch lexical startup behavior", () => {
 		expect(mockGetLexicalSearchService).toHaveBeenCalledTimes(1);
 		expect(mockLexicalSearch).toHaveBeenCalledWith("alpha", 100, undefined);
 		expect(mockWaitForVectorStore).not.toHaveBeenCalled();
-		expect(results).toEqual([
-			{
-				path: "Notes/alpha.md",
-				name: "alpha",
-				frontmatter: undefined,
-				tags: ["#alpha"],
-				matchExplanation: undefined,
-				matchBadges: undefined,
-				score: 12,
-			},
-		]);
+		// Scores are now normalized within the result set rather than passed through
+		// as raw BM25 magnitudes, and rankingDebug is emitted whenever an identity
+		// boost applied — so assert identity and ordering, not the exact numbers.
+		expect(results).toHaveLength(1);
+		expect(results[0]).toMatchObject({
+			path: "Notes/alpha.md",
+			name: "alpha",
+			tags: ["#alpha"],
+		});
 	});
 
 	it("boosts recently opened notes higher in typed search results", async () => {
@@ -191,7 +189,15 @@ describe("performSearch lexical startup behavior", () => {
 		expect(parsed.results[1]?.matchBadges).toEqual(["title"]);
 	});
 
-	it("lets the third most recent typed result climb above a non-recent neighbor", async () => {
+	// Behaviour change (deliberate): when several results are *all* recently opened,
+	// recency no longer identifies any one of them, so its influence is divided
+	// among the contenders instead of applied at full strength to each. This test
+	// previously asserted the weakest of three recent notes (lexical score 9 of 13)
+	// should climb over a non-recent neighbour; that is the mechanism by which a
+	// cluster of recently-opened near-duplicates took over the top of the results.
+	// A *lone* recent note still gets full lift — see "gives the fifth recent result
+	// enough lift to overtake the lexical leader", which still passes.
+	it("does not let one of several equally-recent results climb on recency alone", async () => {
 		mockRecentNotes.push(
 			{ path: "Notes/top-recent.md", lastOpenedAt: 3_000 },
 			{ path: "Notes/mid-recent.md", lastOpenedAt: 2_000 },
@@ -242,13 +248,15 @@ describe("performSearch lexical startup behavior", () => {
 		const result = await tool.invoke({ query: "note" });
 		const parsed: SearchToolResultPayload = JSON.parse(String(result));
 
+		// Relevance order is preserved; edge-recent keeps its badge but not a lift
+		// that would jump it past two better lexical matches.
 		expect(parsed.results.map((entry) => entry.name)).toEqual([
 			"control-one",
-			"edge-recent",
 			"control-two",
 			"control-three",
+			"edge-recent",
 		]);
-		expect(parsed.results[1]?.matchBadges).toEqual(["recent"]);
+		expect(parsed.results.find((entry) => entry.name === "edge-recent")?.matchBadges).toContain("recent");
 	});
 
 	it("keeps a much stronger lexical leader ahead of a recent note", async () => {
@@ -502,17 +510,12 @@ describe("performSearch lexical startup behavior", () => {
 
 		expect(mockWaitForLexicalSearch).toHaveBeenCalledTimes(1);
 		expect(mockBrowse).toHaveBeenCalledWith(100, { tags: ["#beta"] });
-		expect(results).toEqual([
-			{
-				path: "Notes/beta.md",
-				name: "beta",
-				frontmatter: undefined,
-				tags: ["#beta"],
-				matchExplanation: undefined,
-				matchBadges: undefined,
-				score: 8,
-			},
-		]);
+		expect(results).toHaveLength(1);
+		expect(results[0]).toMatchObject({
+			path: "Notes/beta.md",
+			name: "beta",
+			tags: ["#beta"],
+		});
 	});
 
 	it("returns no lexical results when the search service has not started", async () => {
@@ -664,22 +667,20 @@ describe("performSearch lexical startup behavior", () => {
 		expect(parsed.algorithm).toBe("lexical");
 		expect(parsed.totalResults).toBe(1);
 		expect(parsed.returnedResults).toBe(1);
-		expect(parsed.results).toEqual([
-			{
-				rank: 1,
-				name: "orbital-index",
-				path: "Notes/orbital-index.md",
-				score: 12.345,
-				frontmatter: { aliases: ["Rocket Science"] },
-				tags: ["#space", "#orbital-index"],
-				matchBadges: ["tag", "content"],
-				matchExplanation: {
-					source: "content",
-					heading: "Launch Checklist",
-					text: "Propulsion systems need thermal checks before ignition.",
-				},
+		expect(parsed.results).toHaveLength(1);
+		expect(parsed.results[0]).toMatchObject({
+			rank: 1,
+			name: "orbital-index",
+			path: "Notes/orbital-index.md",
+			frontmatter: { aliases: ["Rocket Science"] },
+			tags: ["#space", "#orbital-index"],
+			matchBadges: ["tag", "content"],
+			matchExplanation: {
+				source: "content",
+				heading: "Launch Checklist",
+				text: "Propulsion systems need thermal checks before ignition.",
 			},
-		]);
+		});
 	});
 
 	it("drops privacy-restricted results entirely instead of exposing their path/name", async () => {
@@ -712,18 +713,13 @@ describe("performSearch lexical startup behavior", () => {
 		expect(parsed.totalResults).toBe(1);
 		expect(parsed.returnedResults).toBe(1);
 		expect(parsed.skippedPrivateFiles).toBe(1);
-		expect(parsed.results).toEqual([
-			{
-				rank: 1,
-				name: "public-plan",
-				path: "Notes/public-plan.md",
-				score: 20,
-				frontmatter: undefined,
-				tags: ["#public"],
-				matchBadges: undefined,
-				matchExplanation: undefined,
-			},
-		]);
+		expect(parsed.results).toHaveLength(1);
+		expect(parsed.results[0]).toMatchObject({
+			rank: 1,
+			name: "public-plan",
+			path: "Notes/public-plan.md",
+			tags: ["#public"],
+		});
 		expect(parsed.results.some((entry) => entry.name === "launch-plan" || entry.path?.includes("Private"))).toBe(
 			false,
 		);
@@ -773,11 +769,16 @@ describe("performSearch lexical startup behavior", () => {
 		const result = await tool.invoke({ query: "propulsion" });
 		const parsed: SearchToolResultPayload = JSON.parse(String(result));
 
-		expect(parsed.results[0]).toEqual({
+		// The point of this test is which fields are *omitted*; the score value is
+		// incidental and is now a normalized fusion score rather than raw BM25.
+		expect(parsed.results[0]).toMatchObject({
 			rank: 1,
 			name: "orbital-index",
-			score: 12.345,
 			frontmatter: { aliases: ["Rocket Science"] },
 		});
+		expect(parsed.results[0]?.path).toBeUndefined();
+		expect(parsed.results[0]?.tags).toBeUndefined();
+		expect(parsed.results[0]?.matchBadges).toBeUndefined();
+		expect(parsed.results[0]?.matchExplanation).toBeUndefined();
 	});
 });

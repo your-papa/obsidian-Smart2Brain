@@ -19,6 +19,7 @@ import { getRegistry } from "../providers/registry";
 import { getProviderDefinition } from "../providers/index";
 import { showSettingsLinkNotice } from "../utils/settingsNotice";
 import { getDefaultEmbeddingBatchSize, normalizeEmbeddingBatchSize } from "./batchSize";
+import { aggregateChunksToNotes } from "./chunkAggregation";
 import { createVectorStore } from "./index";
 import {
 	INDEX_VERSION,
@@ -132,12 +133,18 @@ const MODIFY_DEBOUNCE_MS = 5_000;
 const CHARS_PER_TOKEN = 4;
 
 /**
- * Over-fetch factor for semantic search. A large note is now stored as multiple
- * chunks, so several of a note's chunks can occupy adjacent result slots; we
- * request more raw neighbors than `topK` and dedup to distinct notes afterwards
- * so `topK` still yields `topK` distinct notes.
+ * Over-fetch factor for semantic search. A note is stored as one vector per
+ * section, so several of a note's chunks can occupy adjacent result slots; we
+ * request more raw neighbors than `topK` and aggregate to distinct notes
+ * afterwards so `topK` still yields `topK` distinct notes.
+ *
+ * This also feeds `aggregateChunksToNotes`: a note's *supporting* chunks only
+ * count toward its score if they were actually retrieved, so under-fetching
+ * silently degrades aggregation into first-hit-wins. Section-aware chunking
+ * raised the fixture corpus from 337 chunks to 2611 (~7.7 chunks per note), so
+ * the previous factor of 4 no longer covered a note's own sections.
  */
-const CHUNK_OVERFETCH = 4;
+const CHUNK_OVERFETCH = 10;
 
 let instance: VectorStoreService | null = null;
 let pendingInstance: VectorStoreService | null = null;
@@ -1508,49 +1515,77 @@ export class VectorStoreService {
 			const results = await inst.store.search(queryVectorTyped, searchTopK, threshold);
 
 			const { metadataCache } = this.plugin.app;
-			const filteredResults: VectorSearchResult[] = [];
-			// Collapse multiple chunk-hits of the same note into one result. HNSW
-			// returns results sorted by score, so the first hit per path is its
-			// best-matching chunk.
-			const seenPaths = new Set<string>();
+
+			// Apply filters at the *chunk* level first, so aggregation only ever sees
+			// chunks the caller is allowed to retrieve.
+			const allowedHits: Array<{ path: string; score: number }> = [];
+			const passedFilter = new Set<string>();
+			const rejectedByFilter = new Set<string>();
 
 			for (const r of results) {
-				if (seenPaths.has(r.doc.path)) continue;
+				const path = r.doc.path;
+				if (rejectedByFilter.has(path)) continue;
 
-				if (filter?.pathPrefixes?.length) {
-					const matchesPath = filter.pathPrefixes.some((prefix) => matchesPathPrefix(r.doc.path, prefix));
-					if (!matchesPath) continue;
+				if (!passedFilter.has(path)) {
+					if (filter?.pathPrefixes?.length) {
+						const matchesPath = filter.pathPrefixes.some((prefix) => matchesPathPrefix(path, prefix));
+						if (!matchesPath) {
+							rejectedByFilter.add(path);
+							continue;
+						}
+					}
+
+					if (filter?.tags?.length) {
+						const file = this.plugin.app.vault.getAbstractFileByPath(path);
+						const cache = file instanceof TFile ? metadataCache.getFileCache(file) : null;
+						const docTags = cache ? (getAllTags(cache) ?? []) : [];
+						const normalizedFilterTags = filter.tags.map((t) => (t.startsWith("#") ? t : `#${t}`));
+						const normalizedDocTags = docTags.map((t) => (t.startsWith("#") ? t : `#${t}`));
+						const matchesTag = (filterTag: string) =>
+							normalizedDocTags.some(
+								(docTag) => docTag === filterTag || docTag.startsWith(`${filterTag}/`),
+							);
+
+						const ok = filter.requireAllTags
+							? normalizedFilterTags.every(matchesTag)
+							: normalizedFilterTags.some(matchesTag);
+						if (!ok) {
+							rejectedByFilter.add(path);
+							continue;
+						}
+					}
+
+					passedFilter.add(path);
 				}
 
-				const file = this.plugin.app.vault.getAbstractFileByPath(r.doc.path);
+				allowedHits.push({ path, score: r.score });
+			}
+
+			// Collapse chunk hits into note-level scores. A note matching in several
+			// sections outranks one that got a single lucky chunk — see
+			// `chunkAggregation.ts` for why first-hit-wins was not good enough.
+			const aggregated = aggregateChunksToNotes(allowedHits);
+
+			const filteredResults: VectorSearchResult[] = [];
+			for (const note of aggregated) {
+				if (filteredResults.length >= topK) break;
+
+				const file = this.plugin.app.vault.getAbstractFileByPath(note.path);
 				const cache = file instanceof TFile ? metadataCache.getFileCache(file) : null;
 				const docTags = cache ? (getAllTags(cache) ?? []) : [];
 
-				if (filter?.tags?.length) {
-					const normalizedFilterTags = filter.tags.map((t) => (t.startsWith("#") ? t : `#${t}`));
-					const normalizedDocTags = docTags.map((t) => (t.startsWith("#") ? t : `#${t}`));
-					const matchesTag = (filterTag: string) =>
-						normalizedDocTags.some((docTag) => docTag === filterTag || docTag.startsWith(`${filterTag}/`));
-
-					if (filter.requireAllTags) {
-						if (!normalizedFilterTags.every(matchesTag)) continue;
-					} else if (!normalizedFilterTags.some(matchesTag)) {
-						continue;
-					}
-				}
-
-				seenPaths.add(r.doc.path);
 				filteredResults.push({
-					path: r.doc.path,
-					name:
-						file instanceof TFile ? file.basename : r.doc.path.replace(/.*\//, "").replace(/\.[^.]+$/, ""),
+					path: note.path,
+					name: file instanceof TFile ? file.basename : note.path.replace(/.*\//, "").replace(/\.[^.]+$/, ""),
 					frontmatter: cache?.frontmatter,
 					tags: docTags,
 					matchBadges: ["semantic"],
-					score: r.score,
+					score: note.score,
+					rankingDebug: {
+						bestChunkScore: note.bestChunkScore,
+						matchingChunks: note.matchingChunks,
+					},
 				});
-
-				if (filteredResults.length >= topK) break;
 			}
 
 			return filteredResults;

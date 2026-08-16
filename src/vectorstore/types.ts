@@ -126,6 +126,20 @@ export interface SearchRankingDebug {
 	finalAliasBoost?: number;
 	recentAliasBonus?: number;
 	lexicalFeatures?: LexicalRankingFeatures;
+	/** Score of the note's single best-matching chunk, before support aggregation. */
+	bestChunkScore?: number;
+	/** How many of the note's chunks were among the retrieved semantic hits. */
+	matchingChunks?: number;
+	/** Normalized (0-1) lexical score within the result set, after fusion rework. */
+	normalizedLexical?: number;
+	/** Normalized (0-1) semantic score within the result set, after fusion rework. */
+	normalizedSemantic?: number;
+	/** Relevance relative to the top result, used to gate the recency boost. */
+	relativeRelevance?: number;
+	/** True when recency was gated away because the note was not a strong enough match. */
+	recentGated?: boolean;
+	/** Adaptive recency-lift ceiling for this query, derived from result-set spread. */
+	adaptiveRecentLift?: number;
 }
 
 export interface SearchMatchExplanation {

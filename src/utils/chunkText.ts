@@ -27,13 +27,126 @@ interface HeadingFrame {
 }
 
 /**
+ * Matches a fenced code block delimiter, capturing the run and any trailing text.
+ *
+ * At most three leading spaces: four or more make the line an *indented* code
+ * block, not a fence. Accepting arbitrary indentation let a ``` inside indented
+ * example code open a fence that never closed, swallowing every heading after it
+ * — a note with three sections collapsed into one chunk.
+ */
+const FENCE_RE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
+
+/** The delimiter that opened the current fenced block. */
+interface OpenFence {
+	/** "`" or "~". */
+	char: string;
+	/** How many delimiter characters opened the block. */
+	length: number;
+}
+
+/**
+ * Track fenced-code state across lines, remembering *how* the block was opened.
+ *
+ * Both parts of the delimiter matter, and getting either wrong lets a `#` line
+ * inside code be read as a real heading — which then becomes a breadcrumb
+ * ancestor of every later section:
+ *
+ *   - **Character.** CommonMark closes a fence only with the same character, so
+ *     a `~~~` line inside a ```` ```markdown ```` block is content.
+ *   - **Length.** A closing fence must be *at least as long* as the opener, so a
+ *     three-backtick line inside a four-backtick block is content too. That is
+ *     the ordinary way to show fenced code inside fenced code, so it turns up in
+ *     real notes rather than only in edge cases.
+ *   - **Trailing text.** An info string (```` ```text ````) is legal only on the
+ *     *opening* delimiter; a closer permits nothing but whitespace after the run.
+ *     So a ```` ```text ```` line inside an open block is content, and treating
+ *     it as a closer would additionally let the *real* closer re-open a fence and
+ *     swallow every following section.
+ *
+ * @param line The line to inspect.
+ * @param open The fence currently open, or null when outside one.
+ * @returns The fence still open after this line (null when the line closed it).
+ */
+function nextFenceState(line: string, open: OpenFence | null): OpenFence | null {
+	const match = line.match(FENCE_RE);
+	if (!match) return open;
+
+	const run = match[1];
+	const trailing = match[2];
+	if (open === null) {
+		// Opening delimiter: an info string is allowed. A backtick fence's info
+		// string may not itself contain a backtick (it would be inline code).
+		if (run[0] === "`" && trailing.includes("`")) return null;
+		return { char: run[0], length: run.length };
+	}
+
+	// Closing delimiter: same character, at least as long, nothing but whitespace
+	// after it. Anything else is code content inside the open block.
+	const closes = run[0] === open.char && run.length >= open.length && trailing.trim() === "";
+	return closes ? null : open;
+}
+
+/**
+ * Count the markdown sections in a note body.
+ *
+ * Used to decide whether a note that fits the embedding budget should still be
+ * split: more than one section means more than one topic averaged into a single
+ * vector. Heading lines inside fenced code blocks don't open a section — a shell
+ * comment or a Python `#` line would otherwise fragment a note spuriously.
+ *
+ * Returns the number of top-level-ish sections: any leading prose before the
+ * first heading counts as one.
+ */
+function countSections(content: string): number {
+	let sections = 0;
+	let openFence: OpenFence | null = null;
+	let sawLeadingProse = false;
+	let seenHeading = false;
+
+	for (const line of content.split("\n")) {
+		const nextFence = nextFenceState(line, openFence);
+		const insideFence = openFence !== null || nextFence !== openFence;
+		if (insideFence) {
+			// Fenced code before the first heading is still leading content: a note
+			// that opens with a code block and then has one heading holds two
+			// topics, and must not take the single-chunk fast path.
+			if (!seenHeading && line.trim()) sawLeadingProse = true;
+			openFence = nextFence;
+			continue;
+		}
+
+		if (HEADING_RE.test(line)) {
+			seenHeading = true;
+			sections++;
+		} else if (!seenHeading && line.trim()) {
+			sawLeadingProse = true;
+		}
+	}
+
+	return sections + (sawLeadingProse ? 1 : 0);
+}
+
+/**
+ * Render the note title for a chunk prefix.
+ *
+ * Deliberately NOT `# <title>`. A level-one heading is ordinary note content, so
+ * a note containing `# Appendix` would yield a chunk with two sibling H1s and
+ * nothing marking which one is the document's identity — the title becomes
+ * indistinguishable from a section. A `Note:` label keeps the title unambiguous
+ * and reads naturally to an embedding model.
+ */
+function formatTitleLine(title: string): string {
+	return `Note: ${title}`;
+}
+
+/**
  * Build the prefix string (title + active heading breadcrumb) for a chunk.
  * Guards against a pathologically deep/long breadcrumb by dropping the
  * shallowest headings first (keeping the title and the nearest headings) so the
  * prefix can never consume the entire budget.
  */
 function buildPrefix(title: string, headings: HeadingFrame[], maxPrefixChars: number): string {
-	const titleLine = `# ${title}`;
+	const titleLine = formatTitleLine(title);
 	if (headings.length === 0) return titleLine;
 
 	let frames = headings;
@@ -133,12 +246,29 @@ function splitOversizedUnit(unit: string, maxBodyChars: number): string[] {
  * @param maxChars Hard upper bound on the full chunk length (prefix + body).
  */
 export function chunkText(content: string, title: string, maxChars: number): TextChunk[] {
-	const titleLine = `# ${title}`;
+	const titleLine = formatTitleLine(title);
 	const trimmed = content.trim();
 
-	// Fast path: whole note (with title) fits in one chunk — one vector, as before.
+	// Fast path: a note that fits the budget AND covers a single topic becomes one
+	// vector, as before.
+	//
+	// Size alone is the wrong test. An embedding averages everything it is given, so
+	// a note holding several unrelated sections yields a vector near the centroid of
+	// all of them and close to none. Measured on "Cooking Mediterranean Recipes"
+	// (1234 chars — comfortably inside a ~32k budget, so previously one chunk): the
+	// query "griechenland" scores 0.492 against its Greek-salad section in isolation
+	// but only 0.200 against the whole note, because shakshuka, hummus and grilled
+	// fish are averaged in. The note ranked 286/337 and never surfaced.
+	//
+	// So split on section headings whenever the note has more than one, regardless
+	// of length. Every level counts (H1-H6, see HEADING_RE): a note organised with
+	// top-level `#` sections splits exactly like one using `##`, and deeper levels
+	// nest rather than being flattened — a chunk under `### Install` carries the
+	// `## Setup` breadcrumb above it. The packing loop below already emits one
+	// chunk per heading breadcrumb; it was simply unreachable for notes under the
+	// budget.
 	const single = trimmed ? `${titleLine}\n\n${trimmed}` : titleLine;
-	if (single.length <= maxChars) {
+	if (single.length <= maxChars && countSections(trimmed) <= 1) {
 		return [{ content: single, chunkIndex: 0 }];
 	}
 
@@ -164,8 +294,22 @@ export function chunkText(content: string, title: string, maxChars: number): Tex
 		}
 	};
 
+	// Fence state must be tracked here as well as in `countSections`. A `#` line
+	// inside a fenced block is code, not a heading: treating it as one would push a
+	// shell comment onto the breadcrumb stack, where it becomes a permanent
+	// ancestor of every following real section, and would split the fence markers
+	// across separate chunks.
+	let openFence: OpenFence | null = null;
+
 	for (const line of lines) {
-		const m = line.match(HEADING_RE);
+		const nextFence = nextFenceState(line, openFence);
+		if (nextFence !== openFence) {
+			openFence = nextFence;
+			buffer.push(line);
+			continue;
+		}
+
+		const m = openFence !== null ? null : line.match(HEADING_RE);
 		if (m) {
 			flushBuffer();
 			const level = m[1].length;

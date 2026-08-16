@@ -337,8 +337,17 @@ export class HNSWVectorStore implements VectorStore {
 		}
 		await this.ensureHNSWIndex();
 
-		// Remove existing entry if updating
-		const existing = await this.getByPath(doc.path);
+		// Remove the prior version of *this chunk* if updating.
+		//
+		// Must be keyed on the chunk id, not the path: `getByPath` returns only the
+		// first chunk of a note, so on a multi-chunk note re-upserting chunk #2 would
+		// drop chunk #0's mapping while #2's own stale mapping survived. Each such
+		// upsert then assigned a fresh numeric id and orphaned a graph node, leaving
+		// nodes with no `numericToId` entry — which `search()` silently skips,
+		// truncating results. (Observed after section-aware chunking turned
+		// single-chunk notes into multi-chunk ones: 2611 graph nodes vs 2281
+		// mappings, and a 50-result query returning 4.)
+		const existing = await this.getById(doc.id);
 		if (existing) {
 			await this.removeFromHNSW(existing.id);
 			await this.removeIdMapping(existing.id);
@@ -570,7 +579,25 @@ export class HNSWVectorStore implements VectorStore {
 		this.numericToId.clear();
 		this.nextHnswId = 0;
 
-		// Clear HNSW index by recreating
+		// Drop the *persisted* graph, not just the in-memory handle. Recreating the
+		// HNSWWithDB wrapper leaves the serialized graph in its own IndexedDB
+		// database, so the next open() → loadIndex() resurrects every node from
+		// previous indexing runs. Because clear() also resets `nextHnswId` to 0,
+		// those stale nodes then collide with freshly assigned numeric ids: search
+		// resolves a hit through `numericToId`, misses, and silently drops the
+		// result — which manifests as semantic search returning too few results,
+		// or none at all, for perfectly valid queries.
+		if (this.hnswIndex) {
+			try {
+				await this.hnswIndex.deleteIndex();
+			} catch (e) {
+				Logger.error(`${LOG_PREFIX} Failed to delete persisted HNSW graph:`, e);
+			}
+			this.hnswIndex = null;
+		}
+		this.hasPendingIndexSave = false;
+
+		// Recreate an empty graph so subsequent upserts have somewhere to insert.
 		if (this.dimensions) {
 			this.hnswIndex = await HNSWWithDB.create(
 				this.M,

@@ -10,6 +10,8 @@ import { persistStartupRecord, recordStartupEnvironment } from "./utils/startupT
 import "./styles.css";
 import { AgentManager } from "./agent/AgentManager";
 import { PromptFilesService } from "./agent/promptFiles";
+import { performSearch } from "./agent/tools/searchNotes";
+import type { SearchAlgorithm } from "./types/plugin";
 import { inlineDiffPlugin } from "./editor/inlineDiffExtension";
 import { selectionHighlightPlugin } from "./editor/selectionHighlightExtension";
 import { createReadingViewDiffPostProcessor } from "./editor/readingViewDiffProcessor";
@@ -66,6 +68,30 @@ export default class SecondBrainPlugin extends Plugin {
 	private onloadEndAt = -1;
 	/** Mounted status-bar running-agent indicator (unmounted on plugin unload). */
 	private runningIndicator: ReturnType<typeof mount> | null = null;
+
+	/**
+	 * Run the shared search + ranking pipeline and return the ranked paths.
+	 *
+	 * `performSearch` is the single ranking entry point behind both the search modal
+	 * (`SearchModal.ts`) and the `search_notes` agent tool, but it is a module-level
+	 * export and therefore unreachable from the Obsidian CLI's `eval`. Exposing it
+	 * here lets the relevance benchmark
+	 * (`integration/search-relevance-benchmark.test.ts`) measure the real fusion
+	 * ranking rather than re-implementing it. Not part of the plugin's user-facing
+	 * surface.
+	 */
+	async searchNotesForBenchmark(
+		query: string,
+		algorithm: SearchAlgorithm,
+		limit: number,
+	): Promise<Array<{ path: string; name: string; score?: number }>> {
+		const results = await performSearch(this.app, query, algorithm);
+		return results.slice(0, limit).map((result) => ({
+			path: result.path,
+			name: result.name,
+			score: result.score,
+		}));
+	}
 
 	private getAddToChatMenuLabel(selectedCount: number): string {
 		if (selectedCount <= 1) {
