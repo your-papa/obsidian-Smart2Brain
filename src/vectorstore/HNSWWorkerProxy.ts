@@ -125,4 +125,27 @@ export class HNSWWorkerProxy implements VectorStore {
 	async search(queryVector: Float32Array, topK: number, threshold?: number): Promise<ScoredDocument[]> {
 		return (await this.call("search", queryVector, topK, threshold)) as ScoredDocument[];
 	}
+
+	/**
+	 * Inspect HNSW graph health inside the worker.
+	 *
+	 * The graph lives in the worker realm, so reading `hnswIndex` from the main
+	 * thread always shows `undefined` regardless of its true state. A `nodeCount`
+	 * much larger than `mappedIdCount` indicates stale nodes left over from earlier
+	 * indexing runs, which collide with reassigned numeric ids and cause search to
+	 * silently return too few results.
+	 */
+	async getGraphStats(): Promise<{
+		dimensions: number | null;
+		hasIndex: boolean;
+		nodeCount: number | null;
+		mappedIdCount: number;
+	}> {
+		return (await this.call("getGraphStats")) as {
+			dimensions: number | null;
+			hasIndex: boolean;
+			nodeCount: number | null;
+			mappedIdCount: number;
+		};
+	}
 }

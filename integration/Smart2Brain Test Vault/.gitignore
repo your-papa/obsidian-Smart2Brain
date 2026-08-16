@@ -15,3 +15,8 @@
 # Obsidian cache
 .obsidian/plugins/.obsidian/
 .trash/
+
+# Generated search-relevance corpus (~300 notes, 1.9MB).
+# Deterministic: `bun run corpus:generate` reproduces it byte-for-byte from a
+# seeded script, so the generator is the source of truth rather than the output.
+Corpus/

@@ -9,7 +9,8 @@ vi.mock("../../src/stores/dataStore.svelte", () => ({
 	getData: () => mockGetData(),
 }));
 
-import { isAgentFilePath, isAgentPath, isIndexableFile } from "../../src/utils/fileFiltering";
+import { isAgentFilePath, isAgentPath, isIndexableFile, readIndexableContent } from "../../src/utils/fileFiltering";
+import { gzipString, toArrayBuffer } from "../../src/utils/gzip";
 
 describe("isAgentPath (pure)", () => {
 	it("matches the folder itself and files inside it", () => {
@@ -63,5 +64,101 @@ describe("isAgentFilePath / isIndexableFile (folder from plugin data)", () => {
 		});
 		expect(isAgentFilePath("Agents/Skills/foo/SKILL.md")).toBe(false);
 		mockGetData.mockReturnValue({ agentFolder: "Agents" });
+	});
+});
+
+// ---------------------------------------------------------------------------
+// .chat extraction
+// ---------------------------------------------------------------------------
+
+/** Build a LangChain-serialised message as stored inside a checkpoint. */
+function message(id: string | null, content: string): Record<string, unknown> {
+	const kwargs: Record<string, unknown> = { content };
+	if (id !== null) kwargs.id = id;
+	return { lc: 1, type: "constructor", kwargs };
+}
+
+/**
+ * Build thread JSON whose checkpoints form a growing prefix chain — the shape
+ * LangGraph actually persists, where checkpoint N re-contains messages 1..N.
+ */
+function thread(title: string, messages: Array<Record<string, unknown>>): string {
+	const checkpoints: Record<string, unknown> = {};
+	for (let i = 1; i <= messages.length; i++) {
+		checkpoints[`cp-${i}`] = {
+			checkpoint: { id: `cp-${i}`, channel_values: { messages: messages.slice(0, i) } },
+		};
+	}
+	return JSON.stringify({ title, checkpoints });
+}
+
+/** Minimal vault stub exposing the `adapter.readBinary` path used for .chat files. */
+function vaultReturning(raw: string | Uint8Array) {
+	return {
+		adapter: {
+			readBinary: vi.fn().mockImplementation(async () => {
+				const bytes = typeof raw === "string" ? await gzipString(raw) : raw;
+				return toArrayBuffer(bytes);
+			}),
+		},
+	} as never;
+}
+
+const chatFile = { path: "Chats/Thread.chat", extension: "chat", basename: "Thread" } as never;
+
+describe("readIndexableContent (.chat extraction)", () => {
+	it("emits each message once despite the checkpoint tree repeating it", async () => {
+		const raw = thread("Greeting", [
+			message("m1", "hello there"),
+			message("m2", "general kenobi"),
+			message("m3", "you are a bold one"),
+		]);
+
+		const out = await readIndexableContent(vaultReturning(raw), chatFile);
+
+		// Naive per-checkpoint concatenation would emit m1 three times and m2 twice.
+		expect(out.match(/hello there/g)).toHaveLength(1);
+		expect(out.match(/general kenobi/g)).toHaveLength(1);
+		expect(out.match(/you are a bold one/g)).toHaveLength(1);
+	});
+
+	it("preserves the title and first-seen transcript order", async () => {
+		const raw = thread("Greeting", [message("m1", "first"), message("m2", "second")]);
+
+		const out = await readIndexableContent(vaultReturning(raw), chatFile);
+
+		expect(out).toBe("Greeting\n\nfirst\n\nsecond");
+	});
+
+	it("keeps distinct messages that share identical text", async () => {
+		// Two separate turns can legitimately both be "yes"; ids keep them apart.
+		const raw = thread("Confirmations", [message("m1", "yes"), message("m2", "yes")]);
+
+		const out = await readIndexableContent(vaultReturning(raw), chatFile);
+
+		expect(out.match(/yes/g)).toHaveLength(2);
+	});
+
+	it("falls back to content deduplication when messages carry no id", async () => {
+		const raw = thread("Legacy", [message(null, "alpha"), message(null, "beta")]);
+
+		const out = await readIndexableContent(vaultReturning(raw), chatFile);
+
+		expect(out.match(/alpha/g)).toHaveLength(1);
+		expect(out.match(/beta/g)).toHaveLength(1);
+	});
+
+	it("returns an empty string for corrupt thread JSON", async () => {
+		const out = await readIndexableContent(vaultReturning("not json at all"), chatFile);
+
+		expect(out).toBe("");
+	});
+
+	it("returns an empty string when the file cannot be read", async () => {
+		const vault = {
+			adapter: { readBinary: vi.fn().mockRejectedValue(new Error("unreadable")) },
+		} as never;
+
+		expect(await readIndexableContent(vault, chatFile)).toBe("");
 	});
 });

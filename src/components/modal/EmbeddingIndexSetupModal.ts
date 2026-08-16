@@ -1,5 +1,6 @@
 import { Modal } from "obsidian";
 import { mount, unmount } from "svelte";
+import ModalProvider from "../../lib/QueryClientProvider.svelte";
 import type SecondBrainPlugin from "../../main";
 import type { SelectedModel } from "./ModelSelectionModal";
 import EmbeddingIndexSetupModalComponent from "./EmbeddingIndexSetupModal.svelte";
@@ -37,15 +38,30 @@ export class EmbeddingIndexSetupModal extends Modal {
 			this.options.purpose === "search" ? "Configure Search Embedding Index" : "Configure Graph Embedding Index",
 		);
 
-		this.component = mount(EmbeddingIndexSetupModalComponent, {
-			target: this.contentEl,
-			props: {
-				modal: this,
-				plugin: this.plugin,
-				currentSelection: this.options.currentSelection,
-				onSave: this.options.onSave,
+		// Wrapped in ModalProvider: the component calls `useAvailableModels()`, which
+		// resolves a QueryClient from Svelte context. Mounting it bare threw
+		// "No QueryClient was found in Svelte context" and left the modal blank.
+		this.component = mount(
+			ModalProvider<{
+				modal: EmbeddingIndexSetupModal;
+				plugin: SecondBrainPlugin;
+				currentSelection: SelectedModel | null;
+				onSave: (selectedModel: SelectedModel, batchSize: number) => void;
+			}>,
+			{
+				target: this.contentEl,
+				props: {
+					plugin: this.plugin,
+					component: EmbeddingIndexSetupModalComponent,
+					componentProps: {
+						modal: this,
+						plugin: this.plugin,
+						currentSelection: this.options.currentSelection,
+						onSave: this.options.onSave,
+					},
+				},
 			},
-		});
+		);
 	}
 
 	onClose() {

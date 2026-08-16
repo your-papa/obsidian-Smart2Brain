@@ -26,6 +26,57 @@ interface HeadingFrame {
 	text: string;
 }
 
+/** Matches a fenced code block delimiter (``` or ~~~), with optional indent. */
+const FENCE_RE = /^\s*(```|~~~)/;
+
+/**
+ * Count the markdown sections in a note body.
+ *
+ * Used to decide whether a note that fits the embedding budget should still be
+ * split: more than one section means more than one topic averaged into a single
+ * vector. Heading lines inside fenced code blocks don't open a section — a shell
+ * comment or a Python `#` line would otherwise fragment a note spuriously.
+ *
+ * Returns the number of top-level-ish sections: any leading prose before the
+ * first heading counts as one.
+ */
+function countSections(content: string): number {
+	let sections = 0;
+	let inFence = false;
+	let sawLeadingProse = false;
+	let seenHeading = false;
+
+	for (const line of content.split("\n")) {
+		if (FENCE_RE.test(line)) {
+			inFence = !inFence;
+			continue;
+		}
+		if (inFence) continue;
+
+		if (HEADING_RE.test(line)) {
+			seenHeading = true;
+			sections++;
+		} else if (!seenHeading && line.trim()) {
+			sawLeadingProse = true;
+		}
+	}
+
+	return sections + (sawLeadingProse ? 1 : 0);
+}
+
+/**
+ * Render the note title for a chunk prefix.
+ *
+ * Deliberately NOT `# <title>`. A level-one heading is ordinary note content, so
+ * a note containing `# Appendix` would yield a chunk with two sibling H1s and
+ * nothing marking which one is the document's identity — the title becomes
+ * indistinguishable from a section. A `Note:` label keeps the title unambiguous
+ * and reads naturally to an embedding model.
+ */
+function formatTitleLine(title: string): string {
+	return `Note: ${title}`;
+}
+
 /**
  * Build the prefix string (title + active heading breadcrumb) for a chunk.
  * Guards against a pathologically deep/long breadcrumb by dropping the
@@ -33,7 +84,7 @@ interface HeadingFrame {
  * prefix can never consume the entire budget.
  */
 function buildPrefix(title: string, headings: HeadingFrame[], maxPrefixChars: number): string {
-	const titleLine = `# ${title}`;
+	const titleLine = formatTitleLine(title);
 	if (headings.length === 0) return titleLine;
 
 	let frames = headings;
@@ -133,12 +184,29 @@ function splitOversizedUnit(unit: string, maxBodyChars: number): string[] {
  * @param maxChars Hard upper bound on the full chunk length (prefix + body).
  */
 export function chunkText(content: string, title: string, maxChars: number): TextChunk[] {
-	const titleLine = `# ${title}`;
+	const titleLine = formatTitleLine(title);
 	const trimmed = content.trim();
 
-	// Fast path: whole note (with title) fits in one chunk — one vector, as before.
+	// Fast path: a note that fits the budget AND covers a single topic becomes one
+	// vector, as before.
+	//
+	// Size alone is the wrong test. An embedding averages everything it is given, so
+	// a note holding several unrelated sections yields a vector near the centroid of
+	// all of them and close to none. Measured on "Cooking Mediterranean Recipes"
+	// (1234 chars — comfortably inside a ~32k budget, so previously one chunk): the
+	// query "griechenland" scores 0.492 against its Greek-salad section in isolation
+	// but only 0.200 against the whole note, because shakshuka, hummus and grilled
+	// fish are averaged in. The note ranked 286/337 and never surfaced.
+	//
+	// So split on section headings whenever the note has more than one, regardless
+	// of length. Every level counts (H1-H6, see HEADING_RE): a note organised with
+	// top-level `#` sections splits exactly like one using `##`, and deeper levels
+	// nest rather than being flattened — a chunk under `### Install` carries the
+	// `## Setup` breadcrumb above it. The packing loop below already emits one
+	// chunk per heading breadcrumb; it was simply unreachable for notes under the
+	// budget.
 	const single = trimmed ? `${titleLine}\n\n${trimmed}` : titleLine;
-	if (single.length <= maxChars) {
+	if (single.length <= maxChars && countSections(trimmed) <= 1) {
 		return [{ content: single, chunkIndex: 0 }];
 	}
 

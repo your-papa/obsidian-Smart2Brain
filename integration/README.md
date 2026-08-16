@@ -142,3 +142,63 @@ Notes:
 - `eval` and `dev:cdp` are more fragile and should be used only when DOM queries and screenshots are not enough.
 - Some commands return before the modal/view is fully mounted, so polling for a selector is the safest pattern.
 - There is an upstream Codex Desktop macOS issue where running `obsidian` from inside Codex can sometimes make Obsidian quit unexpectedly. If that starts happening, run the same `obsidian` commands in a normal terminal outside Codex and continue verification there.
+
+## Search relevance benchmark
+
+`search-relevance-benchmark.test.ts` measures *ranking quality* as a number
+(nDCG@10 and MRR) rather than asserting individual orderings. Use it to prove a
+search change improves results instead of merely altering them.
+
+### Running it
+
+```bash
+bun run corpus:generate     # once — writes Corpus/ into the test vault
+bun run build && bun run setup-vault
+# open the vault in Obsidian, configure an embedding provider, let it index
+bun run test:benchmark
+```
+
+The corpus is **generated, not committed** (~300 notes, 1.9 MB). The generator is
+seeded, so it reproduces byte-for-byte; `scripts/generate-search-corpus.ts` is
+the source of truth. Regenerate after changing it, then reindex.
+
+### What it contains
+
+`helpers/relevanceJudgments.ts` holds the judgment set: each query carries graded
+expectations (`2` = answers the query, `1` = related, `0` = a distractor the
+ranker is expected to be tempted by) plus a `probes` string explaining which
+behaviour the case tests. Queries deliberately avoid the target note's own
+wording, so term overlap alone cannot find them.
+
+Cases cover: near-synonym bridging, lexical distractors, zero-overlap
+(semantic-only) retrieval, very short and multi-chunk targets, alias matches,
+multi-target queries, near-duplicate discrimination, and recency-vs-relevance
+conflicts (via the `recentNotes` fixture, which the harness applies and clears
+per query).
+
+### The ratchet
+
+`BASELINE_MEAN_NDCG` / `BASELINE_MEAN_RR` are the current best measured scores.
+The suite fails if the mean drops below them, and **prints the new value when it
+improves — raise the constants at that point** so progress is locked in. Lowering
+them should be deliberate and explained.
+
+Current baseline: **mean nDCG@10 = 0.9966, MRR = 1.0** (18 cases,
+`openrouter:qwen/qwen3-embedding-8b`, 2026-08-16). Seventeen cases score 1.000;
+the multi-target smart-city query sits at 0.938 because a grade-1 note ranks
+between the two grade-2 targets, which reflects grading uncertainty in that case
+rather than a demonstrated ranking defect.
+
+Two of the cases are length-bias probes and must be kept as a pair: one where the
+many-chunk note is the *wrong* answer, and one where it is genuinely right. The
+first catches chunk-count inflation; the second stops a fix for it from turning
+into a blanket penalty on long notes.
+
+### Adding a case
+
+Append to `RELEVANCE_JUDGMENTS`. Prefer cases the ranker currently *fails* —
+those are what justify a change. If one is a known failure, set `knownFailure`
+with the measured evidence; the suite reports it separately instead of going red,
+and tells you when it starts passing.
+
+Skips cleanly when no embedding provider is configured, so CI stays green.
