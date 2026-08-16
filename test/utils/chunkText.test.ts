@@ -323,4 +323,37 @@ describe("chunkText heading levels", () => {
 
 		expect(chunkText(body, "Unclosed", 32_764)).toHaveLength(1);
 	});
+
+
+	it("does not let a shorter delimiter close a longer fence", () => {
+		// Review finding: FENCE_RE captured only three characters, so a ``` line
+		// inside a ````-opened block closed it early and the following `#` line
+		// became a heading. Showing fenced code inside fenced code is the ordinary
+		// way to document markdown, so this occurs in real notes.
+		const body = [
+			"## Setup",
+			"Install it.",
+			"",
+			"````markdown",
+			"```",
+			"# not a heading",
+			"```",
+			"````",
+			"",
+			"## Usage",
+			"Run it.",
+		].join("\n");
+
+		const chunks = chunkText(body, "Long Fence", 32_764);
+
+		expect(chunks).toHaveLength(2);
+		expect(chunks.find((c) => c.content.includes("Run it."))?.content).not.toContain("not a heading");
+	});
+
+	it("closes a fence with a delimiter at least as long as the opener", () => {
+		// CommonMark allows the closing fence to be longer than the opening one.
+		const body = ["## Setup", "x", "", "```bash", "# c", "````", "", "## Usage", "y"].join("\n");
+
+		expect(chunkText(body, "Longer Close", 32_764)).toHaveLength(2);
+	});
 });

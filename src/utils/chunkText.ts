@@ -26,31 +26,45 @@ interface HeadingFrame {
 	text: string;
 }
 
-/** Matches a fenced code block delimiter (``` or ~~~), capturing the marker. */
-const FENCE_RE = /^\s*(```|~~~)/;
+/** Matches a fenced code block delimiter, capturing the full run of ` or ~. */
+const FENCE_RE = /^\s*(`{3,}|~{3,})/;
+
+/** The delimiter that opened the current fenced block. */
+interface OpenFence {
+	/** "`" or "~". */
+	char: string;
+	/** How many delimiter characters opened the block. */
+	length: number;
+}
 
 /**
- * Track fenced-code state across lines, remembering *which* marker opened the
- * block.
+ * Track fenced-code state across lines, remembering *how* the block was opened.
  *
- * A naive boolean toggle is wrong: CommonMark only closes a fence with the same
- * marker that opened it, so a `~~~` line inside a ```` ```markdown ```` block is
- * content, not a delimiter. Toggling on it would end the fence early and leave a
- * following `# comment` looking like a real heading — which then becomes a
- * breadcrumb ancestor of every later section.
+ * Both parts of the delimiter matter, and getting either wrong lets a `#` line
+ * inside code be read as a real heading — which then becomes a breadcrumb
+ * ancestor of every later section:
+ *
+ *   - **Character.** CommonMark closes a fence only with the same character, so
+ *     a `~~~` line inside a ```` ```markdown ```` block is content.
+ *   - **Length.** A closing fence must be *at least as long* as the opener, so a
+ *     three-backtick line inside a four-backtick block is content too. That is
+ *     the ordinary way to show fenced code inside fenced code, so it turns up in
+ *     real notes rather than only in edge cases.
  *
  * @param line The line to inspect.
- * @param openMarker The marker that opened the current fence, or null when outside one.
- * @returns The new open marker (null when the line closed the fence).
+ * @param open The fence currently open, or null when outside one.
+ * @returns The fence still open after this line (null when the line closed it).
  */
-function nextFenceState(line: string, openMarker: string | null): string | null {
+function nextFenceState(line: string, open: OpenFence | null): OpenFence | null {
 	const match = line.match(FENCE_RE);
-	if (!match) return openMarker;
+	if (!match) return open;
 
-	const marker = match[1];
-	if (openMarker === null) return marker;
-	// Only the matching marker closes the block; anything else is code content.
-	return marker === openMarker ? null : openMarker;
+	const run = match[1];
+	const fence: OpenFence = { char: run[0], length: run.length };
+	if (open === null) return fence;
+
+	// Anything shorter, or of the other character, is code content.
+	return fence.char === open.char && fence.length >= open.length ? null : open;
 }
 
 /**
@@ -66,17 +80,17 @@ function nextFenceState(line: string, openMarker: string | null): string | null 
  */
 function countSections(content: string): number {
 	let sections = 0;
-	let fenceMarker: string | null = null;
+	let openFence: OpenFence | null = null;
 	let sawLeadingProse = false;
 	let seenHeading = false;
 
 	for (const line of content.split("\n")) {
-		const nextMarker = nextFenceState(line, fenceMarker);
-		if (nextMarker !== fenceMarker) {
-			fenceMarker = nextMarker;
+		const nextFence = nextFenceState(line, openFence);
+		if (nextFence !== openFence) {
+			openFence = nextFence;
 			continue;
 		}
-		if (fenceMarker !== null) continue;
+		if (openFence !== null) continue;
 
 		if (HEADING_RE.test(line)) {
 			seenHeading = true;
@@ -262,17 +276,17 @@ export function chunkText(content: string, title: string, maxChars: number): Tex
 	// shell comment onto the breadcrumb stack, where it becomes a permanent
 	// ancestor of every following real section, and would split the fence markers
 	// across separate chunks.
-	let fenceMarker: string | null = null;
+	let openFence: OpenFence | null = null;
 
 	for (const line of lines) {
-		const nextMarker = nextFenceState(line, fenceMarker);
-		if (nextMarker !== fenceMarker) {
-			fenceMarker = nextMarker;
+		const nextFence = nextFenceState(line, openFence);
+		if (nextFence !== openFence) {
+			openFence = nextFence;
 			buffer.push(line);
 			continue;
 		}
 
-		const m = fenceMarker !== null ? null : line.match(HEADING_RE);
+		const m = openFence !== null ? null : line.match(HEADING_RE);
 		if (m) {
 			flushBuffer();
 			const level = m[1].length;
