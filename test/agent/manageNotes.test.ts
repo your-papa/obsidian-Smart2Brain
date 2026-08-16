@@ -5,12 +5,14 @@ vi.mock("obsidian", () => import("../__mocks__/obsidian"));
 const mockAddChanges = vi.fn().mockReturnValue(["mock-id"]);
 const mockIsPathAllowed = vi.fn().mockReturnValue(true);
 const mockCountOtherThreads = vi.fn().mockReturnValue(0);
+const mockShouldBlockFile = vi.fn().mockReturnValue(false);
 
 vi.mock("../../src/stores/pendingChangesStore.svelte", () => ({
 	getPendingChangesStore: () => ({
 		addChanges: mockAddChanges,
 		isPathAllowed: mockIsPathAllowed,
 		countOtherThreadsPendingUpdate: mockCountOtherThreads,
+		shouldBlockFile: (...args: unknown[]) => mockShouldBlockFile(...args),
 	}),
 }));
 
@@ -69,6 +71,9 @@ function setManageNotesPermissions(permissions?: {
 	mockGetData.mockReturnValue({
 		getAgent: () => undefined,
 		getSelectedAgent: () => ({
+			// A provider must be present for the privacy check to run at all —
+			// `shouldBlockFile` is only consulted when one is resolved.
+			chatModel: { provider: "test-provider" },
 			toolsConfig: {
 				manage_notes: {
 					settings: {
@@ -91,6 +96,7 @@ describe("manageNotes tool", () => {
 		vi.clearAllMocks();
 		mockIsPathAllowed.mockReturnValue(true);
 		mockCountOtherThreads.mockReturnValue(0);
+		mockShouldBlockFile.mockReturnValue(false);
 		mockGetIndexableVaultFiles.mockReturnValue([]);
 		setManageNotesPermissions();
 		app = createMockApp();
@@ -282,6 +288,99 @@ describe("manageNotes tool", () => {
 			expect.any(String),
 			"test-thread-id",
 		);
+	});
+
+	describe("privacy filter", () => {
+		// The privacy filter is an exfiltration control: it exists to stop vault
+		// content reaching an untrusted provider. So it gates the operations that
+		// READ a note into the model's context (update, delete) and not the ones
+		// that only write or rename (create, move).
+
+		it("blocks an update whose target is private for the current provider", async () => {
+			const file = makeFile("Private/secrets.md");
+			mockResolveVaultFileDetailed.mockReturnValue({ status: "found", file });
+			mockShouldBlockFile.mockReturnValue(true);
+
+			const result = await tool.invoke(
+				{
+					operations: [
+						{ type: "update", path: "Private/secrets.md", edits: [{ oldText: "a", newText: "b" }] },
+					],
+				},
+				THREAD_CONFIG,
+			);
+
+			expect(result).toContain("private for the current provider");
+			expect(mockAddChanges).not.toHaveBeenCalled();
+		});
+
+		it("blocks a delete whose target is private for the current provider", async () => {
+			const file = makeFile("Private/secrets.md");
+			mockResolveVaultFileDetailed.mockReturnValue({ status: "found", file });
+			mockShouldBlockFile.mockReturnValue(true);
+
+			const result = await tool.invoke(
+				{ operations: [{ type: "delete", path: "Private/secrets.md" }] },
+				THREAD_CONFIG,
+			);
+
+			expect(result).toContain("private for the current provider");
+			expect(mockAddChanges).not.toHaveBeenCalled();
+		});
+
+		it("stages a create into a private location — content flows to the vault, not the provider", async () => {
+			vi.mocked(app.vault.getAbstractFileByPath).mockReturnValue(null);
+			mockShouldBlockFile.mockReturnValue(true);
+
+			const result = await tool.invoke(
+				{ operations: [{ type: "create", path: "Private/new.md", content: "hello" }] },
+				THREAD_CONFIG,
+			);
+
+			expect(result).not.toContain("private for the current provider");
+			expect(mockAddChanges).toHaveBeenCalledWith(
+				[{ type: "create", path: "Private/new.md", content: "hello" }],
+				expect.any(String),
+				"test-thread-id",
+			);
+		});
+
+		it("stages a move even when both source and destination are private — a move never reads content", async () => {
+			const file = makeFile("Private/source.md");
+			mockResolveVaultFileDetailed.mockReturnValue({ status: "found", file });
+			vi.mocked(app.vault.getAbstractFileByPath).mockReturnValue(null);
+			mockShouldBlockFile.mockReturnValue(true);
+
+			const result = await tool.invoke(
+				{ operations: [{ type: "move", path: "Private/source.md", newPath: "Private/moved.md" }] },
+				THREAD_CONFIG,
+			);
+
+			expect(result).not.toContain("private for the current provider");
+			expect(mockAddChanges).toHaveBeenCalledWith(
+				[{ type: "move", path: "Private/source.md", newPath: "Private/moved.md" }],
+				expect.any(String),
+				"test-thread-id",
+			);
+		});
+
+		it("never consults the privacy filter for create or move", async () => {
+			const file = makeFile("Private/source.md");
+			mockResolveVaultFileDetailed.mockReturnValue({ status: "found", file });
+			vi.mocked(app.vault.getAbstractFileByPath).mockReturnValue(null);
+
+			await tool.invoke(
+				{
+					operations: [
+						{ type: "create", path: "Private/new.md", content: "hello" },
+						{ type: "move", path: "Private/source.md", newPath: "Public/moved.md" },
+					],
+				},
+				THREAD_CONFIG,
+			);
+
+			expect(mockShouldBlockFile).not.toHaveBeenCalled();
+		});
 	});
 
 	it("stages move operations as first-class changes", async () => {

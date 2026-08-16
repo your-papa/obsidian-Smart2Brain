@@ -80,6 +80,13 @@ function changePathLabel(entry: PendingChangeEntry): string {
 	return entry.change.type === "move" ? `${entry.change.path} -> ${entry.change.newPath}` : entry.change.path;
 }
 
+/** Whether this move takes a note out of a private location into a public one.
+ * Not a provider-trust question — see `isDeprivatizingMove`. */
+function isDeprivatizing(entry: PendingChangeEntry): boolean {
+	void store.revision;
+	return store.isDeprivatizingMove(entry.change);
+}
+
 /** Number of OTHER chats that also have a pending update to this entry's file.
  * Only updates can collide cross-thread (create/delete/move aren't dedup-scoped
  * the same way, and only updates carry the stale-original-content hazard). */
@@ -234,7 +241,16 @@ function previewChange(evt: Event, entry: PendingChangeEntry) {
                 {:else}
                   <span class="pcb-path">{changePathLabel(entry)}</span>
                 {/if}
-                {#if otherThreadCount(entry) > 0}
+                {#if isDeprivatizing(entry)}
+                <span
+                  class="pcb-deprivatizing"
+                  title="This note is currently private. Moving it to this location takes it out of the privacy filter, so it will be indexed, searchable, and available to untrusted providers from then on."
+                >
+                  <span use:icon={"shield-off"} style="--icon-size: 11px"></span>
+                  Leaves private
+                </span>
+              {/if}
+              {#if otherThreadCount(entry) > 0}
                   <span
                     class="pcb-cross-thread"
                     title={`${otherThreadCount(entry)} other chat${otherThreadCount(entry) !== 1 ? "s" : ""} also ${otherThreadCount(entry) !== 1 ? "have" : "has"} a pending edit to this file. Whichever is accepted first wins; the others may then fail to apply.`}
@@ -470,6 +486,24 @@ function previewChange(evt: Event, entry: PendingChangeEntry) {
     font-weight: var(--font-semibold);
     background: hsla(var(--color-orange-hsl), 0.2);
     color: var(--color-orange);
+    cursor: help;
+  }
+
+  /* Same shape as .pcb-cross-thread, but color-mix against the hex --color-red
+     rather than hsla(--color-red-hsl): the -hsl vars are undefined in some
+     themes (Cupertino among them), which silently renders the badge
+     transparent. */
+  .pcb-deprivatizing {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    flex-shrink: 0;
+    padding: 1px 5px;
+    border-radius: var(--radius-s);
+    font-size: 10px;
+    font-weight: var(--font-semibold);
+    background: color-mix(in srgb, var(--color-red) 20%, transparent);
+    color: var(--color-red);
     cursor: help;
   }
 

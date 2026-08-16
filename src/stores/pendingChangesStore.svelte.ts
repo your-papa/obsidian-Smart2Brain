@@ -192,6 +192,21 @@ export class PendingChangesStore {
 		return !pluginData.isProviderTrusted(providerId);
 	}
 
+	/**
+	 * Whether applying this change would take a note out of a private location
+	 * and into a non-private one.
+	 *
+	 * Deliberately independent of provider trust: a move exposes nothing to the
+	 * model (it applies as a bare rename), but it does change how every later
+	 * operation treats the note — a previously-private note stops being filtered
+	 * from indexing, search and prompts. That is worth flagging whichever
+	 * provider is selected, so this asks only about the privacy filter.
+	 */
+	isDeprivatizingMove(change: PendingChange): boolean {
+		if (change.type !== "move") return false;
+		return this.isFilePrivate(change.path) && !this.isFilePrivate(change.newPath);
+	}
+
 	/** Stage one or more pending changes. Returns the entry IDs in input order.
 	 *  If a pending update already exists for the same path and thread, the older entry is
 	 *  auto-rejected so only the latest proposal is active. */

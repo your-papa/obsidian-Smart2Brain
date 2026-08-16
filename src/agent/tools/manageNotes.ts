@@ -162,11 +162,23 @@ function validateExistingMarkdownFile(
 	}
 
 	// Privacy check — use the agent that owns this run, not the global selection.
-	const currentProvider = (getData().getAgent(agentId) ?? getData().getSelectedAgent()).chatModel?.provider;
-	if (currentProvider && store.shouldBlockFile(file.path, currentProvider)) {
-		return {
-			error: `Error in operation ${operationNumber}: The file "${file.path}" is private for the current provider. Switch to a trusted provider or adjust provider access settings.`,
-		};
+	//
+	// Only for update/delete: those read the note into the model's context, which
+	// is exactly what the privacy filter exists to prevent. A move never reads
+	// content — it applies as a bare `fileManager.renameFile` — so blocking one
+	// on a private source would apply an exfiltration control to an operation
+	// that cannot exfiltrate. (The agent had to name the source path to move it,
+	// so the path is already in context before this check would run.) Moves that
+	// take a note *out* of a private location are surfaced as a warning at review
+	// time instead — that's a vault-state concern, and unlike provider trust it
+	// applies whichever provider is selected.
+	if (action !== "move") {
+		const currentProvider = (getData().getAgent(agentId) ?? getData().getSelectedAgent()).chatModel?.provider;
+		if (currentProvider && store.shouldBlockFile(file.path, currentProvider)) {
+			return {
+				error: `Error in operation ${operationNumber}: The file "${file.path}" is private for the current provider. Switch to a trusted provider or adjust provider access settings.`,
+			};
+		}
 	}
 
 	return { file };
@@ -473,11 +485,12 @@ export async function stageNoteOperations(
 				return `Error in operation ${operationNumber}: The destination path "${normalizedNewPath}" is excluded by your vault filter settings.`;
 			}
 
-			// Privacy check for move destination
-			const moveProvider = (getData().getAgent(agentId) ?? getData().getSelectedAgent()).chatModel?.provider;
-			if (moveProvider && store.shouldBlockFile(normalizedNewPath, moveProvider)) {
-				return `Error in operation ${operationNumber}: The destination path "${normalizedNewPath}" is private for the current provider. Switch to a trusted provider or adjust provider access settings.`;
-			}
+			// No privacy check on the destination, matching `create`: placing a file
+			// into a private location writes nothing out to the provider, and the
+			// staged-review step is the write-authorization gate. The check here was
+			// also inverted relative to the risk — it blocked moves *into* privacy
+			// (harmless) while permitting moves *out of* it, which is the case that
+			// actually changes how later operations treat the note.
 
 			if (result.file.path === normalizedNewPath) {
 				return `Error in operation ${operationNumber}: Source and destination are the same path "${normalizedNewPath}".`;
