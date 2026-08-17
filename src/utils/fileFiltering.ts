@@ -229,6 +229,35 @@ async function readTextFile(vault: Vault, file: TFile): Promise<string> {
 // ---------------------------------------------------------------------------
 
 /**
+ * Serialised LangChain classes that represent something a person actually said or
+ * was told. `ToolMessage` is deliberately absent: a tool result is the *input* the
+ * agent worked from, not conversation. Measured on a real vault, tool results were
+ * 73.5% of all indexed chat text, and 45.8% of it was `read_content` echoing notes
+ * back verbatim — so notes were indexed a second time inside every thread that had
+ * read them, competing with the note itself at retrieval time.
+ */
+const CONVERSATIONAL_MESSAGE_CLASSES = new Set(["HumanMessage", "AIMessage", "AIMessageChunk", "SystemMessage"]);
+
+/**
+ * Name of the serialised LangChain class for a message, e.g. `"ToolMessage"`.
+ * Serialised messages carry it as the last element of the `id` path array
+ * (`["langchain_core", "messages", "ToolMessage"]`). Returns `null` when the shape
+ * is unrecognised, so the caller can decide how to treat it.
+ */
+function getMessageClass(msg: unknown): string | null {
+	if (!msg || typeof msg !== "object") return null;
+	const record = msg as Record<string, unknown>;
+
+	if (Array.isArray(record.id) && record.id.length > 0) {
+		const last = record.id[record.id.length - 1];
+		if (typeof last === "string" && last.trim()) return last.trim();
+	}
+	// Flat (non-`lc`) message shape stores the role on `type`.
+	if (typeof record.type === "string" && record.type.trim()) return record.type.trim();
+	return null;
+}
+
+/**
  * Extract human and AI message text from a `.chat` file (LangGraph ThreadData JSON).
  * Skips all LangChain serialisation noise, checkpoint metadata, writes, etc.
  *
@@ -240,6 +269,10 @@ async function readTextFile(vault: Vault, file: TFile): Promise<string> {
  * keyed on the stable LangChain message id (falling back to the message text when a
  * message carries no id). First-seen order is preserved so the extracted text still
  * reads as a transcript.
+ *
+ * Only conversational turns are indexed (see `CONVERSATIONAL_MESSAGE_CLASSES`), and
+ * attachment blocks are stripped from those turns, so a thread contributes the
+ * discussion itself rather than a second copy of the notes it referenced.
  */
 function extractChatContent(raw: string): string {
 	try {
@@ -258,6 +291,11 @@ function extractChatContent(raw: string): string {
 			for (const entry of Object.values(checkpoints)) {
 				const messages = getNestedMessages(entry);
 				for (const msg of messages) {
+					// An unrecognised shape has no class to check; indexing it risks
+					// re-admitting tool output, so skip it.
+					const messageClass = getMessageClass(msg);
+					if (!messageClass || !CONVERSATIONAL_MESSAGE_CLASSES.has(messageClass)) continue;
+
 					const content = extractMessageContent(msg);
 					if (!content) continue;
 
@@ -315,6 +353,47 @@ function getNestedMessages(entry: unknown): unknown[] {
 	return Array.isArray(messages) ? messages : [];
 }
 
+/**
+ * Fallback marker for attachment blocks in threads written before the structured
+ * `s2b_attachment` flag existed. Mirrors the wrappers built in `Agent.ts`.
+ */
+const RE_ATTACHMENT_BLOCK = /^--- (?:File|PDF): /;
+
+/**
+ * Returns `true` when a content part is an attached file rather than typed text.
+ *
+ * Attachments are the *note* the user pointed at, not what they said about it, and
+ * the note is already indexed on its own. `Agent.ts` tags every attachment part with
+ * `s2b_attachment: true`; the text-prefix check covers threads written before that.
+ */
+function isAttachmentPart(part: Record<string, unknown>): boolean {
+	if (part.s2b_attachment === true) return true;
+	const text = part.text;
+	return typeof text === "string" && RE_ATTACHMENT_BLOCK.test(text);
+}
+
+/**
+ * Collapse a multimodal content array to its typed text.
+ *
+ * A message with attachments serialises as an array of parts: the user's own text
+ * plus one block per attached file. Treating the whole array as non-string dropped
+ * the user's question entirely (measured: "what can you do" lost, while the attached
+ * note's full body was the only thing that would have been kept). Keep the text
+ * parts, drop the attachments and any non-text (image/file) parts.
+ */
+function extractTextFromContentParts(parts: unknown[]): string {
+	const texts: string[] = [];
+	for (const part of parts) {
+		if (!part || typeof part !== "object") continue;
+		const record = part as Record<string, unknown>;
+		if (record.type !== "text") continue;
+		if (isAttachmentPart(record)) continue;
+		const text = record.text;
+		if (typeof text === "string" && text.trim()) texts.push(text.trim());
+	}
+	return texts.join("\n\n");
+}
+
 function extractMessageContent(msg: unknown): string {
 	if (!msg || typeof msg !== "object") return "";
 	const record = msg as Record<string, unknown>;
@@ -334,6 +413,9 @@ function extractMessageContent(msg: unknown): string {
 
 	if (typeof content === "string" && content.trim()) {
 		return content.trim();
+	}
+	if (Array.isArray(content)) {
+		return extractTextFromContentParts(content);
 	}
 	return "";
 }

@@ -72,10 +72,10 @@ describe("isAgentFilePath / isIndexableFile (folder from plugin data)", () => {
 // ---------------------------------------------------------------------------
 
 /** Build a LangChain-serialised message as stored inside a checkpoint. */
-function message(id: string | null, content: string): Record<string, unknown> {
+function message(id: string | null, content: unknown, messageClass = "HumanMessage"): Record<string, unknown> {
 	const kwargs: Record<string, unknown> = { content };
 	if (id !== null) kwargs.id = id;
-	return { lc: 1, type: "constructor", kwargs };
+	return { lc: 1, type: "constructor", id: ["langchain_core", "messages", messageClass], kwargs };
 }
 
 /**
@@ -160,6 +160,84 @@ describe("readIndexableContent (.chat extraction)", () => {
 		} as never;
 
 		expect(await readIndexableContent(vault, chatFile)).toBe("");
+	});
+
+	it("skips tool results so notes are not indexed a second time inside a thread", async () => {
+		const raw = thread("Research", [
+			message("m1", "what does the note say?"),
+			message(
+				"m2",
+				'Content of "Machine Learning Basics.md":\n\nGradient descent minimises loss.',
+				"ToolMessage",
+			),
+			message("m3", "It covers gradient descent.", "AIMessage"),
+		]);
+
+		const out = await readIndexableContent(vaultReturning(raw), chatFile);
+
+		expect(out).not.toContain("Gradient descent minimises loss");
+		expect(out).toContain("what does the note say?");
+		expect(out).toContain("It covers gradient descent.");
+	});
+
+	it("indexes assistant turns streamed as AIMessageChunk", async () => {
+		const raw = thread("Streamed", [message("m1", "streamed reply", "AIMessageChunk")]);
+
+		expect(await readIndexableContent(vaultReturning(raw), chatFile)).toContain("streamed reply");
+	});
+
+	it("skips messages whose class cannot be determined", async () => {
+		const raw = JSON.stringify({
+			title: "Odd",
+			checkpoints: {
+				"cp-1": { checkpoint: { channel_values: { messages: [{ kwargs: { content: "mystery" } }] } } },
+			},
+		});
+
+		expect(await readIndexableContent(vaultReturning(raw), chatFile)).toBe("Odd");
+	});
+
+	it("keeps the typed question but drops the attached file from a multimodal turn", async () => {
+		const raw = thread("Attachment", [
+			message("m1", [
+				{ type: "text", text: "what can you do" },
+				{
+					type: "text",
+					text: "--- File: Start Here.md ---\nTaskNotes tour body\n--- End File ---",
+					s2b_attachment: true,
+				},
+			]),
+		]);
+
+		const out = await readIndexableContent(vaultReturning(raw), chatFile);
+
+		expect(out).toContain("what can you do");
+		expect(out).not.toContain("TaskNotes tour body");
+	});
+
+	it("drops legacy attachment blocks that predate the s2b_attachment flag", async () => {
+		const raw = thread("Legacy attachment", [
+			message("m1", [
+				{ type: "text", text: "summarise this" },
+				{ type: "text", text: "--- PDF: paper.pdf (3 pages) ---\nabstract body\n--- End PDF ---" },
+			]),
+		]);
+
+		const out = await readIndexableContent(vaultReturning(raw), chatFile);
+
+		expect(out).toContain("summarise this");
+		expect(out).not.toContain("abstract body");
+	});
+
+	it("ignores non-text parts such as images", async () => {
+		const raw = thread("Image", [
+			message("m1", [
+				{ type: "text", text: "describe it" },
+				{ type: "image_url", image_url: { url: "data:image/png;base64,AAAA" } },
+			]),
+		]);
+
+		expect(await readIndexableContent(vaultReturning(raw), chatFile)).toBe("Image\n\ndescribe it");
 	});
 });
 
