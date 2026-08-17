@@ -10,6 +10,7 @@ import MiniSearch, { type SearchResult as MiniSearchResult } from "minisearch";
 import { getTitleMatchKind, matchesLeadingTitlePrefix, type TitleBoostScale } from "../search/searchRanking";
 import { isNumericSearchTerm, normalizeSearchText, tokenizeSearchText } from "../search/searchTermUtils";
 import { createQueryPlan, type QueryPlan } from "../search/queryPlan";
+import { getTermBoost, isStopword } from "../search/stopwords";
 import {
 	getLexicalMatchTier,
 	scoreLexicalCandidate,
@@ -104,8 +105,15 @@ function shouldIdentityPrefixMatch(term: string): boolean {
 	return term.length >= 1;
 }
 
+/**
+ * Content-field prefix matching is for genuine term prefixes, so it is gated on the
+ * term carrying meaning. The length check alone admitted stopwords at exactly the
+ * threshold: German `ich` is 3 characters, so it prefix-matched `ichtzone` and (with
+ * `fuzzy: 0.2`) reached `sich` and `erheblich`, letting a function word match half a
+ * German note. Stopwords still match exactly — they are just not expanded.
+ */
 function shouldContentPrefixMatch(term: string): boolean {
-	return term.length >= 3;
+	return term.length >= 3 && !isStopword(term);
 }
 
 /**
@@ -143,6 +151,7 @@ export class MiniSearchService {
 			idField: "id",
 			searchOptions: {
 				boost: { title: 2, aliases: 1.8, tags: 1.5, pathSegments: 1.2, content: 1 },
+				boostTerm: getTermBoost,
 				fuzzy: 0.2,
 				prefix: shouldContentPrefixMatch,
 			},
@@ -567,6 +576,7 @@ export class MiniSearchService {
 		return this.index.search(queryPlan.identityQuery, {
 			fields: [...IDENTITY_SEARCH_FIELDS],
 			boost: { title: 2, aliases: 1.8, tags: 1.5, pathSegments: 1.2 },
+			boostTerm: getTermBoost,
 			fuzzy: 0.2,
 			prefix: shouldIdentityPrefixMatch,
 		});
@@ -580,6 +590,7 @@ export class MiniSearchService {
 		return this.index.search(queryPlan.contentQuery, {
 			fields: [...CONTENT_SEARCH_FIELDS],
 			boost: { content: 1 },
+			boostTerm: getTermBoost,
 			fuzzy: 0.2,
 			prefix: shouldContentPrefixMatch,
 		});
