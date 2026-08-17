@@ -6,8 +6,39 @@ export interface PdfExtractResult {
 	totalPages: number;
 }
 
+/** A pdfjs text item. `hasEOL` marks the last item on a visual line. */
+interface PdfTextItem {
+	str: string;
+	hasEOL?: boolean;
+}
+
+/**
+ * Joins pdfjs text items into a line-structured string.
+ *
+ * pdfjs emits one item per styled run, so items must be separated or words fuse
+ * across run boundaries ("Scene" + "Leonard" -> "SceneLeonard"). Items ending a
+ * visual line are followed by a newline; the rest are separated by a space
+ * unless one side already supplies the whitespace.
+ */
+export function joinPdfTextItems(items: PdfTextItem[]): string {
+	let text = "";
+	for (const item of items) {
+		if (item.hasEOL) {
+			text += `${item.str}\n`;
+			continue;
+		}
+		if (item.str.length === 0) continue;
+		const needsSpace = text.length > 0 && !/\s$/.test(text) && !/^\s/.test(item.str);
+		text += needsSpace ? ` ${item.str}` : item.str;
+	}
+	return text.replace(/[ \t]+$/gm, "").trim();
+}
+
 /**
  * Extracts all text content from a PDF file using Obsidian's built-in pdfjs.
+ *
+ * Pages are separated by a blank line so downstream chunking has a paragraph
+ * boundary to split on — PDFs have no headings for the chunker to use.
  *
  * @param data - PDF file content as Uint8Array
  * @returns Extracted text and total page count
@@ -20,9 +51,9 @@ export async function extractTextFromPdf(data: Uint8Array): Promise<PdfExtractRe
 	for (let i = 1; i <= totalPages; i++) {
 		const page = await pdf.getPage(i);
 		const content = await page.getTextContent();
-		textParts.push(content.items.map((item: { str: string }) => item.str).join(""));
+		textParts.push(joinPdfTextItems(content.items));
 	}
-	return { text: textParts.join("\n"), totalPages };
+	return { text: textParts.filter((part) => part.length > 0).join("\n\n"), totalPages };
 }
 
 export interface PdfPageExtractResult {
@@ -46,9 +77,9 @@ export async function extractTextFromPdfPages(data: Uint8Array, pages: number[])
 		if (pageNum < 1 || pageNum > totalPages) continue;
 		const page = await pdf.getPage(pageNum);
 		const content = await page.getTextContent();
-		textParts.push(content.items.map((item: { str: string }) => item.str).join(""));
+		textParts.push(joinPdfTextItems(content.items));
 	}
-	return { text: textParts.join("\n"), totalPages };
+	return { text: textParts.filter((part) => part.length > 0).join("\n\n"), totalPages };
 }
 
 /**

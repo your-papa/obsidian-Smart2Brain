@@ -1,6 +1,7 @@
 import type { TFile, Vault } from "obsidian";
 import { getData } from "../stores/dataStore.svelte";
 import { gunzipToString } from "./gzip";
+import { extractTextFromPdf } from "./pdfExtractor";
 
 function normalizePattern(pattern: string): string {
 	return pattern.trim().replace(/^\/+|\/+$/g, "");
@@ -40,11 +41,59 @@ export function shouldProcessVaultPath(filePath: string, targetFolder: string): 
 export const TEXT_INDEXABLE_EXTENSIONS = new Set(["md", "txt", "csv", "json", "yaml", "yml", "canvas", "chat"]);
 
 /**
+ * Extensions whose text is extracted from a binary container rather than read
+ * directly. These are indexable, just not via `readTextFile`.
+ */
+export const BINARY_TEXT_EXTENSIONS = new Set(["pdf"]);
+
+/**
+ * Extensions excluded from the index entirely.
+ *
+ * A file with no extractable text yields an empty body, and `chunkText` still
+ * emits one chunk containing only the title — a content-free vector. Measured:
+ * those score ~0.46-0.48 against *any* query, which is the noise floor, so they
+ * displace real notes while carrying no information. Lexical search still finds
+ * them by filename through MiniSearch.
+ *
+ *   - `base`: Obsidian Bases view definitions — YAML formula/config, no prose.
+ *   - images: no text to extract. Indexing them would require a multimodal
+ *     embedding model and a separate image pipeline; until that exists they are
+ *     pure noise rather than a missing feature.
+ */
+export const NON_INDEXABLE_EXTENSIONS = new Set([
+	"base",
+	"png",
+	"jpg",
+	"jpeg",
+	"gif",
+	"webp",
+	"svg",
+	"bmp",
+	"avif",
+	"ico",
+	"mp3",
+	"wav",
+	"m4a",
+	"ogg",
+	"flac",
+	"mp4",
+	"webm",
+	"mov",
+	"mkv",
+	"zip",
+]);
+
+/**
  * Returns `true` when the file holds text content that can be read and
  * indexed for full-text / embedding search.
  */
 export function isTextIndexableFile(file: TFile): boolean {
 	return TEXT_INDEXABLE_EXTENSIONS.has(file.extension.toLowerCase());
+}
+
+/** Returns `true` when the file's text must be extracted from a binary container. */
+export function isBinaryTextFile(file: TFile): boolean {
+	return BINARY_TEXT_EXTENSIONS.has(file.extension.toLowerCase());
 }
 
 /**
@@ -84,7 +133,14 @@ export function isAgentFilePath(path: string): boolean {
  * Every non-hidden vault file is indexable, except files under the agent folder.
  */
 export function isIndexableFile(file: TFile): boolean {
-	return !isAgentFilePath(file.path);
+	if (isAgentFilePath(file.path)) return false;
+	// Files with no extractable text would be indexed as a title-only vector,
+	// which sits at the similarity noise floor and displaces real notes.
+	// Fall back to the path suffix: `extension` is absent on some call sites'
+	// file-like objects, and treating that as "no extension" would silently
+	// re-admit every excluded type.
+	const extension = (file.extension ?? file.path.split(".").pop() ?? "").toLowerCase();
+	return !NON_INDEXABLE_EXTENSIONS.has(extension);
 }
 
 /**
@@ -97,9 +153,11 @@ export function getIndexableVaultFiles(vault: Vault): TFile[] {
 
 /**
  * Read indexable content for a file. Returns the text content for
- * text-indexable files, or an empty string for binary files (metadata-only
- * indexing). Special-case handling:
+ * text-indexable files, or an empty string when nothing can be extracted.
+ * Special-case handling:
  *   - `.chat` files: extracts only human/AI message content (not LangChain metadata)
+ *   - `.pdf` files: extracts the document text via pdfjs, so a PDF is chunked and
+ *     embedded like any other long document rather than reduced to its filename
  *   - `.excalidraw.md` files: extracts the "back of the note" and text elements,
  *     stripping the huge embedded JSON drawing data
  *
@@ -107,6 +165,21 @@ export function getIndexableVaultFiles(vault: Vault): TFile[] {
  * before calling this helper.
  */
 export async function readIndexableContent(vault: Vault, file: TFile): Promise<string> {
+	// PDFs carry real prose, but it lives inside a binary container. Extracting it
+	// lets the normal chunker split the document by length; returning "" would
+	// index a multi-page PDF as a single title-only vector.
+	if (isBinaryTextFile(file)) {
+		try {
+			const bytes = await vault.adapter.readBinary(file.path);
+			const { text } = await extractTextFromPdf(new Uint8Array(bytes));
+			return text.trim();
+		} catch {
+			// Encrypted, malformed, or scanned-without-OCR: skip rather than fail
+			// the whole index run.
+			return "";
+		}
+	}
+
 	if (!isTextIndexableFile(file)) {
 		return "";
 	}
@@ -156,17 +229,169 @@ async function readTextFile(vault: Vault, file: TFile): Promise<string> {
 // ---------------------------------------------------------------------------
 
 /**
- * Extract human and AI message text from a `.chat` file (LangGraph ThreadData JSON).
- * Skips all LangChain serialisation noise, checkpoint metadata, writes, etc.
+ * Serialised LangChain classes that represent something a person actually said or
+ * was told. `ToolMessage` is deliberately absent: a tool result is the *input* the
+ * agent worked from, not conversation. Measured on a real vault, tool results were
+ * 73.5% of all indexed chat text, and 45.8% of it was `read_content` echoing notes
+ * back verbatim — so notes were indexed a second time inside every thread that had
+ * read them, competing with the note itself at retrieval time.
+ */
+const CONVERSATIONAL_MESSAGE_CLASSES = new Set(["HumanMessage", "AIMessage", "AIMessageChunk", "SystemMessage"]);
+
+/**
+ * Name of the serialised LangChain class for a message, e.g. `"ToolMessage"`.
+ * Serialised messages carry it as the last element of the `id` path array
+ * (`["langchain_core", "messages", "ToolMessage"]`). Returns `null` when the shape
+ * is unrecognised, so the caller can decide how to treat it.
+ */
+function getMessageClass(msg: unknown): string | null {
+	if (!msg || typeof msg !== "object") return null;
+	const record = msg as Record<string, unknown>;
+
+	if (Array.isArray(record.id) && record.id.length > 0) {
+		const last = record.id[record.id.length - 1];
+		if (typeof last === "string" && last.trim()) return last.trim();
+	}
+	// Flat (non-`lc`) message shape stores the role on `type`.
+	if (typeof record.type === "string" && record.type.trim()) return record.type.trim();
+	return null;
+}
+
+/**
+ * Context blocks appended to a user's question before it is sent (visible notes,
+ * selected text, graph selection). They are machinery, not something the user typed,
+ * and they name other notes — indexing them makes a thread match queries about notes
+ * that merely happened to be open. The chat UI strips the same suffix for display
+ * (`stripAugmentedSuffix` in `stores/chatStore.svelte.ts`); matching on the block
+ * marker keeps this independent of the exact rendering.
+ */
+const RE_AUGMENTED_CONTEXT = /\n*\[(?:Currently visible notes|Selected text from |Graph-selected notes)/;
+
+/** Drop appended context blocks, keeping only what the user actually wrote. */
+function stripAugmentedContext(content: string): string {
+	const match = RE_AUGMENTED_CONTEXT.exec(content);
+	return match ? content.slice(0, match.index).trim() : content;
+}
+
+/** Returns `true` when an assistant message is mid-turn narration rather than an answer. */
+function hasToolCalls(msg: unknown): boolean {
+	if (!msg || typeof msg !== "object") return false;
+	const kwargs = (msg as Record<string, unknown>).kwargs;
+	if (!kwargs || typeof kwargs !== "object") return false;
+	const record = kwargs as Record<string, unknown>;
+
+	if (Array.isArray(record.tool_calls) && record.tool_calls.length > 0) return true;
+	const additional = record.additional_kwargs;
+	if (additional && typeof additional === "object") {
+		const nested = (additional as Record<string, unknown>).tool_calls;
+		if (Array.isArray(nested) && nested.length > 0) return true;
+	}
+	return false;
+}
+
+/**
+ * Pick the message list for the conversation as the user last left it.
  *
- * Conversation history is a *tree* of checkpoints, and every checkpoint re-contains
- * the whole message list that preceded it. Concatenating each checkpoint's messages
- * therefore re-emits the same text once per subsequent turn — measured at ~8x on a
- * 526-checkpoint thread, which inflates both the embedding cost and the lexical term
- * frequencies of every chat file. Emit each distinct message exactly once instead,
- * keyed on the stable LangChain message id (falling back to the message text when a
- * message carries no id). First-seen order is preserved so the extracted text still
- * reads as a transcript.
+ * Checkpoints form a *tree*: every regenerate or edit forks a new branch, and each
+ * branch keeps its own answer to the same question. Measured on a 526-checkpoint
+ * thread, that turned 10 real questions into 105 distinct answers (one question was
+ * regenerated 16 times), all of which were being indexed — the single biggest reason
+ * a chat file outweighed real notes.
+ *
+ * This mirrors the branch resolution the chat UI uses to decide which conversation to
+ * show (`resolveActiveCheckpointId` → `findDeterministicTipFrom` in
+ * `stores/chatStore.svelte.ts`): walk from the root and always take the newest child,
+ * tie-breaking on step then id so the choice is deterministic. The UI's extra inputs
+ * (session / persisted / explicit checkpoint) don't apply here — the persisted "last
+ * viewed" id lives in plugin data, not the `.chat` file — so this is the UI's own
+ * fallback path, which is also what the read-only `.chat` embed preview takes.
+ *
+ * It is reimplemented rather than imported because those helpers live in a Svelte
+ * runes store that pulls in the whole plugin graph, and they operate on normalized
+ * LangChain `BaseMessage` instances; indexing reads raw serialised JSON and must stay
+ * usable before `AgentManager` has initialized. Verified to agree with the UI on all
+ * 49 threads in the test vault by comparing against `metadata.lastMessagePreview`.
+ */
+function selectActiveMessages(checkpoints: Record<string, unknown>): unknown[] {
+	const nodes = new Map<string, { id: string; ts: string; step: number; entry: unknown; children: string[] }>();
+	for (const [id, entry] of Object.entries(checkpoints)) {
+		const record = entry as Record<string, unknown>;
+		const checkpoint = record?.checkpoint as Record<string, unknown> | undefined;
+		const metadata = record?.metadata as Record<string, unknown> | undefined;
+		nodes.set(id, {
+			id,
+			ts: typeof checkpoint?.ts === "string" ? checkpoint.ts : "",
+			step: typeof metadata?.step === "number" ? metadata.step : 0,
+			entry,
+			children: [],
+		});
+	}
+	if (nodes.size === 0) return [];
+
+	const parentOf = new Map<string, string | undefined>();
+	for (const [id, entry] of Object.entries(checkpoints)) {
+		const parentConfig = (entry as Record<string, unknown>)?.parentConfig as Record<string, unknown> | undefined;
+		const configurable = parentConfig?.configurable as Record<string, unknown> | undefined;
+		const parentId = configurable?.checkpoint_id;
+		const parent = typeof parentId === "string" && nodes.has(parentId) ? parentId : undefined;
+		parentOf.set(id, parent);
+		if (parent) nodes.get(parent)?.children.push(id);
+	}
+
+	/** Newest first: ts desc, then step desc, then id — matches the UI's `compareNewest`. */
+	const newestFirst = (a: string, b: string): number => {
+		const nodeA = nodes.get(a);
+		const nodeB = nodes.get(b);
+		if (!nodeA || !nodeB) return 0;
+		if (nodeA.ts !== nodeB.ts) return nodeB.ts.localeCompare(nodeA.ts);
+		if (nodeA.step !== nodeB.step) return nodeB.step - nodeA.step;
+		return nodeA.id.localeCompare(nodeB.id);
+	};
+
+	const roots = [...nodes.keys()].filter((id) => !parentOf.get(id));
+	const startId = (roots.length > 0 ? roots : [...nodes.keys()]).sort((a, b) => {
+		const nodeA = nodes.get(a);
+		const nodeB = nodes.get(b);
+		if (!nodeA || !nodeB) return 0;
+		if (nodeA.step !== nodeB.step) return nodeA.step - nodeB.step;
+		if (nodeA.ts !== nodeB.ts) return nodeA.ts.localeCompare(nodeB.ts);
+		return nodeA.id.localeCompare(nodeB.id);
+	})[0];
+
+	// Walk to the tip, taking the newest child at each fork. `visited` guards against
+	// a malformed file whose parent links form a cycle.
+	let current = startId;
+	const visited = new Set<string>();
+	while (current && !visited.has(current)) {
+		visited.add(current);
+		const next = nodes
+			.get(current)
+			?.children.filter((id) => !visited.has(id))
+			.sort(newestFirst)[0];
+		if (!next) break;
+		current = next;
+	}
+
+	return getNestedMessages(nodes.get(current)?.entry);
+}
+
+/**
+ * Extract the conversation from a `.chat` file (LangGraph ThreadData JSON) as
+ * question/answer pairs, skipping LangChain serialisation noise and tool traffic.
+ *
+ * Three things are dropped, each measured as a real source of index bloat:
+ *   - **Tool results** (see `CONVERSATIONAL_MESSAGE_CLASSES`) — 73.5% of indexed chat
+ *     text, nearly half of it notes echoed back verbatim by `read_content`.
+ *   - **Abandoned branches** (see `selectActiveMessages`) — regenerated answers to a
+ *     question the user already re-asked.
+ *   - **Mid-turn narration** — assistant messages that only announce a tool call
+ *     ("I'll quickly inspect the vault structure…"); they carry `tool_calls` and no
+ *     answer, and matched no query meaningfully.
+ *
+ * A turn is emitted as `question\n\nanswer` so the two share a chunk: an answer often
+ * lacks the vocabulary of the question that prompted it, and splitting them costs the
+ * retrieval of both. Only the last final answer of a turn is kept — an assistant can
+ * emit several text messages around its tool calls, but the closing one is the reply.
  */
 function extractChatContent(raw: string): string {
 	try {
@@ -178,25 +403,38 @@ function extractChatContent(raw: string): string {
 			parts.push(data.title.trim());
 		}
 
-		// Walk checkpoints → channel_values.messages → kwargs.content / data.content
 		const checkpoints = data.checkpoints;
 		if (checkpoints && typeof checkpoints === "object") {
-			const seen = new Set<string>();
-			for (const entry of Object.values(checkpoints)) {
-				const messages = getNestedMessages(entry);
-				for (const msg of messages) {
-					const content = extractMessageContent(msg);
-					if (!content) continue;
+			let question = "";
+			let answer = "";
+			const flush = () => {
+				const turn = [question, answer].filter((text) => text.length > 0).join("\n\n");
+				if (turn) parts.push(turn);
+				question = "";
+				answer = "";
+			};
 
-					// Prefer the message id: the same logical message can be
-					// re-serialised across checkpoints, and two genuinely distinct
-					// messages may share identical text (e.g. a repeated "yes").
-					const dedupeKey = getMessageId(msg) ?? `content:${content}`;
-					if (seen.has(dedupeKey)) continue;
-					seen.add(dedupeKey);
-					parts.push(content);
+			for (const msg of selectActiveMessages(checkpoints as Record<string, unknown>)) {
+				// An unrecognised shape has no class to check; indexing it risks
+				// re-admitting tool output, so skip it.
+				const messageClass = getMessageClass(msg);
+				if (!messageClass || !CONVERSATIONAL_MESSAGE_CLASSES.has(messageClass)) continue;
+
+				const content = extractMessageContent(msg);
+				if (!content) continue;
+
+				if (messageClass === "HumanMessage") {
+					// A new question closes the previous turn.
+					flush();
+					question = stripAugmentedContext(content);
+					continue;
 				}
+				// Assistant/system text: keep only turn-ending answers, and let a later
+				// one supersede an earlier one within the same turn.
+				if (hasToolCalls(msg)) continue;
+				answer = content;
 			}
+			flush();
 		}
 
 		return parts.join("\n\n");
@@ -204,32 +442,6 @@ function extractChatContent(raw: string): string {
 		// If parsing fails, fall back to empty (don't index raw JSON)
 		return "";
 	}
-}
-
-/**
- * Read the stable LangChain message id, which survives re-serialisation across
- * checkpoints. Returns `null` when the message carries no usable id so the caller
- * can fall back to content-based deduplication.
- */
-function getMessageId(msg: unknown): string | null {
-	if (!msg || typeof msg !== "object") return null;
-	const record = msg as Record<string, unknown>;
-
-	const candidates: unknown[] = [];
-	if (record.kwargs && typeof record.kwargs === "object") {
-		candidates.push((record.kwargs as Record<string, unknown>).id);
-	}
-	if (record.data && typeof record.data === "object") {
-		candidates.push((record.data as Record<string, unknown>).id);
-	}
-	candidates.push(record.id);
-
-	for (const candidate of candidates) {
-		if (typeof candidate === "string" && candidate.trim()) {
-			return `id:${candidate.trim()}`;
-		}
-	}
-	return null;
 }
 
 function getNestedMessages(entry: unknown): unknown[] {
@@ -240,6 +452,47 @@ function getNestedMessages(entry: unknown): unknown[] {
 	if (!channelValues || typeof channelValues !== "object") return [];
 	const messages = (channelValues as Record<string, unknown>).messages;
 	return Array.isArray(messages) ? messages : [];
+}
+
+/**
+ * Fallback marker for attachment blocks in threads written before the structured
+ * `s2b_attachment` flag existed. Mirrors the wrappers built in `Agent.ts`.
+ */
+const RE_ATTACHMENT_BLOCK = /^--- (?:File|PDF): /;
+
+/**
+ * Returns `true` when a content part is an attached file rather than typed text.
+ *
+ * Attachments are the *note* the user pointed at, not what they said about it, and
+ * the note is already indexed on its own. `Agent.ts` tags every attachment part with
+ * `s2b_attachment: true`; the text-prefix check covers threads written before that.
+ */
+function isAttachmentPart(part: Record<string, unknown>): boolean {
+	if (part.s2b_attachment === true) return true;
+	const text = part.text;
+	return typeof text === "string" && RE_ATTACHMENT_BLOCK.test(text);
+}
+
+/**
+ * Collapse a multimodal content array to its typed text.
+ *
+ * A message with attachments serialises as an array of parts: the user's own text
+ * plus one block per attached file. Treating the whole array as non-string dropped
+ * the user's question entirely (measured: "what can you do" lost, while the attached
+ * note's full body was the only thing that would have been kept). Keep the text
+ * parts, drop the attachments and any non-text (image/file) parts.
+ */
+function extractTextFromContentParts(parts: unknown[]): string {
+	const texts: string[] = [];
+	for (const part of parts) {
+		if (!part || typeof part !== "object") continue;
+		const record = part as Record<string, unknown>;
+		if (record.type !== "text") continue;
+		if (isAttachmentPart(record)) continue;
+		const text = record.text;
+		if (typeof text === "string" && text.trim()) texts.push(text.trim());
+	}
+	return texts.join("\n\n");
 }
 
 function extractMessageContent(msg: unknown): string {
@@ -261,6 +514,9 @@ function extractMessageContent(msg: unknown): string {
 
 	if (typeof content === "string" && content.trim()) {
 		return content.trim();
+	}
+	if (Array.isArray(content)) {
+		return extractTextFromContentParts(content);
 	}
 	return "";
 }

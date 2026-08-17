@@ -935,9 +935,12 @@ export class VectorStoreService {
 
 		this.plugin.registerEvent(
 			vault.on("rename", async (file, oldPath) => {
-				if (file instanceof TFile && isIndexableFile(file)) {
-					await this.handleFileRename(file, oldPath);
-				}
+				if (!(file instanceof TFile)) return;
+				// No `isIndexableFile` gate here: renaming a note to a non-indexable
+				// extension (`note.md` → `note.base`) must still remove the old
+				// path's chunks. `handleFileRename` removes first and re-indexes only
+				// when the destination is still indexable.
+				await this.handleFileRename(file, oldPath);
 			}),
 		);
 	}

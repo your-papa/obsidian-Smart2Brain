@@ -452,4 +452,53 @@ describe("chunkText heading levels", () => {
 		// The counterpart: leading code with no heading after it is still one topic.
 		expect(chunkText(["```bash", "echo hello", "```"].join("\n"), "Only Fence", 32_764)).toHaveLength(1);
 	});
+
+
+	it("preserves leading indentation so indented code is not read as a fence", () => {
+		// A four-space-indented ``` is an indented code block, not a fence. Trimming
+		// the line turned it into a real delimiter, which opened an unterminated
+		// fence and swallowed the following heading into one merged chunk.
+		const body = ["    ```", "    some code", "", "## Usage", "How to use it."].join("\n");
+
+		const chunks = chunkText(body, "Indented Code", 32_764);
+
+		expect(chunks).toHaveLength(2);
+		expect(chunks.find((c) => c.content.includes("How to use it."))?.content).toContain("## Usage");
+		// The indentation itself survives into the chunk body.
+		expect(chunks.find((c) => c.content.includes("some code"))?.content).toContain("    ```");
+	});
+
+	it("still strips blank leading and trailing lines", () => {
+		const chunks = chunkText(["", "  ", "## A", "x", "", ""].join("\n"), "Blanks", 32_764);
+
+		expect(chunks).toHaveLength(1);
+		// Blank edges gone; no stray leading newline before the content.
+		expect(chunks[0].content).toBe("Note: Blanks\n\n## A\nx");
+	});
+
+
+	it("treats CRLF and CR line endings the same as LF", () => {
+		// Review finding: the paragraph separator did not match a CRLF blank line.
+		// The deeper problem was that HEADING_RE never matched \"## A\\r\" at all, so a
+		// CRLF note got *no* section splitting — every heading was invisible and the
+		// whole note collapsed into one vector. Line endings are now normalized once
+		// on entry so every downstream rule can assume \\n.
+		const sections = ["## Alpha", "Content about alpha.", "", "## Beta", "Content about beta."];
+
+		const lf = chunkText(sections.join("\n"), "T", 32_764);
+		const crlf = chunkText(sections.join("\r\n"), "T", 32_764);
+		const cr = chunkText(sections.join("\r"), "T", 32_764);
+
+		expect(lf).toHaveLength(2);
+		expect(crlf.map((c) => c.content)).toEqual(lf.map((c) => c.content));
+		expect(cr.map((c) => c.content)).toEqual(lf.map((c) => c.content));
+	});
+
+	it("keeps fence and indentation rules working under CRLF", () => {
+		const fenced = ["## Setup", "x", "", "```bash", "# c", "```", "", "## Usage", "y"];
+		const indented = ["    ```", "    code", "", "## Usage", "y"];
+
+		expect(chunkText(fenced.join("\r\n"), "T", 32_764)).toHaveLength(2);
+		expect(chunkText(indented.join("\r\n"), "T", 32_764)).toHaveLength(2);
+	});
 });

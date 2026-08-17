@@ -259,9 +259,12 @@ export class LexicalSearchService {
 
 		this.plugin.registerEvent(
 			vault.on("rename", async (file, oldPath) => {
-				if (file instanceof TFile && isIndexableFile(file)) {
-					await this.handleFileRename(file, oldPath);
-				}
+				if (!(file instanceof TFile)) return;
+				// Note the guard is *inside* handleFileRename, not here: renaming a
+				// note to a non-indexable extension (`note.md` → `note.base`) must
+				// still drop the old entry. Gating on the post-rename file skipped
+				// the removal and left a stale, still-searchable document behind.
+				await this.handleFileRename(file, oldPath);
 			}),
 		);
 	}
@@ -285,7 +288,11 @@ export class LexicalSearchService {
 	}
 
 	private async handleFileRename(file: TFile, oldPath: string): Promise<void> {
+		// Always drop the old path, even when the destination is no longer
+		// indexable — otherwise the pre-rename document stays searchable forever.
 		this.miniSearch.removeDocument(oldPath);
+
+		if (!isIndexableFile(file)) return;
 
 		try {
 			const content = await readIndexableContent(this.plugin.app.vault, file);
