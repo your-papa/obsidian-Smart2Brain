@@ -47,20 +47,25 @@ export const TEXT_INDEXABLE_EXTENSIONS = new Set(["md", "txt", "csv", "json", "y
 export const BINARY_TEXT_EXTENSIONS = new Set(["pdf"]);
 
 /**
- * Extensions excluded from the index entirely.
+ * Extensions excluded from the *embedding* index.
  *
  * A file with no extractable text yields an empty body, and `chunkText` still
  * emits one chunk containing only the title — a content-free vector. Measured:
  * those score ~0.46-0.48 against *any* query, which is the noise floor, so they
- * displace real notes while carrying no information. Lexical search still finds
- * them by filename through MiniSearch.
+ * displace real notes while carrying no information.
+ *
+ * This is deliberately **not** applied to lexical search: a user who types
+ * "Bild" or the name of a Bases view expects to find that file, and MiniSearch
+ * matches it on title/path without needing any content at all. Only the semantic
+ * pipeline suffers from content-free entries, so only it filters on this set
+ * (see `isEmbeddableFile` vs `isIndexableFile`).
  *
  *   - `base`: Obsidian Bases view definitions — YAML formula/config, no prose.
- *   - images: no text to extract. Indexing them would require a multimodal
+ *   - images: no text to extract. Embedding them would require a multimodal
  *     embedding model and a separate image pipeline; until that exists they are
  *     pure noise rather than a missing feature.
  */
-export const NON_INDEXABLE_EXTENSIONS = new Set([
+export const NON_EMBEDDABLE_EXTENSIONS = new Set([
 	"base",
 	"png",
 	"jpg",
@@ -129,18 +134,31 @@ export function isAgentFilePath(path: string): boolean {
 }
 
 /**
- * Returns `true` when the file should be included in the search index.
- * Every non-hidden vault file is indexable, except files under the agent folder.
+ * Returns `true` when the file should be visible to search at all.
+ *
+ * Every vault file qualifies except plugin machinery under the agent folder. In
+ * particular images and `.base` files are included: they carry no text to embed, but
+ * they have names, and lexical search finds them by name. Callers that specifically
+ * build the *embedding* index must additionally check {@link isEmbeddableFile}.
  */
 export function isIndexableFile(file: TFile): boolean {
-	if (isAgentFilePath(file.path)) return false;
-	// Files with no extractable text would be indexed as a title-only vector,
-	// which sits at the similarity noise floor and displaces real notes.
+	return !isAgentFilePath(file.path);
+}
+
+/**
+ * Returns `true` when the file has text worth turning into a vector.
+ *
+ * Narrower than {@link isIndexableFile}: a file with no extractable text would be
+ * embedded as a title-only vector, which sits at the similarity noise floor (~0.46-0.48
+ * against *any* query) and displaces real notes.
+ */
+export function isEmbeddableFile(file: TFile): boolean {
+	if (!isIndexableFile(file)) return false;
 	// Fall back to the path suffix: `extension` is absent on some call sites'
 	// file-like objects, and treating that as "no extension" would silently
 	// re-admit every excluded type.
 	const extension = (file.extension ?? file.path.split(".").pop() ?? "").toLowerCase();
-	return !NON_INDEXABLE_EXTENSIONS.has(extension);
+	return !NON_EMBEDDABLE_EXTENSIONS.has(extension);
 }
 
 /**
@@ -149,6 +167,11 @@ export function isIndexableFile(file: TFile): boolean {
  */
 export function getIndexableVaultFiles(vault: Vault): TFile[] {
 	return vault.getFiles().filter((file) => isIndexableFile(file));
+}
+
+/** {@link getIndexableVaultFiles} restricted to files worth embedding. */
+export function getEmbeddableVaultFiles(vault: Vault): TFile[] {
+	return vault.getFiles().filter((file) => isEmbeddableFile(file));
 }
 
 /**
