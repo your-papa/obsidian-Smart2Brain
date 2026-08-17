@@ -117,6 +117,56 @@ function shouldContentPrefixMatch(term: string): boolean {
 }
 
 /**
+ * Smallest share of a matched word that the query term must cover for a content
+ * prefix/fuzzy expansion to count.
+ *
+ * A shared prefix is not a shared meaning. German `essen` ("food") covers only 45% of
+ * `essentially`, and matching it made `griechisches essen` rank a hydrothermal-vent
+ * note first while the vault's only Greek-food note sat at #4 — the other query term,
+ * `griechisches`, has no lexical match at all, so the noise term decided the ranking
+ * outright. All three of that query's lexical hits were `essen` → `essential*`.
+ *
+ * Measured against real pairs, 0.6 separates the two populations: it rejects
+ * `essen`/`essentially` (0.45) and `ich`/`ichtzone` (0.38) while keeping
+ * `mediterr`/`mediterranean` (0.62), `sourdo`/`sourdough` (0.67), `recipe`/`recipes`
+ * (0.86) and `spare`/`sparen` (0.83). The one deliberate loss is `photo`/
+ * `photovoltaic` (0.42), which is genuinely ambiguous — as a content-field match it
+ * reads more like coincidence than intent.
+ */
+const MIN_CONTENT_PREFIX_COVERAGE = 0.6;
+
+/**
+ * Drop content matches that only connect through a long word sharing a short prefix.
+ *
+ * Applies to the content field only. Identity search (title/alias/tag/path) keeps
+ * matching from one character, because that is the incremental-typing path where a
+ * short prefix is exactly what the user means.
+ *
+ * MiniSearch reports the words a result actually matched (`terms`) alongside the
+ * query's own tokens (`queryTerms`), so coverage is computed after the fact — the
+ * `prefix` predicate itself only sees the query term and cannot know what it expanded
+ * to. A result survives if any of its matched words is covered well enough by some
+ * query term; an exact match trivially scores 1.0.
+ */
+function hasSufficientPrefixCoverage(result: MiniSearchResult): boolean {
+	const matched: string[] = Array.isArray(result.terms) ? result.terms : [];
+	const queried: string[] = Array.isArray(result.queryTerms) ? result.queryTerms : [];
+	if (matched.length === 0 || queried.length === 0) return true;
+
+	return matched.some((term) => {
+		const word = term.toLowerCase();
+		if (word.length === 0) return false;
+		return queried.some((queryTerm) => {
+			const query = queryTerm.toLowerCase();
+			if (query.length === 0) return false;
+			// Only expansions are constrained; an exact hit is always its own full word.
+			if (query === word) return true;
+			return query.length / word.length >= MIN_CONTENT_PREFIX_COVERAGE;
+		});
+	});
+}
+
+/**
  * Service for full-text lexical search using MiniSearch.
  * Uses BM25 scoring with field boosting (title 2x, content 1x).
  */
@@ -593,6 +643,12 @@ export class MiniSearchService {
 			boostTerm: getTermBoost,
 			fuzzy: 0.2,
 			prefix: shouldContentPrefixMatch,
+			filter: hasSufficientPrefixCoverage,
+			// An expansion is weaker evidence than the word itself. Left at full weight,
+			// a prefix hit competes with an exact one, and because fusion normalizes
+			// lexical scores against the result set, a query whose only hits are
+			// expansions still hands one of them a normalized 1.0.
+			weights: { prefix: 0.3, fuzzy: 0.2 },
 		});
 	}
 
