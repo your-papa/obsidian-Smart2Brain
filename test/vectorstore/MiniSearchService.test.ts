@@ -313,5 +313,52 @@ describe("MiniSearchService", () => {
 
 			expect(service.search("internationalization", 5).map((r) => r.path)).toContain("Corpus/a.md");
 		});
+
+		it("does not let one well-covered query term rescue a poorly-covered one in the same result", () => {
+			vi.useFakeTimers();
+
+			// A multi-term query where one term matches exactly ("griechisch") and the
+			// other only through a spurious prefix expansion ("essen" -> "essentially").
+			// MiniSearch sums both matched terms' contributions into one score with no
+			// per-term breakdown, so a filter that accepts the result whenever ANY term
+			// clears coverage still hands it the "essentially" contribution. Because the
+			// two cannot be separated after the fact, the whole content-channel result is
+			// dropped for this query — the note is still findable via "griechisch" alone
+			// (see the next test), just not through this specific noisy combination.
+			const service = new MiniSearchService("test-vault", "prefix-coverage-multi-term");
+			service.addDocument("Corpus/mixed.md", "Mixed", "griechisch salad recipe essentially good food");
+			service.addDocument("Corpus/clean.md", "Clean", "griechisch salad recipe good food");
+
+			const results = service.search("griechisch essen", 5);
+
+			expect(results.map((r) => r.path)).not.toContain("Corpus/mixed.md");
+			expect(results.map((r) => r.path)).toContain("Corpus/clean.md");
+		});
+
+		it("keeps a genuine match findable on its own even when a noisy combined query drops it", () => {
+			vi.useFakeTimers();
+
+			const service = new MiniSearchService("test-vault", "prefix-coverage-findable-alone");
+			service.addDocument("Corpus/mixed.md", "Mixed", "griechisch salad recipe essentially good food");
+
+			expect(service.search("griechisch", 5).map((r) => r.path)).toContain("Corpus/mixed.md");
+		});
+
+		it("does not let an unrelated query term's length coincidentally cover a matched word", () => {
+			vi.useFakeTimers();
+
+			// `griechisch` (10 chars) is 91% the length of the unrelated `essentially`
+			// (11 chars) and clears a bare length-ratio check on its own, despite sharing
+			// no prefix and no near-miss spelling with it (edit distance 10). Coverage
+			// must require the query term to plausibly have PRODUCED the matched word —
+			// via a real prefix or MiniSearch's own fuzzy edit-distance budget — not
+			// merely be long enough to pass a ratio test against some unrelated term.
+			const service = new MiniSearchService("test-vault", "prefix-coverage-coincidental-length");
+			service.addDocument("Corpus/only-noise.md", "Only Noise", "this note is essentially about nothing");
+
+			const results = service.search("griechisch essen", 5);
+
+			expect(results.map((r) => r.path)).not.toContain("Corpus/only-noise.md");
+		});
 	});
 });

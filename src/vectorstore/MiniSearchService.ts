@@ -7,18 +7,18 @@
  */
 
 import MiniSearch, { type SearchResult as MiniSearchResult } from "minisearch";
-import { getTitleMatchKind, matchesLeadingTitlePrefix, type TitleBoostScale } from "../search/searchRanking";
-import { isNumericSearchTerm, normalizeSearchText, tokenizeSearchText } from "../search/searchTermUtils";
-import { createQueryPlan, type QueryPlan } from "../search/queryPlan";
-import { getTermBoost, isStopword } from "../search/stopwords";
 import {
-	getLexicalMatchTier,
-	scoreLexicalCandidate,
 	type LexicalCandidateEvidence,
 	type LexicalRankingFeatures,
 	type LexicalScoringConfig,
+	getLexicalMatchTier,
+	scoreLexicalCandidate,
 } from "../search/lexicalScoring";
-import { getLogLevel, Logger, LogLvl } from "../utils/logging";
+import { type QueryPlan, createQueryPlan } from "../search/queryPlan";
+import { type TitleBoostScale, getTitleMatchKind, matchesLeadingTitlePrefix } from "../search/searchRanking";
+import { isNumericSearchTerm, normalizeSearchText, tokenizeSearchText } from "../search/searchTermUtils";
+import { getTermBoost, isStopword } from "../search/stopwords";
+import { LogLvl, Logger, getLogLevel } from "../utils/logging";
 
 import { getDbName } from "./types";
 
@@ -136,6 +136,56 @@ function shouldContentPrefixMatch(term: string): boolean {
 const MIN_CONTENT_PREFIX_COVERAGE = 0.6;
 
 /**
+ * Levenshtein distance, capped: returns `maxDistance + 1` as soon as every remaining
+ * possibility exceeds the cap, so two long unrelated words (a 10- and an 11-letter
+ * word with almost no letters in common) bail out in O(n) rather than the full O(nm)
+ * table. `maxDistance` here is always small (see {@link isPlausibleExpansionSource}),
+ * so the bound matters for content fields with many candidate words.
+ */
+function boundedLevenshtein(a: string, b: string, maxDistance: number): number {
+	if (Math.abs(a.length - b.length) > maxDistance) return maxDistance + 1;
+
+	let previousRow = Array.from({ length: b.length + 1 }, (_, i) => i);
+	for (let i = 1; i <= a.length; i++) {
+		const currentRow = [i];
+		let rowMin = i;
+		for (let j = 1; j <= b.length; j++) {
+			const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+			const value = Math.min(
+				(previousRow[j] ?? Number.POSITIVE_INFINITY) + 1,
+				currentRow[j - 1] + 1,
+				(previousRow[j - 1] ?? Number.POSITIVE_INFINITY) + cost,
+			);
+			currentRow.push(value);
+			rowMin = Math.min(rowMin, value);
+		}
+		// Every cell in this row already exceeds the cap, so it can only grow from here.
+		if (rowMin > maxDistance) return maxDistance + 1;
+		previousRow = currentRow;
+	}
+	return previousRow[b.length] ?? maxDistance + 1;
+}
+
+/**
+ * `true` when `query` plausibly expanded to `word` via MiniSearch's own matching
+ * rules — a real prefix, or within `fuzzy: 0.2`'s edit-distance budget — rather than
+ * merely being long enough by coincidence. Coverage without this check is not
+ * evidence of a relationship: `griechisch` (10 chars) is 91% the length of the
+ * unrelated `essentially` (11 chars) and would clear any length-ratio *or*
+ * length-difference threshold on its own, despite the two sharing no prefix, no
+ * near-miss spelling, and an actual edit distance of 10 — a length-difference proxy
+ * for edit distance was tried first and missed exactly this case, which is why the
+ * real (capped) Levenshtein distance is computed here instead.
+ */
+function isPlausibleExpansionSource(query: string, word: string): boolean {
+	if (word.startsWith(query)) return true;
+	// Mirrors MiniSearch's `fuzzy: 0.2`: edit distance up to 20% of the query's own
+	// length, rounded — the same formula MiniSearchService's `fuzzy` option documents.
+	const maxEditDistance = Math.round(query.length * 0.2);
+	return boundedLevenshtein(query, word, maxEditDistance) <= maxEditDistance;
+}
+
+/**
  * Drop content matches that only connect through a long word sharing a short prefix.
  *
  * Applies to the content field only. Identity search (title/alias/tag/path) keeps
@@ -145,15 +195,29 @@ const MIN_CONTENT_PREFIX_COVERAGE = 0.6;
  * MiniSearch reports the words a result actually matched (`terms`) alongside the
  * query's own tokens (`queryTerms`), so coverage is computed after the fact — the
  * `prefix` predicate itself only sees the query term and cannot know what it expanded
- * to. A result survives if any of its matched words is covered well enough by some
- * query term; an exact match trivially scores 1.0.
+ * to. Neither array says which query term produced which matched word (confirmed: a
+ * single query term can expand to several matched words, e.g. `essen` matching
+ * `essence`, `essentially` and `essential` all at once — `terms.length` and
+ * `queryTerms.length` are unrelated), so `isPlausibleExpansionSource` reconstructs a
+ * candidate pairing from MiniSearch's own matching rules rather than trusting array
+ * position or length alone. Skipping that check was the bug: `essentially` cleared a
+ * bare length-ratio test against the *unrelated* query term `griechisch`, so the
+ * filter passed a result whose only real evidence was `essen` → `essentially` at 45%
+ * coverage — exactly the case this filter exists to catch.
+ *
+ * MiniSearch's score is the sum of every matched term's contribution and it does not
+ * expose a per-term breakdown, so a well-covered word cannot be kept while dropping a
+ * poorly-covered one within the same result — filtering happens at the result level.
+ * Every matched word must therefore be both a plausible expansion of some query term
+ * AND well covered by it; requiring only one covered term to pass the whole result
+ * would still hand it an unrelated word's score contribution.
  */
 function hasSufficientPrefixCoverage(result: MiniSearchResult): boolean {
 	const matched: string[] = Array.isArray(result.terms) ? result.terms : [];
 	const queried: string[] = Array.isArray(result.queryTerms) ? result.queryTerms : [];
 	if (matched.length === 0 || queried.length === 0) return true;
 
-	return matched.some((term) => {
+	return matched.every((term) => {
 		const word = term.toLowerCase();
 		if (word.length === 0) return false;
 		return queried.some((queryTerm) => {
@@ -161,6 +225,7 @@ function hasSufficientPrefixCoverage(result: MiniSearchResult): boolean {
 			if (query.length === 0) return false;
 			// Only expansions are constrained; an exact hit is always its own full word.
 			if (query === word) return true;
+			if (!isPlausibleExpansionSource(query, word)) return false;
 			return query.length / word.length >= MIN_CONTENT_PREFIX_COVERAGE;
 		});
 	});

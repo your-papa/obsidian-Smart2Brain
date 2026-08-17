@@ -79,10 +79,15 @@ const C = "Corpus";
 export const RELEVANCE_JUDGMENTS: readonly RelevanceJudgment[] = [
 	{
 		query: "how much output do solar panels lose to wear at sea",
-		probes: "near-synonym bridging (query 'solar panel' vs note 'photovoltaic array') against a lexical distractor that owns the words 'solar panel'",
+		probes: "near-synonym bridging (query 'solar panel' vs note 'photovoltaic array') against two lexical distractors that own the words 'solar'/'panel'/'photovoltaic' without answering the wear/output-loss question",
 		grades: {
 			[`${C}/Marine Biology/photovoltaic-array-degradation.md`]: 2,
 			[`${C}/Typography/solar-panel-metaphors-in-design.md`]: 0,
+			// General PV overview; contains "solar" and "photovoltaic" but never
+			// discusses degradation, wear, or output loss over time -- graded 0
+			// explicitly so a lexical-title match on this note is scored as the
+			// distractor it is, not an unrewarded correct answer.
+			"Topics/Renewable Energy/Solar Photovoltaics.md": 0,
 		},
 	},
 	{
