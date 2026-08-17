@@ -205,3 +205,21 @@ describe("readIndexableContent (PDF)", () => {
 		expect(await readIndexableContent(vault, pdfFile)).toBe("");
 	});
 });
+
+describe("rename into a non-indexable extension", () => {
+	// Review finding: both index listeners gated the rename event on
+	// `isIndexableFile(file)` — the *post-rename* file. Renaming `note.md` to
+	// `note.base` therefore skipped the handler entirely, so `removeDocument(oldPath)`
+	// never ran and the pre-rename document stayed searchable. The guard now lives
+	// inside the handler, after the removal.
+	it("classifies the destination as non-indexable, so the old entry must be dropped", () => {
+		mockGetData.mockReturnValue({ agentFolder: "Agents" });
+		const before = { path: "Notes/note.md", extension: "md" } as never;
+		const after = { path: "Notes/note.base", extension: "base" } as never;
+
+		expect(isIndexableFile(before)).toBe(true);
+		// The destination is excluded — which is exactly why the event must not be
+		// filtered on it before the stale path is removed.
+		expect(isIndexableFile(after)).toBe(false);
+	});
+});

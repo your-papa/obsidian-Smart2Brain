@@ -475,4 +475,30 @@ describe("chunkText heading levels", () => {
 		// Blank edges gone; no stray leading newline before the content.
 		expect(chunks[0].content).toBe("Note: Blanks\n\n## A\nx");
 	});
+
+
+	it("treats CRLF and CR line endings the same as LF", () => {
+		// Review finding: the paragraph separator did not match a CRLF blank line.
+		// The deeper problem was that HEADING_RE never matched \"## A\\r\" at all, so a
+		// CRLF note got *no* section splitting — every heading was invisible and the
+		// whole note collapsed into one vector. Line endings are now normalized once
+		// on entry so every downstream rule can assume \\n.
+		const sections = ["## Alpha", "Content about alpha.", "", "## Beta", "Content about beta."];
+
+		const lf = chunkText(sections.join("\n"), "T", 32_764);
+		const crlf = chunkText(sections.join("\r\n"), "T", 32_764);
+		const cr = chunkText(sections.join("\r"), "T", 32_764);
+
+		expect(lf).toHaveLength(2);
+		expect(crlf.map((c) => c.content)).toEqual(lf.map((c) => c.content));
+		expect(cr.map((c) => c.content)).toEqual(lf.map((c) => c.content));
+	});
+
+	it("keeps fence and indentation rules working under CRLF", () => {
+		const fenced = ["## Setup", "x", "", "```bash", "# c", "```", "", "## Usage", "y"];
+		const indented = ["    ```", "    code", "", "## Usage", "y"];
+
+		expect(chunkText(fenced.join("\r\n"), "T", 32_764)).toHaveLength(2);
+		expect(chunkText(indented.join("\r\n"), "T", 32_764)).toHaveLength(2);
+	});
 });
