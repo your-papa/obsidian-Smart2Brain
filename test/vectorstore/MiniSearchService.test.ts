@@ -112,14 +112,7 @@ describe("MiniSearchService", () => {
 		service.addDocument(
 			"Notes/sap-ekx.md",
 			"SAP Workstream",
-			[
-				"---",
-				"aliases:",
-				"  - SAP EKX",
-				"---",
-				"",
-				"# SAP Workstream",
-			].join("\n"),
+			["---", "aliases:", "  - SAP EKX", "---", "", "# SAP Workstream"].join("\n"),
 		);
 		service.addDocument("Notes/ekx-one.md", "EKX Steering Sync", "Title-led EKX note.");
 		service.addDocument("Notes/ekx-two.md", "EKX State of the Union", "Another title-led EKX note.");
@@ -137,14 +130,7 @@ describe("MiniSearchService", () => {
 		service.addDocument(
 			"Notes/sap-ekx.md",
 			"SAP Workstream",
-			[
-				"---",
-				"aliases:",
-				"  - SAP EKX",
-				"---",
-				"",
-				"# SAP Workstream",
-			].join("\n"),
+			["---", "aliases:", "  - SAP EKX", "---", "", "# SAP Workstream"].join("\n"),
 		);
 		service.addDocument("Notes/ekx-one.md", "EKX Steering Sync", "Title-led EKX note.");
 
@@ -158,11 +144,7 @@ describe("MiniSearchService", () => {
 		vi.useFakeTimers();
 
 		const service = new MiniSearchService("test-vault", "title-vs-content");
-		service.addDocument(
-			"Notes/pm-and-comms.md",
-			"PM and comms",
-			"Short note with a direct title match.",
-		);
+		service.addDocument("Notes/pm-and-comms.md", "PM and comms", "Short note with a direct title match.");
 		service.addDocument(
 			"Notes/psychologie.md",
 			"Psychologie für Ingenieure",
@@ -197,11 +179,7 @@ describe("MiniSearchService", () => {
 		vi.useFakeTimers();
 
 		const service = new MiniSearchService("test-vault", "mixed-short-token-query");
-		service.addDocument(
-			"Notes/pm-tasks.md",
-			"PM and tasks",
-			"Short note with the intended title match.",
-		);
+		service.addDocument("Notes/pm-tasks.md", "PM and tasks", "Short note with the intended title match.");
 		service.addDocument(
 			"Notes/ekx-sync.md",
 			"EKX Steering Sync Pre-Release",
@@ -281,5 +259,106 @@ describe("MiniSearchService", () => {
 			["project/alpha", 1],
 		]);
 		expect(snapshot.folders).toEqual(["Projects", "Projects/Alpha"]);
+	});
+
+	describe("content prefix coverage", () => {
+		it("does not let a short query term match a long word that merely starts with it", () => {
+			vi.useFakeTimers();
+
+			// The reported case: German "essen" (food) matched "essentially", so a
+			// hydrothermal-vent note outranked the only note about Greek food.
+			const service = new MiniSearchService("test-vault", "prefix-coverage");
+			service.addDocument(
+				"Corpus/vent.md",
+				"Vent Chemosynthesis",
+				"The vent community is essentially chemosynthetic and essentially self-sustaining.",
+			);
+			service.addDocument(
+				"Corpus/greek.md",
+				"Cooking Mediterranean Recipes",
+				"Greek Salad Horiatiki with tomatoes, Kalamata olives and feta cheese.",
+			);
+
+			const results = service.search("essen", 5);
+
+			expect(results.map((r) => r.path)).not.toContain("Corpus/vent.md");
+		});
+
+		it("still matches a genuine prefix of a word", () => {
+			vi.useFakeTimers();
+
+			const service = new MiniSearchService("test-vault", "prefix-legit");
+			service.addDocument("Corpus/greek.md", "Recipes", "Mediterranean cuisine from the region.");
+
+			// 8 of 13 characters — the user typing a real prefix.
+			expect(service.search("mediterr", 5).map((r) => r.path)).toContain("Corpus/greek.md");
+		});
+
+		it("still matches inflections and plurals", () => {
+			vi.useFakeTimers();
+
+			const service = new MiniSearchService("test-vault", "prefix-inflection");
+			service.addDocument("Corpus/a.md", "Recipes", "A page of recipes for the week.");
+			service.addDocument("Corpus/b.md", "Sourdough", "Notes on sourdough starters.");
+
+			expect(service.search("recipe", 5).map((r) => r.path)).toContain("Corpus/a.md");
+			expect(service.search("sourdo", 5).map((r) => r.path)).toContain("Corpus/b.md");
+		});
+
+		it("keeps exact matches regardless of word length", () => {
+			vi.useFakeTimers();
+
+			const service = new MiniSearchService("test-vault", "prefix-exact");
+			service.addDocument("Corpus/a.md", "Long Words", "The word internationalization appears here.");
+
+			expect(service.search("internationalization", 5).map((r) => r.path)).toContain("Corpus/a.md");
+		});
+
+		it("does not let one well-covered query term rescue a poorly-covered one in the same result", () => {
+			vi.useFakeTimers();
+
+			// A multi-term query where one term matches exactly ("griechisch") and the
+			// other only through a spurious prefix expansion ("essen" -> "essentially").
+			// MiniSearch sums both matched terms' contributions into one score with no
+			// per-term breakdown, so a filter that accepts the result whenever ANY term
+			// clears coverage still hands it the "essentially" contribution. Because the
+			// two cannot be separated after the fact, the whole content-channel result is
+			// dropped for this query — the note is still findable via "griechisch" alone
+			// (see the next test), just not through this specific noisy combination.
+			const service = new MiniSearchService("test-vault", "prefix-coverage-multi-term");
+			service.addDocument("Corpus/mixed.md", "Mixed", "griechisch salad recipe essentially good food");
+			service.addDocument("Corpus/clean.md", "Clean", "griechisch salad recipe good food");
+
+			const results = service.search("griechisch essen", 5);
+
+			expect(results.map((r) => r.path)).not.toContain("Corpus/mixed.md");
+			expect(results.map((r) => r.path)).toContain("Corpus/clean.md");
+		});
+
+		it("keeps a genuine match findable on its own even when a noisy combined query drops it", () => {
+			vi.useFakeTimers();
+
+			const service = new MiniSearchService("test-vault", "prefix-coverage-findable-alone");
+			service.addDocument("Corpus/mixed.md", "Mixed", "griechisch salad recipe essentially good food");
+
+			expect(service.search("griechisch", 5).map((r) => r.path)).toContain("Corpus/mixed.md");
+		});
+
+		it("does not let an unrelated query term's length coincidentally cover a matched word", () => {
+			vi.useFakeTimers();
+
+			// `griechisch` (10 chars) is 91% the length of the unrelated `essentially`
+			// (11 chars) and clears a bare length-ratio check on its own, despite sharing
+			// no prefix and no near-miss spelling with it (edit distance 10). Coverage
+			// must require the query term to plausibly have PRODUCED the matched word —
+			// via a real prefix or MiniSearch's own fuzzy edit-distance budget — not
+			// merely be long enough to pass a ratio test against some unrelated term.
+			const service = new MiniSearchService("test-vault", "prefix-coverage-coincidental-length");
+			service.addDocument("Corpus/only-noise.md", "Only Noise", "this note is essentially about nothing");
+
+			const results = service.search("griechisch essen", 5);
+
+			expect(results.map((r) => r.path)).not.toContain("Corpus/only-noise.md");
+		});
 	});
 });

@@ -9,7 +9,13 @@ vi.mock("../../src/stores/dataStore.svelte", () => ({
 	getData: () => mockGetData(),
 }));
 
-import { isAgentFilePath, isAgentPath, isIndexableFile, readIndexableContent } from "../../src/utils/fileFiltering";
+import {
+	isAgentFilePath,
+	isAgentPath,
+	isEmbeddableFile,
+	isIndexableFile,
+	readIndexableContent,
+} from "../../src/utils/fileFiltering";
 import { gzipString, toArrayBuffer } from "../../src/utils/gzip";
 
 describe("isAgentPath (pure)", () => {
@@ -337,24 +343,43 @@ describe("readIndexableContent (.chat extraction)", () => {
 	});
 });
 
-describe("isIndexableFile (content-free extensions)", () => {
+describe("isEmbeddableFile (content-free extensions)", () => {
 	const f = (path: string, extension: string) => ({ path, extension }) as never;
 
-	it("excludes files with no extractable text", () => {
-		// These were indexed as title-only vectors, which sit at the similarity noise
+	it("excludes files with no extractable text from the embedding index", () => {
+		// These were embedded as title-only vectors, which sit at the similarity noise
 		// floor (~0.46-0.48 against any query) and displace real notes.
 		mockGetData.mockReturnValue({ agentFolder: "Agents" });
-		expect(isIndexableFile(f("TaskNotes/Views/tasks.base", "base"))).toBe(false);
-		expect(isIndexableFile(f("Assets/diagram.png", "png"))).toBe(false);
-		expect(isIndexableFile(f("Assets/photo.JPG", "JPG"))).toBe(false);
-		expect(isIndexableFile(f("Assets/clip.mp4", "mp4"))).toBe(false);
+		expect(isEmbeddableFile(f("TaskNotes/Views/tasks.base", "base"))).toBe(false);
+		expect(isEmbeddableFile(f("Assets/diagram.png", "png"))).toBe(false);
+		expect(isEmbeddableFile(f("Assets/photo.JPG", "JPG"))).toBe(false);
+		expect(isEmbeddableFile(f("Assets/clip.mp4", "mp4"))).toBe(false);
 	});
 
 	it("keeps notes and PDFs, whose text can be extracted", () => {
 		mockGetData.mockReturnValue({ agentFolder: "Agents" });
-		expect(isIndexableFile(f("Notes/note.md", "md"))).toBe(true);
-		expect(isIndexableFile(f("Papers/paper.pdf", "pdf"))).toBe(true);
-		expect(isIndexableFile(f("Chats/thread.chat", "chat"))).toBe(true);
+		expect(isEmbeddableFile(f("Notes/note.md", "md"))).toBe(true);
+		expect(isEmbeddableFile(f("Papers/paper.pdf", "pdf"))).toBe(true);
+		expect(isEmbeddableFile(f("Chats/thread.chat", "chat"))).toBe(true);
+	});
+
+	it("still excludes agent-folder files regardless of extension", () => {
+		mockGetData.mockReturnValue({ agentFolder: "Agents" });
+		expect(isEmbeddableFile(f("Agents/Skills/foo/SKILL.md", "md"))).toBe(false);
+	});
+});
+
+describe("isIndexableFile keeps content-free files searchable by name", () => {
+	const f = (path: string, extension: string) => ({ path, extension }) as never;
+
+	it("includes images and Bases views so lexical search can match their titles", () => {
+		// A user typing "Bild" or the name of a Bases view expects to find that file.
+		// MiniSearch matches on title/path and needs no content, so only the semantic
+		// pipeline filters these out.
+		mockGetData.mockReturnValue({ agentFolder: "Agents" });
+		expect(isIndexableFile(f("TaskNotes/Views/tasks.base", "base"))).toBe(true);
+		expect(isIndexableFile(f("Assets/Bild.png", "png"))).toBe(true);
+		expect(isIndexableFile(f("Assets/clip.mp4", "mp4"))).toBe(true);
 	});
 });
 
@@ -380,20 +405,22 @@ describe("readIndexableContent (PDF)", () => {
 	});
 });
 
-describe("rename into a non-indexable extension", () => {
-	// Review finding: both index listeners gated the rename event on
-	// `isIndexableFile(file)` — the *post-rename* file. Renaming `note.md` to
-	// `note.base` therefore skipped the handler entirely, so `removeDocument(oldPath)`
-	// never ran and the pre-rename document stayed searchable. The guard now lives
-	// inside the handler, after the removal.
-	it("classifies the destination as non-indexable, so the old entry must be dropped", () => {
+describe("rename into a non-embeddable extension", () => {
+	// Review finding: both index listeners gated the rename event on the *post-rename*
+	// file. Renaming `note.md` to `note.base` therefore skipped the handler entirely,
+	// so `removeDocument(oldPath)` never ran and the pre-rename document stayed
+	// searchable. The guard now lives inside the handler, after the removal.
+	it("classifies the destination as non-embeddable, so the old vector must be dropped", () => {
 		mockGetData.mockReturnValue({ agentFolder: "Agents" });
 		const before = { path: "Notes/note.md", extension: "md" } as never;
 		const after = { path: "Notes/note.base", extension: "base" } as never;
 
-		expect(isIndexableFile(before)).toBe(true);
-		// The destination is excluded — which is exactly why the event must not be
-		// filtered on it before the stale path is removed.
-		expect(isIndexableFile(after)).toBe(false);
+		expect(isEmbeddableFile(before)).toBe(true);
+		// The destination has no text to embed — which is exactly why the event must
+		// not be filtered on it before the stale path's vectors are removed.
+		expect(isEmbeddableFile(after)).toBe(false);
+		// It stays lexically searchable by name, so the rename must not evict it from
+		// the MiniSearch index — only re-key it.
+		expect(isIndexableFile(after)).toBe(true);
 	});
 });

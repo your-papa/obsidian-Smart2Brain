@@ -6,45 +6,45 @@
  * and export/import via native file dialogs.
  */
 
-import { Notice, TFile, getAllTags } from "obsidian";
-import { encode, decode } from "@msgpack/msgpack";
 import type { EmbeddingsInterface } from "@langchain/core/embeddings";
-import type SecondBrainPlugin from "../main";
+import { decode, encode } from "@msgpack/msgpack";
+import { Notice, TFile, getAllTags } from "obsidian";
 import { hydrateEmbeddingModel } from "../lib/modelMetadataNormalizer";
+import type SecondBrainPlugin from "../main";
+import { getProviderDefinition } from "../providers/index";
 import { fetchModelsDevData } from "../providers/modelsDevApi";
 import { getOllamaModelsCache } from "../providers/ollamaModels";
 import { fetchOpenRouterModels } from "../providers/openrouterModels";
-import { getData } from "../stores/dataStore.svelte";
 import { getRegistry } from "../providers/registry";
-import { getProviderDefinition } from "../providers/index";
+import { getData } from "../stores/dataStore.svelte";
+import { chunkText } from "../utils/chunkText";
+import { getEmbeddableVaultFiles, isEmbeddableFile, readIndexableContent } from "../utils/fileFiltering";
+import { Logger } from "../utils/logging";
+import { matchesPathPrefix } from "../utils/pathUtils";
 import { showSettingsLinkNotice } from "../utils/settingsNotice";
+import { StartupProfiler } from "../utils/startupProfiler";
 import { getDefaultEmbeddingBatchSize, normalizeEmbeddingBatchSize } from "./batchSize";
 import { aggregateChunksToNotes } from "./chunkAggregation";
 import { createVectorStore } from "./index";
+import { toFloat32Array } from "./similarity";
 import {
-	INDEX_VERSION,
-	getDbName,
-	makeChunkId,
-	sanitizeIndexId,
 	type DefaultEmbedModel,
 	type DocumentVector,
+	INDEX_VERSION,
 	type IndexMetadata,
 	type IndexingProgress,
 	type IndexingReport,
-	type SearchResult,
 	type SearchFilter,
+	type SearchResult,
 	type SerializedIndex,
 	type SkipReason,
 	type SkippedFile,
 	type VectorSearchResult,
 	type VectorStore,
+	getDbName,
+	makeChunkId,
+	sanitizeIndexId,
 } from "./types";
-import { Logger } from "../utils/logging";
-import { StartupProfiler } from "../utils/startupProfiler";
-import { getIndexableVaultFiles, isIndexableFile, readIndexableContent } from "../utils/fileFiltering";
-import { matchesPathPrefix } from "../utils/pathUtils";
-import { chunkText } from "../utils/chunkText";
-import { toFloat32Array } from "./similarity";
 
 // ── Electron dialog helpers (Obsidian desktop) ────────────────────────
 
@@ -624,7 +624,7 @@ export class VectorStoreService {
 		Logger.log(`[VectorStore] Validating index ${inst.indexId} against vault...`);
 
 		const { vault } = this.plugin.app;
-		const allVaultFiles = getIndexableVaultFiles(vault);
+		const allVaultFiles = getEmbeddableVaultFiles(vault);
 		const vaultFiles = allVaultFiles.filter((file) => this.shouldIndexFile(file, defaultModel.provider));
 
 		const indexedDocs = await inst.store.getAll();
@@ -911,7 +911,7 @@ export class VectorStoreService {
 
 		this.plugin.registerEvent(
 			vault.on("create", async (file) => {
-				if (file instanceof TFile && isIndexableFile(file)) {
+				if (file instanceof TFile && isEmbeddableFile(file)) {
 					await this.handleFileCreate(file);
 				}
 			}),
@@ -919,7 +919,7 @@ export class VectorStoreService {
 
 		this.plugin.registerEvent(
 			vault.on("modify", (file) => {
-				if (file instanceof TFile && isIndexableFile(file)) {
+				if (file instanceof TFile && isEmbeddableFile(file)) {
 					this.handleFileModify(file);
 				}
 			}),
@@ -936,10 +936,10 @@ export class VectorStoreService {
 		this.plugin.registerEvent(
 			vault.on("rename", async (file, oldPath) => {
 				if (!(file instanceof TFile)) return;
-				// No `isIndexableFile` gate here: renaming a note to a non-indexable
+				// No `isEmbeddableFile` gate here: renaming a note to a non-embeddable
 				// extension (`note.md` → `note.base`) must still remove the old
 				// path's chunks. `handleFileRename` removes first and re-indexes only
-				// when the destination is still indexable.
+				// when the destination is still embeddable.
 				await this.handleFileRename(file, oldPath);
 			}),
 		);
@@ -1149,7 +1149,7 @@ export class VectorStoreService {
 		inst.isIndexing = true;
 		inst.abortController = new AbortController();
 		const { vault } = this.plugin.app;
-		const allFiles = getIndexableVaultFiles(vault);
+		const allFiles = getEmbeddableVaultFiles(vault);
 		const batchSize = this.getBatchSize(inst.indexId, model.provider);
 
 		// Categorize files by skip reason
@@ -1403,7 +1403,7 @@ export class VectorStoreService {
 	 */
 	private getFileSkipReason(file: TFile, provider?: string): SkipReason | null {
 		const pluginData = getData();
-		if (!isIndexableFile(file)) return "excluded";
+		if (!isEmbeddableFile(file)) return "excluded";
 
 		// Privacy check: skip private files for untrusted providers
 		if (provider && !pluginData.isProviderTrusted(provider)) {
@@ -1717,7 +1717,7 @@ export class VectorStoreService {
 	 */
 	private async generateReport(inst: IndexInstance): Promise<IndexingReport> {
 		const { vault } = this.plugin.app;
-		const allFiles = getIndexableVaultFiles(vault);
+		const allFiles = getEmbeddableVaultFiles(vault);
 		const model = this.getModelForInstance(inst);
 		const provider = model?.provider;
 
