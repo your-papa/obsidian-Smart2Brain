@@ -15,9 +15,38 @@
  * not listed is treated as grade 0.
  */
 
+/**
+ * Which job a case does.
+ *
+ * `core` cases are the regression guard: strong models score ~1.0 on all of them, so
+ * any drop is a ranking defect. They carry the ratchet.
+ *
+ * `hard` cases exist to *discriminate between embedding models*. They are expected to
+ * score below 1.0 even on a strong model — a case with no headroom cannot show that
+ * one model is better than another. Averaging the two tiers together would destroy
+ * both jobs at once: it would drag the regression baseline down to where it no longer
+ * catches regressions, and hide model differences inside a mean dominated by
+ * saturated cases. So they are reported and gated separately.
+ *
+ * `recency` cases re-run a `core` query with a *wrong* note marked recently-opened,
+ * asserting that the recency lift cannot hijack the result (the recent note is always
+ * graded 0). They are a separate tier because each one duplicates a `core` query
+ * verbatim — same text, same grades — so folding them into the core mean silently
+ * double-weights those four queries, making a single failure look like two. Keeping
+ * them apart also means only this tier pays the recency-fixture setup cost.
+ */
+export type JudgmentTier = "core" | "hard" | "recency";
+
+/** The difficulty axis a `hard` case probes; used to group benchmark output. */
+export type HardAxis = "multi-hop" | "cross-lingual" | "long-context" | "dilution";
+
 export interface RelevanceJudgment {
 	/** The query as a user would type it. */
 	query: string;
+	/** Defaults to `core` when omitted, so existing cases keep their meaning. */
+	tier?: JudgmentTier;
+	/** Required for `hard` cases — which weakness this one exposes. */
+	axis?: HardAxis;
 	/** Vault-relative paths → grade. */
 	grades: Record<string, 0 | 1 | 2>;
 	/** What ranking behaviour this case is probing (shown in benchmark output). */
@@ -115,9 +144,15 @@ export const RELEVANCE_JUDGMENTS: readonly RelevanceJudgment[] = [
 	// could hijack a query depended on which side of an arbitrary line it landed.
 	// It is now gated by *relative relevance*, capped, and attenuated when several
 	// results are equally recent — keep these cases as the regression guard.
+	//
+	// Each one restates a `core` query with the adversarial condition switched on, so
+	// the pair reads as an A/B: the core case measures the ranking, this one measures
+	// whether recency can break it. The recent note is always graded 0 — a passing
+	// score here means recency did NOT hijack the result, not that it helped.
 
 	{
 		query: "can an octopus learn to open a sealed jar",
+		tier: "recency",
 		probes: "recency vs relevance: the WRONG note (a recipe) is the most recently opened. It must not overtake the correct answer — the failure that motivated capping the recency lift.",
 		recentNotes: [`${C}/Fermentation/octopus-recipes.md`],
 		grades: {
@@ -127,6 +162,7 @@ export const RELEVANCE_JUDGMENTS: readonly RelevanceJudgment[] = [
 	},
 	{
 		query: "what makes very small text readable",
+		tier: "recency",
 		probes: "the same conflict with a distractor that is a much weaker match, so the relative-relevance gate suppresses its recency lift entirely",
 		recentNotes: [`${C}/Fermentation/small-sizes-of-fermentation-vessels.md`],
 		grades: {
@@ -136,6 +172,7 @@ export const RELEVANCE_JUDGMENTS: readonly RelevanceJudgment[] = [
 	},
 	{
 		query: "how long does a wet sourdough starter take to double",
+		tier: "recency",
 		probes: "recency piled onto near-duplicates: three sibling filler notes that already crowd this query are marked recent, testing whether the true answer survives a coordinated lift",
 		recentNotes: [
 			`${C}/Fermentation/sourdough-starter-maintenance-4.md`,
@@ -153,6 +190,7 @@ export const RELEVANCE_JUDGMENTS: readonly RelevanceJudgment[] = [
 	},
 	{
 		query: "Octopus Intelligence",
+		tier: "recency",
 		probes: "recency must not override an exact alias match — the strongest possible identity signal",
 		recentNotes: [`${C}/Fermentation/octopus-recipes.md`],
 		grades: {
@@ -235,6 +273,136 @@ export const RELEVANCE_JUDGMENTS: readonly RelevanceJudgment[] = [
 		grades: {
 			[`${C}/Marine Biology/photovoltaic-array-degradation.md`]: 2,
 			[`${C}/Typography/solar-panel-metaphors-in-design.md`]: 0,
+		},
+	},
+
+	// ════════════════════════════════════════════════════════════════════════
+	// HARD TIER — model discrimination, not regression guarding.
+	//
+	// Added to answer a specific question: is a small local embedding model
+	// (bge-micro-v2, 22M params, 384 dims, English-distilled, 512-token window)
+	// good enough to ship as a zero-setup default, and how much is given up
+	// versus a 0.6B multilingual model?
+	//
+	// The core tier above cannot answer that — every strong model scores ~1.0
+	// on it, so it has no resolving power between candidates. These cases are
+	// built to have headroom along the four axes where a small distilled
+	// encoder is expected to lose ground. Sub-1.0 scores here are the normal,
+	// intended state, NOT failures to fix.
+	// ════════════════════════════════════════════════════════════════════════
+
+	// ── multi-hop ───────────────────────────────────────────────────────────
+	// The query describes a situation; answering means joining two facts held in
+	// different sections (so no single chunk contains both).
+
+	{
+		query: "why would a vent community die off when the plumbing shifts",
+		tier: "hard",
+		axis: "multi-hop",
+		probes: "two-fact join: energy source (sulfide, not surface fall) + flow reroute drops sulfide. Neither section alone answers it; sibling vent notes discuss vents generally.",
+		grades: {
+			[`${C}/Marine Biology/vent-chemosynthesis-energy-budget.md`]: 2,
+			[`${C}/Marine Biology/deep-sea-hydrothermal-vents.md`]: 0,
+			[`${C}/Marine Biology/deep-sea-hydrothermal-vents-2.md`]: 0,
+		},
+	},
+	{
+		query: "what makes overnight funding costs spike suddenly",
+		tier: "hard",
+		axis: "multi-hop",
+		probes: "two-fact join: reserves below intraday need + settlement clustering in the last hour. 'repo market' filler siblings share the vocabulary without the causal chain.",
+		grades: {
+			[`${C}/Monetary Policy/reserve-scarcity-and-repo-spikes.md`]: 2,
+			[`${C}/Monetary Policy/reserve-requirements.md`]: 0,
+			[`${C}/Monetary Policy/open-market-operations.md`]: 0,
+		},
+	},
+
+	// ── cross-lingual ───────────────────────────────────────────────────────
+	// The axis most likely to disqualify an English-distilled model outright.
+	// The notes are monolingual German (filler vocabulary included), so there is
+	// no English text in them to match on.
+
+	{
+		query: "how does heavy rainfall runoff affect how far larvae drift",
+		tier: "hard",
+		axis: "cross-lingual",
+		probes: "English query → monolingual German note. An English-only encoder has nothing to match; a multilingual one should place this at rank 1.",
+		grades: {
+			[`${C}/Marine Biology/salzgehalt-und-larvenwanderung.md`]: 2,
+		},
+	},
+	{
+		query: "keeping a sourdough starter active in a cold kitchen",
+		tier: "hard",
+		axis: "cross-lingual",
+		probes: "English query → German note, competing against ~8 English sourdough-maintenance siblings that are lexically closer to the query.",
+		grades: {
+			[`${C}/Fermentation/sauerteig-fuehrung-im-winter.md`]: 2,
+			[`${C}/Fermentation/sourdough-starter-maintenance.md`]: 0,
+			[`${C}/Fermentation/sourdough-starter-maintenance-2.md`]: 0,
+		},
+	},
+	{
+		query: "wie werden Achsen in variablen Schriften genormt",
+		tier: "hard",
+		axis: "cross-lingual",
+		probes: "reverse direction: German query → English note. Catches a model that handles German input but cannot align it to English content.",
+		grades: {
+			[`${C}/Typography/variable-font-axis-registration.md`]: 2,
+			[`${C}/Typography/variable-font-axes.md`]: 1,
+		},
+	},
+
+	// ── long-context ────────────────────────────────────────────────────────
+	// The answer sits ~900-1100 words into a single heading-free section. The
+	// chunker splits on every heading level H1-H6, so only unstructured prose
+	// produces a chunk large enough to exceed a 512-token window. A model with a
+	// short ceiling sees a truncated chunk that omits the answer entirely.
+
+	{
+		query: "why steam rice instead of boiling it for koji",
+		tier: "hard",
+		axis: "long-context",
+		probes: "answer buried ~918 words into one unbroken section — past a 512-token window. Directly probes truncation on small encoders.",
+		grades: {
+			[`${C}/Fermentation/koji-substrate-preparation.md`]: 2,
+			[`${C}/Fermentation/koji-cultivation.md`]: 1,
+		},
+	},
+	{
+		query: "when does an inverted curve stop predicting a downturn",
+		tier: "hard",
+		axis: "long-context",
+		probes: "answer buried ~1107 words deep; sibling 'Yield Curve Inversion' notes are on-topic but do not contain the qualifier about negative term premia.",
+		grades: {
+			[`${C}/Monetary Policy/yield-curve-signal-decay.md`]: 2,
+			[`${C}/Monetary Policy/yield-curve-inversion.md`]: 1,
+		},
+	},
+
+	// ── dilution ────────────────────────────────────────────────────────────
+	// Reproduces the measured multi-topic signal collapse: the note-level
+	// embedding averages over six unrelated admin topics plus one real answer,
+	// so the answer's contribution to the note vector is heavily attenuated.
+
+	{
+		query: "does survey timing change the herbivore counts",
+		tier: "hard",
+		axis: "dilution",
+		probes: "answer is one section inside a six-topic logistics note (permits, boats, cameras, training...). Note-level similarity is diluted; only chunk-level retrieval recovers it.",
+		grades: {
+			[`${C}/Marine Biology/reef-survey-field-notes.md`]: 2,
+		},
+	},
+	{
+		query: "can hinting be shared between a regular and a condensed cut",
+		tier: "hard",
+		axis: "dilution",
+		probes: "same shape in another domain, competing against dedicated 'Hinting and Rasterization' notes that are topically closer but do not answer the reuse question.",
+		grades: {
+			[`${C}/Typography/foundry-operations-log.md`]: 2,
+			[`${C}/Typography/hinting-and-rasterization.md`]: 1,
 		},
 	},
 ];

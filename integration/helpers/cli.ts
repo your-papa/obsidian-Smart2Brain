@@ -445,28 +445,37 @@ export function obsidianEval(code: string): string {
  * Fire-and-forget an async JS expression in Obsidian and poll a window global
  * for the result. Returns the final value once the global is set.
  *
+ * Checks before each sleep, so work that finishes quickly returns after a single CLI
+ * round-trip. Sleeping first cost every call a full interval however fast it completed:
+ * the search benchmark runs 45 queries whose real latency is ~5ms (lexical) to ~400ms
+ * (hybrid, nearly all of it the embedding call), so a sleep-first 2s interval put a 90s
+ * floor under a run needing ~20s of work. Measured end to end: 210s -> 67s.
+ *
+ * Slow call sites that poll for LLM responses pass a larger `intervalMs` explicitly.
+ *
  * @param fireCode  JS that runs async work and eventually sets `window[globalKey]`
  * @param globalKey The window property to poll
  * @param timeoutMs Maximum time to wait (default 60s)
- * @param intervalMs Polling interval (default 2s)
+ * @param intervalMs Polling interval (default 250ms)
  */
 export async function pollEval(
 	fireCode: string,
 	globalKey: string,
-	{ timeoutMs = 60_000, intervalMs = 2_000 } = {},
+	{ timeoutMs = 60_000, intervalMs = 250 } = {},
 ): Promise<string> {
 	// Fire the async work
 	obsidianEval(fireCode);
 
 	const deadline = Date.now() + timeoutMs;
-	while (Date.now() < deadline) {
-		await sleep(intervalMs);
+	while (true) {
 		const raw = obsidianEval(`window.${globalKey}`);
 		// eval returns "=> value", strip the prefix
 		const value = raw.startsWith("=> ") ? raw.slice(3) : raw;
 		if (value && value !== "undefined" && value !== "pending") {
 			return value;
 		}
+		if (Date.now() >= deadline) break;
+		await sleep(intervalMs);
 	}
 	throw new Error(`pollEval timed out waiting for window.${globalKey}`);
 }
