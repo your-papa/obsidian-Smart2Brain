@@ -138,10 +138,12 @@ const RECENCY_JUDGMENTS = RELEVANCE_JUDGMENTS.filter((j) => j.tier === "recency"
  * results order-dependent. `recordRecentlyOpenedNote` prepends, so the array is
  * applied in reverse to leave `recentNotes[0]` as the most recent.
  *
- * The write persists asynchronously, so setting fixtures has to be followed by a
- * wait. Clearing does not: the tiers that pass no fixtures only need the list to be
- * empty by the time they query, and every one of them clears it again on the next
- * call. Skipping the wait there takes ~11s off a full run.
+ * The write persists asynchronously, so every call has to wait for it to land —
+ * clearing included. Skipping the wait on a clear looked safe when each query was its
+ * own CLI round-trip, because the next round-trip's ~250ms of process spawn gave the
+ * clear time to settle; batching a tier removed that accidental delay and let a run
+ * query against a stale recent list, which showed up as an intermittently lower
+ * hybrid score (0.9211 vs 0.9915) rather than an obvious failure.
  */
 async function applyRecentNotes(paths: readonly string[]): Promise<void> {
 	const ordered = [...paths].reverse();
@@ -150,27 +152,11 @@ async function applyRecentNotes(paths: readonly string[]): Promise<void> {
 			.map((p) => `d.recordRecentlyOpenedNote(${JSON.stringify(p)});`)
 			.join(" ")} return "ok"; })()`,
 	);
-	if (ordered.length > 0) await sleep(500);
+	await sleep(500);
 }
 
-/** Run one query through the real search stack and score the returned ordering. */
-async function scoreQuery(
-	globalKey: string,
-	algorithm: "hybrid" | "lexical",
-	judgment: (typeof RELEVANCE_JUDGMENTS)[number],
-): Promise<QueryOutcome> {
-	await applyRecentNotes(judgment.recentNotes ?? []);
-
-	const raw = await pollEval(
-		`(function(){ window.${globalKey} = "pending"; ${PLUGIN}.searchNotesForBenchmark(${JSON.stringify(judgment.query)}, ${JSON.stringify(algorithm)}, ${RESULT_LIMIT}).then(function(r){ window.${globalKey} = JSON.stringify(r.map(function(d){ return d.path; })); }).catch(function(e){ window.${globalKey} = JSON.stringify({error: String(e && e.message || e)}); }); return "started"; })()`,
-		globalKey,
-		{ timeoutMs: 60_000 },
-	);
-
-	const parsed = JSON.parse(raw);
-	if (parsed.error) throw new Error(`search failed for "${judgment.query}": ${parsed.error}`);
-	const paths: string[] = parsed;
-
+/** Score one query's returned ordering against its graded expectations. */
+function scoreOutcome(judgment: (typeof RELEVANCE_JUDGMENTS)[number], paths: string[]): QueryOutcome {
 	// Multi-target cases have several grade-2 notes; report the best-placed one so
 	// the "rank" column stays meaningful for them too.
 	const targets = Object.entries(judgment.grades)
@@ -191,6 +177,83 @@ async function scoreQuery(
 		knownFailure: judgment.knownFailure,
 		axis: judgment.axis,
 	};
+}
+
+/**
+ * Run a whole tier in one CLI round-trip, issuing its queries concurrently.
+ *
+ * Each `obsidian eval` costs ~254ms of process spawn and IPC regardless of the work
+ * it does, so a per-query fire-and-poll (2 round-trips each) spent ~21s of a 42s run
+ * on the CLI alone. Batching a tier collapses that to 2 round-trips total, and
+ * `Promise.all` then overlaps the searches inside Obsidian: measured 1304ms → 511ms
+ * for 5 hybrid queries, since most of each is an awaited embedding call rather than
+ * CPU. Verified byte-identical to sequential execution across 6 queries — search
+ * holds no per-query state, so concurrency cannot reorder results.
+ *
+ * Recency fixtures are the one thing that *is* shared mutable state, so a tier whose
+ * cases set them must run sequentially; `parallel` is false for that tier.
+ */
+async function scoreQueries(
+	keyPrefix: string,
+	algorithm: "hybrid" | "lexical",
+	judgments: readonly (typeof RELEVANCE_JUDGMENTS)[number][],
+	{ parallel = true } = {},
+): Promise<QueryOutcome[]> {
+	if (judgments.length === 0) return [];
+
+	// Vitest retries a failed test in the same page, so a fixed key would let the
+	// retry read the previous attempt's value before the new run overwrites it —
+	// which surfaced as a hybrid tier reporting the lexical tier's score.
+	const globalKey = `${keyPrefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+	if (!parallel) {
+		const outcomes: QueryOutcome[] = [];
+		for (const [index, judgment] of judgments.entries()) {
+			await applyRecentNotes(judgment.recentNotes ?? []);
+			const raw = await pollEval(
+				fireOne(`${globalKey}${index}`, algorithm, judgment.query),
+				`${globalKey}${index}`,
+			);
+			const parsed = JSON.parse(raw);
+			if (parsed.error) throw new Error(`search failed for "${judgment.query}": ${parsed.error}`);
+			outcomes.push(scoreOutcome(judgment, parsed));
+		}
+		return outcomes;
+	}
+
+	// Concurrency is only safe because none of these cases touch the shared
+	// recent-notes list. Fail loudly rather than silently mis-scoring if one is added.
+	const withFixtures = judgments.filter((j) => (j.recentNotes?.length ?? 0) > 0);
+	if (withFixtures.length > 0) {
+		throw new Error(
+			`cannot run in parallel — these set recentNotes: ${withFixtures.map((j) => j.query).join(", ")}. ` +
+				`Pass { parallel: false }.`,
+		);
+	}
+
+	// The list must still be empty: recency persists in plugin data, so a previous
+	// tier's leftovers would apply to these queries.
+	await applyRecentNotes([]);
+
+	const queries = judgments.map((j) => j.query);
+	const raw = await pollEval(
+		`(function(){ window.${globalKey} = "pending"; Promise.all(${JSON.stringify(queries)}.map(function(q){ return ${PLUGIN}.searchNotesForBenchmark(q, ${JSON.stringify(algorithm)}, ${RESULT_LIMIT}).then(function(r){ return r.map(function(d){ return d.path; }); }); })).then(function(all){ window.${globalKey} = JSON.stringify(all); }).catch(function(e){ window.${globalKey} = JSON.stringify({error: String(e && e.message || e)}); }); return "started"; })()`,
+		globalKey,
+		{ timeoutMs: 120_000 },
+	);
+
+	const parsed = JSON.parse(raw);
+	if (parsed.error) throw new Error(`batched search failed: ${parsed.error}`);
+	const results: string[][] = parsed;
+	if (results.length !== judgments.length) {
+		throw new Error(`expected ${judgments.length} result sets, got ${results.length}`);
+	}
+	return judgments.map((judgment, index) => scoreOutcome(judgment, results[index]));
+}
+
+/** Fire-and-forget expression for a single query, used by the sequential path. */
+function fireOne(globalKey: string, algorithm: "hybrid" | "lexical", query: string): string {
+	return `(function(){ window.${globalKey} = "pending"; ${PLUGIN}.searchNotesForBenchmark(${JSON.stringify(query)}, ${JSON.stringify(algorithm)}, ${RESULT_LIMIT}).then(function(r){ window.${globalKey} = JSON.stringify(r.map(function(d){ return d.path; })); }).catch(function(e){ window.${globalKey} = JSON.stringify({error: String(e && e.message || e)}); }); return "started"; })()`;
 }
 
 const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
@@ -238,6 +301,20 @@ describe("search relevance benchmark", () => {
 	beforeAll(async () => {
 		clearBuffers();
 		await waitForStandaloneMiniSearch();
+
+		// Warm the embedding path before any tier is scored. The first hybrid query
+		// after a reload pays model load / connection setup, and when a whole tier is
+		// issued concurrently that cost lands on all of them at once — some resolve
+		// before the embedder is ready and fall back to lexical-only, which showed up
+		// as the hybrid tier scoring its lexical value (0.8496) on the first attempt
+		// and the true value on Vitest's retry.
+		if (corpusIndexed && providerAvailable && searchIndexAvailable) {
+			await pollEval(
+				`(function(){ window.__s2bWarm = "pending"; ${PLUGIN}.searchNotesForBenchmark("warm up the embedder", "hybrid", 1).then(function(){ window.__s2bWarm = "ok"; }).catch(function(){ window.__s2bWarm = "ok"; }); return "started"; })()`,
+				"__s2bWarm",
+				{ timeoutMs: 120_000 },
+			);
+		}
 	});
 
 	afterAll(async () => {
@@ -255,10 +332,7 @@ describe("search relevance benchmark", () => {
 
 	describe.skipIf(!corpusIndexed)("lexical baseline", () => {
 		it("measures nDCG@10 and MRR for lexical-only ranking", async () => {
-			const outcomes: QueryOutcome[] = [];
-			for (const [i, judgment] of CORE_JUDGMENTS.entries()) {
-				outcomes.push(await scoreQuery(`__s2bBenchLex${i}`, "lexical", judgment));
-			}
+			const outcomes = await scoreQueries("__s2bBenchLex", "lexical", CORE_JUDGMENTS);
 			report(`LEXICAL  (n=${outcomes.length})`, outcomes);
 
 			// Lexical alone cannot bridge the near-synonym cases; this run exists to
@@ -270,10 +344,7 @@ describe("search relevance benchmark", () => {
 
 	describe.skipIf(!corpusIndexed || !providerAvailable || !searchIndexAvailable)("hybrid ranking", () => {
 		it("measures nDCG@10 and MRR for hybrid ranking", async () => {
-			const outcomes: QueryOutcome[] = [];
-			for (const [i, judgment] of CORE_JUDGMENTS.entries()) {
-				outcomes.push(await scoreQuery(`__s2bBenchHyb${i}`, "hybrid", judgment));
-			}
+			const outcomes = await scoreQueries("__s2bBenchHyb", "hybrid", CORE_JUDGMENTS);
 			report(`HYBRID  (n=${outcomes.length})`, outcomes);
 
 			const meanNdcg = mean(outcomes.map((o) => o.ndcg));
@@ -305,10 +376,8 @@ describe("search relevance benchmark", () => {
 			const known = RELEVANCE_JUDGMENTS.filter((j) => j.knownFailure);
 			if (known.length === 0) return;
 
-			const outcomes: QueryOutcome[] = [];
-			for (const [i, judgment] of known.entries()) {
-				outcomes.push(await scoreQuery(`__s2bBenchKnown${i}`, "hybrid", judgment));
-			}
+			// May include recency cases, which mutate shared fixture state — run serially.
+			const outcomes = await scoreQueries("__s2bBenchKnown", "hybrid", known, { parallel: false });
 
 			// Informational, not a gate: if one of these starts passing, the ranking
 			// change worked and the `knownFailure` annotation should be removed.
@@ -330,10 +399,7 @@ describe("search relevance benchmark", () => {
 		 * differences the tier was built to expose.
 		 */
 		it("measures the hard tier per difficulty axis (model discrimination)", async () => {
-			const outcomes: QueryOutcome[] = [];
-			for (const [i, judgment] of HARD_JUDGMENTS.entries()) {
-				outcomes.push(await scoreQuery(`__s2bBenchHard${i}`, "hybrid", judgment));
-			}
+			const outcomes = await scoreQueries("__s2bBenchHard", "hybrid", HARD_JUDGMENTS);
 			report(`HARD  (n=${outcomes.length})`, outcomes);
 
 			const axes = [...new Set(outcomes.map((o) => o.axis ?? "unknown"))].sort();
@@ -378,10 +444,9 @@ describe("search relevance benchmark", () => {
 		it("measures recency resistance (a recent wrong note must not win)", async () => {
 			if (RECENCY_JUDGMENTS.length === 0) return;
 
-			const outcomes: QueryOutcome[] = [];
-			for (const [i, judgment] of RECENCY_JUDGMENTS.entries()) {
-				outcomes.push(await scoreQuery(`__s2bBenchRecent${i}`, "hybrid", judgment));
-			}
+			// Sequential by necessity: each case rewrites the shared recent-notes list,
+			// so concurrent runs would score against each other's fixtures.
+			const outcomes = await scoreQueries("__s2bBenchRecent", "hybrid", RECENCY_JUDGMENTS, { parallel: false });
 			report(`RECENCY  (n=${outcomes.length})`, outcomes);
 
 			const meanNdcg = mean(outcomes.map((o) => o.ndcg));
