@@ -41,12 +41,41 @@ const RESULT_LIMIT = 25;
  *   - `omlx:harrier-oss-v1-0.6b-MLX-8bit`   mean nDCG@10 = 0.9934, MRR = 1.0
  * The baseline below is set to clear both.
  *
+ * 2026-08-17, `harrier-oss-v1-0.6b-MLX-8bit`: indexing `.chat` files as
+ * active-branch Q&A pairs and adding stopword down-weighting restored this model to
+ * 0.9934 / 1.0 from an interim 0.9524 / 0.9444. The hard tier moved 0.6814 → 0.8308,
+ * driven almost entirely by `cross-lingual` (0.3807 → 0.6667), where German function
+ * words had been carrying matches on their own.
+ *
+ * The four recency cases then moved to their own tier, so this baseline now covers 14
+ * distinct queries rather than 18 with 4 duplicated. Both tiers are ratcheted against
+ * the same number — the recency cases restate core queries and are equally expected to
+ * score ~1.0 — so a change that breaks either still fails the suite. Measured after
+ * the split on `harrier-oss-v1-0.6b-MLX-8bit`: core 0.9915 / 1.0 (n=14), recency
+ * 1.0000 / 1.0 (n=4). The core mean moved 0.9934 → 0.9915 purely because the four
+ * perfect-scoring duplicates no longer pad it.
+ *
  * **Raise these whenever a change improves the mean** — the test prints the new
  * value when it clears the bar. Lowering them is a deliberate act that should
  * come with an explanation of why the regression is acceptable.
  */
 const BASELINE_MEAN_NDCG = 0.99;
 const BASELINE_MEAN_RR = 1.0;
+
+/**
+ * Floor for the `hard` tier — the model-discrimination cases.
+ *
+ * This is NOT a ratchet, and it is deliberately loose. Those cases are built to
+ * have headroom (see the HARD TIER block in `relevanceJudgments.ts`); scoring below
+ * 1.0 on them is the intended state, because a case every model aces cannot tell two
+ * models apart. The number here only catches a *collapse* — a change that breaks
+ * hard retrieval outright — while leaving room for the score to move up and down as
+ * embedding models are swapped.
+ *
+ * Record measurements per model in `integration/README.md` rather than encoding one
+ * model's score here as if it were a target.
+ */
+const HARD_FLOOR_MEAN_NDCG = 0.35;
 
 /**
  * Absorbs embedding-provider jitter only. Repeated runs against the same index
@@ -91,7 +120,15 @@ interface QueryOutcome {
 	targetRank: number | null;
 	topPaths: string[];
 	knownFailure?: string;
+	axis?: string;
 }
+
+/** The regression-guarding cases (everything without an explicit tier). */
+const CORE_JUDGMENTS = RELEVANCE_JUDGMENTS.filter((j) => (j.tier ?? "core") === "core");
+/** The model-discrimination cases. */
+const HARD_JUDGMENTS = RELEVANCE_JUDGMENTS.filter((j) => j.tier === "hard");
+/** The cases that put a recently-opened note in conflict with the right answer. */
+const RECENCY_JUDGMENTS = RELEVANCE_JUDGMENTS.filter((j) => j.tier === "recency");
 
 /**
  * Reset the recent-notes list, then mark this case's fixtures as opened.
@@ -100,6 +137,11 @@ interface QueryOutcome {
  * explicit reset a case would inherit whatever the previous one opened, making
  * results order-dependent. `recordRecentlyOpenedNote` prepends, so the array is
  * applied in reverse to leave `recentNotes[0]` as the most recent.
+ *
+ * The write persists asynchronously, so setting fixtures has to be followed by a
+ * wait. Clearing does not: the tiers that pass no fixtures only need the list to be
+ * empty by the time they query, and every one of them clears it again on the next
+ * call. Skipping the wait there takes ~11s off a full run.
  */
 async function applyRecentNotes(paths: readonly string[]): Promise<void> {
 	const ordered = [...paths].reverse();
@@ -108,8 +150,7 @@ async function applyRecentNotes(paths: readonly string[]): Promise<void> {
 			.map((p) => `d.recordRecentlyOpenedNote(${JSON.stringify(p)});`)
 			.join(" ")} return "ok"; })()`,
 	);
-	// The setter persists asynchronously; give it a beat before querying.
-	await sleep(500);
+	if (ordered.length > 0) await sleep(500);
 }
 
 /** Run one query through the real search stack and score the returned ordering. */
@@ -148,6 +189,7 @@ async function scoreQuery(
 		targetRank: targetIndex >= 0 ? targetIndex + 1 : null,
 		topPaths: paths.slice(0, 5),
 		knownFailure: judgment.knownFailure,
+		axis: judgment.axis,
 	};
 }
 
@@ -206,16 +248,15 @@ describe("search relevance benchmark", () => {
 	});
 
 	it("has the generated corpus present in the vault", () => {
-		expect(
-			corpusIndexed,
-			"Corpus/ not found in the vault — run: bun run scripts/generate-search-corpus.ts",
-		).toBe(true);
+		expect(corpusIndexed, "Corpus/ not found in the vault — run: bun run scripts/generate-search-corpus.ts").toBe(
+			true,
+		);
 	});
 
 	describe.skipIf(!corpusIndexed)("lexical baseline", () => {
 		it("measures nDCG@10 and MRR for lexical-only ranking", async () => {
 			const outcomes: QueryOutcome[] = [];
-			for (const [i, judgment] of RELEVANCE_JUDGMENTS.entries()) {
+			for (const [i, judgment] of CORE_JUDGMENTS.entries()) {
 				outcomes.push(await scoreQuery(`__s2bBenchLex${i}`, "lexical", judgment));
 			}
 			report(`LEXICAL  (n=${outcomes.length})`, outcomes);
@@ -223,14 +264,14 @@ describe("search relevance benchmark", () => {
 			// Lexical alone cannot bridge the near-synonym cases; this run exists to
 			// quantify the gap the semantic half is supposed to close, so it only
 			// asserts that the harness produced a score for every query.
-			expect(outcomes).toHaveLength(RELEVANCE_JUDGMENTS.length);
+			expect(outcomes).toHaveLength(CORE_JUDGMENTS.length);
 		});
 	});
 
 	describe.skipIf(!corpusIndexed || !providerAvailable || !searchIndexAvailable)("hybrid ranking", () => {
 		it("measures nDCG@10 and MRR for hybrid ranking", async () => {
 			const outcomes: QueryOutcome[] = [];
-			for (const [i, judgment] of RELEVANCE_JUDGMENTS.entries()) {
+			for (const [i, judgment] of CORE_JUDGMENTS.entries()) {
 				outcomes.push(await scoreQuery(`__s2bBenchHyb${i}`, "hybrid", judgment));
 			}
 			report(`HYBRID  (n=${outcomes.length})`, outcomes);
@@ -277,6 +318,82 @@ describe("search relevance benchmark", () => {
 				}
 			}
 			expect(outcomes).toHaveLength(known.length);
+		});
+
+		/**
+		 * The model-discrimination tier.
+		 *
+		 * Reported per axis, because the aggregate is not the useful number: a model
+		 * can be strong overall and still be unusable for a vault that is partly
+		 * German, and only the per-axis split makes that visible. When comparing two
+		 * embedding models, compare the axis rows — the mean hides exactly the
+		 * differences the tier was built to expose.
+		 */
+		it("measures the hard tier per difficulty axis (model discrimination)", async () => {
+			const outcomes: QueryOutcome[] = [];
+			for (const [i, judgment] of HARD_JUDGMENTS.entries()) {
+				outcomes.push(await scoreQuery(`__s2bBenchHard${i}`, "hybrid", judgment));
+			}
+			report(`HARD  (n=${outcomes.length})`, outcomes);
+
+			const axes = [...new Set(outcomes.map((o) => o.axis ?? "unknown"))].sort();
+			const lines = ["", "──────── HARD tier by axis ────────"];
+			for (const axis of axes) {
+				const inAxis = outcomes.filter((o) => (o.axis ?? "unknown") === axis);
+				lines.push(
+					`  ${axis.padEnd(14)} nDCG@${NDCG_K}=${mean(inAxis.map((o) => o.ndcg)).toFixed(4)}` +
+						` MRR=${mean(inAxis.map((o) => o.rr)).toFixed(4)} (n=${inAxis.length})`,
+				);
+			}
+			const meanNdcg = mean(outcomes.map((o) => o.ndcg));
+			lines.push(
+				`  ${"OVERALL".padEnd(14)} nDCG@${NDCG_K}=${meanNdcg.toFixed(4)}` +
+					` MRR=${mean(outcomes.map((o) => o.rr)).toFixed(4)} (n=${outcomes.length})`,
+				"",
+				"  Record this per embedding model in integration/README.md.",
+				"  Sub-1.0 is expected here — these cases exist to have headroom.",
+				"",
+			);
+			console.log(lines.join("\n"));
+
+			// Collapse guard only — deliberately far below the measured score. This
+			// must not be ratcheted like the core baseline: tightening it would turn a
+			// measurement instrument into a second regression gate, and the whole point
+			// of the tier is that the number is allowed to move when the model changes.
+			expect(meanNdcg, `hard-tier mean nDCG@${NDCG_K} collapsed`).toBeGreaterThanOrEqual(HARD_FLOOR_MEAN_NDCG);
+		});
+
+		/**
+		 * The recency-vs-relevance tier.
+		 *
+		 * Each case re-runs a `core` query with the *wrong* note marked recently-opened.
+		 * The recent note is graded 0, so a high score means the recency lift did not
+		 * hijack the result — this measures resistance, not recency quality.
+		 *
+		 * Held apart from `core` because every query here duplicates a core one
+		 * verbatim; averaging them together double-weights those four queries, so one
+		 * genuine failure reads as two. It carries its own ratchet: these cases are
+		 * expected to score ~1.0, since the ranking they guard is shipped and tuned.
+		 */
+		it("measures recency resistance (a recent wrong note must not win)", async () => {
+			if (RECENCY_JUDGMENTS.length === 0) return;
+
+			const outcomes: QueryOutcome[] = [];
+			for (const [i, judgment] of RECENCY_JUDGMENTS.entries()) {
+				outcomes.push(await scoreQuery(`__s2bBenchRecent${i}`, "hybrid", judgment));
+			}
+			report(`RECENCY  (n=${outcomes.length})`, outcomes);
+
+			const meanNdcg = mean(outcomes.map((o) => o.ndcg));
+			expect(meanNdcg, `recency-tier mean nDCG@${NDCG_K} regressed`).toBeGreaterThanOrEqual(
+				BASELINE_MEAN_NDCG - BASELINE_TOLERANCE,
+			);
+
+			// A single case collapsing means one recent note now outranks the right
+			// answer, which the mean alone would hide.
+			for (const outcome of outcomes) {
+				expect(outcome.ndcg, `${outcome.query} — ${outcome.probes}`).toBeGreaterThan(0.5);
+			}
 		});
 	});
 });
