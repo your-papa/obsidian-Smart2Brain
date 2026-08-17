@@ -162,3 +162,46 @@ describe("readIndexableContent (.chat extraction)", () => {
 		expect(await readIndexableContent(vault, chatFile)).toBe("");
 	});
 });
+
+describe("isIndexableFile (content-free extensions)", () => {
+	const f = (path: string, extension: string) => ({ path, extension }) as never;
+
+	it("excludes files with no extractable text", () => {
+		// These were indexed as title-only vectors, which sit at the similarity noise
+		// floor (~0.46-0.48 against any query) and displace real notes.
+		mockGetData.mockReturnValue({ agentFolder: "Agents" });
+		expect(isIndexableFile(f("TaskNotes/Views/tasks.base", "base"))).toBe(false);
+		expect(isIndexableFile(f("Assets/diagram.png", "png"))).toBe(false);
+		expect(isIndexableFile(f("Assets/photo.JPG", "JPG"))).toBe(false);
+		expect(isIndexableFile(f("Assets/clip.mp4", "mp4"))).toBe(false);
+	});
+
+	it("keeps notes and PDFs, whose text can be extracted", () => {
+		mockGetData.mockReturnValue({ agentFolder: "Agents" });
+		expect(isIndexableFile(f("Notes/note.md", "md"))).toBe(true);
+		expect(isIndexableFile(f("Papers/paper.pdf", "pdf"))).toBe(true);
+		expect(isIndexableFile(f("Chats/thread.chat", "chat"))).toBe(true);
+	});
+});
+
+describe("readIndexableContent (PDF)", () => {
+	const pdfFile = { path: "Papers/paper.pdf", extension: "pdf", basename: "paper" } as never;
+
+	it("returns an empty string when the PDF cannot be parsed", async () => {
+		// Encrypted, malformed, or scanned-without-OCR must skip the file rather than
+		// fail the whole index run.
+		const vault = {
+			adapter: { readBinary: vi.fn().mockResolvedValue(new ArrayBuffer(8)) },
+		} as never;
+
+		expect(await readIndexableContent(vault, pdfFile)).toBe("");
+	});
+
+	it("returns an empty string when the file cannot be read at all", async () => {
+		const vault = {
+			adapter: { readBinary: vi.fn().mockRejectedValue(new Error("missing")) },
+		} as never;
+
+		expect(await readIndexableContent(vault, pdfFile)).toBe("");
+	});
+});

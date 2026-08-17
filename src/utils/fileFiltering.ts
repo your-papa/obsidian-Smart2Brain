@@ -1,6 +1,7 @@
 import type { TFile, Vault } from "obsidian";
 import { getData } from "../stores/dataStore.svelte";
 import { gunzipToString } from "./gzip";
+import { extractTextFromPdf } from "./pdfExtractor";
 
 function normalizePattern(pattern: string): string {
 	return pattern.trim().replace(/^\/+|\/+$/g, "");
@@ -40,11 +41,59 @@ export function shouldProcessVaultPath(filePath: string, targetFolder: string): 
 export const TEXT_INDEXABLE_EXTENSIONS = new Set(["md", "txt", "csv", "json", "yaml", "yml", "canvas", "chat"]);
 
 /**
+ * Extensions whose text is extracted from a binary container rather than read
+ * directly. These are indexable, just not via `readTextFile`.
+ */
+export const BINARY_TEXT_EXTENSIONS = new Set(["pdf"]);
+
+/**
+ * Extensions excluded from the index entirely.
+ *
+ * A file with no extractable text yields an empty body, and `chunkText` still
+ * emits one chunk containing only the title — a content-free vector. Measured:
+ * those score ~0.46-0.48 against *any* query, which is the noise floor, so they
+ * displace real notes while carrying no information. Lexical search still finds
+ * them by filename through MiniSearch.
+ *
+ *   - `base`: Obsidian Bases view definitions — YAML formula/config, no prose.
+ *   - images: no text to extract. Indexing them would require a multimodal
+ *     embedding model and a separate image pipeline; until that exists they are
+ *     pure noise rather than a missing feature.
+ */
+export const NON_INDEXABLE_EXTENSIONS = new Set([
+	"base",
+	"png",
+	"jpg",
+	"jpeg",
+	"gif",
+	"webp",
+	"svg",
+	"bmp",
+	"avif",
+	"ico",
+	"mp3",
+	"wav",
+	"m4a",
+	"ogg",
+	"flac",
+	"mp4",
+	"webm",
+	"mov",
+	"mkv",
+	"zip",
+]);
+
+/**
  * Returns `true` when the file holds text content that can be read and
  * indexed for full-text / embedding search.
  */
 export function isTextIndexableFile(file: TFile): boolean {
 	return TEXT_INDEXABLE_EXTENSIONS.has(file.extension.toLowerCase());
+}
+
+/** Returns `true` when the file's text must be extracted from a binary container. */
+export function isBinaryTextFile(file: TFile): boolean {
+	return BINARY_TEXT_EXTENSIONS.has(file.extension.toLowerCase());
 }
 
 /**
@@ -84,7 +133,14 @@ export function isAgentFilePath(path: string): boolean {
  * Every non-hidden vault file is indexable, except files under the agent folder.
  */
 export function isIndexableFile(file: TFile): boolean {
-	return !isAgentFilePath(file.path);
+	if (isAgentFilePath(file.path)) return false;
+	// Files with no extractable text would be indexed as a title-only vector,
+	// which sits at the similarity noise floor and displaces real notes.
+	// Fall back to the path suffix: `extension` is absent on some call sites'
+	// file-like objects, and treating that as "no extension" would silently
+	// re-admit every excluded type.
+	const extension = (file.extension ?? file.path.split(".").pop() ?? "").toLowerCase();
+	return !NON_INDEXABLE_EXTENSIONS.has(extension);
 }
 
 /**
@@ -97,9 +153,11 @@ export function getIndexableVaultFiles(vault: Vault): TFile[] {
 
 /**
  * Read indexable content for a file. Returns the text content for
- * text-indexable files, or an empty string for binary files (metadata-only
- * indexing). Special-case handling:
+ * text-indexable files, or an empty string when nothing can be extracted.
+ * Special-case handling:
  *   - `.chat` files: extracts only human/AI message content (not LangChain metadata)
+ *   - `.pdf` files: extracts the document text via pdfjs, so a PDF is chunked and
+ *     embedded like any other long document rather than reduced to its filename
  *   - `.excalidraw.md` files: extracts the "back of the note" and text elements,
  *     stripping the huge embedded JSON drawing data
  *
@@ -107,6 +165,21 @@ export function getIndexableVaultFiles(vault: Vault): TFile[] {
  * before calling this helper.
  */
 export async function readIndexableContent(vault: Vault, file: TFile): Promise<string> {
+	// PDFs carry real prose, but it lives inside a binary container. Extracting it
+	// lets the normal chunker split the document by length; returning "" would
+	// index a multi-page PDF as a single title-only vector.
+	if (isBinaryTextFile(file)) {
+		try {
+			const bytes = await vault.adapter.readBinary(file.path);
+			const { text } = await extractTextFromPdf(new Uint8Array(bytes));
+			return text.trim();
+		} catch {
+			// Encrypted, malformed, or scanned-without-OCR: skip rather than fail
+			// the whole index run.
+			return "";
+		}
+	}
+
 	if (!isTextIndexableFile(file)) {
 		return "";
 	}

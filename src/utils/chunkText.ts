@@ -162,12 +162,21 @@ function buildPrefix(title: string, headings: HeadingFrame[], maxPrefixChars: nu
 	return titleLine;
 }
 
-/** Split raw note content into paragraphs on blank lines, preserving order. */
+/**
+ * Split raw note content into paragraphs on blank lines, preserving order.
+ *
+ * Only *trailing* whitespace is trimmed. Leading indentation is structural
+ * markdown — four spaces mark an indented code block, and list continuations rely
+ * on it — so stripping it changes what the text means. A `    ```` ``` ```` ` line
+ * correctly rejected as a fence (indented code, not a delimiter) would otherwise
+ * be re-emitted as a bare ```` ``` ````, turning the chunk body into an
+ * unterminated fence that swallows the following heading.
+ */
 function splitParagraphs(content: string): string[] {
 	return content
-		.split(/\n\s*\n/)
-		.map((p) => p.trim())
-		.filter((p) => p.length > 0);
+		.split(/\n[ \t]*\n/)
+		.map((p) => p.replace(/\s+$/, ""))
+		.filter((p) => p.trim().length > 0);
 }
 
 /**
@@ -247,7 +256,11 @@ function splitOversizedUnit(unit: string, maxBodyChars: number): string[] {
  */
 export function chunkText(content: string, title: string, maxChars: number): TextChunk[] {
 	const titleLine = formatTitleLine(title);
-	const trimmed = content.trim();
+	// Strip blank leading/trailing *lines*, but never a line's own indentation:
+	// `"    ```".trim()` yields a real fence delimiter, which would make
+	// `countSections` read indented example code as an unterminated fence and
+	// swallow every heading after it.
+	const trimmed = content.replace(/^(?:[ \t]*\n)+/, "").replace(/\s+$/, "");
 
 	// Fast path: a note that fits the budget AND covers a single topic becomes one
 	// vector, as before.
@@ -286,9 +299,14 @@ export function chunkText(content: string, title: string, maxChars: number): Tex
 	let buffer: string[] = [];
 
 	const flushBuffer = () => {
-		const text = buffer.join("\n").trim();
+		// Trim blank edges only — see `splitParagraphs` on why leading indentation
+		// must survive.
+		const text = buffer
+			.join("\n")
+			.replace(/^\s*\n/, "")
+			.replace(/\s+$/, "");
 		buffer = [];
-		if (!text) return;
+		if (!text.trim()) return;
 		for (const para of splitParagraphs(text)) {
 			units.push({ body: para, headings: [...headings] });
 		}

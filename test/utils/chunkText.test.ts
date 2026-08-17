@@ -452,4 +452,27 @@ describe("chunkText heading levels", () => {
 		// The counterpart: leading code with no heading after it is still one topic.
 		expect(chunkText(["```bash", "echo hello", "```"].join("\n"), "Only Fence", 32_764)).toHaveLength(1);
 	});
+
+
+	it("preserves leading indentation so indented code is not read as a fence", () => {
+		// A four-space-indented ``` is an indented code block, not a fence. Trimming
+		// the line turned it into a real delimiter, which opened an unterminated
+		// fence and swallowed the following heading into one merged chunk.
+		const body = ["    ```", "    some code", "", "## Usage", "How to use it."].join("\n");
+
+		const chunks = chunkText(body, "Indented Code", 32_764);
+
+		expect(chunks).toHaveLength(2);
+		expect(chunks.find((c) => c.content.includes("How to use it."))?.content).toContain("## Usage");
+		// The indentation itself survives into the chunk body.
+		expect(chunks.find((c) => c.content.includes("some code"))?.content).toContain("    ```");
+	});
+
+	it("still strips blank leading and trailing lines", () => {
+		const chunks = chunkText(["", "  ", "## A", "x", "", ""].join("\n"), "Blanks", 32_764);
+
+		expect(chunks).toHaveLength(1);
+		// Blank edges gone; no stray leading newline before the content.
+		expect(chunks[0].content).toBe("Note: Blanks\n\n## A\nx");
+	});
 });
