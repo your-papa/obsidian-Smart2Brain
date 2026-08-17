@@ -5,7 +5,6 @@ import {
 	isProviderConfigured,
 	obsidianEval,
 	pollEval,
-	sleep,
 	waitForStandaloneMiniSearch,
 } from "./helpers/cli.ts";
 import { RELEVANCE_JUDGMENTS, ndcgAt, reciprocalRank } from "./helpers/relevanceJudgments.ts";
@@ -131,28 +130,50 @@ const HARD_JUDGMENTS = RELEVANCE_JUDGMENTS.filter((j) => j.tier === "hard");
 const RECENCY_JUDGMENTS = RELEVANCE_JUDGMENTS.filter((j) => j.tier === "recency");
 
 /**
- * Reset the recent-notes list, then mark this case's fixtures as opened.
+ * Reset the recent-notes list, then mark this case's fixtures as opened, and confirm
+ * the list ended up holding exactly those notes.
  *
  * Recency is real ranking input, and it leaks between queries — without an
  * explicit reset a case would inherit whatever the previous one opened, making
  * results order-dependent. `recordRecentlyOpenedNote` prepends, so the array is
  * applied in reverse to leave `recentNotes[0]` as the most recent.
  *
- * The write persists asynchronously, so every call has to wait for it to land —
- * clearing included. Skipping the wait on a clear looked safe when each query was its
- * own CLI round-trip, because the next round-trip's ~250ms of process spawn gave the
- * clear time to settle; batching a tier removed that accidental delay and let a run
- * query against a stale recent list, which showed up as an intermittently lower
- * hybrid score (0.9211 vs 0.9915) rather than an obvious failure.
+ * It also leaks in from *outside* the benchmark. `main.ts` records every note opened
+ * in the vault via `workspace.on("file-open")`, so a note clicked in Obsidian while
+ * the suite runs lands at position 0 with a fresh timestamp — ahead of the fixtures.
+ * A click before a case is harmless (the clear removes it), but one landing between
+ * the clear and the query survives, and that is precisely the recency-vs-relevance
+ * conflict this tier measures. Verified: a stray note recorded before a fixture is
+ * still present alongside it afterwards.
+ *
+ * So the state is read back and asserted rather than assumed. `clearRecentNotes` is
+ * async (it awaits `saveSettings`), which is why a fixed sleep was needed before —
+ * awaiting it and then verifying removes both the guess and the blind spot.
  */
 async function applyRecentNotes(paths: readonly string[]): Promise<void> {
 	const ordered = [...paths].reverse();
-	obsidianEval(
-		`(function(){ var d = ${PLUGIN}.pluginData; d.clearRecentNotes(); ${ordered
+	const globalKey = `__s2bRecent_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+	const raw = await pollEval(
+		`(function(){ window.${globalKey} = "pending"; var d = ${PLUGIN}.pluginData; d.clearRecentNotes().then(function(){ ${ordered
 			.map((p) => `d.recordRecentlyOpenedNote(${JSON.stringify(p)});`)
-			.join(" ")} return "ok"; })()`,
+			.join(
+				" ",
+			)} window.${globalKey} = JSON.stringify(d.recentNotes.map(function(e){ return e.path; })); }).catch(function(e){ window.${globalKey} = JSON.stringify({error: String(e && e.message || e)}); }); return "started"; })()`,
+		globalKey,
+		{ timeoutMs: 15_000 },
 	);
-	await sleep(500);
+
+	const actual = JSON.parse(raw);
+	if (actual.error) throw new Error(`failed to set recent notes: ${actual.error}`);
+
+	// Most-recent-first, which is the reverse of the order they were recorded in.
+	const expected = [...ordered].reverse();
+	if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+		throw new Error(
+			`recent-notes fixture mismatch — expected [${expected.join(", ")}], got [${actual.join(", ")}]. ` +
+				`A note opened in the vault during the run can land here; leave the test vault idle while the benchmark runs.`,
+		);
+	}
 }
 
 /** Score one query's returned ordering against its graded expectations. */
