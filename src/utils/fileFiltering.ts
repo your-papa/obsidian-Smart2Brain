@@ -258,21 +258,140 @@ function getMessageClass(msg: unknown): string | null {
 }
 
 /**
- * Extract human and AI message text from a `.chat` file (LangGraph ThreadData JSON).
- * Skips all LangChain serialisation noise, checkpoint metadata, writes, etc.
+ * Context blocks appended to a user's question before it is sent (visible notes,
+ * selected text, graph selection). They are machinery, not something the user typed,
+ * and they name other notes — indexing them makes a thread match queries about notes
+ * that merely happened to be open. The chat UI strips the same suffix for display
+ * (`stripAugmentedSuffix` in `stores/chatStore.svelte.ts`); matching on the block
+ * marker keeps this independent of the exact rendering.
+ */
+const RE_AUGMENTED_CONTEXT = /\n*\[(?:Currently visible notes|Selected text from |Graph-selected notes)/;
+
+/** Drop appended context blocks, keeping only what the user actually wrote. */
+function stripAugmentedContext(content: string): string {
+	const match = RE_AUGMENTED_CONTEXT.exec(content);
+	return match ? content.slice(0, match.index).trim() : content;
+}
+
+/** Returns `true` when an assistant message is mid-turn narration rather than an answer. */
+function hasToolCalls(msg: unknown): boolean {
+	if (!msg || typeof msg !== "object") return false;
+	const kwargs = (msg as Record<string, unknown>).kwargs;
+	if (!kwargs || typeof kwargs !== "object") return false;
+	const record = kwargs as Record<string, unknown>;
+
+	if (Array.isArray(record.tool_calls) && record.tool_calls.length > 0) return true;
+	const additional = record.additional_kwargs;
+	if (additional && typeof additional === "object") {
+		const nested = (additional as Record<string, unknown>).tool_calls;
+		if (Array.isArray(nested) && nested.length > 0) return true;
+	}
+	return false;
+}
+
+/**
+ * Pick the message list for the conversation as the user last left it.
  *
- * Conversation history is a *tree* of checkpoints, and every checkpoint re-contains
- * the whole message list that preceded it. Concatenating each checkpoint's messages
- * therefore re-emits the same text once per subsequent turn — measured at ~8x on a
- * 526-checkpoint thread, which inflates both the embedding cost and the lexical term
- * frequencies of every chat file. Emit each distinct message exactly once instead,
- * keyed on the stable LangChain message id (falling back to the message text when a
- * message carries no id). First-seen order is preserved so the extracted text still
- * reads as a transcript.
+ * Checkpoints form a *tree*: every regenerate or edit forks a new branch, and each
+ * branch keeps its own answer to the same question. Measured on a 526-checkpoint
+ * thread, that turned 10 real questions into 105 distinct answers (one question was
+ * regenerated 16 times), all of which were being indexed — the single biggest reason
+ * a chat file outweighed real notes.
  *
- * Only conversational turns are indexed (see `CONVERSATIONAL_MESSAGE_CLASSES`), and
- * attachment blocks are stripped from those turns, so a thread contributes the
- * discussion itself rather than a second copy of the notes it referenced.
+ * This mirrors the branch resolution the chat UI uses to decide which conversation to
+ * show (`resolveActiveCheckpointId` → `findDeterministicTipFrom` in
+ * `stores/chatStore.svelte.ts`): walk from the root and always take the newest child,
+ * tie-breaking on step then id so the choice is deterministic. The UI's extra inputs
+ * (session / persisted / explicit checkpoint) don't apply here — the persisted "last
+ * viewed" id lives in plugin data, not the `.chat` file — so this is the UI's own
+ * fallback path, which is also what the read-only `.chat` embed preview takes.
+ *
+ * It is reimplemented rather than imported because those helpers live in a Svelte
+ * runes store that pulls in the whole plugin graph, and they operate on normalized
+ * LangChain `BaseMessage` instances; indexing reads raw serialised JSON and must stay
+ * usable before `AgentManager` has initialized. Verified to agree with the UI on all
+ * 49 threads in the test vault by comparing against `metadata.lastMessagePreview`.
+ */
+function selectActiveMessages(checkpoints: Record<string, unknown>): unknown[] {
+	const nodes = new Map<string, { id: string; ts: string; step: number; entry: unknown; children: string[] }>();
+	for (const [id, entry] of Object.entries(checkpoints)) {
+		const record = entry as Record<string, unknown>;
+		const checkpoint = record?.checkpoint as Record<string, unknown> | undefined;
+		const metadata = record?.metadata as Record<string, unknown> | undefined;
+		nodes.set(id, {
+			id,
+			ts: typeof checkpoint?.ts === "string" ? checkpoint.ts : "",
+			step: typeof metadata?.step === "number" ? metadata.step : 0,
+			entry,
+			children: [],
+		});
+	}
+	if (nodes.size === 0) return [];
+
+	const parentOf = new Map<string, string | undefined>();
+	for (const [id, entry] of Object.entries(checkpoints)) {
+		const parentConfig = (entry as Record<string, unknown>)?.parentConfig as Record<string, unknown> | undefined;
+		const configurable = parentConfig?.configurable as Record<string, unknown> | undefined;
+		const parentId = configurable?.checkpoint_id;
+		const parent = typeof parentId === "string" && nodes.has(parentId) ? parentId : undefined;
+		parentOf.set(id, parent);
+		if (parent) nodes.get(parent)?.children.push(id);
+	}
+
+	/** Newest first: ts desc, then step desc, then id — matches the UI's `compareNewest`. */
+	const newestFirst = (a: string, b: string): number => {
+		const nodeA = nodes.get(a);
+		const nodeB = nodes.get(b);
+		if (!nodeA || !nodeB) return 0;
+		if (nodeA.ts !== nodeB.ts) return nodeB.ts.localeCompare(nodeA.ts);
+		if (nodeA.step !== nodeB.step) return nodeB.step - nodeA.step;
+		return nodeA.id.localeCompare(nodeB.id);
+	};
+
+	const roots = [...nodes.keys()].filter((id) => !parentOf.get(id));
+	const startId = (roots.length > 0 ? roots : [...nodes.keys()]).sort((a, b) => {
+		const nodeA = nodes.get(a);
+		const nodeB = nodes.get(b);
+		if (!nodeA || !nodeB) return 0;
+		if (nodeA.step !== nodeB.step) return nodeA.step - nodeB.step;
+		if (nodeA.ts !== nodeB.ts) return nodeA.ts.localeCompare(nodeB.ts);
+		return nodeA.id.localeCompare(nodeB.id);
+	})[0];
+
+	// Walk to the tip, taking the newest child at each fork. `visited` guards against
+	// a malformed file whose parent links form a cycle.
+	let current = startId;
+	const visited = new Set<string>();
+	while (current && !visited.has(current)) {
+		visited.add(current);
+		const next = nodes
+			.get(current)
+			?.children.filter((id) => !visited.has(id))
+			.sort(newestFirst)[0];
+		if (!next) break;
+		current = next;
+	}
+
+	return getNestedMessages(nodes.get(current)?.entry);
+}
+
+/**
+ * Extract the conversation from a `.chat` file (LangGraph ThreadData JSON) as
+ * question/answer pairs, skipping LangChain serialisation noise and tool traffic.
+ *
+ * Three things are dropped, each measured as a real source of index bloat:
+ *   - **Tool results** (see `CONVERSATIONAL_MESSAGE_CLASSES`) — 73.5% of indexed chat
+ *     text, nearly half of it notes echoed back verbatim by `read_content`.
+ *   - **Abandoned branches** (see `selectActiveMessages`) — regenerated answers to a
+ *     question the user already re-asked.
+ *   - **Mid-turn narration** — assistant messages that only announce a tool call
+ *     ("I'll quickly inspect the vault structure…"); they carry `tool_calls` and no
+ *     answer, and matched no query meaningfully.
+ *
+ * A turn is emitted as `question\n\nanswer` so the two share a chunk: an answer often
+ * lacks the vocabulary of the question that prompted it, and splitting them costs the
+ * retrieval of both. Only the last final answer of a turn is kept — an assistant can
+ * emit several text messages around its tool calls, but the closing one is the reply.
  */
 function extractChatContent(raw: string): string {
 	try {
@@ -284,30 +403,38 @@ function extractChatContent(raw: string): string {
 			parts.push(data.title.trim());
 		}
 
-		// Walk checkpoints → channel_values.messages → kwargs.content / data.content
 		const checkpoints = data.checkpoints;
 		if (checkpoints && typeof checkpoints === "object") {
-			const seen = new Set<string>();
-			for (const entry of Object.values(checkpoints)) {
-				const messages = getNestedMessages(entry);
-				for (const msg of messages) {
-					// An unrecognised shape has no class to check; indexing it risks
-					// re-admitting tool output, so skip it.
-					const messageClass = getMessageClass(msg);
-					if (!messageClass || !CONVERSATIONAL_MESSAGE_CLASSES.has(messageClass)) continue;
+			let question = "";
+			let answer = "";
+			const flush = () => {
+				const turn = [question, answer].filter((text) => text.length > 0).join("\n\n");
+				if (turn) parts.push(turn);
+				question = "";
+				answer = "";
+			};
 
-					const content = extractMessageContent(msg);
-					if (!content) continue;
+			for (const msg of selectActiveMessages(checkpoints as Record<string, unknown>)) {
+				// An unrecognised shape has no class to check; indexing it risks
+				// re-admitting tool output, so skip it.
+				const messageClass = getMessageClass(msg);
+				if (!messageClass || !CONVERSATIONAL_MESSAGE_CLASSES.has(messageClass)) continue;
 
-					// Prefer the message id: the same logical message can be
-					// re-serialised across checkpoints, and two genuinely distinct
-					// messages may share identical text (e.g. a repeated "yes").
-					const dedupeKey = getMessageId(msg) ?? `content:${content}`;
-					if (seen.has(dedupeKey)) continue;
-					seen.add(dedupeKey);
-					parts.push(content);
+				const content = extractMessageContent(msg);
+				if (!content) continue;
+
+				if (messageClass === "HumanMessage") {
+					// A new question closes the previous turn.
+					flush();
+					question = stripAugmentedContext(content);
+					continue;
 				}
+				// Assistant/system text: keep only turn-ending answers, and let a later
+				// one supersede an earlier one within the same turn.
+				if (hasToolCalls(msg)) continue;
+				answer = content;
 			}
+			flush();
 		}
 
 		return parts.join("\n\n");
@@ -315,32 +442,6 @@ function extractChatContent(raw: string): string {
 		// If parsing fails, fall back to empty (don't index raw JSON)
 		return "";
 	}
-}
-
-/**
- * Read the stable LangChain message id, which survives re-serialisation across
- * checkpoints. Returns `null` when the message carries no usable id so the caller
- * can fall back to content-based deduplication.
- */
-function getMessageId(msg: unknown): string | null {
-	if (!msg || typeof msg !== "object") return null;
-	const record = msg as Record<string, unknown>;
-
-	const candidates: unknown[] = [];
-	if (record.kwargs && typeof record.kwargs === "object") {
-		candidates.push((record.kwargs as Record<string, unknown>).id);
-	}
-	if (record.data && typeof record.data === "object") {
-		candidates.push((record.data as Record<string, unknown>).id);
-	}
-	candidates.push(record.id);
-
-	for (const candidate of candidates) {
-		if (typeof candidate === "string" && candidate.trim()) {
-			return `id:${candidate.trim()}`;
-		}
-	}
-	return null;
 }
 
 function getNestedMessages(entry: unknown): unknown[] {

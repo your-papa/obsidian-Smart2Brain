@@ -78,18 +78,76 @@ function message(id: string | null, content: unknown, messageClass = "HumanMessa
 	return { lc: 1, type: "constructor", id: ["langchain_core", "messages", messageClass], kwargs };
 }
 
+/** Assistant reply that ends a turn. */
+function reply(id: string, content: unknown) {
+	return message(id, content, "AIMessage");
+}
+
+/** Assistant message that only announces a tool call (mid-turn narration). */
+function narration(id: string, content: string) {
+	const msg = message(id, content, "AIMessage");
+	(msg.kwargs as Record<string, unknown>).tool_calls = [{ name: "search_notes", args: {} }];
+	return msg;
+}
+
+/** A tool result, which must never reach the index. */
+function toolResult(id: string, content: string) {
+	return message(id, content, "ToolMessage");
+}
+
 /**
  * Build thread JSON whose checkpoints form a growing prefix chain — the shape
- * LangGraph actually persists, where checkpoint N re-contains messages 1..N.
+ * LangGraph actually persists, where checkpoint N re-contains messages 1..N and
+ * links to N-1 via `parentConfig`.
  */
-function thread(title: string, messages: Array<Record<string, unknown>>): string {
+function thread(title: string, messages: Array<Record<string, unknown>>, tsBase = 1): string {
 	const checkpoints: Record<string, unknown> = {};
 	for (let i = 1; i <= messages.length; i++) {
 		checkpoints[`cp-${i}`] = {
-			checkpoint: { id: `cp-${i}`, channel_values: { messages: messages.slice(0, i) } },
+			checkpoint: {
+				id: `cp-${i}`,
+				ts: `2026-01-01T00:00:${String(tsBase + i).padStart(2, "0")}.000Z`,
+				channel_values: { messages: messages.slice(0, i) },
+			},
+			metadata: { step: i },
+			...(i > 1 ? { parentConfig: { configurable: { checkpoint_id: `cp-${i - 1}` } } } : {}),
 		};
 	}
 	return JSON.stringify({ title, checkpoints });
+}
+
+/**
+ * Build a thread that forks: `common` messages, then two competing continuations
+ * from the same parent. `newer` carries the later timestamp, so it is the branch
+ * the chat UI would show.
+ */
+function forkedThread(
+	title: string,
+	common: Array<Record<string, unknown>>,
+	older: Array<Record<string, unknown>>,
+	newer: Array<Record<string, unknown>>,
+): string {
+	const parsed = JSON.parse(thread(title, common));
+	const forkPoint = `cp-${common.length}`;
+	parsed.checkpoints["cp-old"] = {
+		checkpoint: {
+			id: "cp-old",
+			ts: "2026-01-01T00:01:00.000Z",
+			channel_values: { messages: [...common, ...older] },
+		},
+		metadata: { step: common.length + 1 },
+		parentConfig: { configurable: { checkpoint_id: forkPoint } },
+	};
+	parsed.checkpoints["cp-new"] = {
+		checkpoint: {
+			id: "cp-new",
+			ts: "2026-01-01T00:02:00.000Z",
+			channel_values: { messages: [...common, ...newer] },
+		},
+		metadata: { step: common.length + 1 },
+		parentConfig: { configurable: { checkpoint_id: forkPoint } },
+	};
+	return JSON.stringify(parsed);
 }
 
 /** Minimal vault stub exposing the `adapter.readBinary` path used for .chat files. */
@@ -110,42 +168,80 @@ describe("readIndexableContent (.chat extraction)", () => {
 	it("emits each message once despite the checkpoint tree repeating it", async () => {
 		const raw = thread("Greeting", [
 			message("m1", "hello there"),
-			message("m2", "general kenobi"),
+			reply("m2", "general kenobi"),
 			message("m3", "you are a bold one"),
+			reply("m4", "back away"),
 		]);
 
 		const out = await readIndexableContent(vaultReturning(raw), chatFile);
 
-		// Naive per-checkpoint concatenation would emit m1 three times and m2 twice.
+		// Naive per-checkpoint concatenation would emit m1 four times and m2 three times.
 		expect(out.match(/hello there/g)).toHaveLength(1);
 		expect(out.match(/general kenobi/g)).toHaveLength(1);
 		expect(out.match(/you are a bold one/g)).toHaveLength(1);
 	});
 
-	it("preserves the title and first-seen transcript order", async () => {
-		const raw = thread("Greeting", [message("m1", "first"), message("m2", "second")]);
+	it("pairs each question with its answer in transcript order", async () => {
+		const raw = thread("Greeting", [
+			message("m1", "first question"),
+			reply("m2", "first answer"),
+			message("m3", "second question"),
+			reply("m4", "second answer"),
+		]);
 
 		const out = await readIndexableContent(vaultReturning(raw), chatFile);
 
-		expect(out).toBe("Greeting\n\nfirst\n\nsecond");
+		expect(out).toBe("Greeting\n\nfirst question\n\nfirst answer\n\nsecond question\n\nsecond answer");
 	});
 
-	it("keeps distinct messages that share identical text", async () => {
-		// Two separate turns can legitimately both be "yes"; ids keep them apart.
-		const raw = thread("Confirmations", [message("m1", "yes"), message("m2", "yes")]);
+	it("keeps only the active branch when an answer was regenerated", async () => {
+		const raw = forkedThread(
+			"Regenerated",
+			[message("m1", "what is it")],
+			[reply("old", "discarded answer")],
+			[reply("new", "kept answer")],
+		);
 
 		const out = await readIndexableContent(vaultReturning(raw), chatFile);
 
-		expect(out.match(/yes/g)).toHaveLength(2);
+		expect(out).toContain("kept answer");
+		expect(out).not.toContain("discarded answer");
+		expect(out).toContain("what is it");
 	});
 
-	it("falls back to content deduplication when messages carry no id", async () => {
-		const raw = thread("Legacy", [message(null, "alpha"), message(null, "beta")]);
+	it("drops mid-turn narration that only announces a tool call", async () => {
+		const raw = thread("Narrated", [
+			message("m1", "find the note"),
+			narration("m2", "I'll search the vault for that."),
+			toolResult("m3", "hit: Some Note.md"),
+			reply("m4", "Found it in Some Note."),
+		]);
 
 		const out = await readIndexableContent(vaultReturning(raw), chatFile);
 
-		expect(out.match(/alpha/g)).toHaveLength(1);
-		expect(out.match(/beta/g)).toHaveLength(1);
+		expect(out).toBe("Narrated\n\nfind the note\n\nFound it in Some Note.");
+	});
+
+	it("keeps the last answer when a turn ends with several assistant messages", async () => {
+		const raw = thread("Multi", [message("m1", "q"), reply("m2", "partial"), reply("m3", "final answer")]);
+
+		const out = await readIndexableContent(vaultReturning(raw), chatFile);
+
+		expect(out).toContain("final answer");
+		expect(out).not.toContain("partial");
+	});
+
+	it("strips appended context blocks from the user's question", async () => {
+		const raw = thread("Context", [
+			message("m1", "what can you see\n\n[Currently visible notes]\n- Large Notes/Distributed Systems.md"),
+			reply("m2", "I can see one note."),
+		]);
+
+		const out = await readIndexableContent(vaultReturning(raw), chatFile);
+
+		expect(out).toContain("what can you see");
+		expect(out).not.toContain("Distributed Systems");
+		expect(out).not.toContain("Currently visible notes");
 	});
 
 	it("returns an empty string for corrupt thread JSON", async () => {
