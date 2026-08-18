@@ -88,12 +88,18 @@ const RESULT_LIMIT = 25;
  * comparable hybrid dip was expected.
  *
  * It did not happen. Measured on `harrier-oss-v1-0.6b-MLX-8bit` after the change:
- * **core 0.8821 / MRR 0.8571**, clearing this floor. The semantic half recovers what
- * the folder boost was previously supplying, so the layout rework cost the ratcheted
- * tier nothing. Reproduced exactly across two consecutive runs.
+ * **core 0.9085 / MRR 0.8929**, comfortably clearing this floor. The semantic half
+ * recovers what the folder boost was previously supplying, so the layout rework cost
+ * the ratcheted tier nothing.
  *
  * The lexical finding stands on its own, though: a directory name was worth ~0.10 nDCG
  * on a single query when the semantic half was absent.
+ *
+ * **Reindex before comparing two runs.** Scores reproduce exactly against a given
+ * index but not across a rebuild of it — an earlier build of this same corpus (hash
+ * verified identical) gave core 0.8821 and a `size-bias` axis 0.12 lower. HNSW graph
+ * construction is order-dependent, so `BASELINE_TOLERANCE` does not cover it; measure
+ * both sides of any comparison against the same build.
  */
 const BASELINE_MEAN_NDCG = 0.88;
 const BASELINE_MEAN_RR = 0.85;

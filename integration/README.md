@@ -158,10 +158,13 @@ bun run build && bun run setup-vault
 bun run test:benchmark
 ```
 
-The corpus is **generated, not committed** (~304 notes: 285 filler + 6 core probes
-+ 9 hard probes + 4 distractors). The generator is
-seeded, so it reproduces byte-for-byte; `scripts/generate-search-corpus.ts` is
-the source of truth. Regenerate after changing it, then reindex.
+The corpus is **generated, not committed** — 308 notes in `Corpus/` (285 filler,
+6 core probes, 9 hard probes, 8 distractors) plus 31 of the 59 in `Zettel/`. The
+generator is seeded, so it reproduces byte-for-byte; `scripts/generate-search-corpus.ts`
+is the source of truth. Regenerate after changing it, then reindex.
+
+The other 28 notes in `Zettel/` are hand-written and **are** committed — see
+*Vault layout* below for why that directory is mixed.
 
 ### Vault layout
 
@@ -444,7 +447,7 @@ entire burden.
 **The hybrid tier has since been measured** (`harrier-oss-v1-0.6b-MLX-8bit`, see
 *Recording results per model* below) and the failure survives it: `feedback i
 received` and `feedback i gave someone` still return the *same* top note. The semantic
-half raises the core tier from 0.7121 to 0.8821, but it does not recover the
+half raises the core tier from 0.7110 to 0.9085, but it does not recover the
 relational frame — which is why `intent-frame` is one of the two weakest axes.
 
 #### Why the layer is small but weighted (measured 2026-08-18)
@@ -563,33 +566,47 @@ discriminate between models.
 ##### 2026-08-18 — `omlx:harrier-oss-v1-0.6b-MLX-8bit`, current corpus
 
 The first run of the hybrid tier against the reworked corpus (Zettel layer, realistic
-filenames, realistic-use axes). Reproduced exactly across two consecutive runs — these
-are not jittery numbers.
+filenames, realistic-use axes).
 
 | tier | nDCG@10 | MRR | n |
 |---|---|---|---|
-| **core** (ratcheted) | **0.8821** | 0.8571 | 14 |
+| **core** (ratcheted) | **0.9085** | 0.8929 | 14 |
 | recency | 0.8155 | 0.7500 | 4 |
-| hard — all | 0.7459 | 0.7286 | 25 |
-| hard — gated (excl. 2 known failures) | 0.7491 | 0.7376 | 23 |
-| lexical-only baseline | 0.7121 | 0.6794 | 14 |
+| hard — all | 0.7456 | 0.7297 | 25 |
+| hard — gated (excl. 1 known failure) | 0.7588 | 0.7497 | 24 |
+| lexical-only baseline | 0.7110 | 0.6784 | 14 |
 
 Hard tier by axis, weakest first:
 
 | axis | nDCG@10 | MRR | n | reading |
 |---|---|---|---|---|
-| `cross-lingual` | **0.6077** | 0.5625 | 4 | weakest axis; see `griechischer salat` below |
-| `intent-frame` | **0.6274** | 0.6193 | 6 | the axis built for the reported failure — real headroom |
+| `cross-lingual` | **0.5154** | 0.4375 | 4 | weakest axis; see `griechischer salat` above |
+| `intent-frame` | **0.6250** | 0.6147 | 6 | the axis built for the reported failure — real headroom |
 | `multi-hop` | 0.7153 | 0.6250 | 2 | |
-| `size-bias` | 0.7540 | 0.6667 | 3 | unchanged from the previous corpus |
-| `polysemy` | 0.7544 | 0.8000 | 5 | |
+| `polysemy` | 0.7560 | 0.8111 | 5 | |
+| `size-bias` | 0.8770 | 0.8333 | 3 | |
 | `provenance` | 0.9871 | 1.0000 | 1 | **higher than predicted — see below** |
 | `dilution` | 1.0000 | 1.0000 | 2 | saturated |
 | `long-context` | 1.0000 | 1.0000 | 2 | saturated |
 
+> **The index build is a variance source — reindex before comparing runs.**
+> These numbers reproduce *exactly* across repeated runs against the same index, but
+> **not** across a rebuild of it. An earlier session on a byte-identical corpus
+> (same hash `2dc3dd1e`, verified) recorded core 0.8821 / hard 0.7459 with
+> `cross-lingual` 0.6077 and `size-bias` 0.7540; after the vault was reindexed, the
+> same code and same notes gave the figures above. Neither set is wrong — HNSW graph
+> construction is order-dependent, so two builds over identical input are not the same
+> index.
+>
+> Practical consequence: a measured difference of a few points between two runs says
+> nothing unless both ran against the same index build. When comparing embedding
+> models, or before/after a ranking change, reindex once and measure both sides
+> against that build. The tolerance at `BASELINE_TOLERANCE` (0.02) absorbs provider
+> jitter, not this — the `size-bias` axis moved 0.12 across builds.
+
 Three things worth reading off this:
 
-**Core clears the 0.88 ratchet at 0.8821.** The layout consolidation and the filename
+**Core clears the 0.88 ratchet at 0.9085.** The layout consolidation and the filename
 rework cost nothing on the regression tier, despite the `Topics/Smart Cities/` path
 boost disappearing (a dip was anticipated at `BASELINE_MEAN_NDCG`; it did not
 materialise on the hybrid tier).
@@ -600,11 +617,18 @@ still reproduces on hybrid: `feedback i received` and `feedback i gave someone` 
 the *same* top note (`Feedback Scoring Service`), so the direction-sensitivity
 assertion fails. The semantic half does not fix it.
 
-**`provenance` scored 0.9871, not ~0 as predicted.** The prediction was that path and
-tag boosts cannot fire for conversational queries, and that part is correct — but the
-semantic half finds the note from title and body text regardless. The `knownFailure`
-annotation on that case is now questionable and should be re-examined rather than left
-labelling a passing case as broken.
+**`provenance` scored 0.9871, not ~0 as predicted.** The prediction — that path and tag
+boosts cannot fire for conversational queries — was correct about the mechanism and
+wrong about the outcome. The case returns both grade-2 notes at ranks 1-2 and the
+grade-1 note at rank 4, because the semantic half finds them from title and body text
+without needing the provenance signal.
+
+The `knownFailure` annotation has been removed: labelling a passing case as broken is
+worse than having no case. What it now measures is narrower but honest — provenance-
+scoped queries are answerable *when the source words also appear in the text*. A query
+whose provenance exists **only** in frontmatter (`type: meeting` with no "meeting"
+anywhere in the body) would be the real test of the gap, and the corpus does not have
+one yet. That is the obvious next case for this axis.
 
 ##### Earlier runs — different corpus, not comparable
 

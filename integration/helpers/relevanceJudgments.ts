@@ -603,16 +603,25 @@ export const RELEVANCE_JUDGMENTS: readonly RelevanceJudgment[] = [
 	// score near zero on every model, which is no resolving power at all: a case that
 	// every model fails cannot distinguish two models any more than one they all ace.
 	//
-	// So this records the defect rather than pretending to measure a model difference.
-	// Remove the `knownFailure` if path/tag matching ever becomes token-wise.
+	// **The prediction was half wrong, and the case is kept as the record of that.**
+	// Path and tag boosts really do return 0 here — that part held. But the case does
+	// not fail: measured 0.9871 on `harrier-oss-v1-0.6b-MLX-8bit`, returning both
+	// grade-2 notes at ranks 1-2 and the grade-1 note at rank 4. The semantic half
+	// recovers the notes from title and body text without needing the provenance
+	// signal at all, because "vendor" and "call" happen to appear in them.
+	//
+	// So the `knownFailure` annotation was removed: labelling a passing case as broken
+	// is worse than having no case. What the case now measures is narrower but honest —
+	// that provenance-scoped queries are answerable *when the source words also appear
+	// in the text*. A query whose provenance exists ONLY in frontmatter (`type: meeting`
+	// with no "meeting" in the body) would be the real test of the gap, and this corpus
+	// does not have one yet.
 
 	{
 		query: "notes from the vendor call",
 		tier: "hard",
 		axis: "provenance",
-		knownFailure:
-			"Path and tag boosts match the whole query string, so 'notes from the vendor call' scores 0 from both despite the note carrying `source: vendor call` in frontmatter and a `vendor` tag. Arbitrary frontmatter fields are not indexed at all (LexicalSearchService reads only aliases/tags), and the flat Zettel layer gives no folder signal. Only the literal words 'vendor' and 'call' in the title and body can match.",
-		probes: "provenance scoping: 'from the vendor call' is a source, not a subject. Documents that frontmatter provenance fields are invisible to ranking and that path/tag boosts cannot fire for conversational queries.",
+		probes: "provenance scoping: 'from the vendor call' is a source, not a subject. Path/tag boosts cannot fire (they match the whole query string) and arbitrary frontmatter fields are not indexed, so this passes only because 'vendor' and 'call' also appear in the notes' title and body — not because provenance is understood.",
 		grades: {
 			"Zettel/Vendor Call - Observability Tooling.md": 2,
 			// Same `source: vendor call` frontmatter, so a ranker that *could* read
