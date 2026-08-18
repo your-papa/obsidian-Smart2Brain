@@ -597,24 +597,55 @@ describe("performSearch lexical startup behavior", () => {
 		expect(results[0]?.rankingDebug?.finalAliasBoost).toBeGreaterThan(0);
 	});
 
-	it("returns nothing when the lexical index matched nothing", async () => {
-		// Semantic search has no concept of "no answer" — it always returns its
-		// nearest neighbours, so a meaningless query yields a page of confident
-		// results. Lexical finding nothing means no indexed note contains any query
-		// term, which makes those neighbours noise.
+	/** A flat semantic field — the shape a meaningless query produces. */
+	const flatSemanticResults = Array.from({ length: 20 }, (_, i) => ({
+		path: `Notes/n${i}.md`,
+		name: `N${i}`,
+		score: 0.58 - i * 0.002,
+	}));
+
+	/** A peaked semantic field — one clear winner above the pack. */
+	const peakedSemanticResults = [
+		{ path: "Notes/answer.md", name: "Answer", score: 0.78 },
+		...Array.from({ length: 19 }, (_, i) => ({
+			path: `Notes/n${i}.md`,
+			name: `N${i}`,
+			score: 0.57 - i * 0.002,
+		})),
+	];
+
+	it("keeps semantic results when lexical matched nothing", async () => {
+		// A query with no literal overlap anywhere — the shape of a cross-lingual
+		// or synonym-only search — must not be suppressed. Gating on lexical
+		// emptiness was implemented and reverted: it silently discarded real
+		// answers (see the note in `hybridSearch`).
 		mockWaitForVectorStore.mockResolvedValue(true);
 		mockWaitForLexicalSearch.mockResolvedValue(true);
 		mockGetVectorStoreService.mockReturnValue({
-			semanticSearch: vi.fn().mockResolvedValue([
-				{ path: "Notes/a.md", name: "A", score: 0.58 },
-				{ path: "Notes/b.md", name: "B", score: 0.57 },
-			]),
+			semanticSearch: vi.fn().mockResolvedValue(peakedSemanticResults),
+		});
+		mockLexicalSearch.mockResolvedValue([]);
+
+		const results = await performSearch({} as App, "Zwiebelkuchen", "hybrid");
+
+		expect(results.length).toBeGreaterThan(0);
+		expect(results[0]?.name).toBe("Answer");
+	});
+
+	it("keeps semantic results even when the semantic field is flat", async () => {
+		// The other half of the same decision: a flat distribution is what a
+		// meaningless query produces, but it is *also* what some real queries
+		// produce on some embedding models, so it cannot be used to suppress.
+		mockWaitForVectorStore.mockResolvedValue(true);
+		mockWaitForLexicalSearch.mockResolvedValue(true);
+		mockGetVectorStoreService.mockReturnValue({
+			semanticSearch: vi.fn().mockResolvedValue(flatSemanticResults),
 		});
 		mockLexicalSearch.mockResolvedValue([]);
 
 		const results = await performSearch({} as App, "zzzznotarealword", "hybrid");
 
-		expect(results).toEqual([]);
+		expect(results.length).toBeGreaterThan(0);
 	});
 
 	it("keeps semantic results when lexical is unavailable rather than empty", async () => {

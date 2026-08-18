@@ -61,33 +61,42 @@ function normalizeTags(tags: string[] | undefined): string[] | undefined {
  */
 async function hybridSearch(app: App, query: string, filter?: SearchFilter): Promise<SearchResult[]> {
 	// Run semantic and lexical search in parallel
-	const [semanticResults, lexical] = await Promise.all([
+	const [semanticResults, lexicalResults] = await Promise.all([
 		embeddingsSearch(app, query, filter),
-		getLexicalResultsWithAvailability(app, query, filter),
+		getLexicalResults(app, query, filter),
 	]);
 
-	// Precision floor: semantic search has no concept of "no answer". Every query
-	// embeds to some vector and returns its nearest neighbours, so a meaningless
-	// query yields a full page of confident-looking results — measured at cosine
-	// 0.515-0.597 against 0.665-0.700 for genuine matches. The bands *overlap*,
-	// so no absolute threshold separates them (`similarityThreshold` defaults to
-	// 0.7 in code, which would discard real answers).
+	// NOTE: there is deliberately no "no results" suppression here.
 	//
-	// The semantic score *distribution* looked promising — nonsense returns a flat
-	// field (spread 0.038-0.071) where real queries have a clear winner
-	// (0.184-0.242) — but two graded benchmark queries sit inside the nonsense
-	// band (`how does heavy rainfall runoff…` at 0.048), so gating on spread would
-	// suppress real answers.
+	// Semantic search has no concept of "no answer" — every query embeds to some
+	// vector and returns its nearest neighbours, so a meaningless query yields a
+	// full page of confident-looking results (measured at cosine 0.515-0.597,
+	// against 0.665-0.700 for genuine matches). Three ways to suppress that were
+	// implemented and measured; all three fail:
 	//
-	// Lexical agreement separates the two cleanly, with no overlap: every real
-	// query above returns 25 lexical hits, every nonsense query returns 0. If no
-	// indexed note contains *any* query term, the nearest neighbours are noise.
+	//  1. **Absolute cosine threshold.** The bands overlap, so any cutoff that
+	//     catches gibberish also discards real answers. (`similarityThreshold`
+	//     defaults to 0.7 in code, well above genuine matches.)
+	//  2. **Lexical corroboration** — suppress when no indexed note contains any
+	//     query term. Clean on one model, but it silently discards legitimate
+	//     queries with no literal overlap: `Zwiebelkuchen` correctly retrieves the
+	//     German sourdough note while matching zero terms. That is the normal
+	//     shape of a cross-lingual or synonym-only search, not an edge case.
+	//  3. **Semantic distribution shape** — suppress a flat field of
+	//     equally-mediocre neighbours, keep a clear winner. Separates cleanly on
+	//     `harrier` (noise ≤1.107 `top/median`, real ≥1.303) and is *provably
+	//     unusable* on `qwen3`, where the bands invert: `Zwiebelkuchen` scores
+	//     1.031 while four noise queries score higher (up to 1.113). No threshold
+	//     on this metric exists for that model.
 	//
-	// Only applies when the lexical index was actually consulted — an unavailable
-	// service also returns nothing, and that is not evidence about the query.
-	if (lexical.available && lexical.results.length === 0) {
-		return [];
-	}
+	// Returning ranked results for a meaningless query is the lesser failure: the
+	// user sees obviously-irrelevant notes and refines. Silently returning nothing
+	// for a real query is worse, and (2) and (3) both do that on some model.
+	//
+	// The benchmark keeps both floors measured — `returns nothing for queries that
+	// match nothing` and `still returns results for meaningful queries with no
+	// lexical overlap` — so a future attempt has to satisfy both at once, on both
+	// models, rather than trading one for the other.
 
 	// Both legs are kept deliberately. Dropping lexical when semantic is available
 	// was measured (semantic alone ranks the right answer #1 on most core queries)
@@ -98,7 +107,7 @@ async function hybridSearch(app: App, query: string, filter?: SearchFilter): Pro
 	// without giving up that recall.
 	return rankSearchResults({
 		query,
-		lexicalResults: lexical.results,
+		lexicalResults,
 		semanticResults,
 		recentBoostByPath: buildRecentBoostMap(getRecentNotes(app, filter)),
 	});
@@ -117,29 +126,12 @@ async function getReadyLexicalSearchService() {
  * Get lexical search results using MiniSearch (BM25 based).
  */
 async function getLexicalResults(app: App, query: string, filter?: SearchFilter): Promise<SearchResult[]> {
-	return (await getLexicalResultsWithAvailability(app, query, filter)).results;
-}
-
-/**
- * As {@link getLexicalResults}, but reports whether the lexical index was
- * actually consulted.
- *
- * An empty result means two very different things: "no indexed note contains
- * any query term" (a real signal) versus "the service was not ready" (no signal
- * at all). The no-match gate in `hybridSearch` acts on the former and must never
- * act on the latter, so the distinction cannot be collapsed into `[]`.
- */
-async function getLexicalResultsWithAvailability(
-	app: App,
-	query: string,
-	filter?: SearchFilter,
-): Promise<{ results: SearchResult[]; available: boolean }> {
 	const vectorStore = await getReadyLexicalSearchService();
 	if (!vectorStore) {
-		return { results: [], available: false };
+		return [];
 	}
 
-	return { results: await vectorStore.search(query, 100, filter), available: true };
+	return vectorStore.search(query, 100, filter);
 }
 
 /**

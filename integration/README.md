@@ -305,24 +305,33 @@ improved. Dropping the lexical leg altogether was measured too and is far worse 
 tier doing its job: the same ranker, and the weaker model still loses some
 padded-note contests.
 
-#### The no-match precision floor
+#### The precision and recall floors
 
-Separate from the graded tiers, `returns nothing for queries that match nothing`
-asserts that meaningless queries produce **zero** results. It is measured as a result
-count, not nDCG — graded relevance needs a target to rank, and these queries have none.
+Two count-based tests sit outside the graded tiers, because nDCG needs a target to rank
+and these queries either have none or have one no grader assigned:
 
-The gap it guards is that semantic search has no concept of "no answer": every query
-embeds to some vector and returns its nearest neighbours. Before the fix, gibberish
-returned a full page (25/25) of results at cosine 0.515–0.597, against 0.665–0.700 for
-genuine matches — **overlapping** bands, so no absolute `similarityThreshold` can
-separate them. Gating on the semantic score *distribution* also fails: nonsense returns
-a flat field (spread 0.038–0.071) versus a clear winner for real queries
-(0.184–0.242), but two graded benchmark queries fall inside the nonsense band.
+- `reports how many results a meaningless query returns` — **reported, not asserted.**
+- `still returns results for meaningful queries with no lexical overlap` — **asserted.**
 
-The rule that works is lexical corroboration — if no indexed note contains *any* query
-term, the nearest neighbours are noise. It separates cleanly with no overlap (every
-real query returns 25 lexical hits, every nonsense query 0) and costs nothing on the
-graded tiers. See `hybridSearch` in `src/agent/tools/searchNotes.ts`.
+Semantic search has no concept of "no answer": every query embeds to some vector and
+returns its nearest neighbours, so gibberish comes back with a full page (25/25) at
+cosine 0.515–0.597 against 0.665–0.700 for genuine matches. Three suppressions were
+implemented and measured, and **all three fail**:
+
+| approach | why it fails |
+|---|---|
+| absolute cosine threshold | bands overlap; `similarityThreshold`'s 0.7 default discards real answers |
+| lexical corroboration (suppress when no note shares a term) | discards `Zwiebelkuchen`, `Hefeteig` — real German queries whose answer is the German note, matching zero English-tokenised terms |
+| semantic distribution shape (`top / median`) | clean on `harrier` (noise ≤1.107, real ≥1.303) but **inverted** on `qwen3`: `Zwiebelkuchen` scores 1.031 while four gibberish queries score higher, up to 1.113 |
+
+The third is the trap worth remembering: it looked like a clean two-signal fix and
+swept to an error-free band of 1.11–1.21 *on one model*. Only the second model showed
+the bands overlap, so no threshold exists there at all.
+
+The accepted trade-off is that a meaningless query returns ranked noise — the user sees
+obviously-irrelevant notes and refines — rather than a real query silently returning
+nothing. Any future attempt must drive the no-match count down **without** breaking the
+recall floor, on both models. See `hybridSearch` in `src/agent/tools/searchNotes.ts`.
 | `local-spike:TaylorAI/bge-micro-v2` | **0.8600** | 0.6445 | **0.2103** | 0.6460 | 0.9664 | — | **0.5716** |
 
 **bge-micro-v2 (2026-08-17, 22M params, 384 dims, 512-token window, local WASM).**
