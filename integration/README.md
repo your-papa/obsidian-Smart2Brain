@@ -163,6 +163,96 @@ The corpus is **generated, not committed** (~304 notes: 285 filler + 6 core prob
 seeded, so it reproduces byte-for-byte; `scripts/generate-search-corpus.ts` is
 the source of truth. Regenerate after changing it, then reindex.
 
+### Vault layout
+
+The test vault has **two content regions**, and the split is deliberate:
+
+| region | notes | generated? | tracked in git? | role |
+|---|---|---|---|---|
+| `Corpus/` | 308 | yes (`scripts/generate-search-corpus.ts`) | no | synthetic bulk: 4 topic folders, ~285 near-duplicate filler notes, plus the graded probes and distractors |
+| `Zettel/` | 59 | partly — 31 generated, 28 hand-written | the 28 hand-written ones | flat working vault: one person's notes, no subfolders, hierarchy via frontmatter and `[[wikilinks]]` |
+
+`Welcome.md` stays at the vault root because it is Obsidian's landing note, not
+content.
+
+#### Filenames use spaces, not kebab-case
+
+This is load-bearing, not a style preference. `file.basename` is indexed as
+MiniSearch's **title field** (`LexicalSearchService.addDocument`), and
+`SEARCH_TERM_SPLIT_REGEX` in `searchTermUtils.ts` is `/[^\p{L}\p{N}#@_-]+/u` — it
+keeps `-` as a *word character*. So:
+
+| filename | tokens |
+|---|---|
+| `refresh-ratios-for-daily-baking` | **1** (one opaque blob) |
+| `Refresh Ratios for Daily Baking` | **5** |
+
+A kebab-case filename can never partially match a query, so `calculateTitleBoost`
+gets nothing from it.
+
+The asymmetry cuts both ways, which is why **every note in both regions** now uses
+`titleToFilename()`:
+
+- a slugified **distractor** loses the title signal that makes it a competitor, so the
+  benchmark gets quietly *easier* — this is what happened when the bulk filler was
+  briefly slugified;
+- a slugified **target** loses the signal that would surface it, so the benchmark gets
+  *harder* for a reason nobody chose.
+
+Neither was a deliberate property. Both were artifacts of the filename convention.
+
+Spaces also match how Obsidian itself names notes (the filename *is* the title), and
+how the hand-written fixtures in this vault have always been named.
+
+Dashes are kept where they belong to the title — dates (`2026-03-16.md`, `Weekly
+Review 2026-03-14.md`) and `1-1 with Priya - March.md`. A colon between digits becomes
+a hyphen rather than being stripped, since deleting it turns `1:1` into `11`.
+
+`slug` still exists on the note types as the generator's stable internal identifier —
+used by the pair-balance guard, the size-bias shape check, the per-note PRNG seed, and
+`--clean` — so display text and machinery change independently. A retitled note keeps
+its PRNG stream; only its filename moves.
+
+Two guards keep the link graph honest: every `[[wikilink]]` target must resolve to a
+real note (`INTENTIONAL_STUBS` declares the one deliberate unresolved link, since real
+vaults have those), and link targets are normalised through the same
+`titleToFilename()` the writer uses, so links and filenames cannot drift apart by
+construction rather than by discipline.
+
+Non-ASCII titles survive intact — `Sauerteigführung im Winter.md` keeps its umlaut,
+which matters because the cross-lingual axis depends on those notes being genuinely
+German.
+
+**Consolidated 2026-08-18.** `Topics/` (20 notes), `Large Notes/` (2) and six loose
+root notes used to be separate regions. They were folded into `Zettel/` so the vault
+reads as one place rather than five labelled zones. Nothing was rewritten — the moves
+were `git mv`, the note bodies are byte-identical, and the wikilinks between them were
+already bare `[[Note Name]]` references that Obsidian resolves by name, so flattening
+broke none of them. Only the graded paths in `relevanceJudgments.ts` changed.
+
+**This moved one core score, and the reason is worth knowing.** The lexical core mean
+went 0.7281 → 0.7203, entirely from `smart city sensors and data platforms`
+(0.839 → 0.735). That query contains the words "smart city", which used to match the
+**folder name** `Topics/Smart Cities/` through `calculatePathBoost`
+(`src/search/searchRanking.ts:345`). Flattened, there is no such segment, so the boost
+is gone and `Urban Data Platforms.md` — a grade-2 target whose *title* shares no query
+term — fell out of the top 5, while siblings with "Smart" in their titles kept their
+`titleBoost`.
+
+Nothing about the notes changed, so the honest reading is that **the old 0.839 was
+partly earned by folder naming rather than by ranking quality**. A Zettelkasten vault
+has no such folders, so the lower number is the more representative measurement. It is
+also a concrete demonstration of how much a path segment can be worth: ~0.10 nDCG on a
+single query, from a directory name.
+
+`Corpus/` was deliberately *not* folded in. It is 308 generated notes, ~285 of them
+near-duplicates of each other; dissolving that into the flat namespace would not
+produce a Zettelkasten, it would produce four topic silos with the labels removed —
+less realistic than the current split, while voiding every recorded baseline. The
+folders are what make bulk filler plausible. The cross-vocabulary interference that
+makes real search hard comes from `Zettel/` being cross-cutting (see *Why the layer
+is small but weighted* below), not from where notes sit on disk.
+
 ### What it contains
 
 `helpers/relevanceJudgments.ts` holds the judgment set: each query carries graded
@@ -203,8 +293,9 @@ them. That makes them a good regression guard and a useless model-comparison
 tool: they cannot tell a 22M-param local model from a 600M one.
 
 The `hard` tier exists for that second job. Cases carry `tier: "hard"` plus an
-`axis`, and are built to have *headroom* along the four dimensions where a small
-distilled encoder is expected to lose ground:
+`axis`, and are built to have *headroom* along the dimensions where retrieval is
+expected to lose ground — the first five where a small distilled encoder struggles,
+the last three where *any* model must resolve meaning rather than topic:
 
 | Axis | What it probes | Why a small model struggles |
 |---|---|---|
@@ -213,6 +304,55 @@ distilled encoder is expected to lose ground:
 | `long-context` | Answer buried ~900–1100 words into one heading-free section | Exceeds a 512-token window, so the answer is truncated away |
 | `dilution` | Answer is one section inside a six-topic note | Note-level embedding averages the answer into unrelated topics |
 | `size-bias` | A long padded note out-chunks the short note that answers the query | A note's score is the max over its chunks, and max-of-N grows with N regardless of relevance |
+| `polysemy` | One word, two legitimate senses, neither note off-topic | Both notes are honestly about the query's topic; only sense separates them |
+| `intent-frame` | Same topic words, opposite relational role ("feedback I received" vs "gave") | Requires the *direction* of a relation, which term overlap cannot express |
+| `provenance` | Query scopes by where a note came from, not what it is about | Frontmatter provenance fields are not indexed; path/tag boosts cannot fire (see below) |
+
+#### The realistic-use axes (`polysemy`, `intent-frame`, `provenance`)
+
+These were added after a real-vault failure the rest of the suite could not
+reproduce: the query **"feedback i received"** returned notes about an LLM
+feedback-scoring component in an automation pipeline, not notes recording feedback
+the user was given.
+
+Three properties of `Corpus/` made that unreproducible:
+
+1. **Every distractor there declares its own irrelevance.** `octopus-recipes.md`
+   literally contains *"not animal behaviour, learning, or any container-opening
+   problem solving"*. An embedder reads that and correctly pushes the note away —
+   which is why those cases saturate. Real polysemy has no such tell.
+2. **The four domains are hermetic.** No shared vocabulary, so cross-domain
+   confusion is trivially avoidable. Real vaults are one person's notes, where the
+   colliding senses sit side by side.
+3. **No query is about the user.** All the original cases are third-person factual
+   lookups; real usage skews first-person and relational.
+
+They grade against **`Zettel/`** — a flat, single-directory layer (no subfolders)
+with hierarchy in frontmatter and `[[wikilinks]]`, mirroring a Zettelkasten vault.
+Both of those organising mechanisms are **inert for ranking**: nothing in
+`src/search/` reads link structure, and `LexicalSearchService` reads only
+`aliases`/`tags` from frontmatter. That is deliberate — it is the condition under
+which real-vault search fails, and the folder-shaped corpus never reproduces it.
+
+Two mechanics worth knowing when reading these scores:
+
+- **`i` never reaches the ranker.** `isSignificantSearchTerm` drops single-character
+  tokens, so "feedback i received" plans as `feedback | received`. `received` and
+  `gave` are *not* stopwords and score at full weight — but the target notes avoid
+  them ("Priya said", "I told him"), as real notes do, so lexical is reduced to the
+  one term both candidates share.
+- **`provenance` is one case, not a full axis, and is marked `knownFailure`.**
+  `calculatePathBoost` / `calculateTagBoost` match the **whole query string** against
+  a path segment or tag, so a conversational query like *"notes from the vendor
+  call"* returns 0 from both. Every provenance case would score ~0 on every model —
+  no resolving power, so a full axis would measure the same known gap repeatedly.
+  Remove the annotation if path/tag matching becomes token-wise.
+
+The suite also asserts one property no aggregate can express: **"feedback i
+received" and "feedback i gave someone" must not return the same top note.** Both
+can score respectably on nDCG while returning identical orderings, since each has a
+graded-2 note the other ranks highly. Only comparing the two orderings catches a
+ranker that keys on topic and ignores direction.
 
 **Sub-1.0 scores here are the intended state, not failures to fix.** The tier is
 gated only by `HARD_FLOOR_MEAN_NDCG`, a loose collapse guard — deliberately *not*
@@ -274,12 +414,213 @@ note that answers their query — the generator asserts this, because the chunke
 splits on headings, so a graded target that gains sections silently disarms the case
 unless its distractor grows too.
 
+#### The realistic-use axes, measured on lexical-only (2026-08-18)
+
+Recorded before any embedding provider was configured, so this is the **lexical
+floor** — what the ranker does with no semantic half at all. It is worth keeping
+because it isolates the mechanism precisely:
+
+```
+"feedback i received"     → 1. Zettel/feedback-scoring-service.md   ← WRONG
+"feedback i gave someone" → 1. Zettel/feedback-scoring-service.md   ← WRONG (same note)
+```
+
+Both directions return the same top note, and it is the wrong one for both. Term
+counts explain it completely:
+
+| note | "feedback" | "received" | "gave" |
+|---|---|---|---|
+| `feedback-scoring-service.md` (wrong answer) | **4** | 0 | 0 |
+| `1-1-priya-2026-03.md` (answers "received") | 0 | 0 | 0 |
+| `feedback-i-gave-2026-q1.md` (answers "gave") | 0 | 0 | 0 |
+
+The lexical ranker has exactly one signal available — term frequency of `feedback` —
+and it points entirely at the wrong note. This is not a tuning problem: **the notes a
+person actually writes about feedback rarely contain the word.** A 1:1 note says
+"Priya said"; a review-prep note says "I told him". Nothing lexical can bridge that,
+which is why these cases sit in the hard tier and why the semantic half carries the
+entire burden.
+
+**The hybrid tier has since been measured** (`harrier-oss-v1-0.6b-MLX-8bit`, see
+*Recording results per model* below) and the failure survives it: `feedback i
+received` and `feedback i gave someone` still return the *same* top note. The semantic
+half raises the core tier from 0.7121 to 0.8821, but it does not recover the
+relational frame — which is why `intent-frame` is one of the two weakest axes.
+
+#### Why the layer is small but weighted (measured 2026-08-18)
+
+`Zettel/` is 31 notes against 308 in `Corpus/` — 8.4% of the vault — yet it takes a
+far larger share of every result set, because its vocabulary cuts across the topic
+corpus instead of sitting inside one silo:
+
+| query | Zettel notes in lexical top-25, at 10 notes → at 31 |
+|---|---|
+| how long before a rate change reaches borrowers | 4/25 → **8/25** |
+| what makes very small text readable | 4/25 → **9/25** |
+| smart city sensors and data platforms | 2/25 → 2/25 |
+| can an octopus learn to open a sealed jar | 1/25 → 2/25 |
+
+Two things worth reading off this. The layer is **~4× over-represented** relative to
+its size, which is the crowding real vaults produce and the topic corpus cannot. And
+the domain-anchored queries (octopus, smart city) barely move — correct, since generic
+working-life vocabulary should not override a strong topical match.
+
+**The core lexical mean was 0.7281 before the expansion and 0.7281 after.** Adding 21
+notes that take up to a third of some result sets changed the regression tier by
+nothing: the new notes crowd results without displacing correct answers. That is the
+property that makes it safe to keep growing this layer.
+
+This is also why the layer was *grown* rather than the regions being flattened into
+one namespace. Flattening was considered and rejected: a flat directory holding 77
+near-duplicate typography notes is not a Zettelkasten, it is four topic silos with the
+labels removed — less realistic than what is there now, while voiding every recorded
+baseline and breaking the folder-spanning multi-target cases. The cross-vocabulary
+interference that makes real search hard comes from the notes being cross-cutting, not
+from where they sit on disk.
+
+#### Filler notes have real titles
+
+The bulk filler has 40 unique subjects and 285 notes to produce, so each subject
+recurs about seven times. That used to render as `Kimchi Seasonality 2` through
+`Kimchi Seasonality 7` — a shape no real vault has. People write several notes
+circling the same idea from different angles, under different names, months apart;
+they do not number them.
+
+Each subject now carries a `variantTitles` list of distinct hand-written titles
+(`Winter Kimjang Batch Notes`, `Summer Quick Kimchi Methods`, `Fermentation Speed and
+Ambient Heat`), still recognisably about the same subject — that topical overlap is
+the point, since two judgment cases grade these siblings at 0 to make crowding cost
+score.
+
+**Variant 1 keeps the plain subject name.** Four judgment cases grade a base note
+(`Koji Cultivation`, `Variable Font Axes`, `Yield Curve Inversion`, `Hinting and
+Rasterization`) at 1 as a genuinely-related result, so those must survive. It also
+mirrors a real vault: one canonical note per topic, plus scattered related ones.
+
+The numbered scheme was not just unrealistic — it made crowding *too easy to detect*.
+A shared title stem is a free grouping signal, and `getNumericSuffixPenalty` in
+`lexicalScoring.ts` explicitly keys on a trailing number. Real near-duplicates are
+only discoverable through overlapping vocabulary, which is now the case here.
+
+The generator throws if a subject has no `variantTitles` entry or too few titles for
+the variant count `BULK_TARGET` implies, so this cannot silently regress to numbers.
+
+#### The `griechischer salat` case (false-cognate prefix match)
+
+Found by hand while spot-checking the vault, then added as a `cross-lingual` case.
+Measured hybrid:
+
+```
+"griechischer salat" → 1. Salt Tolerance Across Species      ← wrong
+                       2. Salt Type and Mineral Content      ← wrong
+                       3. Salt Percentage and Aging Duration ← wrong
+                       4. Cooking Mediterranean Recipes      ← correct (nDCG 0.431)
+"greek salad"        → 1. Cooking Mediterranean Recipes      ← correct
+```
+
+German `salat` prefix-matches English `salt`, and those three filler notes carry
+"Salt" in their **titles**, so they collect `calculateTitleBoost` on top of the term
+match. The right answer has no title match at all — `## Greek Salad (Horiatiki)` is a
+heading inside `Cooking Mediterranean Recipes.md` — so it competes on content score
+alone. The English query returning it at rank 1 isolates the cause to the cognate
+rather than to retrieval, and the lexical-only run reproduces the same three winners,
+so the misdirection is lexical and the hybrid fusion carries it through.
+
+Prefix matching is deliberate and already tuned (`prefix: shouldContentPrefixMatch`,
+`weights: { prefix: 0.3 }` in `MiniSearchService.ts`), with a documented history of
+exactly this class of problem — so this is not a switch to flip. The case measures
+whether the semantic half can recover a query the lexical half actively misdirects.
+Currently it cannot, hence `knownFailure`.
+
+Note the collision was *created* by giving the filler realistic titles: those notes
+were previously `brine-concentration-N.md`, with no "Salt" in the title and therefore
+no title boost. The rename did not introduce the prefix behaviour, it exposed it. The
+three notes are pinned in `REQUIRED_FILLER` so renaming them cannot make the case
+silently pass for the wrong reason.
+
+#### Collision clusters
+
+The layer is organised around **sense collisions** rather than topics. `block`,
+`context`, `run`, `sync`, `draft`, `ship`, `scale`, `capacity`, `charge`, `pitch`,
+`review`, `feedback` and `pipeline` each appear in at least two notes in *unrelated
+senses* — calendar block vs storage block, LLM context window vs interruption context,
+nightly run vs running a team.
+
+The generator asserts this. A cluster that drops below two members throws, because a
+single-member cluster silently tests nothing. That guard is not theoretical: it caught
+`context-switching-cost.md`, whose first draft described the phenomenon without ever
+using the word "context" ("the state I had in my head"), and `draft`, which had one
+real member once frontmatter was excluded from the count.
+
+Cases in these clusters were **measured before being written** — each query was run
+against the live ranker and kept only if the correct answer did *not* already win.
+Queries whose target matched by title ("the nightly run keeps failing" → rank 1) were
+discarded rather than banked as easy wins, since a case with no headroom cannot
+discriminate between models.
+
 #### Recording results per model
+
+##### 2026-08-18 — `omlx:harrier-oss-v1-0.6b-MLX-8bit`, current corpus
+
+The first run of the hybrid tier against the reworked corpus (Zettel layer, realistic
+filenames, realistic-use axes). Reproduced exactly across two consecutive runs — these
+are not jittery numbers.
+
+| tier | nDCG@10 | MRR | n |
+|---|---|---|---|
+| **core** (ratcheted) | **0.8821** | 0.8571 | 14 |
+| recency | 0.8155 | 0.7500 | 4 |
+| hard — all | 0.7459 | 0.7286 | 25 |
+| hard — gated (excl. 2 known failures) | 0.7491 | 0.7376 | 23 |
+| lexical-only baseline | 0.7121 | 0.6794 | 14 |
+
+Hard tier by axis, weakest first:
+
+| axis | nDCG@10 | MRR | n | reading |
+|---|---|---|---|---|
+| `cross-lingual` | **0.6077** | 0.5625 | 4 | weakest axis; see `griechischer salat` below |
+| `intent-frame` | **0.6274** | 0.6193 | 6 | the axis built for the reported failure — real headroom |
+| `multi-hop` | 0.7153 | 0.6250 | 2 | |
+| `size-bias` | 0.7540 | 0.6667 | 3 | unchanged from the previous corpus |
+| `polysemy` | 0.7544 | 0.8000 | 5 | |
+| `provenance` | 0.9871 | 1.0000 | 1 | **higher than predicted — see below** |
+| `dilution` | 1.0000 | 1.0000 | 2 | saturated |
+| `long-context` | 1.0000 | 1.0000 | 2 | saturated |
+
+Three things worth reading off this:
+
+**Core clears the 0.88 ratchet at 0.8821.** The layout consolidation and the filename
+rework cost nothing on the regression tier, despite the `Topics/Smart Cities/` path
+boost disappearing (a dip was anticipated at `BASELINE_MEAN_NDCG`; it did not
+materialise on the hybrid tier).
+
+**`intent-frame` and `cross-lingual` are the two weakest axes**, which is the intended
+outcome — those are the ones built to have headroom. The reported real-vault failure
+still reproduces on hybrid: `feedback i received` and `feedback i gave someone` return
+the *same* top note (`Feedback Scoring Service`), so the direction-sensitivity
+assertion fails. The semantic half does not fix it.
+
+**`provenance` scored 0.9871, not ~0 as predicted.** The prediction was that path and
+tag boosts cannot fire for conversational queries, and that part is correct — but the
+semantic half finds the note from title and body text regardless. The `knownFailure`
+annotation on that case is now questionable and should be re-examined rather than left
+labelling a passing case as broken.
+
+##### Earlier runs — different corpus, not comparable
 
 | Model | core nDCG@10 | hard: multi-hop | cross-lingual | long-context | dilution | size-bias | hard overall |
 |---|---|---|---|---|---|---|---|
 | `openrouter:qwen/qwen3-embedding-8b` | 0.9959 | 1.0000 | 0.6483 | 0.7057 | 1.0000 | 1.0000 | 0.8630 |
 | `omlx:harrier-oss-v1-0.6b-MLX-8bit` | 0.8889 | 0.8155 | 0.5253 | 0.9210 | 1.0000 | 0.7540 | 0.7759 |
+
+**Do not compare these rows against the block above.** They predate the Zettel layer,
+the flat-vault consolidation, the filename rework, and the three realistic-use axes —
+the corpus is materially different, so a difference between the two blocks says
+nothing about the ranker. `qwen3` has not been re-measured on the current corpus; when
+it is, it belongs in its own dated block.
+
+`provenance` has no column in the older table: it is a single `knownFailure` case and
+is excluded from the gated mean by design (see above).
 
 **Measured 2026-08-17, after the hybrid re-weighting** (`SEMANTIC_SOURCE_WEIGHT`
 0.60 → 0.78, see `src/search/finalSearchRanking.ts`). Three of the size-bias queries
@@ -380,6 +721,13 @@ contained extra non-corpus notes (`TaskNotes/`, `Large Notes/`, `Topics/`) that
 appear in several top-5 lists. The two remote models above were measured on the
 same corpus but not necessarily the same surrounding vault, so treat the core-tier
 gap as indicative rather than exact.
+
+> **Layout note (2026-08-18):** `Large Notes/` and `Topics/` no longer exist — they
+> were consolidated into the flat `Zettel/` namespace along with the loose root
+> notes (see *Vault layout* below). The paths above are kept as written because they
+> describe the vault as it was when those numbers were measured. Graded paths in
+> `relevanceJudgments.ts` were rewritten to match the new layout; the notes and their
+> content are unchanged, so the scores remain comparable.
 
 Fill the hard columns as each model is measured; the suite prints exactly these
 rows. The core column is the existing ratchet and should stay ~0.99 for every
