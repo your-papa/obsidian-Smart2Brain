@@ -38,7 +38,7 @@
 export type JudgmentTier = "core" | "hard" | "recency";
 
 /** The difficulty axis a `hard` case probes; used to group benchmark output. */
-export type HardAxis = "multi-hop" | "cross-lingual" | "long-context" | "dilution";
+export type HardAxis = "multi-hop" | "cross-lingual" | "long-context" | "dilution" | "size-bias";
 
 export interface RelevanceJudgment {
 	/** The query as a user would type it. */
@@ -408,6 +408,54 @@ export const RELEVANCE_JUDGMENTS: readonly RelevanceJudgment[] = [
 		grades: {
 			[`${C}/Typography/foundry-operations-log.md`]: 2,
 			[`${C}/Typography/hinting-and-rasterization.md`]: 1,
+		},
+	},
+
+	// ── size-bias ───────────────────────────────────────────────────────────
+	// The only axis where a many-chunk note is the WRONG answer.
+	//
+	// A note's semantic score is the max over its chunks, and the maximum of N
+	// samples grows with N whether or not any chunk is relevant — a 28-section
+	// note gets 28 draws at a high cosine where a 3-section note gets 3. Every
+	// other case in this file either rewards length or is neutral to it (graded
+	// targets skew long: median 8 sections against a corpus median of 4; ordinary
+	// distractors are all under 700 words). That one-sidedness is not academic:
+	// it made a measured chunk-count correction look purely negative, because the
+	// suite could see the cost of a length penalty and never its benefit.
+	//
+	// Each case pairs a SHORT note that actually answers the query against a LONG
+	// padded distractor that merely shares its vocabulary and out-chunks it. The
+	// generator asserts the distractors stay bigger than their targets.
+	//
+	// Sub-1.0 is the intended state here, as everywhere in this tier.
+	{
+		query: "can an octopus learn to open a sealed jar",
+		tier: "hard",
+		axis: "size-bias",
+		probes: "3-section answer note vs an 8-section husbandry log repeating 'octopus', 'sealed', 'jar', and 'lid' across every section. The distractor has ~2.7x the chunks and none of the answer.",
+		grades: {
+			[`${C}/Marine Biology/cephalopod-problem-solving.md`]: 2,
+			[`${C}/Marine Biology/octopus-husbandry-program-notes.md`]: 0,
+		},
+	},
+	{
+		query: "what makes very small text readable",
+		tier: "hard",
+		axis: "size-bias",
+		probes: "9-section answer note vs an 18-section print-production handbook saturated with 'small', 'text', 'readable', 'size'. Twice the chunks, no finding about legibility.",
+		grades: {
+			[`${C}/Typography/legibility-at-small-sizes.md`]: 2,
+			[`${C}/Typography/type-specimen-production-handbook.md`]: 0,
+		},
+	},
+	{
+		query: "how long before a rate change reaches borrowers",
+		tier: "hard",
+		axis: "size-bias",
+		probes: "the hardest of the three: a 28-section press-office archive out-chunks the 25-section answer note while repeating 'rate', 'change', and 'borrowers' throughout. Length alone must not decide it.",
+		grades: {
+			[`${C}/Monetary Policy/policy-rate-transmission-lag.md`]: 2,
+			[`${C}/Monetary Policy/central-bank-communications-archive.md`]: 0,
 		},
 	},
 ];

@@ -147,3 +147,76 @@ describe("aggregateChunksToNotes", () => {
 		expect(result[0].score).toBe(0.5);
 	});
 });
+
+describe("aggregateChunksToNotes chunk counts and size bias", () => {
+	/**
+	 * Deterministic pseudo-random chunk scores for a note of `count` sections
+	 * drawn around `mean`.
+	 *
+	 * Crucially each note's chunks are *independent draws*, so its best chunk is a
+	 * genuine max-of-N — that is the effect under test. A fixture that hands every
+	 * note the same maximum by construction exhibits no size bias at all and would
+	 * make these assertions vacuous.
+	 */
+	const chunks = (path: string, count: number, mean: number, seed = 1, sd = 0.06) => {
+		// Mulberry32: small, deterministic, and good enough to approximate a normal
+		// draw via the mean of several uniforms (central limit).
+		let state = seed * 0x9e3779b9;
+		const next = () => {
+			state = (state + 0x6d2b79f5) | 0;
+			let t = Math.imul(state ^ (state >>> 15), 1 | state);
+			t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+			return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+		};
+		return Array.from({ length: count }, () => {
+			const gauss = (next() + next() + next() + next() - 2) * Math.sqrt(3);
+			return { path, score: mean + sd * gauss };
+		});
+	};
+
+	it("documents the max-of-N size bias this module deliberately does not correct", () => {
+		// This is the bias itself, not a fix for it: two notes whose sections match
+		// the query equally well, one 10x longer. The long note gets 10x the draws
+		// at a high cosine, so its *best* chunk is systematically higher through
+		// nothing but size.
+		//
+		// The test asserts the bias EXISTS at the documented scale. Two corrections
+		// were built and both measured worse (see the module docs); the defect they
+		// targeted was fixed in the hybrid fusion weighting instead. Scoring here is
+		// deliberately left uncorrected. If a future change moves these numbers,
+		// that is a real behavioural change and should be understood rather than
+		// re-baselined.
+		const TRIALS = 200;
+		let longWins = 0;
+		let bestChunkGap = 0;
+		for (let seed = 1; seed <= TRIALS; seed++) {
+			const hits = [...chunks("short.md", 4, 0.5, seed), ...chunks("long.md", 40, 0.5, seed + 5000)];
+			const result = aggregateChunksToNotes(hits);
+			const long = result.find((r) => r.path === "long.md");
+			const short = result.find((r) => r.path === "short.md");
+			if (result[0].path === "long.md") longWins++;
+			bestChunkGap += (long?.bestChunkScore ?? 0) - (short?.bestChunkScore ?? 0);
+		}
+
+		// ~+0.055 of best-chunk score at this spread, matching the measured figure.
+		expect(bestChunkGap / TRIALS).toBeGreaterThan(0.05);
+		// At equal quality the longer note wins almost always — purely on size.
+		expect(longWins / TRIALS).toBeGreaterThan(0.9);
+	});
+
+	it("scores a note only from the chunks that were actually retrieved", () => {
+		// The aggregate depends on the retrieved hits and nothing else — no note
+		// size, no index-wide state. This is what keeps the module pure and is why
+		// a size-aware correction needed extra plumbing (since removed).
+		const hits = [
+			{ path: "a.md", score: 0.6 },
+			{ path: "a.md", score: 0.59 },
+		];
+
+		const note = aggregateChunksToNotes(hits)[0];
+
+		expect(note.matchingChunks).toBe(2);
+		expect(note.bestChunkScore).toBe(0.6);
+		expect(note.score).toBeGreaterThan(0.6);
+	});
+});

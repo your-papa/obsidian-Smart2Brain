@@ -304,11 +304,7 @@ describe("performSearch lexical startup behavior", () => {
 		const result = await tool.invoke({ query: "note" });
 		const parsed: SearchToolResultPayload = JSON.parse(String(result));
 
-		expect(parsed.results.map((entry) => entry.name)).toEqual([
-			"lexical-top",
-			"runner-up",
-			"recent-lower",
-		]);
+		expect(parsed.results.map((entry) => entry.name)).toEqual(["lexical-top", "runner-up", "recent-lower"]);
 	});
 
 	it("gives the fifth recent result enough lift to overtake the lexical leader", async () => {
@@ -599,6 +595,59 @@ describe("performSearch lexical startup behavior", () => {
 
 		expect(results[0]?.name).toBe("Alias Fixture");
 		expect(results[0]?.rankingDebug?.finalAliasBoost).toBeGreaterThan(0);
+	});
+
+	it("returns nothing when the lexical index matched nothing", async () => {
+		// Semantic search has no concept of "no answer" — it always returns its
+		// nearest neighbours, so a meaningless query yields a page of confident
+		// results. Lexical finding nothing means no indexed note contains any query
+		// term, which makes those neighbours noise.
+		mockWaitForVectorStore.mockResolvedValue(true);
+		mockWaitForLexicalSearch.mockResolvedValue(true);
+		mockGetVectorStoreService.mockReturnValue({
+			semanticSearch: vi.fn().mockResolvedValue([
+				{ path: "Notes/a.md", name: "A", score: 0.58 },
+				{ path: "Notes/b.md", name: "B", score: 0.57 },
+			]),
+		});
+		mockLexicalSearch.mockResolvedValue([]);
+
+		const results = await performSearch({} as App, "zzzznotarealword", "hybrid");
+
+		expect(results).toEqual([]);
+	});
+
+	it("keeps semantic results when lexical is unavailable rather than empty", async () => {
+		// The guard that makes the rule above safe: a lexical service that never
+		// initialised also returns nothing, but that says nothing about the query.
+		// Suppressing here would break hybrid search whenever the index is not
+		// ready yet.
+		mockWaitForVectorStore.mockResolvedValue(true);
+		mockWaitForLexicalSearch.mockResolvedValue(false);
+		mockGetVectorStoreService.mockReturnValue({
+			semanticSearch: vi.fn().mockResolvedValue([{ path: "Notes/real.md", name: "Real Answer", score: 0.81 }]),
+		});
+
+		const results = await performSearch({} as App, "anything", "hybrid");
+
+		expect(results.map((r) => r.name)).toContain("Real Answer");
+	});
+
+	it("keeps results when lexical matched even a single note", async () => {
+		// The gate is "lexical found nothing at all", not a score threshold — a
+		// single weak lexical hit is enough corroboration to trust the semantic leg.
+		mockWaitForVectorStore.mockResolvedValue(true);
+		mockWaitForLexicalSearch.mockResolvedValue(true);
+		mockGetVectorStoreService.mockReturnValue({
+			semanticSearch: vi
+				.fn()
+				.mockResolvedValue([{ path: "Notes/semantic.md", name: "Semantic Hit", score: 0.7 }]),
+		});
+		mockLexicalSearch.mockResolvedValue([{ path: "Notes/weak.md", name: "Weak Hit", score: 0.4 }]);
+
+		const results = await performSearch({} as App, "borderline", "hybrid");
+
+		expect(results.length).toBeGreaterThan(0);
 	});
 
 	it("prefers recent alias-token matches over plain title-prefix matches in lexical ranking", async () => {

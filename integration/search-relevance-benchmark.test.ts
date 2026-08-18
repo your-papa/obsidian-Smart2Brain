@@ -57,9 +57,48 @@ const RESULT_LIMIT = 25;
  * **Raise these whenever a change improves the mean** — the test prints the new
  * value when it clears the bar. Lowering them is a deliberate act that should
  * come with an explanation of why the regression is acceptable.
+ *
+ * **Lowered 2026-08-17, 0.99 → 0.82, when the corpus gained the `size-bias`
+ * distractors.** This is not a tolerated ranking regression — the ranker is
+ * byte-for-byte the same code that scored 0.9934, and every case it passed before
+ * it still passes. What changed is the corpus: four long padded notes were added
+ * that share a query's vocabulary without answering it, and three `core` queries
+ * are restated verbatim by the new `size-bias` axis, so those queries now have a
+ * long wrong answer to beat where previously they had none.
+ *
+ * The honest reading is that the old 0.99 was measuring a corpus in which no
+ * many-chunk note was ever the wrong answer. Measured after the change:
+ * `qwen3-embedding-8b` 0.8871, `harrier-oss-v1-0.6b` 0.8300. The floor is set just
+ * under the weaker of the two.
+ *
+ * **Raised back to 0.88 (2026-08-17)** once the size-bias defect was fixed by
+ * re-weighting the hybrid fusion (`SEMANTIC_SOURCE_WEIGHT` 0.60 → 0.78 in
+ * `finalSearchRanking.ts`). The padded distractors no longer take rank 1
+ * anywhere. Measured after the fix: `qwen3-embedding-8b` 0.9959 / MRR 1.0000,
+ * `harrier-oss-v1-0.6b` 0.8889 / MRR 0.8571. Floor set just under the weaker.
+ *
+ * The gap between the two models is now the honest signal — `harrier` still loses
+ * the padded-note contest on some queries where `qwen3` wins it outright.
  */
-const BASELINE_MEAN_NDCG = 0.99;
-const BASELINE_MEAN_RR = 1.0;
+const BASELINE_MEAN_NDCG = 0.88;
+const BASELINE_MEAN_RR = 0.85;
+
+/**
+ * Separate floor for the `recency` tier, which cannot share the core one.
+ *
+ * The tier is only four cases, and three of them restate queries that the
+ * `size-bias` axis also targets. A padded distractor beating the real answer
+ * therefore moves this mean by a quarter each time, where the same defect is
+ * diluted across fourteen core cases. Sharing a constant would make the recency
+ * tier fail for a size-bias reason, hiding whichever problem was not the cause.
+ *
+ * Measured after the hybrid re-weighting fixed the size-bias defect: `harrier`
+ * 0.8155, `qwen3-embedding-8b` 1.0000 (both up from 0.7232 / 0.8155). Set just
+ * under the weaker. The per-case `> 0.5` guard below is what actually protects
+ * recency behaviour — it still catches a recent note outranking the right
+ * answer, which is what this tier exists for.
+ */
+const RECENCY_FLOOR_MEAN_NDCG = 0.8;
 
 /**
  * Floor for the `hard` tier — the model-discrimination cases.
@@ -411,6 +450,50 @@ describe("search relevance benchmark", () => {
 		});
 
 		/**
+		 * Precision floor: a query that matches nothing must return nothing.
+		 *
+		 * Graded relevance cannot express this — nDCG needs a target to rank, and
+		 * these queries have none. The measurement is a result *count*, so it lives
+		 * in its own test rather than distorting a tier's mean.
+		 *
+		 * The gap it guards: semantic search has no notion of "no answer". Every
+		 * query embeds to *some* vector, and the nearest neighbours come back with
+		 * cosines in the same band real matches occupy — measured 0.515-0.597 for
+		 * gibberish against 0.665-0.700 for genuine hits. Lexical correctly returns
+		 * zero for these, so the fusion is what turns "nothing matched" into three
+		 * confident-looking results.
+		 *
+		 * Note the bands *overlap*, so a fixed cosine cutoff cannot separate them —
+		 * `similarityThreshold` defaults to 0.7 in code, which would also discard
+		 * real answers. Any fix has to be relative (how far below the top hit) or
+		 * corroborative (does the lexical leg agree), not an absolute constant.
+		 */
+		it("returns nothing for queries that match nothing", async () => {
+			// Strings with no meaning in any indexed note. Kept obviously synthetic:
+			// a real-word query that merely has no answer would be a recall question,
+			// which is a different (and much harder) judgement call.
+			const NONSENSE = ["zzzznotarealword", "qqxjvbwm", "asdfghjkl zxcvbnm"];
+
+			const globalKey = `__s2bBenchNoMatch_${Date.now()}`;
+			const raw = await pollEval(
+				`(function(){ window.${globalKey} = "pending"; Promise.all(${JSON.stringify(NONSENSE)}.map(function(q){ return ${PLUGIN}.searchNotesForBenchmark(q, "hybrid", ${RESULT_LIMIT}).then(function(r){ return r.length; }); })).then(function(all){ window.${globalKey} = JSON.stringify(all); }).catch(function(e){ window.${globalKey} = JSON.stringify({error: String(e && e.message || e)}); }); return "started"; })()`,
+				globalKey,
+				{ timeoutMs: 120_000 },
+			);
+
+			const counts = JSON.parse(raw) as number[] | { error: string };
+			if (!Array.isArray(counts)) throw new Error(`no-match probe failed: ${counts.error}`);
+
+			const lines = ["", "──────── NO-MATCH (precision floor) ────────"];
+			NONSENSE.forEach((q, i) => lines.push(`${String(counts[i]).padStart(3)} results  ${JSON.stringify(q)}`));
+			console.log(lines.join("\n"));
+
+			for (const [index, count] of counts.entries()) {
+				expect(count, `"${NONSENSE[index]}" should match nothing`).toBe(0);
+			}
+		});
+
+		/**
 		 * The model-discrimination tier.
 		 *
 		 * Reported per axis, because the aggregate is not the useful number: a model
@@ -472,7 +555,7 @@ describe("search relevance benchmark", () => {
 
 			const meanNdcg = mean(outcomes.map((o) => o.ndcg));
 			expect(meanNdcg, `recency-tier mean nDCG@${NDCG_K} regressed`).toBeGreaterThanOrEqual(
-				BASELINE_MEAN_NDCG - BASELINE_TOLERANCE,
+				RECENCY_FLOOR_MEAN_NDCG - BASELINE_TOLERANCE,
 			);
 
 			// A single case collapsing means one recent note now outranks the right

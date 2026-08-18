@@ -74,6 +74,40 @@ export interface AggregatedNote {
  * scoring 0.72. Long notes get more chunks sub-linearly in their length (100x the
  * bytes yields only ~11x the chunks), so this bias grows with vault heterogeneity.
  *
+ * ## Known residual: max-of-N size bias (measured, deliberately not corrected)
+ *
+ * Support is not the only way chunk count leaks into a note's score. The score
+ * is anchored on the note's *best* chunk, and the maximum of N samples grows
+ * with N whether or not any of them is relevant: a note split into 40 chunks
+ * gets 40 draws at producing a high cosine, while a 4-chunk note gets 4.
+ * Simulated against this function, an irrelevant 40-chunk note at per-chunk mean
+ * 0.45 beats a relevant 4-chunk note at mean 0.55 in ~53% of trials — and still
+ * wins ~27% of the time with the support term removed entirely, which is what
+ * identifies `best` itself, not support, as the source.
+ *
+ * **Two corrections were built and measured here; both made retrieval worse.**
+ * Do not re-attempt either without new evidence:
+ *
+ *  - Subtracting `0.5 * spread * ln(totalChunks)` — the expected-max baseline for
+ *    a note's own size, calibrated per query so it stays model-independent. Cost
+ *    0.0135 hard-tier nDCG@10 on one embedding model and 0.0529 on another, and
+ *    its one apparent gain (`long-context`) changed sign between them. A penalty
+ *    keyed on note *size* cannot tell "long because padded" from "long because
+ *    thorough", and real targets are often the long notes. Getting the totals
+ *    also meant a per-path count map maintained across every store mutation,
+ *    since over-fetch truncates the retrieved count.
+ *  - Shrinking the best chunk toward the note's own median: *worse than doing
+ *    nothing* (41.3% vs 49.2% on the target case), because a genuinely relevant
+ *    short note also has an outlier best chunk.
+ *
+ * The defect those attempts targeted turned out to be mostly lexical rather than
+ * semantic. A padded note wins by matching *more distinct query terms* — BM25
+ * rewards breadth, and length buys vocabulary coverage — not by drawing a lucky
+ * maximum. Re-weighting the hybrid fusion toward semantic fixed it outright
+ * (`SEMANTIC_SOURCE_WEIGHT` in `finalSearchRanking.ts`), taking the benchmark's
+ * `size-bias` axis from 0.6309 to 1.0000 on the stronger model. Reach for that
+ * knob before touching this one.
+ *
  * @param hits Chunk hits sorted by score descending (as returned by the store).
  * @returns Notes sorted by aggregate score descending.
  */
