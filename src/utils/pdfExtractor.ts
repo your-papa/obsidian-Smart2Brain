@@ -1,6 +1,38 @@
 import { loadPdfJs } from "obsidian";
 import { PDFDocument } from "pdf-lib";
 
+/**
+ * pdfjs `VerbosityLevel.ERRORS`. Suppresses per-page `WARNING`-level noise from
+ * the worker (e.g. "TT: undefined function: 32" — unimplemented TrueType font
+ * hinting opcodes) while still surfacing real errors. Font hinting is irrelevant
+ * to us: we only pull text via `getTextContent()`, never render.
+ */
+const PDFJS_VERBOSITY_ERRORS = 0;
+
+/**
+ * Resolves the URLs pdfjs needs for standard font data and CMaps.
+ *
+ * Without `standardFontDataUrl`, pdfjs can't load the 14 standard fonts and
+ * throws `UnknownErrorException` per non-embedded font, falling into expensive
+ * glyph recovery ("Required `glyf` table is not found -- trying to recover").
+ * Repeated across every page of every PDF in a full index, that font-recovery
+ * work is heavy enough to OOM the shared worker and crash the renderer.
+ *
+ * Obsidian ships these assets alongside the pdfjs worker and points
+ * `GlobalWorkerOptions.workerSrc` at it (e.g. "/lib/pdfjs/pdf.worker.min.mjs").
+ * We derive the sibling `standard_fonts/` and `cmaps/` dirs from that path
+ * rather than hardcoding, so the fix survives a change to Obsidian's layout.
+ * If `workerSrc` is unset, return nothing and let pdfjs use its own defaults.
+ */
+function pdfAssetUrls(pdfjsLib: {
+	GlobalWorkerOptions?: { workerSrc?: string };
+}): { standardFontDataUrl?: string; cMapUrl?: string } {
+	const workerSrc = pdfjsLib?.GlobalWorkerOptions?.workerSrc;
+	if (!workerSrc) return {};
+	const base = workerSrc.replace(/[^/]*$/, ""); // strip the worker filename → ".../lib/pdfjs/"
+	return { standardFontDataUrl: `${base}standard_fonts/`, cMapUrl: `${base}cmaps/` };
+}
+
 export interface PdfExtractResult {
 	text: string;
 	totalPages: number;
@@ -45,15 +77,27 @@ export function joinPdfTextItems(items: PdfTextItem[]): string {
  */
 export async function extractTextFromPdf(data: Uint8Array): Promise<PdfExtractResult> {
 	const pdfjsLib = await loadPdfJs();
-	const pdf = await pdfjsLib.getDocument({ data }).promise;
-	const totalPages = pdf.numPages;
-	const textParts: string[] = [];
-	for (let i = 1; i <= totalPages; i++) {
-		const page = await pdf.getPage(i);
-		const content = await page.getTextContent();
-		textParts.push(joinPdfTextItems(content.items));
+	const pdf = await pdfjsLib.getDocument({
+		data,
+		verbosity: PDFJS_VERBOSITY_ERRORS,
+		...pdfAssetUrls(pdfjsLib),
+		cMapPacked: true,
+	}).promise;
+	try {
+		const totalPages = pdf.numPages;
+		const textParts: string[] = [];
+		for (let i = 1; i <= totalPages; i++) {
+			const page = await pdf.getPage(i);
+			const content = await page.getTextContent();
+			textParts.push(joinPdfTextItems(content.items));
+		}
+		return { text: textParts.filter((part) => part.length > 0).join("\n\n"), totalPages };
+	} finally {
+		// Release worker-side memory (font caches, page objects) before the next
+		// PDF. Without this, a full-vault index accumulates every document until GC
+		// and OOMs the shared worker.
+		await pdf.destroy();
 	}
-	return { text: textParts.filter((part) => part.length > 0).join("\n\n"), totalPages };
 }
 
 export interface PdfPageExtractResult {
@@ -70,16 +114,25 @@ export interface PdfPageExtractResult {
  */
 export async function extractTextFromPdfPages(data: Uint8Array, pages: number[]): Promise<PdfPageExtractResult> {
 	const pdfjsLib = await loadPdfJs();
-	const pdf = await pdfjsLib.getDocument({ data }).promise;
-	const totalPages = pdf.numPages;
-	const textParts: string[] = [];
-	for (const pageNum of pages) {
-		if (pageNum < 1 || pageNum > totalPages) continue;
-		const page = await pdf.getPage(pageNum);
-		const content = await page.getTextContent();
-		textParts.push(joinPdfTextItems(content.items));
+	const pdf = await pdfjsLib.getDocument({
+		data,
+		verbosity: PDFJS_VERBOSITY_ERRORS,
+		...pdfAssetUrls(pdfjsLib),
+		cMapPacked: true,
+	}).promise;
+	try {
+		const totalPages = pdf.numPages;
+		const textParts: string[] = [];
+		for (const pageNum of pages) {
+			if (pageNum < 1 || pageNum > totalPages) continue;
+			const page = await pdf.getPage(pageNum);
+			const content = await page.getTextContent();
+			textParts.push(joinPdfTextItems(content.items));
+		}
+		return { text: textParts.filter((part) => part.length > 0).join("\n\n"), totalPages };
+	} finally {
+		await pdf.destroy();
 	}
-	return { text: textParts.filter((part) => part.length > 0).join("\n\n"), totalPages };
 }
 
 /**
