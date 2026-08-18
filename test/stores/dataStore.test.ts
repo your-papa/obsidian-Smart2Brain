@@ -447,9 +447,7 @@ describe("PluginDataStore – Chat Models", () => {
 	});
 
 	it("should throw when updating non-existent model", () => {
-		expect(() => store.updateChatModel("openai", "nonexistent", {} as never)).toThrow(
-			SetChatModelError,
-		);
+		expect(() => store.updateChatModel("openai", "nonexistent", {} as never)).toThrow(SetChatModelError);
 	});
 
 	it("should delete a chat model", () => {
@@ -683,9 +681,7 @@ describe("PluginDataStore – Embed Models", () => {
 
 	it("should throw when adding duplicate embed model", () => {
 		store.addEmbedModel("openrouter", "dupe-model", {} as never);
-		expect(() => store.addEmbedModel("openrouter", "dupe-model", {} as never)).toThrow(
-			AddEmbedModelError,
-		);
+		expect(() => store.addEmbedModel("openrouter", "dupe-model", {} as never)).toThrow(AddEmbedModelError);
 	});
 
 	it("should delete an embed model", () => {

@@ -157,9 +157,7 @@ describe("baseMessageToAssistantMessage", () => {
 	it("should apply tool outputs from tool messages", () => {
 		const msg = aiMsgWithToolCalls("", [{ id: "tc-1", name: "search_notes", args: { query: "test" } }]);
 
-		const toolOutputs = new Map([
-			["tc-1", { content: "Found 3 results", status: "completed" as const }],
-		]);
+		const toolOutputs = new Map([["tc-1", { content: "Found 3 results", status: "completed" as const }]]);
 
 		const result = baseMessageToAssistantMessage(msg, toolOutputs);
 
@@ -170,9 +168,7 @@ describe("baseMessageToAssistantMessage", () => {
 	it("should mark failed tool outputs", () => {
 		const msg = aiMsgWithToolCalls("", [{ id: "tc-1", name: "read_content", args: { path: "missing.md" } }]);
 
-		const toolOutputs = new Map([
-			["tc-1", { content: "File not found", status: "failed" as const }],
-		]);
+		const toolOutputs = new Map([["tc-1", { content: "File not found", status: "failed" as const }]]);
 
 		const result = baseMessageToAssistantMessage(msg, toolOutputs);
 
@@ -244,12 +240,7 @@ describe("baseMessagesToMessagePairs", () => {
 	});
 
 	it("should handle multi-turn conversation", () => {
-		const msgs = [
-			humanMsg("Hello"),
-			aiMsg("Hi there!"),
-			humanMsg("How are you?"),
-			aiMsg("I'm doing well!"),
-		];
+		const msgs = [humanMsg("Hello"), aiMsg("Hi there!"), humanMsg("How are you?"), aiMsg("I'm doing well!")];
 		const pairs = baseMessagesToMessagePairs(msgs);
 
 		expect(pairs).toHaveLength(2);
@@ -262,9 +253,7 @@ describe("baseMessagesToMessagePairs", () => {
 	it("should merge consecutive AI messages (tool call + final response)", () => {
 		const msgs = [
 			humanMsg("Search for notes about AI"),
-			aiMsgWithToolCalls("Let me search", [
-				{ id: "tc-1", name: "search_notes", args: { query: "AI" } },
-			]),
+			aiMsgWithToolCalls("Let me search", [{ id: "tc-1", name: "search_notes", args: { query: "AI" } }]),
 			toolMsg("Found: AI.md, ML.md", "tc-1"),
 			aiMsg("I found two relevant notes: AI.md and ML.md"),
 		];
@@ -366,7 +355,14 @@ describe("baseMessagesToMessagePairs", () => {
 			id: "maintenance-1",
 			additional_kwargs: { lc_source: "manual_summarization" },
 		});
-		const msgs = [humanMsg("Hello"), aiMsg("Hi"), maintenance, aiMsg("Context compacted."), humanMsg("Continue"), aiMsg("Done")];
+		const msgs = [
+			humanMsg("Hello"),
+			aiMsg("Hi"),
+			maintenance,
+			aiMsg("Context compacted."),
+			humanMsg("Continue"),
+			aiMsg("Done"),
+		];
 		const pairs = baseMessagesToMessagePairs(msgs);
 
 		expect(pairs).toHaveLength(3);
@@ -389,7 +385,14 @@ describe("baseMessagesToMessagePairs", () => {
 			id: "summary-2",
 			additional_kwargs: { lc_source: "manual_summarization" },
 		});
-		const msgs = [humanMsg("Hello"), aiMsg("Hi"), autoSummary, aiMsg("Summary A"), manualSummary, aiMsg("Summary B")];
+		const msgs = [
+			humanMsg("Hello"),
+			aiMsg("Hi"),
+			autoSummary,
+			aiMsg("Summary A"),
+			manualSummary,
+			aiMsg("Summary B"),
+		];
 		const pairs = baseMessagesToMessagePairs(msgs);
 
 		expect(pairs).toHaveLength(2);
@@ -399,12 +402,7 @@ describe("baseMessagesToMessagePairs", () => {
 	});
 
 	it("should assign unique UUIDv7 IDs to each pair", () => {
-		const msgs = [
-			humanMsg("A"),
-			aiMsg("B"),
-			humanMsg("C"),
-			aiMsg("D"),
-		];
+		const msgs = [humanMsg("A"), aiMsg("B"), humanMsg("C"), aiMsg("D")];
 		const pairs = baseMessagesToMessagePairs(msgs);
 
 		const ids = pairs.map((p) => p.id);
@@ -654,8 +652,8 @@ describe("baseMessagesToMessagePairs — subagent AIMessage attribution", () => 
 
 		const sub1 = toolCalls!.find((tc) => tc.id === "search-D1");
 		const sub2 = toolCalls!.find((tc) => tc.id === "search-E1");
-		expect(sub1?.parentToolCallId).toBe(taskIdD);  // FIFO: D first
-		expect(sub2?.parentToolCallId).toBe(taskIdE);  // FIFO: E second (D already has 1 child)
+		expect(sub1?.parentToolCallId).toBe(taskIdD); // FIFO: D first
+		expect(sub2?.parentToolCallId).toBe(taskIdE); // FIFO: E second (D already has 1 child)
 	});
 
 	it("does not attribute final-answer AIMessage (no tool calls) as subagent", () => {
@@ -706,11 +704,23 @@ describe("baseMessagesToMessagePairs — subagent AIMessage attribution", () => 
 			new ToolMessage({ content: "B done", tool_call_id: taskIdB }),
 			new AIMessage({ id: "seq-parent-3", content: "", tool_calls: [{ id: taskIdC, name: "task", args: {} }] }),
 			new ToolMessage({ content: "C done", tool_call_id: taskIdC }),
-			new AIMessage({ id: "sub-seq-1", content: "", tool_calls: [{ id: "search-seq-1", name: "search_notes", args: {} }] }),
+			new AIMessage({
+				id: "sub-seq-1",
+				content: "",
+				tool_calls: [{ id: "search-seq-1", name: "search_notes", args: {} }],
+			}),
 			new ToolMessage({ content: "r1", tool_call_id: "search-seq-1" }),
-			new AIMessage({ id: "sub-seq-2", content: "", tool_calls: [{ id: "list-seq-1", name: "list_directory", args: {} }] }),
+			new AIMessage({
+				id: "sub-seq-2",
+				content: "",
+				tool_calls: [{ id: "list-seq-1", name: "list_directory", args: {} }],
+			}),
 			new ToolMessage({ content: "r2", tool_call_id: "list-seq-1" }),
-			new AIMessage({ id: "sub-seq-3", content: "", tool_calls: [{ id: "search-seq-2", name: "search_notes", args: {} }] }),
+			new AIMessage({
+				id: "sub-seq-3",
+				content: "",
+				tool_calls: [{ id: "search-seq-2", name: "search_notes", args: {} }],
+			}),
 			new ToolMessage({ content: "r3", tool_call_id: "search-seq-2" }),
 			new AIMessage({ id: "seq-final", content: "Sequential done." }),
 		];
@@ -755,9 +765,7 @@ describe("baseMessageToAssistantMessage — preamble extraction from content blo
 	it("assigns empty preamble when no text precedes a tool_use block", () => {
 		const msg = new AIMessage({
 			id: "ai-preamble-2",
-			content: [
-				{ type: "tool_use", id: "call-2", name: "list_directory", input: {} },
-			],
+			content: [{ type: "tool_use", id: "call-2", name: "list_directory", input: {} }],
 			tool_calls: [{ id: "call-2", name: "list_directory", args: {} }],
 		});
 

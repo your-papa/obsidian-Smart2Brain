@@ -106,7 +106,9 @@ describe.skipIf(!providerAvailable)("multi-turn conversation", () => {
 		return summary as NonNullable<ReturnType<typeof getPersistedChatSummary>>;
 	}
 
-	async function waitForTitledFreshChatSummary(): Promise<NonNullable<ReturnType<typeof getLatestPersistedChatSummary>>> {
+	async function waitForTitledFreshChatSummary(): Promise<
+		NonNullable<ReturnType<typeof getLatestPersistedChatSummary>>
+	> {
 		await waitForCondition(
 			() => {
 				const summary = getLatestPersistedChatSummary();
@@ -128,9 +130,8 @@ describe.skipIf(!providerAvailable)("multi-turn conversation", () => {
 			(candidate) => candidate.humanContents.length >= 1 && candidate.assistantContents.length >= 1,
 			"first persisted UI conversation turn",
 		);
-		const summary = initialSummary.threadId === "Chats/New Chat.chat"
-			? await waitForTitledFreshChatSummary()
-			: initialSummary;
+		const summary =
+			initialSummary.threadId === "Chats/New Chat.chat" ? await waitForTitledFreshChatSummary() : initialSummary;
 
 		expect(summary.assistantContents.at(-1)?.length ?? 0).toBeGreaterThan(0);
 		threadId = summary.threadId;
@@ -145,9 +146,10 @@ describe.skipIf(!providerAvailable)("multi-turn conversation", () => {
 			threadFilePath as string,
 			threadId as string,
 			"What word did I ask you to remember?",
-			(candidate) => candidate.humanContents.length >= 2
-				&& candidate.assistantContents.length >= 2
-				&& (candidate.assistantContents.at(-1) ?? "").toUpperCase().includes("PINEAPPLE"),
+			(candidate) =>
+				candidate.humanContents.length >= 2 &&
+				candidate.assistantContents.length >= 2 &&
+				(candidate.assistantContents.at(-1) ?? "").toUpperCase().includes("PINEAPPLE"),
 			"follow-up UI conversation recall",
 		);
 
@@ -193,9 +195,10 @@ describe.skipIf(!providerAvailable)("multi-turn conversation", () => {
 				(candidate) => candidate.humanContents.length >= 1 && candidate.assistantContents.length >= 1,
 				"first summarization UI turn",
 			);
-			const first = initialSummary.threadId === "Chats/New Chat.chat"
-				? await waitForTitledFreshChatSummary()
-				: initialSummary;
+			const first =
+				initialSummary.threadId === "Chats/New Chat.chat"
+					? await waitForTitledFreshChatSummary()
+					: initialSummary;
 
 			summaryThreadId = first.threadId;
 			summaryThreadFilePath = first.filePath;
@@ -207,7 +210,8 @@ describe.skipIf(!providerAvailable)("multi-turn conversation", () => {
 					summaryThreadFilePath as string,
 					summaryThreadId as string,
 					`Keep this response short. ${filler}`,
-					(candidate) => candidate.humanContents.length >= i + 2 && candidate.assistantContents.length >= i + 2,
+					(candidate) =>
+						candidate.humanContents.length >= i + 2 && candidate.assistantContents.length >= i + 2,
 					`summary compaction loop turn ${i + 1}`,
 				);
 				expect(result.assistantContents.at(-1)?.length ?? 0).toBeGreaterThan(0);
@@ -219,9 +223,10 @@ describe.skipIf(!providerAvailable)("multi-turn conversation", () => {
 				summaryThreadFilePath as string,
 				summaryThreadId as string,
 				"What codeword did I ask you to remember at the start? Reply with the single word only.",
-				(candidate) => candidate.humanContents.length >= 6
-					&& candidate.assistantContents.length >= 6
-					&& (candidate.assistantContents.at(-1) ?? "").toUpperCase().includes("STARFRUIT"),
+				(candidate) =>
+					candidate.humanContents.length >= 6 &&
+					candidate.assistantContents.length >= 6 &&
+					(candidate.assistantContents.at(-1) ?? "").toUpperCase().includes("STARFRUIT"),
 				"summary recall after UI turns",
 			);
 

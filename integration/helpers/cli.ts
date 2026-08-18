@@ -59,15 +59,19 @@ function getLatestCheckpointRecord(chat: PersistedChatFile): PersistedCheckpoint
 	const records = Object.values(chat.checkpoints ?? {});
 	if (records.length === 0) return null;
 
-	return records.sort((left, right) => {
-		const leftStep = left.metadata?.step ?? Number.MIN_SAFE_INTEGER;
-		const rightStep = right.metadata?.step ?? Number.MIN_SAFE_INTEGER;
-		if (leftStep !== rightStep) return leftStep - rightStep;
+	return (
+		records
+			.sort((left, right) => {
+				const leftStep = left.metadata?.step ?? Number.MIN_SAFE_INTEGER;
+				const rightStep = right.metadata?.step ?? Number.MIN_SAFE_INTEGER;
+				if (leftStep !== rightStep) return leftStep - rightStep;
 
-		const leftTs = Date.parse(left.checkpoint?.ts ?? "");
-		const rightTs = Date.parse(right.checkpoint?.ts ?? "");
-		return leftTs - rightTs;
-	}).at(-1) ?? null;
+				const leftTs = Date.parse(left.checkpoint?.ts ?? "");
+				const rightTs = Date.parse(right.checkpoint?.ts ?? "");
+				return leftTs - rightTs;
+			})
+			.at(-1) ?? null
+	);
 }
 
 function stringifyMessageContent(content: unknown): string {
@@ -206,9 +210,12 @@ export function getErrors(): string {
 	const result = obsidian("dev:errors", { ignoreError: true });
 	if (result === "No errors captured.") return "";
 	// Filter out benign ResizeObserver loop notifications
-	const lines = result.split("\n").filter(
-		(line) => line.trim() !== "" && !line.includes("ResizeObserver loop completed with undelivered notifications"),
-	);
+	const lines = result
+		.split("\n")
+		.filter(
+			(line) =>
+				line.trim() !== "" && !line.includes("ResizeObserver loop completed with undelivered notifications"),
+		);
 	return lines.join("\n").trim();
 }
 
@@ -272,14 +279,12 @@ export function closeAllModals({ maxPasses = 24 } = {}): void {
 			return "no-close-target";
 		})()`);
 
-		obsidian(
-			`dev:cdp method=Input.dispatchKeyEvent params='{"type":"keyDown","key":"Escape","code":"Escape"}'`,
-			{ ignoreError: true },
-		);
-		obsidian(
-			`dev:cdp method=Input.dispatchKeyEvent params='{"type":"keyUp","key":"Escape","code":"Escape"}'`,
-			{ ignoreError: true },
-		);
+		obsidian(`dev:cdp method=Input.dispatchKeyEvent params='{"type":"keyDown","key":"Escape","code":"Escape"}'`, {
+			ignoreError: true,
+		});
+		obsidian(`dev:cdp method=Input.dispatchKeyEvent params='{"type":"keyUp","key":"Escape","code":"Escape"}'`, {
+			ignoreError: true,
+		});
 	}
 }
 
@@ -372,10 +377,7 @@ export function sleep(ms: number): Promise<void> {
  * Poll until a CSS selector matches at least one element in Obsidian DOM.
  * Throws if not found within timeoutMs.
  */
-export async function waitForSelector(
-	selector: string,
-	{ timeoutMs = 15_000, intervalMs = 500 } = {},
-): Promise<void> {
+export async function waitForSelector(selector: string, { timeoutMs = 15_000, intervalMs = 500 } = {}): Promise<void> {
 	const deadline = Date.now() + timeoutMs;
 	while (Date.now() < deadline) {
 		if (domCount(selector) > 0) return;
@@ -409,9 +411,7 @@ export const PLUGIN = 'app.plugins.plugins["smart-second-brain"]';
  * Returns true if the plugin has at least one configured provider.
  */
 export function isProviderConfigured(): boolean {
-	const result = obsidianEval(
-		`${PLUGIN}.pluginData.getConfiguredProviders().length > 0`,
-	);
+	const result = obsidianEval(`${PLUGIN}.pluginData.getConfiguredProviders().length > 0`);
 	return result.includes("true");
 }
 
@@ -422,9 +422,7 @@ export function isProviderConfigured(): boolean {
 export async function waitForStandaloneMiniSearch({ timeoutMs = 30_000, intervalMs = 500 } = {}): Promise<void> {
 	await waitForCondition(
 		() => {
-			const raw = obsidianEval(
-				`${PLUGIN}.lexicalSearchService?.documentCount ?? 0`,
-			);
+			const raw = obsidianEval(`${PLUGIN}.lexicalSearchService?.documentCount ?? 0`);
 			const value = raw.startsWith("=> ") ? raw.slice(3) : raw;
 			return Number.parseInt(value, 10) > 0;
 		},

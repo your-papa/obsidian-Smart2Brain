@@ -1,10 +1,4 @@
-import {
-	clearBuffers,
-	disablePlugin,
-	enablePlugin,
-	isPluginEnabled,
-	sleep,
-} from "./helpers/cli.ts";
+import { clearBuffers, disablePlugin, enablePlugin, isPluginEnabled, sleep } from "./helpers/cli.ts";
 
 /**
  * Runs once before all integration test files.

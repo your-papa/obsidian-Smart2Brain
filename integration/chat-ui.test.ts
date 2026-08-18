@@ -73,9 +73,7 @@ describe("chat view UI", () => {
 	});
 
 	it("should display a context usage indicator in the input area", () => {
-		const contextIndicators = domCount(
-			'[aria-label="Open context token distribution"][title*="Context usage"]',
-		);
+		const contextIndicators = domCount('[aria-label="Open context token distribution"][title*="Context usage"]');
 		expect(contextIndicators).toBeGreaterThanOrEqual(1);
 	});
 

@@ -16,7 +16,7 @@ import {
 	waitForCondition,
 	waitForSelector,
 } from "./helpers/cli.ts";
-import type { } from "vitest";
+import type {} from "vitest";
 
 describe(".chat file handling", () => {
 	beforeAll(async () => {

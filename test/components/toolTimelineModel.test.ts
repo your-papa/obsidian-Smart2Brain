@@ -199,11 +199,7 @@ describe("groupStepTools — merging consecutive same-tool calls", () => {
 	});
 
 	it("merges consecutive same-tool calls into one group", () => {
-		const groups = groupStepTools([
-			call("1", "grep_notes"),
-			call("2", "grep_notes"),
-			call("3", "grep_notes"),
-		]);
+		const groups = groupStepTools([call("1", "grep_notes"), call("2", "grep_notes"), call("3", "grep_notes")]);
 		expect(groups).toHaveLength(1);
 		expect(groups[0].merged).toBe(true);
 		expect(groups[0].calls).toHaveLength(3);

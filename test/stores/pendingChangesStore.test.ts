@@ -176,11 +176,7 @@ describe("PendingChangesStore", () => {
 
 	describe("rejectChange", () => {
 		it("should reject a pending change", () => {
-			const [id] = store.addChanges(
-				[{ type: "create", path: "a.md", content: "A" }],
-				"tc-1",
-				"thread-1",
-			);
+			const [id] = store.addChanges([{ type: "create", path: "a.md", content: "A" }], "tc-1", "thread-1");
 
 			store.rejectChange(id);
 
@@ -189,11 +185,7 @@ describe("PendingChangesStore", () => {
 		});
 
 		it("should be a no-op for already-rejected changes", () => {
-			const [id] = store.addChanges(
-				[{ type: "create", path: "a.md", content: "A" }],
-				"tc-1",
-				"thread-1",
-			);
+			const [id] = store.addChanges([{ type: "create", path: "a.md", content: "A" }], "tc-1", "thread-1");
 
 			store.rejectChange(id);
 			store.rejectChange(id); // should not throw
@@ -226,12 +218,14 @@ describe("PendingChangesStore", () => {
 			(plugin.app.vault.read as ReturnType<typeof vi.fn>).mockResolvedValue("original content");
 
 			const [id] = store.addChanges(
-				[{
-					type: "update",
-					path: "note.md",
-					originalContent: "original content",
-					newContent: "updated content",
-				}],
+				[
+					{
+						type: "update",
+						path: "note.md",
+						originalContent: "original content",
+						newContent: "updated content",
+					},
+				],
 				"tc-1",
 				"thread-1",
 			);
@@ -249,12 +243,14 @@ describe("PendingChangesStore", () => {
 			(plugin.app.vault.read as ReturnType<typeof vi.fn>).mockResolvedValue("externally modified");
 
 			const [id] = store.addChanges(
-				[{
-					type: "update",
-					path: "note.md",
-					originalContent: "original content",
-					newContent: "new content",
-				}],
+				[
+					{
+						type: "update",
+						path: "note.md",
+						originalContent: "original content",
+						newContent: "new content",
+					},
+				],
 				"tc-1",
 				"thread-1",
 			);
@@ -347,11 +343,7 @@ describe("PendingChangesStore", () => {
 		});
 
 		it("should be a no-op for non-update changes", () => {
-			const [id] = store.addChanges(
-				[{ type: "create", path: "a.md", content: "A" }],
-				"tc-1",
-				"thread-1",
-			);
+			const [id] = store.addChanges([{ type: "create", path: "a.md", content: "A" }], "tc-1", "thread-1");
 
 			store.rejectChangeGroup(id, 0);
 			expect(store.getEntry(id)?.status).toBe("pending");
@@ -396,11 +388,7 @@ describe("PendingChangesStore", () => {
 
 	describe("hasConflict", () => {
 		it("should return false for create changes", async () => {
-			const [id] = store.addChanges(
-				[{ type: "create", path: "new.md", content: "Hello" }],
-				"tc-1",
-				"thread-1",
-			);
+			const [id] = store.addChanges([{ type: "create", path: "new.md", content: "Hello" }], "tc-1", "thread-1");
 
 			expect(await store.hasConflict(id)).toBe(false);
 		});
@@ -411,12 +399,14 @@ describe("PendingChangesStore", () => {
 			(plugin.app.vault.read as ReturnType<typeof vi.fn>).mockResolvedValue("externally modified");
 
 			const [id] = store.addChanges(
-				[{
-					type: "update",
-					path: "note.md",
-					originalContent: "original",
-					newContent: "new",
-				}],
+				[
+					{
+						type: "update",
+						path: "note.md",
+						originalContent: "original",
+						newContent: "new",
+					},
+				],
 				"tc-1",
 				"thread-1",
 			);
@@ -430,12 +420,14 @@ describe("PendingChangesStore", () => {
 			(plugin.app.vault.read as ReturnType<typeof vi.fn>).mockResolvedValue("original");
 
 			const [id] = store.addChanges(
-				[{
-					type: "update",
-					path: "note.md",
-					originalContent: "original",
-					newContent: "new",
-				}],
+				[
+					{
+						type: "update",
+						path: "note.md",
+						originalContent: "original",
+						newContent: "new",
+					},
+				],
 				"tc-1",
 				"thread-1",
 			);
@@ -462,16 +454,8 @@ describe("PendingChangesStore", () => {
 
 	describe("cleanup", () => {
 		it("cleanupResolved should remove accepted/rejected but keep pending", () => {
-			const [id1] = store.addChanges(
-				[{ type: "create", path: "a.md", content: "A" }],
-				"tc-1",
-				"thread-1",
-			);
-			const [id2] = store.addChanges(
-				[{ type: "create", path: "b.md", content: "B" }],
-				"tc-2",
-				"thread-1",
-			);
+			const [id1] = store.addChanges([{ type: "create", path: "a.md", content: "A" }], "tc-1", "thread-1");
+			const [id2] = store.addChanges([{ type: "create", path: "b.md", content: "B" }], "tc-2", "thread-1");
 
 			store.rejectChange(id1);
 

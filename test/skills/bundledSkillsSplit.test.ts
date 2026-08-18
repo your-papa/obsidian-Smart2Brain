@@ -35,10 +35,9 @@ describe("bundled skills split (defaults vs integrations)", () => {
 
 	it("BUNDLED_INTEGRATION_SKILLS is the 6 integration skills", () => {
 		const names = BUNDLED_INTEGRATION_SKILLS.map((s) => s.name).sort();
-		expect(names).toEqual([
-			...Object.keys(CORE_PLUGIN_INTEGRATIONS),
-			...Object.keys(COMMUNITY_PLUGIN_INTEGRATIONS),
-		].sort());
+		expect(names).toEqual(
+			[...Object.keys(CORE_PLUGIN_INTEGRATIONS), ...Object.keys(COMMUNITY_PLUGIN_INTEGRATIONS)].sort(),
+		);
 	});
 
 	it("core-plugin integrations carry corePluginId and category 'core'", () => {

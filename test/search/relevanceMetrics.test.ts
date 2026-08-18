@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-	RELEVANCE_JUDGMENTS,
-	ndcgAt,
-	reciprocalRank,
-} from "../../integration/helpers/relevanceJudgments";
+import { RELEVANCE_JUDGMENTS, ndcgAt, reciprocalRank } from "../../integration/helpers/relevanceJudgments";
 
 /*
  * The benchmark decides whether the ranking rework ships, so the metrics
@@ -106,9 +102,7 @@ describe("judgment set", () => {
 	});
 
 	it("covers multi-target queries, so nDCG measures set ordering not just rank 1", () => {
-		const multi = RELEVANCE_JUDGMENTS.filter(
-			(j) => Object.values(j.grades).filter((g) => g === 2).length > 1,
-		);
+		const multi = RELEVANCE_JUDGMENTS.filter((j) => Object.values(j.grades).filter((g) => g === 2).length > 1);
 		expect(multi.length).toBeGreaterThan(0);
 	});
 

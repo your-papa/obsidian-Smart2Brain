@@ -72,9 +72,9 @@ describe("agent interaction", () => {
 			() => {
 				const summary = getLatestPersistedChatSummary();
 				return Boolean(
-					summary
-					&& summary.humanContents.includes("Reply with exactly: PONG")
-					&& summary.assistantContents.some((content) => content.includes("PONG")),
+					summary &&
+						summary.humanContents.includes("Reply with exactly: PONG") &&
+						summary.assistantContents.some((content) => content.includes("PONG")),
 				);
 			},
 			"persisted chat summary for simple UI message",
@@ -107,38 +107,42 @@ describe("agent with tool use", () => {
 		clearBuffers();
 	});
 
-	it.skipIf(!providerAvailable)("should invoke tools when asked to search vault content", async () => {
-		executeCommand("smart-second-brain:new-chat");
-		await waitForSelector(".chat-root");
-		await sleep(1000);
+	it.skipIf(!providerAvailable)(
+		"should invoke tools when asked to search vault content",
+		async () => {
+			executeCommand("smart-second-brain:new-chat");
+			await waitForSelector(".chat-root");
+			await sleep(1000);
 
-		const prompt = "Use the search_notes tool to find notes about machine learning in my vault";
-		const submitResult = await submitChatMessageViaUi(prompt);
-		expect(submitResult).not.toContain("missing-");
-		expect(submitResult).not.toContain("send-disabled");
-		expect(submitResult).not.toContain("ERROR:");
+			const prompt = "Use the search_notes tool to find notes about machine learning in my vault";
+			const submitResult = await submitChatMessageViaUi(prompt);
+			expect(submitResult).not.toContain("missing-");
+			expect(submitResult).not.toContain("send-disabled");
+			expect(submitResult).not.toContain("ERROR:");
 
-		await waitForCondition(
-			() => {
-				const summary = getLatestPersistedChatSummary();
-				return Boolean(
-					summary
-					&& summary.humanContents.includes(prompt)
-					&& summary.toolCallNames.length > 0
-					&& summary.toolOutputCount > 0
-					&& summary.assistantContents.length > 0,
-				);
-			},
-			"persisted chat summary for UI tool-use message",
-			{ timeoutMs: 120_000, intervalMs: 1_000 },
-		);
+			await waitForCondition(
+				() => {
+					const summary = getLatestPersistedChatSummary();
+					return Boolean(
+						summary &&
+							summary.humanContents.includes(prompt) &&
+							summary.toolCallNames.length > 0 &&
+							summary.toolOutputCount > 0 &&
+							summary.assistantContents.length > 0,
+					);
+				},
+				"persisted chat summary for UI tool-use message",
+				{ timeoutMs: 120_000, intervalMs: 1_000 },
+			);
 
-		const summary = getLatestPersistedChatSummary();
-		expect(summary).not.toBeNull();
-		expect(summary?.assistantContents.length ?? 0).toBeGreaterThan(0);
-		expect(summary?.toolCallNames.length ?? 0).toBeGreaterThan(0);
-		toolThreadId = summary?.threadId ?? null;
-	}, 120_000);
+			const summary = getLatestPersistedChatSummary();
+			expect(summary).not.toBeNull();
+			expect(summary?.assistantContents.length ?? 0).toBeGreaterThan(0);
+			expect(summary?.toolCallNames.length ?? 0).toBeGreaterThan(0);
+			toolThreadId = summary?.threadId ?? null;
+		},
+		120_000,
+	);
 
 	it.skipIf(!providerAvailable)("should have used a search-related tool", () => {
 		const summary = getLatestPersistedChatSummary();

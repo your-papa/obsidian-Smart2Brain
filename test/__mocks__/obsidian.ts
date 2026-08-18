@@ -171,10 +171,7 @@ export function normalizePath(path: string): string {
 	return path.replace(/\\/g, "/").replace(/\/+/g, "/");
 }
 
-export function debounce<T extends (...args: unknown[]) => unknown>(
-	fn: T,
-	delay: number,
-): T & { cancel: () => void } {
+export function debounce<T extends (...args: unknown[]) => unknown>(fn: T, delay: number): T & { cancel: () => void } {
 	let timeout: ReturnType<typeof setTimeout>;
 	const debounced = ((...args: unknown[]) => {
 		clearTimeout(timeout);

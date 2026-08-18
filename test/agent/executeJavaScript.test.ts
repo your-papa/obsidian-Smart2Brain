@@ -24,7 +24,7 @@ describe("executeJavaScriptSnippet", () => {
 		});
 
 		expect(result.result).toEqual([4, 8, 12]);
-		expect(result.logs).toEqual(['[log] doubled [4,8,12]']);
+		expect(result.logs).toEqual(["[log] doubled [4,8,12]"]);
 	});
 
 	it("normalizes complex values to JSON-safe output", async () => {

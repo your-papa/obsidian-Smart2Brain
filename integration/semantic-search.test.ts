@@ -11,7 +11,7 @@ import {
 	sleep,
 	waitForStandaloneMiniSearch,
 } from "./helpers/cli.ts";
-import type { } from "vitest";
+import type {} from "vitest";
 
 const providerAvailable = (() => {
 	try {
@@ -63,7 +63,11 @@ describe("semantic search", () => {
 		it("should return results for a known term", async () => {
 			const globalKey = "__s2bLexical";
 
-			const result = await lexicalSearchEval(globalKey, "transformer", "function(d){ return {name:d.name, path:d.path}; }");
+			const result = await lexicalSearchEval(
+				globalKey,
+				"transformer",
+				"function(d){ return {name:d.name, path:d.path}; }",
+			);
 
 			const parsed = JSON.parse(result);
 			expect(parsed.error).toBeUndefined();
@@ -74,7 +78,11 @@ describe("semantic search", () => {
 		it("should rank relevant results higher", async () => {
 			const globalKey = "__s2bLexicalRank";
 
-			const result = await lexicalSearchEval(globalKey, "neural networks", "function(d){ return {name:d.name, score:d.score}; }");
+			const result = await lexicalSearchEval(
+				globalKey,
+				"neural networks",
+				"function(d){ return {name:d.name, score:d.score}; }",
+			);
 
 			const parsed = JSON.parse(result);
 			expect(parsed.length).toBeGreaterThan(0);
@@ -113,7 +121,8 @@ describe("semantic search", () => {
 
 	describe("search with dynamically created note", () => {
 		const testNoteName = "Integration Test Dynamic Note";
-		const testContent = "Quantum entanglement allows particles to be correlated across vast distances instantaneously";
+		const testContent =
+			"Quantum entanglement allows particles to be correlated across vast distances instantaneously";
 
 		beforeAll(async () => {
 			createNote(testNoteName, testContent);

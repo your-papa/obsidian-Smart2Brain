@@ -1,4 +1,3 @@
-
 import { rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -36,10 +35,9 @@ function activeSearchSelector(selector: string): string {
 }
 
 function activeSearchBadgeLabels(): string {
-	return obsidian(
-		`dev:dom selector='${activeSearchSelector(".s2b-search-result-badge")}' all attr=aria-label`,
-		{ ignoreError: true },
-	);
+	return obsidian(`dev:dom selector='${activeSearchSelector(".s2b-search-result-badge")}' all attr=aria-label`, {
+		ignoreError: true,
+	});
 }
 
 function setActiveSearchQuery(value: string): string {
@@ -64,10 +62,10 @@ function dispatchActiveSearchKey(options: {
 			?? document.querySelector(${JSON.stringify(ACTIVE_SEARCH_MODAL)});
 		if (!(target instanceof HTMLElement)) return "missing-modal";
 		const event = new KeyboardEvent("keydown", ${JSON.stringify({
-		bubbles: true,
-		cancelable: true,
-		...options,
-	})});
+			bubbles: true,
+			cancelable: true,
+			...options,
+		})});
 		target.dispatchEvent(event);
 		return "dispatched";
 	})()`);
@@ -125,25 +123,15 @@ describe("search modal", () => {
 	const pathNoteName = "SpaceOps/Path Fixture.md";
 	const pathNoteContent = ["# Path Fixture", "", "This note is about telemetry and consoles."].join("\n");
 	const numericTitleNoteName = "9. Semester.md";
-	const numericTitleNoteContent = [
-		"# 9. Semester",
-		"",
-		"Program overview and module planning.",
-	].join("\n");
+	const numericTitleNoteContent = ["# 9. Semester", "", "Program overview and module planning."].join("\n");
 	const lexicalLeadRankingNoteName = "Recent Boost Probe.md";
 	const lexicalLeadRankingBaseName = lexicalLeadRankingNoteName.replace(/\.md$/u, "");
-	const lexicalLeadRankingNoteContent = [
-		"# Recent Boost Probe",
-		"",
-		"Control note for lexical title matching.",
-	].join("\n");
+	const lexicalLeadRankingNoteContent = ["# Recent Boost Probe", "", "Control note for lexical title matching."].join(
+		"\n",
+	);
 	const recentBoostRankingNoteName = "Recent Boost Ranking Fixture.md";
 	const recentBoostRankingBaseName = recentBoostRankingNoteName.replace(/\.md$/u, "");
-	const recentBoostRankingNoteContent = [
-		"# Recent Boost Ranking Fixture",
-		"",
-		"Recent Boost Probe",
-	].join("\n");
+	const recentBoostRankingNoteContent = ["# Recent Boost Ranking Fixture", "", "Recent Boost Probe"].join("\n");
 	const filesystemFixtureBaseName = `Filesystem Created Recent Fixture ${Date.now()}`;
 	const filesystemFixtureNoteName = `${filesystemFixtureBaseName}.md`;
 	const filesystemFixturePath = fileURLToPath(
@@ -198,10 +186,9 @@ describe("search modal", () => {
 	}, 30_000);
 
 	it("should have a prompt input with placeholder text", () => {
-		const placeholder = obsidian(
-			`dev:dom selector='${activeSearchSelector(".prompt-input")}' attr=placeholder`,
-			{ ignoreError: true },
-		);
+		const placeholder = obsidian(`dev:dom selector='${activeSearchSelector(".prompt-input")}' attr=placeholder`, {
+			ignoreError: true,
+		});
 		expect(placeholder).toContain("Search notes");
 	});
 
@@ -262,13 +249,13 @@ describe("search modal", () => {
 		setActiveSearchQuery(query);
 
 		await waitForCondition(
-			() => domText(activeSearchSelector('.s2b-search-result-name')).includes(recentBoostRankingBaseName),
+			() => domText(activeSearchSelector(".s2b-search-result-name")).includes(recentBoostRankingBaseName),
 			"recently opened typed match to rise to the top",
 			{ timeoutMs: 20_000, intervalMs: 250 },
 		);
 
-		expect(domText(activeSearchSelector('.s2b-search-result-name'))).toContain(recentBoostRankingBaseName);
-		expect(activeSearchBadgeLabels()).toContain('Recent');
+		expect(domText(activeSearchSelector(".s2b-search-result-name"))).toContain(recentBoostRankingBaseName);
+		expect(activeSearchBadgeLabels()).toContain("Recent");
 	}, 30_000);
 
 	it("should not show filesystem-created notes that were never opened in recents", async () => {
@@ -282,9 +269,9 @@ describe("search modal", () => {
 
 		await waitForCondition(
 			() =>
-				obsidianEval(`Boolean(app.vault.getAbstractFileByPath(${JSON.stringify(filesystemFixtureNoteName)}))`).includes(
-					"true",
-				),
+				obsidianEval(
+					`Boolean(app.vault.getAbstractFileByPath(${JSON.stringify(filesystemFixtureNoteName)}))`,
+				).includes("true"),
 			"filesystem-created note to appear in the vault",
 			{ timeoutMs: 10_000, intervalMs: 250 },
 		);
@@ -292,10 +279,9 @@ describe("search modal", () => {
 		executeCommand("smart-second-brain:search-notes");
 		await waitForSelector(ACTIVE_SEARCH_MODAL);
 
-		const resultNames = obsidian(
-			`dev:dom selector='${activeSearchSelector(".s2b-search-result-name")}' all text`,
-			{ ignoreError: true },
-		);
+		const resultNames = obsidian(`dev:dom selector='${activeSearchSelector(".s2b-search-result-name")}' all text`, {
+			ignoreError: true,
+		});
 
 		expect(resultNames).not.toContain(filesystemFixtureBaseName);
 		expect(getErrors()).toBe("");
@@ -313,7 +299,7 @@ describe("search modal", () => {
 		setActiveSearchQuery("Rocket Science");
 
 		await waitForCondition(
-			() => domText(activeSearchSelector('.s2b-search-result-name')).includes('Alias Fixture'),
+			() => domText(activeSearchSelector(".s2b-search-result-name")).includes("Alias Fixture"),
 			"alias result to be selected for mod-enter",
 			{ timeoutMs: 20_000 },
 		);
@@ -342,14 +328,13 @@ describe("search modal", () => {
 		expect(state.active).toBe(aliasNoteName);
 		expect(state.matching).toBeGreaterThan(0);
 		expect(state.total).toBeGreaterThan(initialLeafCount);
-
 	}, 30_000);
 
 	it("should keep selections across queries when pressing Shift+Enter", async () => {
 		setActiveSearchQuery("Rocket Science");
 
 		await waitForCondition(
-			() => domText(activeSearchSelector('.s2b-search-result-name')).includes('Alias Fixture'),
+			() => domText(activeSearchSelector(".s2b-search-result-name")).includes("Alias Fixture"),
 			"alias result to appear for first selection",
 			{ timeoutMs: 20_000 },
 		);
@@ -357,7 +342,7 @@ describe("search modal", () => {
 		dispatchActiveSearchKey({ key: "Enter", code: "Enter", shiftKey: true });
 
 		await waitForCondition(
-			() => domText(activeSearchSelector('.s2b-search-selection-summary')).includes('Selected:'),
+			() => domText(activeSearchSelector(".s2b-search-selection-summary")).includes("Selected:"),
 			"selection summary to show first selection",
 			{ timeoutMs: 10_000, intervalMs: 250 },
 		);
@@ -365,7 +350,7 @@ describe("search modal", () => {
 		setActiveSearchQuery("orbital-index");
 
 		await waitForCondition(
-			() => domText(activeSearchSelector('.s2b-search-result-name')).includes('Tag Fixture'),
+			() => domText(activeSearchSelector(".s2b-search-result-name")).includes("Tag Fixture"),
 			"tag fixture to appear for second selection",
 			{ timeoutMs: 20_000 },
 		);
@@ -373,15 +358,17 @@ describe("search modal", () => {
 		dispatchActiveSearchKey({ key: "Enter", code: "Enter", shiftKey: true });
 
 		await waitForCondition(
-			() => domText(activeSearchSelector('.s2b-search-selection-summary')).includes('2 selected'),
+			() => domText(activeSearchSelector(".s2b-search-selection-summary")).includes("2 selected"),
 			"selection summary to preserve selection across queries",
 			{ timeoutMs: 10_000, intervalMs: 250 },
 		);
 
-		expect(domText(activeSearchSelector('.s2b-search-selection-summary'))).toContain('2 selected');
+		expect(domText(activeSearchSelector(".s2b-search-selection-summary"))).toContain("2 selected");
 		expect(
-			obsidianEval(`Array.from(document.querySelectorAll(${JSON.stringify(activeSearchSelector('.s2b-search-result-item-selected'))})).length`).replace(/^=>\s*/u, ''),
-		).not.toBe('0');
+			obsidianEval(
+				`Array.from(document.querySelectorAll(${JSON.stringify(activeSearchSelector(".s2b-search-result-item-selected"))})).length`,
+			).replace(/^=>\s*/u, ""),
+		).not.toBe("0");
 	}, 30_000);
 
 	it.skip("should create a new note from the query when pressing Mod+Shift+Enter", async () => {
@@ -389,7 +376,10 @@ describe("search modal", () => {
 		dispatchActiveSearchKey({ key: "Enter", code: "Enter", metaKey: true, shiftKey: true });
 
 		await waitForCondition(
-			() => obsidianEval(`Boolean(app.vault.getAbstractFileByPath('${multiSelectCreateNoteName}'))`).includes('true'),
+			() =>
+				obsidianEval(`Boolean(app.vault.getAbstractFileByPath('${multiSelectCreateNoteName}'))`).includes(
+					"true",
+				),
 			"mod-shift-enter note to be created",
 			{ timeoutMs: 10_000, intervalMs: 250 },
 		);
@@ -402,11 +392,12 @@ describe("search modal", () => {
 
 		expect(readNote(multiSelectCreateNoteName)).toContain(`# ${multiSelectCreateNoteTitle}`);
 		expect(obsidianEval(`app.workspace.getActiveFile()?.path ?? ''`)).toContain(multiSelectCreateNoteName);
-
 	}, 30_000);
 
 	it("should show a notice instead of enabling semantic mode when no search index is selected", async () => {
-		const originalIndex = obsidianEval(`${PLUGIN}.pluginData.searchEmbedIndex ?? null`).replace(/^=>\s*/u, "").trim();
+		const originalIndex = obsidianEval(`${PLUGIN}.pluginData.searchEmbedIndex ?? null`)
+			.replace(/^=>\s*/u, "")
+			.trim();
 
 		clearBuffers();
 		obsidianEval(`${PLUGIN}.pluginData.clearEmbedIndex("search")`);
@@ -450,9 +441,11 @@ describe("search modal", () => {
 
 		expect(snapshot.error).toBeNull();
 		expect(snapshot.index).toBeNull();
-		expect(snapshot.instructions).toContain('semantic: off');
-		expect(snapshot.notices.join(" ")).toContain('Select a search embedding index before enabling semantic search.');
-		expect(snapshot.anchors).toContain('Open search settings');
+		expect(snapshot.instructions).toContain("semantic: off");
+		expect(snapshot.notices.join(" ")).toContain(
+			"Select a search embedding index before enabling semantic search.",
+		);
+		expect(snapshot.anchors).toContain("Open search settings");
 
 		obsidianEval(`(() => {
 			const link = document.querySelector(".notice a");
@@ -481,9 +474,7 @@ describe("search modal", () => {
 
 		if (originalIndex !== "null") {
 			const [provider, ...modelParts] = originalIndex.split(":");
-			obsidianEval(
-				`${PLUGIN}.pluginData.setEmbedIndex("search", "${provider}", "${modelParts.join(":")}")`,
-			);
+			obsidianEval(`${PLUGIN}.pluginData.setEmbedIndex("search", "${provider}", "${modelParts.join(":")}")`);
 			await waitForCondition(
 				() => obsidianEval(`${PLUGIN}.pluginData.searchEmbedIndex === "${originalIndex}"`).includes("true"),
 				"search embedding index to be restored",
@@ -528,7 +519,7 @@ describe("search modal", () => {
 	it.skip("should show active filter chips and allow toggling tag mode", async () => {
 		setActiveSearchQuery("#orbital");
 		await waitForCondition(
-			() => domCount(activeSearchSelector('.s2b-search-autocomplete')) > 0,
+			() => domCount(activeSearchSelector(".s2b-search-autocomplete")) > 0,
 			"tag autocomplete suggestions to appear",
 			{ timeoutMs: 20_000 },
 		);
@@ -536,165 +527,169 @@ describe("search modal", () => {
 
 		setActiveSearchQuery("#stealth");
 		await waitForCondition(
-			() => domCount(activeSearchSelector('.s2b-search-autocomplete')) > 0,
+			() => domCount(activeSearchSelector(".s2b-search-autocomplete")) > 0,
 			"second tag autocomplete suggestions to appear",
 			{ timeoutMs: 20_000 },
 		);
 		clickFirstActiveSuggestion();
 
 		await waitForCondition(
-			() => domCount(activeSearchSelector('.s2b-inline-chip')) >= 2,
+			() => domCount(activeSearchSelector(".s2b-inline-chip")) >= 2,
 			"filter chips to appear",
 			{ timeoutMs: 20_000 },
 		);
 
-		expect(domText(activeSearchSelector('.s2b-inline-chip-mode'))).toContain('ANY');
+		expect(domText(activeSearchSelector(".s2b-inline-chip-mode"))).toContain("ANY");
 
 		obsidianEval(`(() => {
-			const chip = document.querySelector(${JSON.stringify(activeSearchSelector('.s2b-inline-chip-mode'))});
+			const chip = document.querySelector(${JSON.stringify(activeSearchSelector(".s2b-inline-chip-mode"))});
 			if (!(chip instanceof HTMLButtonElement)) return 'missing';
 			chip.click();
 			return chip.textContent || '';
 		})()`);
 
 		await waitForCondition(
-			() => domText(activeSearchSelector('.s2b-inline-chip-mode')).includes('ALL'),
+			() => domText(activeSearchSelector(".s2b-inline-chip-mode")).includes("ALL"),
 			"tag mode to toggle",
 			{ timeoutMs: 20_000 },
 		);
 
-		expect(domText(activeSearchSelector('.s2b-inline-chip-mode'))).toContain('ALL');
+		expect(domText(activeSearchSelector(".s2b-inline-chip-mode"))).toContain("ALL");
 	}, 30_000);
 
 	it.skip("should turn a tag autocomplete selection into a filter chip", async () => {
 		setActiveSearchQuery("#orbital");
 		await waitForCondition(
-			() => domCount(activeSearchSelector('.s2b-search-autocomplete')) > 0,
+			() => domCount(activeSearchSelector(".s2b-search-autocomplete")) > 0,
 			"tag autocomplete to appear",
 			{ timeoutMs: 20_000 },
 		);
 		clickFirstActiveSuggestion();
 
 		await waitForCondition(
-			() => domText(activeSearchSelector('.s2b-inline-chip')).includes('orbital-index'),
+			() => domText(activeSearchSelector(".s2b-inline-chip")).includes("orbital-index"),
 			"tag chip to appear",
 			{ timeoutMs: 20_000 },
 		);
 
-		expect(domText(activeSearchSelector('.s2b-inline-chip'))).toContain('orbital-index');
+		expect(domText(activeSearchSelector(".s2b-inline-chip"))).toContain("orbital-index");
 	}, 30_000);
 
 	it.skip("should turn a folder autocomplete selection into a filter chip", async () => {
 		setActiveSearchQuery("SpaceOps/");
 		await waitForCondition(
-			() => domCount(activeSearchSelector('.s2b-search-autocomplete')) > 0,
+			() => domCount(activeSearchSelector(".s2b-search-autocomplete")) > 0,
 			"folder autocomplete to appear",
 			{ timeoutMs: 20_000 },
 		);
 		clickFirstActiveSuggestion();
 
 		await waitForCondition(
-			() => domText(activeSearchSelector('.s2b-inline-chip')).includes('SpaceOps'),
+			() => domText(activeSearchSelector(".s2b-inline-chip")).includes("SpaceOps"),
 			"path chip to appear",
 			{ timeoutMs: 20_000 },
 		);
 
-		expect(domText(activeSearchSelector('.s2b-inline-chip'))).toContain('SpaceOps');
+		expect(domText(activeSearchSelector(".s2b-inline-chip"))).toContain("SpaceOps");
 	}, 30_000);
 
 	it("should show alias matches with alias badge and explanation", async () => {
 		setActiveSearchQuery("Rocket Science");
 
 		await waitForCondition(
-			() => domText(activeSearchSelector('.s2b-search-result-name')).includes('Alias Fixture'),
+			() => domText(activeSearchSelector(".s2b-search-result-name")).includes("Alias Fixture"),
 			"alias result to appear",
 			{ timeoutMs: 20_000 },
 		);
 
-		expect(domText(activeSearchSelector('.s2b-search-result-name'))).toContain('Alias Fixture');
-		expect(activeSearchBadgeLabels()).toContain('Alias');
-		expect(domText(activeSearchSelector('.s2b-search-result-snippet'))).toContain('Rocket Science');
+		expect(domText(activeSearchSelector(".s2b-search-result-name"))).toContain("Alias Fixture");
+		expect(activeSearchBadgeLabels()).toContain("Alias");
+		expect(domText(activeSearchSelector(".s2b-search-result-snippet"))).toContain("Rocket Science");
 	}, 30_000);
 
 	it("should show tag matches with file tag pills", async () => {
-		setActiveSearchQuery('orbital-index');
+		setActiveSearchQuery("orbital-index");
 
 		await waitForCondition(
-			() => domText(activeSearchSelector('.s2b-search-result-name')).includes('Tag Fixture'),
+			() => domText(activeSearchSelector(".s2b-search-result-name")).includes("Tag Fixture"),
 			"tag result to appear",
 			{ timeoutMs: 20_000 },
 		);
 
-		expect(domText(activeSearchSelector('.s2b-search-result-name'))).toContain('Tag Fixture');
-		expect(activeSearchBadgeLabels()).toContain('Tag');
-		expect(domCount(activeSearchSelector('.s2b-search-result-tag'))).toBeGreaterThan(0);
-		expect(domText(activeSearchSelector('.s2b-search-result-tags'))).toContain('orbital-index');
+		expect(domText(activeSearchSelector(".s2b-search-result-name"))).toContain("Tag Fixture");
+		expect(activeSearchBadgeLabels()).toContain("Tag");
+		expect(domCount(activeSearchSelector(".s2b-search-result-tag"))).toBeGreaterThan(0);
+		expect(domText(activeSearchSelector(".s2b-search-result-tags"))).toContain("orbital-index");
 	}, 30_000);
 
 	it("should keep inline content tags out of the title tag pills", async () => {
-		setActiveSearchQuery('stealth-inline');
+		setActiveSearchQuery("stealth-inline");
 
 		await waitForCondition(
-			() => domText(activeSearchSelector('.s2b-search-result-name')).includes('Inline Tag Fixture'),
+			() => domText(activeSearchSelector(".s2b-search-result-name")).includes("Inline Tag Fixture"),
 			"inline tag match to appear",
 			{ timeoutMs: 20_000 },
 		);
 
-		expect(domText(activeSearchSelector('.s2b-search-result-name'))).toContain('Inline Tag Fixture');
-		expect(domText(activeSearchSelector('.s2b-search-result-snippet'))).toContain('stealth-inline');
-		expect(domCount(activeSearchSelector('.s2b-search-result-tag'))).toBe(0);
+		expect(domText(activeSearchSelector(".s2b-search-result-name"))).toContain("Inline Tag Fixture");
+		expect(domText(activeSearchSelector(".s2b-search-result-snippet"))).toContain("stealth-inline");
+		expect(domCount(activeSearchSelector(".s2b-search-result-tag"))).toBe(0);
 	}, 30_000);
 
 	it.skip("should show path matches with path badge", async () => {
-		setActiveSearchQuery('SpaceOps');
+		setActiveSearchQuery("SpaceOps");
 
 		await waitForCondition(
-			() => domText(activeSearchSelector('.s2b-search-result-name')).includes('Path Fixture'),
+			() => domText(activeSearchSelector(".s2b-search-result-name")).includes("Path Fixture"),
 			"path result to appear",
 			{ timeoutMs: 20_000 },
 		);
 
-		expect(domText(activeSearchSelector('.s2b-search-result-name'))).toContain('Path Fixture');
-		expect(activeSearchBadgeLabels()).toContain('Path');
+		expect(domText(activeSearchSelector(".s2b-search-result-name"))).toContain("Path Fixture");
+		expect(activeSearchBadgeLabels()).toContain("Path");
 	}, 30_000);
 
 	it("should prioritize exact title matches over section or link mentions", async () => {
-		setActiveSearchQuery('Obsidian Plugin Development');
+		setActiveSearchQuery("Obsidian Plugin Development");
 
 		await waitForCondition(
-			() => domText(activeSearchSelector('.s2b-search-result-name')).includes('Obsidian Plugin Development'),
+			() => domText(activeSearchSelector(".s2b-search-result-name")).includes("Obsidian Plugin Development"),
 			"exact title match to rank first",
 			{ timeoutMs: 20_000 },
 		);
 
-		expect(domText(activeSearchSelector('.s2b-search-result-name'))).toContain('Obsidian Plugin Development');
-		expect(domCount(activeSearchSelector('.s2b-search-result-name .s2b-search-result-highlight-title'))).toBeGreaterThan(0);
+		expect(domText(activeSearchSelector(".s2b-search-result-name"))).toContain("Obsidian Plugin Development");
+		expect(
+			domCount(activeSearchSelector(".s2b-search-result-name .s2b-search-result-highlight-title")),
+		).toBeGreaterThan(0);
 	}, 30_000);
 
 	it.skip("should rank numeric-leading title prefix matches ahead of noisy content matches", async () => {
-		setActiveSearchQuery('9. semes');
+		setActiveSearchQuery("9. semes");
 
 		await waitForCondition(
 			() =>
 				obsidianEval(`(() => {
-					const first = document.querySelector(${JSON.stringify(activeSearchSelector('.s2b-search-result-name'))});
+					const first = document.querySelector(${JSON.stringify(activeSearchSelector(".s2b-search-result-name"))});
 					return first?.textContent ?? '';
-				})()`).includes('9. Semester'),
+				})()`).includes("9. Semester"),
 			"numeric-leading title match to rank first",
 			{ timeoutMs: 20_000, intervalMs: 250 },
 		);
 
 		expect(
 			obsidianEval(`(() => {
-				const first = document.querySelector(${JSON.stringify(activeSearchSelector('.s2b-search-result-name'))});
+				const first = document.querySelector(${JSON.stringify(activeSearchSelector(".s2b-search-result-name"))});
 				return first?.textContent ?? '';
 			})()`),
 		).toContain("9. Semester");
 	}, 30_000);
 
-	it.skipIf(!searchIndexAvailable)("should only show the semantic glow while a semantic search is in flight", async () => {
-		expect(
-			obsidianEval(`(() => {
+	it.skipIf(!searchIndexAvailable)(
+		"should only show the semantic glow while a semantic search is in flight",
+		async () => {
+			expect(
+				obsidianEval(`(() => {
 				const plugin = app.plugins.plugins["smart-second-brain"];
 				if (!plugin?.vectorStoreService) return 'missing-plugin';
 				const service = plugin.vectorStoreService;
@@ -707,10 +702,10 @@ describe("search modal", () => {
 				};
 				return 'patched';
 			})()`),
-		).toContain("patched");
+			).toContain("patched");
 
-		expect(
-			obsidianEval(`(() => {
+			expect(
+				obsidianEval(`(() => {
 				const modal = document.querySelector(${JSON.stringify(ACTIVE_SEARCH_MODAL)});
 				if (!(modal instanceof HTMLElement)) return 'missing-modal';
 				const event = new KeyboardEvent('keydown', {
@@ -722,30 +717,30 @@ describe("search modal", () => {
 				modal.dispatchEvent(event);
 				return modal.querySelector('.prompt-instructions')?.textContent ?? 'ok';
 			})()`),
-		).not.toContain("missing");
+			).not.toContain("missing");
 
-		setActiveSearchQuery('machine learning');
+			setActiveSearchQuery("machine learning");
 
-		await waitForCondition(
-			() => domCount('.s2b-search-modal-glow') > 0,
-			"semantic glow to appear during active search",
-			{ timeoutMs: 10_000, intervalMs: 100 },
-		);
+			await waitForCondition(
+				() => domCount(".s2b-search-modal-glow") > 0,
+				"semantic glow to appear during active search",
+				{ timeoutMs: 10_000, intervalMs: 100 },
+			);
 
-		await waitForCondition(
-			() => domCount(activeSearchSelector('.s2b-search-result')) > 0,
-			"semantic search results to appear",
-			{ timeoutMs: 20_000 },
-		);
+			await waitForCondition(
+				() => domCount(activeSearchSelector(".s2b-search-result")) > 0,
+				"semantic search results to appear",
+				{ timeoutMs: 20_000 },
+			);
 
-		await waitForCondition(
-			() => domCount('.s2b-search-modal-glow') === 0,
-			"semantic glow to stop once results are rendered",
-			{ timeoutMs: 10_000, intervalMs: 100 },
-		);
+			await waitForCondition(
+				() => domCount(".s2b-search-modal-glow") === 0,
+				"semantic glow to stop once results are rendered",
+				{ timeoutMs: 10_000, intervalMs: 100 },
+			);
 
-		expect(
-			obsidianEval(`(() => {
+			expect(
+				obsidianEval(`(() => {
 				const plugin = app.plugins.plugins["smart-second-brain"];
 				const original = window.__s2bOriginalSemanticSearch;
 				if (plugin?.vectorStoreService && typeof original === 'function') {
@@ -754,8 +749,10 @@ describe("search modal", () => {
 				delete window.__s2bOriginalSemanticSearch;
 				return 'restored';
 			})()`),
-		).toContain("restored");
-	}, 30_000);
+			).toContain("restored");
+		},
+		30_000,
+	);
 
 	it("should close without errors when dismissed", async () => {
 		// Press Escape to close

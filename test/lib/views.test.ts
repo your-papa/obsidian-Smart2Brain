@@ -27,7 +27,10 @@ function createMockApp(
 ): App {
 	const mockFiles = files.map((path) => ({
 		path,
-		basename: path.replace(/\.[^.]+$/, "").split("/").pop(),
+		basename: path
+			.replace(/\.[^.]+$/, "")
+			.split("/")
+			.pop(),
 		extension: path.split(".").pop() ?? "md",
 		name: path.split("/").pop(),
 	}));
@@ -57,8 +60,7 @@ function createMockApp(
 		vault: {
 			getMarkdownFiles: () => mockFiles.filter((f) => f.extension === "md"),
 			getFiles: () => mockFiles,
-			getAbstractFileByPath: (path: string) =>
-				mockFiles.find((f) => f.path === path) ?? null,
+			getAbstractFileByPath: (path: string) => mockFiles.find((f) => f.path === path) ?? null,
 		},
 	} as unknown as App;
 }
@@ -239,9 +241,7 @@ describe("resolveViewFilter", () => {
 
 			// Research/ml-paper.md has #ml, Research/deep-learning.md has #ml
 			// Research/notes.pdf does NOT have #ml
-			expect(result.paths).toEqual(
-				new Set(["Research/ml-paper.md", "Research/deep-learning.md"]),
-			);
+			expect(result.paths).toEqual(new Set(["Research/ml-paper.md", "Research/deep-learning.md"]));
 		});
 
 		it("intersects three conditions", () => {
@@ -367,9 +367,7 @@ describe("resolveViewFilter", () => {
 
 			// Research files with #ml or #research: ml-paper.md, deep-learning.md
 			// Research/notes.pdf is not in universe (pdf, not md... wait it IS in files but may not have tags)
-			expect(result.paths).toEqual(
-				new Set(["Research/ml-paper.md", "Research/deep-learning.md"]),
-			);
+			expect(result.paths).toEqual(new Set(["Research/ml-paper.md", "Research/deep-learning.md"]));
 		});
 
 		it("any(all(folder:Work, tag:#urgent), folder:Personal)", () => {
@@ -389,9 +387,7 @@ describe("resolveViewFilter", () => {
 			};
 			const result = resolveViewFilter(app, filter);
 
-			expect(result.paths).toEqual(
-				new Set(["Work/project-a.md", "Personal/journal.md", "Personal/recipes.md"]),
-			);
+			expect(result.paths).toEqual(new Set(["Work/project-a.md", "Personal/journal.md", "Personal/recipes.md"]));
 		});
 
 		it("collects stale paths from nested frozen leaves", () => {
@@ -405,9 +401,7 @@ describe("resolveViewFilter", () => {
 			};
 			const result = resolveViewFilter(app, filter);
 
-			expect(result.paths).toEqual(
-				new Set(["Work/project-a.md", "Personal/journal.md"]),
-			);
+			expect(result.paths).toEqual(new Set(["Work/project-a.md", "Personal/journal.md"]));
 			expect(result.stalePaths).toEqual(expect.arrayContaining(["gone1.md", "gone2.md"]));
 			expect(result.stalePaths).toHaveLength(2);
 		});
@@ -488,12 +482,7 @@ describe("describeViewFilter", () => {
 
 describe("getAllMarkdownPaths", () => {
 	it("returns only markdown file paths", () => {
-		const app = createMockApp([
-			"notes/a.md",
-			"notes/b.md",
-			"assets/image.png",
-			"data.pdf",
-		]);
+		const app = createMockApp(["notes/a.md", "notes/b.md", "assets/image.png", "data.pdf"]);
 		const paths = getAllMarkdownPaths(app);
 
 		expect(paths).toEqual(new Set(["notes/a.md", "notes/b.md"]));
@@ -575,12 +564,7 @@ describe("space membership draft helpers", () => {
 
 	it("resolves draft membership with provenance and exclusions", () => {
 		const app = createMockApp(
-			[
-				"Manual/a.md",
-				"Research/ml-paper.md",
-				"Research/deep-learning.md",
-				"Research/skip.md",
-			],
+			["Manual/a.md", "Research/ml-paper.md", "Research/deep-learning.md", "Research/skip.md"],
 			{
 				"Research/ml-paper.md": ["#ml"],
 				"Research/deep-learning.md": ["#ml"],
@@ -596,27 +580,17 @@ describe("space membership draft helpers", () => {
 			excludedPaths: ["Research/skip.md"],
 		});
 
-		expect(result.paths).toEqual(
-			new Set(["Manual/a.md", "Research/ml-paper.md", "Research/deep-learning.md"]),
-		);
+		expect(result.paths).toEqual(new Set(["Manual/a.md", "Research/ml-paper.md", "Research/deep-learning.md"]));
 		expect(result.stalePaths).toEqual(["missing.md"]);
 		expect(result.excludedPaths).toEqual(new Set(["Research/skip.md"]));
 		expect(result.provenance.get("Manual/a.md")).toEqual(["Manual"]);
-		expect(result.provenance.get("Research/ml-paper.md")).toEqual([
-			"Folder: Research",
-			"Tag: #ml",
-		]);
+		expect(result.provenance.get("Research/ml-paper.md")).toEqual(["Folder: Research", "Tag: #ml"]);
 		expect(result.provenance.has("Research/skip.md")).toBe(false);
 	});
 
 	it("matches a single path against simple membership rules", () => {
 		const app = createMockApp(
-			[
-				"Work/manual.md",
-				"Research/ml-paper.md",
-				"Research/skip.md",
-				"Assets/diagram.pdf",
-			],
+			["Work/manual.md", "Research/ml-paper.md", "Research/skip.md", "Assets/diagram.pdf"],
 			{
 				"Research/ml-paper.md": ["#ml"],
 				"Research/skip.md": ["#ml"],
@@ -625,10 +599,7 @@ describe("space membership draft helpers", () => {
 
 		const draft = {
 			manualPaths: ["Work/manual.md"],
-			autoIncludeRules: [
-				{ type: "tag", value: "#ml" } as const,
-				{ type: "extension", value: "pdf" } as const,
-			],
+			autoIncludeRules: [{ type: "tag", value: "#ml" } as const, { type: "extension", value: "pdf" } as const],
 			excludedPaths: ["Research/skip.md"],
 		};
 
@@ -676,9 +647,7 @@ describe("property leaf", () => {
 		const filter: ViewFilter = { type: "property", value: "client" };
 		const result = resolveViewFilter(app(), filter, new Set(FILES));
 
-		expect(result.paths).toEqual(
-			new Set(["Clients/acme.md", "Clients/globex.md", "Work/listed.md"]),
-		);
+		expect(result.paths).toEqual(new Set(["Clients/acme.md", "Clients/globex.md", "Work/listed.md"]));
 	});
 
 	it("treats a present-but-empty value as absent", () => {
@@ -703,9 +672,7 @@ describe("property leaf", () => {
 		};
 		const result = resolveViewFilter(app(), filter, new Set(FILES));
 
-		expect(result.paths).toEqual(
-			new Set(["Clients/acme.md", "Clients/globex.md", "Work/listed.md"]),
-		);
+		expect(result.paths).toEqual(new Set(["Clients/acme.md", "Clients/globex.md", "Work/listed.md"]));
 	});
 
 	it("matches list-valued properties per element", () => {
@@ -776,9 +743,7 @@ describe("property leaf", () => {
 		const parsed = parseSpaceMembershipFilter(compileSpaceMembershipDraft(draft));
 
 		expect(parsed.isAdvanced).toBe(false);
-		expect(parsed.draft.autoIncludeRules).toEqual([
-			{ type: "property", value: "client", values: ["Acme"] },
-		]);
+		expect(parsed.draft.autoIncludeRules).toEqual([{ type: "property", value: "client", values: ["Acme"] }]);
 	});
 
 	it("agrees between the sync path matcher and the set resolver", () => {
@@ -795,9 +760,9 @@ describe("property leaf", () => {
 
 	it("describes property leaves with and without values", () => {
 		expect(describeViewFilter({ type: "property", value: "client" })).toBe("prop:client");
-		expect(
-			describeViewFilter({ type: "property", value: "client", values: ["Acme", "Globex"] }),
-		).toBe("prop:client=Acme|Globex");
+		expect(describeViewFilter({ type: "property", value: "client", values: ["Acme", "Globex"] })).toBe(
+			"prop:client=Acme|Globex",
+		);
 	});
 });
 

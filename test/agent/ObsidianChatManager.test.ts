@@ -105,9 +105,24 @@ describe("ObsidianChatManager", () => {
 					threadIndex: Map<string, { threadId: string; title: string; createdAt: number; updatedAt: number }>;
 				}
 			).threadIndex;
-			threadIndex.set("Chats/old.chat", { threadId: "Chats/old.chat", title: "Old Thread", createdAt: 1000, updatedAt: 1000 });
-			threadIndex.set("Chats/new.chat", { threadId: "Chats/new.chat", title: "New Thread", createdAt: 2000, updatedAt: 3000 });
-			threadIndex.set("Chats/mid.chat", { threadId: "Chats/mid.chat", title: "Mid Thread", createdAt: 1500, updatedAt: 2000 });
+			threadIndex.set("Chats/old.chat", {
+				threadId: "Chats/old.chat",
+				title: "Old Thread",
+				createdAt: 1000,
+				updatedAt: 1000,
+			});
+			threadIndex.set("Chats/new.chat", {
+				threadId: "Chats/new.chat",
+				title: "New Thread",
+				createdAt: 2000,
+				updatedAt: 3000,
+			});
+			threadIndex.set("Chats/mid.chat", {
+				threadId: "Chats/mid.chat",
+				title: "Mid Thread",
+				createdAt: 1500,
+				updatedAt: 2000,
+			});
 
 			const threads = await threadStore.list();
 			expect(threads).toHaveLength(3);

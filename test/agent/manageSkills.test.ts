@@ -203,10 +203,7 @@ describe("manage_skills tool", () => {
 			const svc = makeSkillsService(dataviewCache());
 			const { app, write } = makeApp({});
 			const t = createManageSkillsTool(svc, app, "agent-1");
-			const res = await t.invoke(
-				{ type: "create", name: "Not Valid!", description: "x", body: "y" },
-				RUN_CONFIG,
-			);
+			const res = await t.invoke({ type: "create", name: "Not Valid!", description: "x", body: "y" }, RUN_CONFIG);
 			expect(res).toMatch(/invalid name/i);
 			expect(write).not.toHaveBeenCalled();
 		});
