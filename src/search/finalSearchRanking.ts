@@ -43,8 +43,39 @@ const RANK_FUSION_WEIGHT = 1 - SCORE_FUSION_WEIGHT;
  * Relative weight of the semantic vs lexical source once both are normalized to
  * 0-1. Semantic leads because it is the only source that can bridge vocabulary
  * gaps; lexical remains a strong tiebreaker and the sole signal for exact terms.
+ *
+ * **0.60 → 0.78 (2026-08-17), to fix the `size-bias` axis.** A long padded note
+ * beat the short note that actually answered the query in five benchmark queries,
+ * and the cause was lexical, not semantic: semantic ranked the correct answer #1
+ * in all of them. BM25 rewards *breadth* of matched terms, and a long note has
+ * enough vocabulary to match something for nearly every query word — the padded
+ * octopus note matched `jar`, `can` and `an` (terms the real answer lacks) and so
+ * scored 358 against 140, despite near-identical counts of the terms that matter
+ * (`octopus` 2 vs 1, `sealed` 1 vs 1). Length buys coverage, and coverage was
+ * outvoting relevance.
+ *
+ * Removing the lexical leg entirely was measured too and is *not* the answer: it
+ * lifts core (+0.11) and size-bias (+0.25) but collapses `long-context` from
+ * 0.9254 to 0.2372, because those targets bury their answer in an unbroken prose
+ * run whose embedding is diluted — the literal query terms are all that finds
+ * them. The two sources are genuinely complementary; lexical was simply
+ * over-weighted.
+ *
+ * Swept per model against the benchmark. Both improve on core, hard overall and
+ * size-bias; the only regression is `long-context` (n=2):
+ *
+ * | model   | core            | hard            | size-bias       | long-context    |
+ * |---------|-----------------|-----------------|-----------------|-----------------|
+ * | harrier | 0.8300 → 0.8889 | 0.7504 → 0.7759 | 0.6309 → 0.7540 | 0.9254 → 0.9210 |
+ * | qwen3   | 0.8871 → 0.9695 | 0.8146 → 0.8630 | 0.7540 → 1.0000 | 0.9410 → 0.7057 |
+ *
+ * 0.78 rather than the marginally better 0.79-0.80: on `harrier` those sit on the
+ * edge of a discontinuity where `long-context` falls to 0.7685 at 0.81, so the
+ * plateau's lower end is the safer landing. Do not raise this to chase the last
+ * 0.03 of hard overall — re-run the sweep instead, because the cliff moves with
+ * the embedding model.
  */
-const SEMANTIC_SOURCE_WEIGHT = 0.6;
+const SEMANTIC_SOURCE_WEIGHT = 0.78;
 const LEXICAL_SOURCE_WEIGHT = 1 - SEMANTIC_SOURCE_WEIGHT;
 
 /** Identity boosts, as a fraction of the (0-1) fused score. */
@@ -306,6 +337,13 @@ export function rankSearchResults({
 			// Weighted normalized scores, plus a rank term for stability. Both parts
 			// are already 0-1, so the fused score is 0-1 and the identity boosts
 			// below are meaningful fractions rather than magnitude-specific nudges.
+			//
+			// A result absent from one source scores 0 for it rather than being
+			// credited from the other. Crediting was measured (0 → 1.5) and is a
+			// dead end: cross-lingual nDCG never moved off 0.5253, while core fell
+			// 0.8889 → 0.8483 and long-context collapsed 0.9210 → 0.6443. On a
+			// typical query 55-72% of semantic results are absent from lexical, so
+			// the credit is a broad boost to the majority, not a targeted fix.
 			const scorePart = SEMANTIC_SOURCE_WEIGHT * normalizedSemantic + LEXICAL_SOURCE_WEIGHT * normalizedLexical;
 			// Normalize the RRF sum by its own maximum (both sources at rank 1) so it
 			// too lands on 0-1 and the split below is a true proportion.

@@ -1,6 +1,6 @@
 import { TFile, getAllTags, type CachedMetadata } from "obsidian";
 import type SecondBrainPlugin from "../main";
-import { compileFilter, matchesSearchFilter } from "../search/searchFilters";
+import { compileFilter, matchesPathFilter, matchesSearchFilter } from "../search/searchFilters";
 import { extractSearchTerms } from "../search/searchTermUtils";
 import { createQueryPlan, type QueryPlan } from "../search/queryPlan";
 import {
@@ -163,13 +163,39 @@ export class LexicalSearchService {
 		return this.miniSearch.documentCount;
 	}
 
+	/**
+	 * Over-fetch factor when a filter is present, so that filtering still leaves
+	 * enough survivors to fill `topK`.
+	 *
+	 * Only a heuristic: a filter selecting a rare tag can still exhaust it. The
+	 * `browse` path does not rely on this at all — it filters before limiting,
+	 * which is exact — but ranked search has no way to know a document's tags
+	 * without reading its cache, so it over-fetches and filters afterwards.
+	 */
+	private static readonly FILTERED_OVERFETCH = 10;
+
 	async search(query: string, topK: number, filter?: SearchFilter): Promise<VectorSearchResult[]> {
-		const results = this.miniSearch.search(query, topK * (filter ? 3 : 1));
+		const limit = filter ? topK * LexicalSearchService.FILTERED_OVERFETCH : topK;
+		const results = this.miniSearch.search(query, limit);
 		return this.applyFilter(results, topK, filter, query);
 	}
 
 	async browse(topK: number, filter?: SearchFilter): Promise<VectorSearchResult[]> {
-		const results = this.miniSearch.browse(topK * (filter ? 3 : 1));
+		// Push the path predicate *into* the browse so it filters before slicing.
+		// Browsing is ordered by path, so post-filtering a sliced list only ever
+		// sees the alphabetically-earliest candidates — which silently returned
+		// 18 of a 77-note folder. Tag constraints still resolve in applyFilter,
+		// which has the metadata cache; this pre-filter is path-only and
+		// deliberately permissive.
+		const compiled = filter ? compileFilter(filter) : undefined;
+		// A tag constraint is still applied after the fact (tags need the metadata
+		// cache), so leave headroom for it; a path-only filter is already exact and
+		// needs none.
+		const limit = filter?.tags?.length ? topK * LexicalSearchService.FILTERED_OVERFETCH : topK;
+		const results = this.miniSearch.browse(
+			limit,
+			compiled ? (path) => matchesPathFilter(path, compiled) : undefined,
+		);
 		return this.applyFilter(results, topK, filter);
 	}
 

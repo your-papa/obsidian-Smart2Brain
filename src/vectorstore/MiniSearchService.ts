@@ -946,8 +946,19 @@ export class MiniSearchService {
 	 * @param limit Maximum results to return
 	 * @returns All document paths and names
 	 */
-	browse(limit = 100): LexicalSearchResult[] {
-		const paths = Array.from(this.documentPaths).sort();
+	/**
+	 * List indexed documents in path order, without a query.
+	 *
+	 * `isCandidate` is applied **before** the limit, not after. Browsing is
+	 * ordered by path, so slicing first and filtering afterwards means a filter
+	 * only ever sees the alphabetically-earliest `limit` documents: browsing
+	 * `Corpus/Typography` in a 300-note vault returned 18 of its 77 notes,
+	 * because `Corpus/T…` sorts past the cut. Callers that filter must pass the
+	 * predicate down rather than post-filtering the result.
+	 */
+	browse(limit = 100, isCandidate?: (path: string) => boolean): LexicalSearchResult[] {
+		const all = Array.from(this.documentPaths).sort();
+		const paths = isCandidate ? all.filter(isCandidate) : all;
 		return paths.slice(0, limit).map((path) => ({
 			path,
 			name:

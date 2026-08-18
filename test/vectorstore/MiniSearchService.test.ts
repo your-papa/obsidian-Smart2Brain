@@ -361,4 +361,51 @@ describe("MiniSearchService", () => {
 			expect(results.map((r) => r.path)).not.toContain("Corpus/only-noise.md");
 		});
 	});
+
+	describe("browse", () => {
+		/** A vault where the folder of interest sorts *after* the browse limit. */
+		const buildVault = (id: string) => {
+			vi.useFakeTimers();
+			const service = new MiniSearchService("test-vault", id);
+			// 60 notes under Archive/ (sorts first), then 20 under Typography/.
+			for (let i = 0; i < 60; i++) {
+				service.addDocument(`Archive/note-${String(i).padStart(3, "0")}.md`, `Archive ${i}`, "filler");
+			}
+			for (let i = 0; i < 20; i++) {
+				service.addDocument(`Typography/note-${String(i).padStart(3, "0")}.md`, `Typo ${i}`, "filler");
+			}
+			return service;
+		};
+
+		it("returns a filtered folder in full even when it sorts past the limit", () => {
+			// The regression: browse slices a path-sorted list, so filtering the
+			// result afterwards only ever saw the alphabetically-earliest `limit`
+			// documents. Browsing `Typography` in the real vault returned 18 of 77.
+			const service = buildVault("browse-filter");
+
+			const results = service.browse(50, (path) => path.startsWith("Typography/"));
+
+			expect(results).toHaveLength(20);
+			expect(results.every((r) => r.path.startsWith("Typography/"))).toBe(true);
+		});
+
+		it("still honours the limit when the filter matches more than it", () => {
+			const service = buildVault("browse-limit");
+
+			const results = service.browse(10, (path) => path.startsWith("Archive/"));
+
+			expect(results).toHaveLength(10);
+			expect(results.every((r) => r.path.startsWith("Archive/"))).toBe(true);
+		});
+
+		it("is unchanged when no predicate is supplied", () => {
+			const service = buildVault("browse-nofilter");
+
+			const results = service.browse(5);
+
+			expect(results).toHaveLength(5);
+			// Path order, so the Archive notes come first.
+			expect(results[0].path).toBe("Archive/note-000.md");
+		});
+	});
 });

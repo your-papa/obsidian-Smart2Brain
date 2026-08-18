@@ -1772,6 +1772,8 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 			semanticRrfScore: result.rankingDebug?.semanticRrfScore,
 			finalTitleBoost: result.rankingDebug?.finalTitleBoost,
 			finalAliasBoost: result.rankingDebug?.finalAliasBoost,
+			bestChunkScore: result.rankingDebug?.bestChunkScore,
+			matchingChunks: result.rankingDebug?.matchingChunks,
 			lexicalAdjustedScore: result.rankingDebug?.lexicalFeatures?.adjustedScore,
 			lexicalMatchTier: result.rankingDebug?.lexicalFeatures?.matchTier,
 			identityScore: result.rankingDebug?.lexicalFeatures?.identityScore,

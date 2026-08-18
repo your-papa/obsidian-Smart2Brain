@@ -158,7 +158,8 @@ bun run build && bun run setup-vault
 bun run test:benchmark
 ```
 
-The corpus is **generated, not committed** (~300 notes, 1.9 MB). The generator is
+The corpus is **generated, not committed** (~304 notes: 285 filler + 6 core probes
++ 9 hard probes + 4 distractors). The generator is
 seeded, so it reproduces byte-for-byte; `scripts/generate-search-corpus.ts` is
 the source of truth. Regenerate after changing it, then reindex.
 
@@ -183,7 +184,8 @@ The suite fails if the mean drops below them, and **prints the new value when it
 improves — raise the constants at that point** so progress is locked in. Lowering
 them should be deliberate and explained.
 
-Current baseline: **mean nDCG@10 = 0.9966, MRR = 1.0** (18 cases,
+Current baseline (**core tier only** — the hard tier is not ratcheted; see below):
+**mean nDCG@10 = 0.9966, MRR = 1.0** (18 cases,
 `openrouter:qwen/qwen3-embedding-8b`, 2026-08-16). Seventeen cases score 1.000;
 the multi-target smart-city query sits at 0.938 because a grade-1 note ranks
 between the two grade-2 targets, which reflects grading uncertainty in that case
@@ -194,11 +196,203 @@ many-chunk note is the *wrong* answer, and one where it is genuinely right. The
 first catches chunk-count inflation; the second stops a fix for it from turning
 into a blanket penalty on long notes.
 
+### The hard tier
+
+The cases above are **saturated** — every strong embedding model scores ~1.0 on
+them. That makes them a good regression guard and a useless model-comparison
+tool: they cannot tell a 22M-param local model from a 600M one.
+
+The `hard` tier exists for that second job. Cases carry `tier: "hard"` plus an
+`axis`, and are built to have *headroom* along the four dimensions where a small
+distilled encoder is expected to lose ground:
+
+| Axis | What it probes | Why a small model struggles |
+|---|---|---|
+| `multi-hop` | Answer requires joining two facts held in different sections | Needs compositional signal, not single-passage similarity |
+| `cross-lingual` | German notes ↔ English queries (both directions) | bge-micro-v2 is English-distilled; harrier/qwen3 are multilingual |
+| `long-context` | Answer buried ~900–1100 words into one heading-free section | Exceeds a 512-token window, so the answer is truncated away |
+| `dilution` | Answer is one section inside a six-topic note | Note-level embedding averages the answer into unrelated topics |
+| `size-bias` | A long padded note out-chunks the short note that answers the query | A note's score is the max over its chunks, and max-of-N grows with N regardless of relevance |
+
+**Sub-1.0 scores here are the intended state, not failures to fix.** The tier is
+gated only by `HARD_FLOOR_MEAN_NDCG`, a loose collapse guard — deliberately *not*
+a ratchet. Ratcheting it would turn a measuring instrument into a second
+regression gate and destroy the headroom the tier exists to provide.
+
+Read the **per-axis** rows, not the mean. A model can look fine overall and still
+be unusable for a partly-German vault; only the axis split shows that.
+
+The long-context cases depend on note *shape*, not length: `chunkText` splits on
+every heading level H1–H6, so a long structured note yields many small chunks and
+never exercises a token ceiling. The generator's `unstructuredTail` builds an
+unbroken run of prose specifically to defeat that.
+
+Cross-lingual notes are monolingual German down to the filler vocabulary
+(`vocabularyDe` per domain). Earlier drafts left English technical terms in German
+sentences, which handed an English-only model free traction and made the axis
+measure nothing.
+
+**Cross-lingual is the lowest-scoring axis (0.5253 harrier / 0.6483 qwen3), and that
+is a model limit rather than a ranking bug.** Investigated 2026-08-18; the evidence:
+
+- The three cases behave completely differently — German→English scores 0.945, while
+  `keeping a sourdough starter active in a cold kitchen` scores 0.000. There is no
+  single systemic cause to fix.
+- On the failing case the grading is correct and the case is fair: the German note
+  directly answers it ("unheated kitchen under eighteen degrees… refresh more often
+  with warmer water"), and **not one** of the 8 English `sourdough-starter-maintenance-*`
+  siblings that beat it even contains the word "cold". They win on topic similarity.
+- The decisive measurement is the same note against the same index in two languages:
+  a **German** query puts it at **rank 1** (0.773); the **English** query puts it at
+  **rank 19** (0.656). The encoder loses ~0.12 of similarity crossing languages —
+  exactly enough for same-topic siblings to overtake it. `qwen3` halves the penalty
+  (rank 19 → 10) but does not remove it, which is the axis discriminating between
+  models as intended.
+- The target is absent from lexical entirely (a German note shares no terms with an
+  English query), so it enters fusion on one source. Crediting a missing source from
+  the other was implemented and swept 0 → 1.5: **a dead end.** Cross-lingual nDCG
+  never moved off 0.5253 at any value, while core fell 0.8889 → 0.8483 and
+  long-context collapsed 0.9210 → 0.6443. On a typical query 55-72% of semantic
+  results are absent from lexical, so that credit is a broad boost to the majority,
+  not a targeted fix. The note's rank did improve (43 → 15) but never reached the
+  top 10.
+
+The lever that would actually move this axis is a **more multilingual embedding
+model**, which is what the axis exists to reveal. Do not chase it in the ranker.
+
+`size-bias` is the one axis that measures the ranker more than the model, and the
+only place in the suite where a many-chunk note is the **wrong** answer. Everywhere
+else length is either rewarded or irrelevant — graded targets skew long (median 8
+sections against a corpus median of 4) and ordinary distractors are all under 700
+words. Without this axis the suite can measure the *cost* of a length penalty and
+never its *benefit*, which is exactly how a measured chunk-count correction came to
+look purely negative on every axis (the measured A/B is recorded in
+`src/vectorstore/chunkAggregation.ts`).
+
+Its distractors are the largest notes in the corpus and must out-chunk the short
+note that answers their query — the generator asserts this, because the chunker
+splits on headings, so a graded target that gains sections silently disarms the case
+unless its distractor grows too.
+
+#### Recording results per model
+
+| Model | core nDCG@10 | hard: multi-hop | cross-lingual | long-context | dilution | size-bias | hard overall |
+|---|---|---|---|---|---|---|---|
+| `openrouter:qwen/qwen3-embedding-8b` | 0.9959 | 1.0000 | 0.6483 | 0.7057 | 1.0000 | 1.0000 | 0.8630 |
+| `omlx:harrier-oss-v1-0.6b-MLX-8bit` | 0.8889 | 0.8155 | 0.5253 | 0.9210 | 1.0000 | 0.7540 | 0.7759 |
+
+**Measured 2026-08-17, after the hybrid re-weighting** (`SEMANTIC_SOURCE_WEIGHT`
+0.60 → 0.78, see `src/search/finalSearchRanking.ts`). Three of the size-bias queries
+deliberately restate `core` / `recency` queries verbatim, so a padded note that beats
+the real answer is penalised in all three tiers at once — which is why fixing it moved
+every tier:
+
+| tier / axis | harrier before → after | qwen3 before → after |
+|---|---|---|
+| core | 0.8300 → **0.8889** | 0.8871 → **0.9959** |
+| recency | 0.7232 → **0.8155** | 0.8155 → **1.0000** |
+| hard overall | 0.7504 → **0.7759** | 0.8146 → **0.8630** |
+| size-bias | 0.6309 → **0.7540** | 0.7540 → **1.0000** |
+| long-context | 0.9254 → 0.9210 | 0.9410 → 0.7057 |
+
+The `long-context` regression is the deliberate half of the trade: those answers sit
+in an unbroken prose run whose embedding is diluted, so lexical is what retrieves
+them, and down-weighting lexical costs recall there. It is 2 cases against the 20 that
+improved. Dropping the lexical leg altogether was measured too and is far worse —
+`long-context` falls to 0.2372.
+
+`harrier` still trails `qwen3` on size-bias (0.7540 vs a perfect 1.0000), which is the
+tier doing its job: the same ranker, and the weaker model still loses some
+padded-note contests.
+
+#### The precision and recall floors
+
+Two count-based tests sit outside the graded tiers, because nDCG needs a target to rank
+and these queries either have none or have one no grader assigned:
+
+- `reports how many results a meaningless query returns` — **reported, not asserted.**
+- `still returns results for meaningful queries with no lexical overlap` — **asserted.**
+
+Semantic search has no concept of "no answer": every query embeds to some vector and
+returns its nearest neighbours, so gibberish comes back with a full page (25/25) at
+cosine 0.515–0.597 against 0.665–0.700 for genuine matches. Three suppressions were
+implemented and measured, and **all three fail**:
+
+| approach | why it fails |
+|---|---|
+| absolute cosine threshold | bands overlap; `similarityThreshold`'s 0.7 default discards real answers |
+| lexical corroboration (suppress when no note shares a term) | discards `Zwiebelkuchen`, `Hefeteig` — real German queries whose answer is the German note, matching zero English-tokenised terms |
+| semantic distribution shape (`top / median`) | clean on `harrier` (noise ≤1.107, real ≥1.303) but **inverted** on `qwen3`: `Zwiebelkuchen` scores 1.031 while four gibberish queries score higher, up to 1.113 |
+
+The third is the trap worth remembering: it looked like a clean two-signal fix and
+swept to an error-free band of 1.11–1.21 *on one model*. Only the second model showed
+the bands overlap, so no threshold exists there at all.
+
+The accepted trade-off is that a meaningless query returns ranked noise — the user sees
+obviously-irrelevant notes and refines — rather than a real query silently returning
+nothing. Any future attempt must drive the no-match count down **without** breaking the
+recall floor, on both models. See `hybridSearch` in `src/agent/tools/searchNotes.ts`.
+| `local-spike:TaylorAI/bge-micro-v2` | **0.8600** | 0.6445 | **0.2103** | 0.6460 | 0.9664 | — | **0.5716** |
+
+**bge-micro-v2 (2026-08-17, 22M params, 384 dims, 512-token window, local WASM).**
+The hard tier did its job: where the core tier separates the models by ~0.14, the
+hard tier separates them by far more, and the per-axis split says *why*.
+
+- **cross-lingual 0.2103 — the disqualifier.** All three cases fail almost totally.
+  On "keeping a sourdough starter active in a cold kitchen" the German note is not
+  retrieved at all (nDCG 0.000, rank —); the top 5 are English `sourdough-starter-maintenance-*`
+  siblings. The reverse direction (German query → English note) is just as bad
+  (0.000, rank 15). This is the predicted consequence of an English-distilled model
+  and it is not a tuning problem.
+- **long-context 0.6460 and multi-hop 0.6445** — middling, as expected for a 512-token
+  window and a small distilled encoder.
+- **dilution 0.9664** — genuinely strong; chunk-level retrieval carries it.
+- **core 0.8600** is below the 0.99 ratchet, so the suite fails on this model. That
+  is the ratchet working, *not* a ranking regression: two core cases collapse
+  ("what makes very small text readable" 0.356, "when do prices rise so fast…" 0.000),
+  both zero-lexical-overlap / very-short-note probes.
+
+#### Throughput (measured, identical 32-chunk workload, warm-up discarded)
+
+| Model | Where it runs | ms/chunk (3 runs) | chunks/s | dims |
+|---|---|---|---|---|
+| `harrier-oss-v1-0.6b-MLX-8bit` | oMLX, local GPU (Metal) | 53.6 / 50.6 / 50.5 | **19.4** | 1024 |
+| `qwen/qwen3-embedding-8b` | OpenRouter, remote GPU | 89.3 | 11.2 | 4096 |
+| `TaylorAI/bge-micro-v2` | transformers.js, local WASM | 119.8 / 121.5 / 118.3 | **8.3** | 384 |
+
+**The 22M-parameter local model is the slowest of the three.** It loses 2.4x to a
+600M model on the same Mac and 1.3x to an 8B model over the network. Parameter
+count is not what decides this — parallelism is:
+
+- bge-micro-v2 runs **strictly serial on one core**: `crossOriginIsolated` is
+  `false` in Obsidian's renderer, so threaded WASM is unavailable and 11 of 12
+  cores sit idle. WebGPU is available but showed no gain (dispatch overhead
+  exceeds the compute saving at this model size).
+- oMLX uses the Mac's GPU via Metal and batches the whole request.
+- The remote call amortises one network round trip across the batch.
+
+A bundled local model therefore buys **privacy, offline capability, and zero
+setup — not speed**. For reference, a full clean vault rebuild was 2533 chunks in
+211 s.
+
+Caveat on comparability: this run indexed 2533 chunks / 343 notes, and the vault
+contained extra non-corpus notes (`TaskNotes/`, `Large Notes/`, `Topics/`) that
+appear in several top-5 lists. The two remote models above were measured on the
+same corpus but not necessarily the same surrounding vault, so treat the core-tier
+gap as indicative rather than exact.
+
+Fill the hard columns as each model is measured; the suite prints exactly these
+rows. The core column is the existing ratchet and should stay ~0.99 for every
+model — if it moves, that is a ranking regression, not a model difference.
+
 ### Adding a case
 
 Append to `RELEVANCE_JUDGMENTS`. Prefer cases the ranker currently *fails* —
 those are what justify a change. If one is a known failure, set `knownFailure`
 with the measured evidence; the suite reports it separately instead of going red,
 and tells you when it starts passing.
+
+For a model-discrimination case, set `tier: "hard"` and an `axis` instead; it is
+then excluded from the core ratchet automatically and reported under its axis.
 
 Skips cleanly when no embedding provider is configured, so CI stays green.

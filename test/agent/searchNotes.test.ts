@@ -304,11 +304,7 @@ describe("performSearch lexical startup behavior", () => {
 		const result = await tool.invoke({ query: "note" });
 		const parsed: SearchToolResultPayload = JSON.parse(String(result));
 
-		expect(parsed.results.map((entry) => entry.name)).toEqual([
-			"lexical-top",
-			"runner-up",
-			"recent-lower",
-		]);
+		expect(parsed.results.map((entry) => entry.name)).toEqual(["lexical-top", "runner-up", "recent-lower"]);
 	});
 
 	it("gives the fifth recent result enough lift to overtake the lexical leader", async () => {
@@ -599,6 +595,90 @@ describe("performSearch lexical startup behavior", () => {
 
 		expect(results[0]?.name).toBe("Alias Fixture");
 		expect(results[0]?.rankingDebug?.finalAliasBoost).toBeGreaterThan(0);
+	});
+
+	/** A flat semantic field — the shape a meaningless query produces. */
+	const flatSemanticResults = Array.from({ length: 20 }, (_, i) => ({
+		path: `Notes/n${i}.md`,
+		name: `N${i}`,
+		score: 0.58 - i * 0.002,
+	}));
+
+	/** A peaked semantic field — one clear winner above the pack. */
+	const peakedSemanticResults = [
+		{ path: "Notes/answer.md", name: "Answer", score: 0.78 },
+		...Array.from({ length: 19 }, (_, i) => ({
+			path: `Notes/n${i}.md`,
+			name: `N${i}`,
+			score: 0.57 - i * 0.002,
+		})),
+	];
+
+	it("keeps semantic results when lexical matched nothing", async () => {
+		// A query with no literal overlap anywhere — the shape of a cross-lingual
+		// or synonym-only search — must not be suppressed. Gating on lexical
+		// emptiness was implemented and reverted: it silently discarded real
+		// answers (see the note in `hybridSearch`).
+		mockWaitForVectorStore.mockResolvedValue(true);
+		mockWaitForLexicalSearch.mockResolvedValue(true);
+		mockGetVectorStoreService.mockReturnValue({
+			semanticSearch: vi.fn().mockResolvedValue(peakedSemanticResults),
+		});
+		mockLexicalSearch.mockResolvedValue([]);
+
+		const results = await performSearch({} as App, "Zwiebelkuchen", "hybrid");
+
+		expect(results.length).toBeGreaterThan(0);
+		expect(results[0]?.name).toBe("Answer");
+	});
+
+	it("keeps semantic results even when the semantic field is flat", async () => {
+		// The other half of the same decision: a flat distribution is what a
+		// meaningless query produces, but it is *also* what some real queries
+		// produce on some embedding models, so it cannot be used to suppress.
+		mockWaitForVectorStore.mockResolvedValue(true);
+		mockWaitForLexicalSearch.mockResolvedValue(true);
+		mockGetVectorStoreService.mockReturnValue({
+			semanticSearch: vi.fn().mockResolvedValue(flatSemanticResults),
+		});
+		mockLexicalSearch.mockResolvedValue([]);
+
+		const results = await performSearch({} as App, "zzzznotarealword", "hybrid");
+
+		expect(results.length).toBeGreaterThan(0);
+	});
+
+	it("keeps semantic results when lexical is unavailable rather than empty", async () => {
+		// The guard that makes the rule above safe: a lexical service that never
+		// initialised also returns nothing, but that says nothing about the query.
+		// Suppressing here would break hybrid search whenever the index is not
+		// ready yet.
+		mockWaitForVectorStore.mockResolvedValue(true);
+		mockWaitForLexicalSearch.mockResolvedValue(false);
+		mockGetVectorStoreService.mockReturnValue({
+			semanticSearch: vi.fn().mockResolvedValue([{ path: "Notes/real.md", name: "Real Answer", score: 0.81 }]),
+		});
+
+		const results = await performSearch({} as App, "anything", "hybrid");
+
+		expect(results.map((r) => r.name)).toContain("Real Answer");
+	});
+
+	it("keeps results when lexical matched even a single note", async () => {
+		// The gate is "lexical found nothing at all", not a score threshold — a
+		// single weak lexical hit is enough corroboration to trust the semantic leg.
+		mockWaitForVectorStore.mockResolvedValue(true);
+		mockWaitForLexicalSearch.mockResolvedValue(true);
+		mockGetVectorStoreService.mockReturnValue({
+			semanticSearch: vi
+				.fn()
+				.mockResolvedValue([{ path: "Notes/semantic.md", name: "Semantic Hit", score: 0.7 }]),
+		});
+		mockLexicalSearch.mockResolvedValue([{ path: "Notes/weak.md", name: "Weak Hit", score: 0.4 }]);
+
+		const results = await performSearch({} as App, "borderline", "hybrid");
+
+		expect(results.length).toBeGreaterThan(0);
 	});
 
 	it("prefers recent alias-token matches over plain title-prefix matches in lexical ranking", async () => {

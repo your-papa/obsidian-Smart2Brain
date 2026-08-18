@@ -66,6 +66,45 @@ async function hybridSearch(app: App, query: string, filter?: SearchFilter): Pro
 		getLexicalResults(app, query, filter),
 	]);
 
+	// NOTE: there is deliberately no "no results" suppression here.
+	//
+	// Semantic search has no concept of "no answer" — every query embeds to some
+	// vector and returns its nearest neighbours, so a meaningless query yields a
+	// full page of confident-looking results (measured at cosine 0.515-0.597,
+	// against 0.665-0.700 for genuine matches). Three ways to suppress that were
+	// implemented and measured; all three fail:
+	//
+	//  1. **Absolute cosine threshold.** The bands overlap, so any cutoff that
+	//     catches gibberish also discards real answers. (`similarityThreshold`
+	//     defaults to 0.7 in code, well above genuine matches.)
+	//  2. **Lexical corroboration** — suppress when no indexed note contains any
+	//     query term. Clean on one model, but it silently discards legitimate
+	//     queries with no literal overlap: `Zwiebelkuchen` correctly retrieves the
+	//     German sourdough note while matching zero terms. That is the normal
+	//     shape of a cross-lingual or synonym-only search, not an edge case.
+	//  3. **Semantic distribution shape** — suppress a flat field of
+	//     equally-mediocre neighbours, keep a clear winner. Separates cleanly on
+	//     `harrier` (noise ≤1.107 `top/median`, real ≥1.303) and is *provably
+	//     unusable* on `qwen3`, where the bands invert: `Zwiebelkuchen` scores
+	//     1.031 while four noise queries score higher (up to 1.113). No threshold
+	//     on this metric exists for that model.
+	//
+	// Returning ranked results for a meaningless query is the lesser failure: the
+	// user sees obviously-irrelevant notes and refines. Silently returning nothing
+	// for a real query is worse, and (2) and (3) both do that on some model.
+	//
+	// The benchmark keeps both floors measured — `returns nothing for queries that
+	// match nothing` and `still returns results for meaningful queries with no
+	// lexical overlap` — so a future attempt has to satisfy both at once, on both
+	// models, rather than trading one for the other.
+
+	// Both legs are kept deliberately. Dropping lexical when semantic is available
+	// was measured (semantic alone ranks the right answer #1 on most core queries)
+	// but collapses the `long-context` axis 0.9254 → 0.2372: those answers sit in
+	// an unbroken prose run whose embedding is diluted, so the literal query terms
+	// are the only thing that retrieves them. See SEMANTIC_SOURCE_WEIGHT in
+	// `finalSearchRanking.ts` for the weighting that fixes the size-bias defect
+	// without giving up that recall.
 	return rankSearchResults({
 		query,
 		lexicalResults,

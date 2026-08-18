@@ -51,6 +51,28 @@ export function compileFilter(filter: SearchFilter): CompiledFilter {
  * Pass a `CompiledFilter` (from `compileFilter`) when calling inside a loop
  * over many documents — it avoids rebuilding the exact-path Set on every call.
  */
+/**
+ * Path-only half of {@link matchesSearchFilter}, for callers that must narrow a
+ * candidate set *before* they have file metadata to read tags from.
+ *
+ * Deliberately permissive: a filter that also constrains tags returns `true`
+ * here for anything whose path qualifies, leaving the authoritative tag check to
+ * `matchesSearchFilter` once the cache is available. Being permissive costs a
+ * few extra candidates; being strict would silently drop real matches.
+ */
+export function matchesPathFilter(path: string, filter?: SearchFilter | CompiledFilter): boolean {
+	if (!filter) return true;
+	const compiled: CompiledFilter | null = "exactPathSet" in filter ? (filter as CompiledFilter) : null;
+	const sf: SearchFilter = compiled ? compiled.filter : (filter as SearchFilter);
+
+	if (!sf.pathPrefixes?.length) return true;
+
+	if (compiled?.exactPathSet) {
+		return compiled.exactPathSet.has(normalizeVaultPath(path));
+	}
+	return sf.pathPrefixes.some((prefix) => matchesPathPrefix(path, prefix));
+}
+
 export function matchesSearchFilter(path: string, docTags: string[], filter?: SearchFilter | CompiledFilter): boolean {
 	if (!filter) {
 		return true;
