@@ -896,8 +896,12 @@ function getTopicEdges(): GraphEdge[] {
  * determine the result, so this doubles as an identity for "which grouping is
  * this". Link-only results must never share a slot with fused ones.
  */
-function partitionKey(resolution: number, linkOnly = settings.linkOnlyTopics): string {
-	return `${settings.leidenSeed}:${resolution}:${linkOnly ? "wiki" : "fused"}`;
+function partitionKey(
+	resolution: number,
+	linkOnly = settings.linkOnlyTopics,
+	seed: number = settings.leidenSeed,
+): string {
+	return `${seed}:${resolution}:${linkOnly ? "wiki" : "fused"}`;
 }
 
 /** The partition the controls are currently asking for. */
@@ -988,9 +992,12 @@ async function deriveGranularityLevels(topicEdges: GraphEdge[]) {
 	isDerivingGranularityLadder = true;
 
 	const localBuildVersion = buildVersion;
-	// Captured once: the probe loop awaits between rungs, and every cached entry it
-	// writes has to be keyed to the mode the edges were actually taken from.
+	// Captured once, and used for every probe below. The loop awaits between
+	// rungs, so reading these live would let a mid-loop change split the ladder
+	// across two partitions — and, because they also form the cache key, file
+	// old-seed results under the new seed. One ladder must describe one partition.
 	const linkOnly = settings.linkOnlyTopics;
+	const seed = settings.leidenSeed;
 	const sources = topicEdges.map((e) => e.source);
 	const targets = topicEdges.map((e) => e.target);
 	const weights = topicEdges.map(leidenWeight);
@@ -1002,11 +1009,11 @@ async function deriveGranularityLevels(topicEdges: GraphEdge[]) {
 		for (const resolution of GRANULARITY_PROBE_RESOLUTIONS) {
 			if (localBuildVersion !== buildVersion) return;
 
-			const cacheKey = partitionKey(resolution, linkOnly);
+			const cacheKey = partitionKey(resolution, linkOnly, seed);
 			let communities = leidenCache.get(cacheKey)?.communities;
 			if (!communities) {
 				try {
-					const result = await leidenAsync(sources, targets, weights, false, settings.leidenSeed, resolution);
+					const result = await leidenAsync(sources, targets, weights, false, seed, resolution);
 					if (localBuildVersion !== buildVersion) return;
 					leidenCache.set(cacheKey, { communities: result.communities, centrality: result.centrality });
 					communities = result.communities;
@@ -1020,18 +1027,18 @@ async function deriveGranularityLevels(topicEdges: GraphEdge[]) {
 		}
 
 		if (localBuildVersion !== buildVersion) return;
-		// The rungs describe the edge set the probes ran over. If the user switched
-		// link mode meanwhile, publishing them would give the slider levels derived
-		// from a graph that is no longer on screen — and because the probes seeded
-		// the cache under the *old* mode, dragging would then hit misses and skip
-		// levels.
+		// The rungs describe the partition the probes ran under. If the seed or the
+		// link mode moved on, publishing them would give the slider levels derived
+		// from a grouping that is no longer on screen — and because the probes seed
+		// the cache under the old partition, dragging would then hit misses and
+		// skip levels.
 		//
-		// Re-probing has to happen from here. The mode change already called
+		// Re-probing has to happen from here. Whatever changed already called
 		// `runLeidenSegmentation`, and that call's `deriveGranularityLevels` was
 		// turned away by the `isDerivingGranularityLadder` guard while this run held
 		// it — so nothing else is left to rebuild the ladder.
-		if (linkOnly !== settings.linkOnlyTopics) {
-			Logger.info("[SmartGraph] Re-probing the granularity ladder: link mode changed mid-derivation");
+		if (linkOnly !== settings.linkOnlyTopics || seed !== settings.leidenSeed) {
+			Logger.info("[SmartGraph] Re-probing the granularity ladder: the partition changed mid-derivation");
 			isDerivingGranularityLadder = false;
 			void deriveGranularityLevels(getTopicEdges());
 			return;
