@@ -3,7 +3,22 @@ import type { ProviderInstanceMeta } from "../types/provider/index";
 import type { UUIDv7 } from "../utils/uuid7Validator";
 import type { SmartGraphSettings } from "./graph";
 
-export type SearchAlgorithm = "lexical" | "hybrid";
+/**
+ * Retrieval strategy.
+ *
+ * - `lexical` — BM25 only. The default, and what the search modal shows first.
+ * - `semantic` — embeddings only, with **no lexical leg at all**. Not the same as
+ *   hybrid with the lexical weight turned down: `rankSearchResults` takes its
+ *   single-source branch when `lexicalResults` is empty, which skips RRF
+ *   rank-mixing and raises the title boost (`SEMANTIC_ONLY_TITLE_BOOST_MAX`).
+ * - `hybrid` — both legs fused at `SEMANTIC_SOURCE_WEIGHT`.
+ *
+ * The modal's Tab toggle picks `lexical` ↔ `semantic`, because by the time a user
+ * toggles it they have already seen and rejected the lexical ordering. The agent's
+ * `search_notes` tool defaults to whatever `dataStore.searchAlgorithm` says and is
+ * usually left on hybrid, where there is no prior view to reject.
+ */
+export type SearchAlgorithm = "lexical" | "semantic" | "hybrid";
 
 export interface RecentNoteEntry {
 	path: string;

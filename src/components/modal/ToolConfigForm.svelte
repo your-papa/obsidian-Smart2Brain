@@ -458,6 +458,7 @@ function openProcessorSelectionModal(currentProcessor: ChatModel | null, onSelec
           type="options"
           dropdown={[
             { display: "Lexical (BM25)", value: "lexical" as SearchAlgorithm },
+            { display: "Semantic (embeddings only)", value: "semantic" as SearchAlgorithm },
             { display: "Hybrid (BM25 + semantic)", value: "hybrid" as SearchAlgorithm },
           ]}
           selected={algorithm}
