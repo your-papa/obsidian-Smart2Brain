@@ -11,6 +11,7 @@
 
 import { isNumericSearchTerm, normalizeSearchText, tokenizeSearchText } from "./searchTermUtils";
 import { createQueryPlan, type QueryPlan } from "./queryPlan";
+import { isStopword } from "./stopwords";
 
 export type TitleMatchKind =
 	| "exact"
@@ -299,12 +300,104 @@ export function calculateAliasBoost(
 // ---------------------------------------------------------------------------
 
 /**
+ * Fraction of `maxBoost` available to a *token-wise* match, as opposed to a
+ * whole-query match.
+ *
+ * Whole-query matching ("the query IS this tag") is strong evidence and keeps the
+ * full boost. A token-wise match is much weaker evidence — a conversational query
+ * shares a token with a folder or tag all the time without being *about* it — so
+ * it is capped well below the whole-query tiers, and scaled by coverage on top.
+ *
+ * This ceiling is what stops the token-wise path from re-creating the defect
+ * documented in `integration/README.md`: the `Topics/Smart Cities/` folder was
+ * worth ~0.10 nDCG on a single query purely because a directory happened to be
+ * named after the query's subject. Coverage-scaled and capped, a one-token
+ * incidental overlap can nudge a tie but cannot overturn a relevance gap.
+ *
+ * Applies to **paths only** — see `calculateTagBoost` for why tags are excluded.
+ * Measured on the graded benchmark (`harrier-oss-v1-0.6b-MLX-8bit`, one index
+ * build): path-only token-wise matching leaves every tier byte-identical to
+ * baseline (core 0.9085, hard 0.7456, recency 0.8155), so the capability is free
+ * on this corpus. 0.35 is kept rather than tuned down because nothing here
+ * measures it — the corpus has one folder-shaped region and the graded queries do
+ * not depend on folder names.
+ */
+const TOKENWISE_MATCH_SHARE = 0.35;
+
+/**
+ * Coverage-weighted token overlap between the query's significant terms and a
+ * single target string (a tag or a path segment), in 0-1.
+ *
+ * Both directions matter and are deliberately combined multiplicatively-ish via
+ * the *smaller* of the two ratios:
+ *
+ *  - query coverage — how much of what the user asked for this target accounts
+ *    for. One token out of six is weak evidence.
+ *  - target coverage — how much of the target the match accounts for. A query
+ *    token matching the whole of a short tag (`#review`) is stronger evidence
+ *    than matching one word of a long folder name.
+ *
+ * Taking the minimum means a match must be substantial from *both* sides. This is
+ * what keeps "notes from the vendor call" from lighting up every folder that
+ * contains the word "notes".
+ */
+function tokenOverlapRatio(queryTokens: string[], targetTokens: string[]): number {
+	// Stopwords are excluded from *both* sides rather than merely down-weighted.
+	// `extractSearchTerms` keeps them (only `getTermBoost` discounts them, at BM25
+	// time), so without this a query like "notes from the vendor call" would count
+	// `from` and `the` toward coverage — letting an incidental function-word hit on
+	// a folder named "The Archive" register as a third of a match. Overlap here is
+	// an evidence ratio, and a function word is not evidence.
+	const query = queryTokens.filter((token) => !isStopword(token));
+	const target = targetTokens.filter((token) => !isStopword(token));
+	if (query.length === 0 || target.length === 0) {
+		return 0;
+	}
+
+	const targetSet = new Set(target);
+	const matched = query.filter((token) => targetSet.has(token));
+	if (matched.length === 0) {
+		return 0;
+	}
+
+	const queryCoverage = matched.length / query.length;
+	const targetCoverage = new Set(matched).size / targetSet.size;
+	return Math.min(queryCoverage, targetCoverage);
+}
+
+/**
  * Calculate a tag boost based on how well `query` matches the given tags.
+ *
+ * Whole-query only (equality, prefix, substring), so a conversational query
+ * scores 0 here. That is deliberate, and it is the one asymmetry with
+ * `calculatePathBoost`.
+ *
+ * **Token-wise tag matching was implemented and measured, and it is a net loss.**
+ * On the graded benchmark (`harrier-oss-v1-0.6b-MLX-8bit`, single index build) it
+ * took the hard tier 0.7456 → 0.7375, entirely from `polysemy` 0.7560 → 0.7154,
+ * while improving nothing. The failing case is `the review is blocking me`, and it
+ * is not a tuning problem:
+ *
+ *   | note                      | tags               | correct? |
+ *   |---------------------------|--------------------|----------|
+ *   | `Weekly Review 2026-03-14`| `zettel`, `review` | no       |
+ *   | `PR Review Backlog`       | `zettel`, `platform`| **yes** |
+ *
+ * The wrong note is the one tagged `#review`; the right one is not tagged for the
+ * word the user typed. Tags record what a note *is*, and a query naming a topic is
+ * often looking for a note *about* that topic rather than one filed under it —
+ * so on exactly the queries where senses collide, tag identity points the wrong
+ * way. Halving the share (0.35 → 0.15) did not recover the case, because the boost
+ * was widening a lead the wrong note already held rather than creating one.
+ *
+ * Paths do not have this problem: a folder is a *location*, and a note's location
+ * is not a claim about which sense of a word it uses.
  *
  * Returns a value between 0 and `maxBoost`.
  */
-export function calculateTagBoost(query: string, tags: string[], maxBoost: number): number {
-	const normalizedQuery = query.trim().toLowerCase();
+export function calculateTagBoost(query: string | QueryPlan, tags: string[], maxBoost: number): number {
+	const plan = resolveQueryPlan(query);
+	const normalizedQuery = plan.normalizedQuery;
 	if (!normalizedQuery || tags.length === 0) {
 		return 0;
 	}
@@ -324,6 +417,7 @@ export function calculateTagBoost(query: string, tags: string[], maxBoost: numbe
 			continue;
 		}
 
+		// No token-wise fallback here, deliberately — see the docblock above.
 		if (normalizedTag.includes(normalizedQuery)) {
 			bestBoost = Math.max(bestBoost, maxBoost * 0.25);
 		}
@@ -340,10 +434,15 @@ export function calculateTagBoost(query: string, tags: string[], maxBoost: numbe
  * Calculate a path-segment boost based on how well `query` matches
  * the folder segments of `pathSegments`.
  *
+ * Matches whole-query first, then falls back to a capped token-wise overlap, on
+ * the same terms as `calculateTagBoost` — see `TOKENWISE_MATCH_SHARE` for why the
+ * token-wise tier is deliberately weak.
+ *
  * Returns a value between 0 and `maxBoost`.
  */
-export function calculatePathBoost(query: string, pathSegments: string[], maxBoost: number): number {
-	const normalizedQuery = query.trim().toLowerCase();
+export function calculatePathBoost(query: string | QueryPlan, pathSegments: string[], maxBoost: number): number {
+	const plan = resolveQueryPlan(query);
+	const normalizedQuery = plan.normalizedQuery;
 	if (!normalizedQuery || pathSegments.length === 0) {
 		return 0;
 	}
@@ -365,6 +464,12 @@ export function calculatePathBoost(query: string, pathSegments: string[], maxBoo
 
 		if (normalizedSegment.includes(normalizedQuery)) {
 			bestBoost = Math.max(bestBoost, maxBoost * 0.26);
+			continue;
+		}
+
+		const overlap = tokenOverlapRatio(plan.searchTerms, tokenizeSearchText(normalizedSegment));
+		if (overlap > 0) {
+			bestBoost = Math.max(bestBoost, maxBoost * TOKENWISE_MATCH_SHARE * overlap);
 		}
 	}
 
