@@ -703,6 +703,13 @@ function handleFocusCluster(cluster: number, pan = false, multi = true) {
 	}
 }
 
+/**
+ * Adopt a new selection: the single place that records it and mirrors it out.
+ *
+ * Every path that changes the selection routes through here — canvas lasso,
+ * topic label, panel row — so the graph and each open chat's context tray can
+ * never disagree about what is selected.
+ */
 function handleSelectionChange(paths: string[]) {
 	selectedPaths = paths;
 	const messenger = getSessionRegistry();
@@ -715,12 +722,8 @@ function handleSelectionChange(paths: string[]) {
 function handleLassoModeChange(active: boolean) {
 	lassoMode = active;
 	if (!active) {
-		selectedPaths = [];
 		canvasComponent?.clearSelection();
-		const messenger = getSessionRegistry();
-		if (messenger) {
-			messenger.graphSelection = [];
-		}
+		handleSelectionChange([]);
 	}
 }
 
@@ -795,14 +798,10 @@ function handleZoomToSelection() {
 }
 
 function handleClearSelection() {
-	selectedPaths = [];
 	focusedClusters = new Set();
 	focusedSegmentIds = new Set();
 	canvasComponent?.clearSelection();
-	const messenger = getSessionRegistry();
-	if (messenger) {
-		messenger.graphSelection = [];
-	}
+	handleSelectionChange([]);
 }
 
 async function handleImmerse() {
@@ -1058,19 +1057,21 @@ function handleFocusSegment(segmentId: string, multi: boolean) {
 
 	// Mirror into `focusedClusters` so the canvas agrees about which topics are
 	// focused however the selection was made — panel row or topic label.
-	const paths: string[] = [];
 	const clusters = new Set<number>();
 	for (const id of next) {
 		const index = segments.findIndex((s) => s.id === id);
-		if (index === -1) continue;
-		clusters.add(index);
-		paths.push(...segments[index].paths);
+		if (index !== -1) clusters.add(index);
 	}
 	focusedClusters = clusters;
+
+	// Resolve through the canvas rather than reading `segment.paths` directly: a
+	// collapsed topic is one synthetic node standing for its members, and only the
+	// canvas can map it back to real note paths. Reading the segment would hand
+	// chat the pre-collapse paths, so a row click and a label click — the same act
+	// — would disagree the moment a topic was folded.
+	const paths = canvasComponent?.getNodePathsForClusters(clusters) ?? [];
 	canvasComponent?.selectNodesByPaths(paths);
-	selectedPaths = paths;
-	const messenger = getSessionRegistry();
-	if (messenger) messenger.graphSelection = [...paths];
+	handleSelectionChange(paths);
 	// A plain row click is "take me to this topic", so framing it helps. A
 	// Shift/⌘ click is building a multi-selection — moving the view mid-gesture
 	// would shift the rows and labels the user is still aiming at.
