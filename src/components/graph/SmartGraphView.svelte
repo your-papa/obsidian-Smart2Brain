@@ -214,6 +214,23 @@ let effectiveClusterLabels: Record<number, string> = $derived({
 	...generatedClusterLabels,
 });
 
+/**
+ * `segments` with the current topic names applied.
+ *
+ * The label baked into a segment is the hub-filename default, fixed at the
+ * moment Leiden resolved. AI names arrive later and only ever landed in
+ * `effectiveClusterLabels`, so the canvas pills renamed themselves while the
+ * panel's list kept the old names. Deriving the panel's copy keeps one source of
+ * truth for what a topic is called. A segment's index *is* its cluster id (they
+ * are assigned `cluster: i` from this same array in `resolveAndApplySegments`).
+ */
+let labeledSegments: SpaceSegment[] = $derived(
+	segments.map((segment, cluster) => {
+		const label = effectiveClusterLabels[cluster];
+		return label === undefined || label === segment.label ? segment : { ...segment, label };
+	}),
+);
+
 let graphData: GraphData = $state({ nodes: [], edges: [] });
 
 /**
@@ -1584,7 +1601,7 @@ function handleHoverPreview(event: MouseEvent, path: string, targetEl: HTMLEleme
     onLassoModeChange={handleLassoModeChange}
     {graphData}
     nodeCount={displayGraphData.nodes.length}
-    {segments}
+    segments={labeledSegments}
     {isTopicsCollapsed}
     focusedSegmentIds={focusedSegmentIds}
     onFocusSegment={handleFocusSegment}
