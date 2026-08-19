@@ -610,17 +610,35 @@ onDestroy(() => {
 	labelingAbort?.abort();
 });
 
+/**
+ * Drop every piece of state recorded against topic *numbers*.
+ *
+ * Cluster ids are size-sorted positions in a fresh partition, so "topic 3"
+ * before and after a re-run are unrelated groups. Anything holding an id — a
+ * fold, a focus, a selection — would silently reattach to the wrong topic.
+ *
+ * `collapseAll` survives deliberately: it's a mode, not an id, so it still means
+ * what it says under any numbering.
+ */
+function clearTopicIndexedState() {
+	if (collapsedTopics.size > 0) collapsedTopics = new Set();
+	if (expandedTopics.size > 0) expandedTopics = new Set();
+	// Focus and selection are id-keyed too — leaving them would highlight whichever
+	// unrelated group inherited the number.
+	if (focusedClusters.size > 0 || focusedSegmentIds.size > 0 || selectedPaths.length > 0) {
+		handleClearSelection();
+	}
+}
+
 // Handlers
 function handleSettingsChange(partial: Partial<SmartGraphSettings>) {
-	// Changing resolution re-runs Leiden, which both invents new topics and
-	// *renumbers* existing ones — so any per-topic fold/unfold recorded against
-	// the old numbering would reattach to unrelated groups. Drop those exceptions;
-	// collapse-all is a mode and survives, which is what the user expects.
-	if (partial.leidenResolution !== undefined && partial.leidenResolution !== settings.leidenResolution) {
-		if (collapsedTopics.size > 0) collapsedTopics = new Set();
-		if (expandedTopics.size > 0) expandedTopics = new Set();
-	}
+	// Compared as partition identities rather than field-by-field: resolution,
+	// seed and link-mode each re-run Leiden and renumber every topic, so keying
+	// the reset off the key itself covers all three (and anything added later)
+	// instead of relying on this list staying complete.
+	const previousKey = currentPartitionKey();
 	data.smartGraphSettings = { ...settings, ...partial };
+	if (currentPartitionKey() !== previousKey) clearTopicIndexedState();
 }
 
 function handleFolderFilterChange(folders: string[]) {
@@ -851,6 +869,20 @@ function getTopicEdges(): GraphEdge[] {
 	);
 }
 
+/**
+ * Cache key for one Leiden partition — the seed, resolution and edge mode fully
+ * determine the result, so this doubles as an identity for "which grouping is
+ * this". Link-only results must never share a slot with fused ones.
+ */
+function partitionKey(resolution: number, linkOnly = settings.linkOnlyTopics): string {
+	return `${settings.leidenSeed}:${resolution}:${linkOnly ? "wiki" : "fused"}`;
+}
+
+/** The partition the controls are currently asking for. */
+function currentPartitionKey(): string {
+	return partitionKey(settings.leidenResolution);
+}
+
 async function runLeidenSegmentation() {
 	const localBuildVersion = buildVersion;
 	const topicEdges = getTopicEdges();
@@ -865,8 +897,7 @@ async function runLeidenSegmentation() {
 		return;
 	}
 
-	// Link-only results must not share a cache slot with fused ones.
-	const cacheKey = `${settings.leidenSeed}:${settings.leidenResolution}:${settings.linkOnlyTopics ? "wiki" : "fused"}`;
+	const cacheKey = currentPartitionKey();
 	const cached = leidenCache.get(cacheKey);
 	if (cached) {
 		Logger.info(`[SmartGraph] Leiden cache hit (γ=${settings.leidenResolution.toFixed(2)})`);
@@ -899,7 +930,19 @@ async function runLeidenSegmentation() {
 	Logger.info(
 		`[SmartGraph] Leiden (γ=${settings.leidenResolution.toFixed(2)}, ${topicEdges.length} edges, ${graphData.nodes.length} nodes): ${Math.round(performance.now() - start)}ms`,
 	);
+	// Always worth caching — the result is correct for the settings it ran under,
+	// even if those are no longer the ones on screen.
 	leidenCache.set(cacheKey, { communities: result.communities, centrality: result.centrality });
+	// …but only *apply* it if those settings are still current. `buildVersion`
+	// alone can't tell: it tracks graph rebuilds, while γ, seed and link-mode all
+	// change the partition without touching the graph. A slow run started at one γ
+	// would otherwise land after the user moved to another (served instantly from
+	// cache) and quietly replace it, leaving the controls describing a grouping
+	// the canvas isn't showing.
+	if (currentPartitionKey() !== cacheKey) {
+		Logger.info("[SmartGraph] Discarding a Leiden result the settings have moved past");
+		return;
+	}
 	leidenCommunities = result.communities;
 	leidenCentrality = result.centrality;
 	resolveAndApplySegments(graphData);
@@ -923,7 +966,9 @@ async function deriveZoomLevels(topicEdges: GraphEdge[]) {
 	isDerivingZoomLadder = true;
 
 	const localBuildVersion = buildVersion;
-	const mode = settings.linkOnlyTopics ? "wiki" : "fused";
+	// Captured once: the probe loop awaits between rungs, and every cached entry it
+	// writes has to be keyed to the mode the edges were actually taken from.
+	const linkOnly = settings.linkOnlyTopics;
 	const sources = topicEdges.map((e) => e.source);
 	const targets = topicEdges.map((e) => e.target);
 	const weights = topicEdges.map(leidenWeight);
@@ -935,7 +980,7 @@ async function deriveZoomLevels(topicEdges: GraphEdge[]) {
 		for (const resolution of ZOOM_PROBE_RESOLUTIONS) {
 			if (localBuildVersion !== buildVersion) return;
 
-			const cacheKey = `${settings.leidenSeed}:${resolution}:${mode}`;
+			const cacheKey = partitionKey(resolution, linkOnly);
 			let communities = leidenCache.get(cacheKey)?.communities;
 			if (!communities) {
 				try {
@@ -984,8 +1029,7 @@ async function computeTopicHierarchy(topicEdges: GraphEdge[]) {
 	const localBuildVersion = buildVersion;
 	const fineResolution = settings.leidenResolution ?? 1.0;
 	const coarseResolution = coarseResolutionFor(fineResolution);
-	const mode = settings.linkOnlyTopics ? "wiki" : "fused";
-	const cacheKey = `${settings.leidenSeed}:${coarseResolution}:${mode}`;
+	const cacheKey = partitionKey(coarseResolution);
 
 	let communities: Record<string, number>;
 	const cached = leidenCache.get(cacheKey);
@@ -1406,8 +1450,7 @@ function handleZoomChange(zoom: number) {
 	const resolution = zoomToResolution(zoom, zoomLadder);
 	if (resolution === settings.leidenResolution) return;
 
-	const cacheKey = `${settings.leidenSeed}:${resolution}:${settings.linkOnlyTopics ? "wiki" : "fused"}`;
-	const cached = leidenCache.get(cacheKey);
+	const cached = leidenCache.get(partitionKey(resolution));
 	if (!cached) return;
 
 	handleSettingsChange({ leidenResolution: resolution });
