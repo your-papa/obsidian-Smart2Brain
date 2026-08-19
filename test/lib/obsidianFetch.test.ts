@@ -240,3 +240,46 @@ describe("createObsidianFetch timeout", () => {
 		}
 	});
 });
+
+/*
+ * Timeout must be distinguishable from user cancellation.
+ *
+ * Both abort the same signal, but callers act on them differently: the indexing
+ * loop treats a user cancel as "stop now" and a timeout as "the provider may be
+ * down — retry once, then notify". Flattening both to `AbortError` silently
+ * disabled that recovery path on the requestUrl leg.
+ */
+describe("createObsidianFetch abort reasons", () => {
+	beforeEach(() => {
+		mockRequestUrl.mockReset();
+		mockRequestUrl.mockReturnValue(new Promise(() => {}) as ReturnType<typeof requestUrl>);
+	});
+
+	it("rejects with TimeoutError when the timeout fires", async () => {
+		vi.useFakeTimers();
+		try {
+			const fetchImpl = createObsidianFetch();
+			const pending = fetchImpl("https://unreachable.example/v1/embeddings", { method: "POST", body: "{}" });
+			const assertion = expect(pending).rejects.toMatchObject({ name: "TimeoutError" });
+
+			await vi.advanceTimersByTimeAsync(60_000);
+			await assertion;
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("rejects with AbortError when the caller cancels", async () => {
+		const controller = new AbortController();
+		const fetchImpl = createObsidianFetch();
+		const pending = fetchImpl("https://unreachable.example/v1/embeddings", {
+			method: "POST",
+			body: "{}",
+			signal: controller.signal,
+		});
+		const assertion = expect(pending).rejects.toMatchObject({ name: "AbortError" });
+
+		controller.abort();
+		await assertion;
+	});
+});

@@ -33,16 +33,31 @@ const REQUEST_TIMEOUT_MS = 60_000;
  * `Response`, and resolving with a sentinel would make every call site check for
  * it. `DOMException("…", "AbortError")` is what native fetch throws on abort, so
  * existing `error.name === "AbortError"` handling keeps working.
+ *
+ * **The abort *reason* is propagated, not flattened.** A timeout and a user
+ * cancellation both abort this signal, but callers need to tell them apart: the
+ * indexing loop treats `AbortError` as "the user stopped this" and bails
+ * immediately, while a `TimeoutError` must reach the unreachable-provider path so
+ * the run can retry once and then notify. Rejecting with a bare `AbortError` in
+ * both cases silently disabled that recovery on the `requestUrl` leg.
  */
 function rejectOnAbort(signal: AbortSignal): Promise<never> {
+	// Duck-typed rather than `instanceof Error`: `DOMException` is not an `Error`
+	// subclass in every environment (notably jsdom, where the test suite runs), so
+	// an instanceof check silently discarded the TimeoutError reason and reported
+	// every timeout as a user cancellation.
+	const abortError = () => {
+		const reason: unknown = signal.reason;
+		const named =
+			typeof reason === "object" && reason !== null && typeof (reason as { name?: unknown }).name === "string";
+		return named ? (reason as Error) : new DOMException("Request aborted", "AbortError");
+	};
 	return new Promise((_, reject) => {
 		if (signal.aborted) {
-			reject(new DOMException("Request aborted", "AbortError"));
+			reject(abortError());
 			return;
 		}
-		signal.addEventListener("abort", () => reject(new DOMException("Request aborted", "AbortError")), {
-			once: true,
-		});
+		signal.addEventListener("abort", () => reject(abortError()), { once: true });
 	});
 }
 

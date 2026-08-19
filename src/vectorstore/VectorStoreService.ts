@@ -848,7 +848,7 @@ export class VectorStoreService {
 						// A cancelled batch must not fall through to the per-entry retry
 						// below: that would re-issue every request in the batch against a
 						// provider the user just asked us to stop talking to.
-						if (error instanceof Error && error.name === "AbortError") break;
+						if (this.isUserCancellation(error)) break;
 						Logger.error("[VectorStore] Batch validation indexing failed:", error);
 						// A transport failure will hit every remaining chunk the same way,
 						// so retrying this batch entry-by-entry is pure waste. Give the
@@ -856,6 +856,10 @@ export class VectorStoreService {
 						if (this.isProviderUnreachable(error)) {
 							consecutiveUnreachable++;
 							if (this.abortForUnreachableProvider(inst, error, consecutiveUnreachable)) break;
+							// Account for the batch before skipping the per-entry retry.
+							// Without this the notes silently vanish from the index while
+							// the run still reports success.
+							for (const entry of batch) noteSkipped(entry.file.path);
 							continue;
 						}
 						consecutiveUnreachable = 0;
@@ -889,7 +893,7 @@ export class VectorStoreService {
 								// Cancellation is not a per-file failure. Without this guard,
 								// aborting mid-batch fires one error Notice per remaining
 								// file and buries the "cancelled" message under them.
-								if (entryError instanceof Error && entryError.name === "AbortError") throw entryError;
+								if (this.isUserCancellation(entryError)) throw entryError;
 								Logger.error(`[VectorStore] Failed to index ${entry.file.path}:`, entryError);
 								const reason = entryError instanceof Error ? entryError.message : String(entryError);
 								new Notice(`Failed to embed ${entry.file.basename}: ${reason}`);
@@ -1194,8 +1198,38 @@ export class VectorStoreService {
 	 * input, so the per-entry fallback is worth running. A transport failure is a
 	 * property of the *connection*, and will hit every remaining chunk identically.
 	 */
+	/**
+	 * True only when the *user* cancelled — never for a transport failure.
+	 *
+	 * The distinction is load-bearing: a bare `error.name === "AbortError"` check
+	 * also caught request timeouts (which reject with `TimeoutError`, but used to be
+	 * flattened to `AbortError` in `obsidianFetch`), so a dead provider short-circuited
+	 * the loop as if the user had pressed Cancel — skipping the unreachable-provider
+	 * notice entirely.
+	 */
+	private isUserCancellation(error: unknown): boolean {
+		return this.errorName(error) === "AbortError";
+	}
+
+	/**
+	 * Read `.name` without an `instanceof Error` check.
+	 *
+	 * `DOMException` — which is what an aborted fetch rejects with — is not an
+	 * `Error` subclass in every environment, so `instanceof` silently misses it and
+	 * a timeout gets misread as an ordinary failure.
+	 */
+	private errorName(error: unknown): string | undefined {
+		if (typeof error !== "object" || error === null) return undefined;
+		const name = (error as { name?: unknown }).name;
+		return typeof name === "string" ? name : undefined;
+	}
+
 	private isProviderUnreachable(error: unknown): boolean {
-		if (error instanceof Error && (error.name === "AbortError" || error.name === "TimeoutError")) return true;
+		// `AbortError` is deliberately NOT here: it means the *user* cancelled, which
+		// callers handle separately (and treating it as a provider fault would show a
+		// spurious "provider unreachable" notice on every cancel). `TimeoutError` is a
+		// provider fault and must survive `isUserCancellation` above it.
+		if (this.errorName(error) === "TimeoutError") return true;
 		const message = error instanceof Error ? error.message : String(error);
 		return /network error|you are offline|connection may have changed|fetch failed|failed to fetch|timed out|ECONNREFUSED|ENOTFOUND|ETIMEDOUT|socket hang up|502|503|504/i.test(
 			message,
@@ -1405,7 +1439,7 @@ export class VectorStoreService {
 				} catch (error) {
 					// See the matching guard in the validation loop: a cancelled batch
 					// must not fall through to the sequential retry.
-					if (error instanceof Error && error.name === "AbortError") break;
+					if (this.isUserCancellation(error)) break;
 					Logger.warn(
 						`[VectorStore] Batch ${Math.floor(i / batchSize) + 1} failed, falling back to sequential:`,
 						error,
@@ -1415,6 +1449,10 @@ export class VectorStoreService {
 					if (this.isProviderUnreachable(error)) {
 						consecutiveUnreachable++;
 						if (this.abortForUnreachableProvider(inst, error, consecutiveUnreachable)) break;
+						// Account for the batch before skipping the per-entry retry, so
+						// the notes are reported as skipped rather than silently dropped
+						// from a run that still claims success.
+						for (const entry of batch) noteSkipped(entry.file.path, "embed-error");
 						continue;
 					}
 					consecutiveUnreachable = 0;
@@ -1444,7 +1482,7 @@ export class VectorStoreService {
 						} catch (entryError) {
 							// See the matching guard in the validation loop: cancellation
 							// must not be reported as a per-file embedding failure.
-							if (entryError instanceof Error && entryError.name === "AbortError") throw entryError;
+							if (this.isUserCancellation(entryError)) throw entryError;
 							Logger.error(`[VectorStore] Failed to index ${entry.file.path}:`, entryError);
 							const reason = entryError instanceof Error ? entryError.message : String(entryError);
 							new Notice(`Failed to embed ${entry.file.basename}: ${reason}`);
