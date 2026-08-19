@@ -1045,6 +1045,11 @@ export class PixiRenderer {
 			const p = placements[i];
 			const obj = this.clusterPillObjects[i];
 			obj.container.visible = true;
+			// Dim the whole pill — background, border and text together — so an
+			// unfocused label stays readable enough to Shift-click without competing
+			// with the selection. Per-element alpha would leave the text at full
+			// strength, which is the part that actually reads.
+			obj.container.alpha = p.isFocused ? 1 : 0.45;
 
 			const g = obj.graphics;
 			g.clear();

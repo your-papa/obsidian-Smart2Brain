@@ -984,7 +984,9 @@ function render() {
 
 		for (const [cluster, node] of clusterRepresentativeNodes) {
 			if (node.x == null || node.y == null) continue;
-			if (focusedClusters.size > 0 && !focusedClusters.has(cluster)) continue;
+			// Unfocused topics keep their label (drawn dimmed via `isFocused`) rather
+			// than being dropped: hiding them would leave nothing to Shift-click, so
+			// building a multi-topic selection from the graph would be impossible.
 			// A collapsed topic node already renders its own name, and its "cluster"
 			// is just itself — a pill here would read "Topic · 1" beside the group
 			// it stands for.
@@ -1021,7 +1023,9 @@ function render() {
 				pillH: ANCHOR_PILL_H,
 				x: pillX,
 				y: pillY,
-				isFocused: focusedClusters.has(cluster),
+				// With nothing selected every topic reads as focused — matching the
+				// hull path — so pills only dim once a selection actually exists.
+				isFocused: focusedClusters.size === 0 || focusedClusters.has(cluster),
 				color: node.color ?? c.graphNode,
 				// Drives placement priority: the biggest topics claim space first.
 				nodeCount,
@@ -1035,7 +1039,13 @@ function render() {
 		// them around produces an unreadable pile — so labels are placed biggest
 		// topic first and any that still collide are left out. A dropped topic
 		// keeps its coloured region and its row in the panel; only the pill goes.
-		anchorPlacements.sort((a, b) => (b.nodeCount ?? 0) - (a.nodeCount ?? 0) || a.y - b.y);
+		//
+		// Focused topics claim space ahead of size: once a selection exists, the
+		// label the user just picked must not be crowded out by a larger topic
+		// they didn't.
+		anchorPlacements.sort(
+			(a, b) => Number(b.isFocused) - Number(a.isFocused) || (b.nodeCount ?? 0) - (a.nodeCount ?? 0) || a.y - b.y,
+		);
 
 		const placed: typeof anchorPlacements = [];
 		const collides = (a: (typeof anchorPlacements)[number], b: (typeof anchorPlacements)[number]) =>
