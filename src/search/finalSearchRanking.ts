@@ -69,13 +69,36 @@ const RANK_FUSION_WEIGHT = 1 - SCORE_FUSION_WEIGHT;
  * | harrier | 0.8300 → 0.8889 | 0.7504 → 0.7759 | 0.6309 → 0.7540 | 0.9254 → 0.9210 |
  * | qwen3   | 0.8871 → 0.9695 | 0.8146 → 0.8630 | 0.7540 → 1.0000 | 0.9410 → 0.7057 |
  *
- * 0.78 rather than the marginally better 0.79-0.80: on `harrier` those sit on the
- * edge of a discontinuity where `long-context` falls to 0.7685 at 0.81, so the
- * plateau's lower end is the safer landing. Do not raise this to chase the last
- * 0.03 of hard overall — re-run the sweep instead, because the cliff moves with
- * the embedding model.
+ * **0.78 → 0.86 (2026-08-18).** The previous note said "do not raise this to chase
+ * the last 0.03 of hard overall" and predicted a `long-context` cliff just above
+ * 0.80. Re-swept on the reworked corpus against a single index build, that turned
+ * out to be corpus-specific: the cliff is at 0.88, not 0.81, and there is a wide
+ * plateau below it that the old value sat well short of.
+ *
+ * | weight | core   | hard   | cross-lingual | long-context | dilution | polysemy |
+ * |--------|--------|--------|---------------|--------------|----------|----------|
+ * | 0.78   | 0.9085 | 0.7456 | 0.5154        | 1.0000       | 1.0000   | 0.7560   |
+ * | 0.83   | 0.9348 | 0.7651 | 0.6250        | 1.0000       | 1.0000   | 0.7488   |
+ * | **0.86** | **0.9355** | **0.7872** | **0.7500** | **1.0000** | **1.0000** | 0.7488 |
+ * | 0.88   | 0.9370 | 0.7791 | 0.7500        | 0.8984       | 1.0000   | 0.7488   |
+ * | 0.90   | 0.9386 | 0.7797 | 0.7500        | 0.8984       | 1.0000   | 0.7520   |
+ * | 0.93   | 0.9641 | 0.7574 | 0.7500        | 0.8984       | 0.8984   | 0.6808   |
+ *
+ * 0.86 is the last point where `cross-lingual` has fully gained (+0.23) while
+ * `long-context` and `dilution` are both still perfect; 0.88 buys nothing further
+ * and costs `long-context` 0.10. Above 0.90 the semantic leg starts losing the
+ * recall that the lexical leg exists to supply, and `polysemy` follows it down.
+ *
+ * **This also overturns a documented conclusion.** `integration/README.md` recorded
+ * `cross-lingual` as a model limit — "the lever that would actually move this axis
+ * is a more multilingual embedding model. Do not chase it in the ranker." That was
+ * measured at 0.78, where the German note was being outvoted by English same-topic
+ * siblings that only the *lexical* leg preferred. It moves 0.5154 → 0.7500 on this
+ * lever alone, with no model change. Note core rises monotonically across the whole
+ * range while hard peaks and falls — tuning on core alone would have picked 0.93 and
+ * silently broken three hard axes.
  */
-const SEMANTIC_SOURCE_WEIGHT = 0.78;
+const SEMANTIC_SOURCE_WEIGHT = 0.86;
 const LEXICAL_SOURCE_WEIGHT = 1 - SEMANTIC_SOURCE_WEIGHT;
 
 /** Identity boosts, as a fraction of the (0-1) fused score. */
