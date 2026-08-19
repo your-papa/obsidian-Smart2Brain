@@ -124,16 +124,36 @@ export const RELEVANCE_JUDGMENTS: readonly RelevanceJudgment[] = [
 	},
 	{
 		query: "when do prices rise so fast people stop using the local currency",
-		probes: "very short note (~45 words) as the correct answer — length normalization must not bury it under long notes",
+		probes: "very short note (~45 words) as the correct answer — length normalization must not bury it under long notes. Had the worst Hole@10 in the suite (10/10 ungraded) before the pooled grading pass; the additions are same-domain filler that names the topic without answering it.",
 		grades: {
 			[`${C}/Monetary Policy/Hyperinflation Episodes.md`]: 2,
+			// Currency-adjacent bulk filler. Each opens "<Title> is a recurring topic
+			// in monetary policy" and never states a threshold or a switching
+			// behaviour, so they are plausible neighbours rather than answers.
+			[`${C}/Monetary Policy/Revenue From Currency Issuance.md`]: 1,
+			[`${C}/Monetary Policy/Currency Pegs.md`]: 1,
+			[`${C}/Monetary Policy/Peg Abandonment Case Studies.md`]: 1,
+			[`${C}/Monetary Policy/Currency Board Arrangements.md`]: 1,
+			// Off-topic within the same domain: repo-market plumbing has nothing to
+			// do with currency abandonment, so a high rank here is a real error.
+			[`${C}/Monetary Policy/Reserve Scarcity and Repo Spikes.md`]: 0,
 		},
 	},
 	{
 		query: "how long does a wet sourdough starter take to double",
-		probes: "multi-chunk target where the answer is repeated late in the note — aggregate vs best-chunk scoring",
+		probes: "multi-chunk target where the answer is repeated late in the note — aggregate vs best-chunk scoring. Distractors graded from a pooled top-10 across all three algorithms (see 'Filling judgment holes' in the README): the equipment log is a declared size-bias distractor that explicitly disclaims the answer, yet currently ranks hybrid-2 / lexical-1.",
 		grades: {
 			[`${C}/Fermentation/Starter Hydration and Rise Time.md`]: 2,
+			// Declared size-bias distractor. Its own body says "Nothing here
+			// measures how long any starter takes to rise, double, or respond to
+			// hydration" — so a high rank for it is unambiguously wrong.
+			[`${C}/Fermentation/Bakery Equipment Maintenance Log.md`]: 0,
+			// Bulk filler: names the topic in template prose ("is a recurring topic
+			// in fermentation") without stating any timing. Topically adjacent, so
+			// reasonable to surface, but it answers nothing — grade 1, not 2.
+			[`${C}/Fermentation/Sourdough Starter Maintenance.md`]: 1,
+			[`${C}/Fermentation/Refresh Ratios for Daily Baking.md`]: 1,
+			[`${C}/Fermentation/First Rise Timing Expectations.md`]: 1,
 		},
 	},
 	{
@@ -275,9 +295,17 @@ export const RELEVANCE_JUDGMENTS: readonly RelevanceJudgment[] = [
 	},
 	{
 		query: "which borrowers feel a policy rate change first",
-		probes: "the many-chunk note (17KB, ~20 chunks) is genuinely correct here — guards against over-correcting the length-bias fix into a penalty on long notes",
+		probes: "the many-chunk note (17KB, ~20 chunks) is genuinely correct here — guards against over-correcting the length-bias fix into a penalty on long notes. The pooled grading pass found the size-bias distractor taking rank 1 in BOTH legs while ungraded, so the case was scoring 0.631 for a defect it could not attribute.",
 		grades: {
 			[`${C}/Monetary Policy/Policy Rate Transmission Lag.md`]: 2,
+			// The archive is a declared size-bias distractor and disclaims this exact
+			// query in its own body: "not of how long transmission takes or which
+			// borrowers feel a change first". It nonetheless ranks hybrid-1 /
+			// lexical-1. Grading it 0 is what makes that legible as an error.
+			[`${C}/Monetary Policy/Central Bank Communications Archive.md`]: 0,
+			// Same-domain filler: transmission vocabulary in template prose, no
+			// statement about which borrowers reprice first.
+			[`${C}/Monetary Policy/Interest Rate Corridors.md`]: 1,
 		},
 	},
 	{

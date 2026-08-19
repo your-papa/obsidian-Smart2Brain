@@ -116,8 +116,20 @@ const RESULT_LIMIT = 25;
  * higher at every previous weight) comes in below this, lower it rather than
  * assuming a regression — but re-sweep the weight for that model first, since the
  * plateau's upper edge moved with the corpus once already.
+ *
+ * **Lowered 0.93 → 0.92 (2026-08-19), and this is NOT a ranking regression.** The
+ * judgment set gained graded distractors on three under-judged queries (Hole@10 was
+ * 7.4-8.5 of every top-10 ungraded). Core moved 0.9355 → **0.9305** because errors that
+ * were previously *invisible* are now scored — most starkly, the declared size-bias
+ * distractor `Central Bank Communications Archive` takes rank 1 in both legs for
+ * "which borrowers feel a policy rate change first" while disclaiming that exact query
+ * in its own body. The ranker is byte-identical; the measurement got stricter.
+ *
+ * Expect this to happen again as more holes are filled. A drop that coincides with new
+ * judgments is the benchmark improving, not the ranker degrading — verify by checking
+ * whether the ranking itself moved before lowering the floor.
  */
-const BASELINE_MEAN_NDCG = 0.93;
+const BASELINE_MEAN_NDCG = 0.92;
 const BASELINE_MEAN_RR = 0.9;
 
 /**

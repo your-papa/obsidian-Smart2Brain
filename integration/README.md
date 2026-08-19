@@ -723,6 +723,43 @@ reason independent of the score), but it should not be cited as a measured regre
 **No per-axis CIs**, deliberately: n=1..5 per axis makes an interval meaningless. Axis
 rows are directional indicators, not numbers a 0.05 difference can be defended on.
 
+##### Filling judgment holes — first pass (2026-08-19)
+
+Three of the worst-affected queries were re-graded. **Candidates were pooled from all
+three algorithms** (`lexical`, `semantic`, `hybrid`, top-10 each) rather than taken from
+one ranker's output, and every added note was judged by *reading it* against the query.
+Grading whatever the current ranker returns is how pooling bias gets baked in — the
+point is to be willing to grade a highly-ranked note as 0.
+
+Two of the three were scoring well while a **declared size-bias distractor sat at rank 1
+in both legs, ungraded**:
+
+| query | the unpenalised note | rank |
+|---|---|---|
+| `which borrowers feel a policy rate change first` | `Central Bank Communications Archive` | hybrid 1, lexical 1 |
+| `how long does a wet sourdough starter take to double` | `Bakery Equipment Maintenance Log` | hybrid 2, lexical 1 |
+
+Both notes carry `distractor` + `size-bias` tags and disclaim the query in their own
+body — the archive says it is *"not of how long transmission takes or which borrowers
+feel a change first"*. They were simply never graded, so nDCG treated them as neutral.
+
+The distinction the additions encode is **answerhood vs topicality**. The bulk filler
+(`Sourdough Starter Maintenance`, `Currency Pegs`, `Interest Rate Corridors` …) is
+same-domain template prose — *"X is a recurring topic in Y"* — that names the subject
+without stating anything. Those are graded **1**: reasonable to surface, never the
+answer. Notes that actively disclaim the query, or are off-topic within the domain, are
+graded **0**.
+
+**Measured effect: core 0.9355 → 0.9305, lexical Hole@10 7.4 → 7.1.** The score dropped
+because previously-invisible errors are now scored; the ranker is byte-identical.
+`BASELINE_MEAN_NDCG` was lowered 0.93 → 0.92 to match. **Expect this pattern to repeat**
+as more holes are filled — a drop coinciding with new judgments is the benchmark getting
+stricter, and should be verified against the ranking itself before being read as a
+regression.
+
+Still outstanding: `things i said i would do and didn't` (10/10 ungraded on the hard
+tier) and the alias cases (`Octopus Intelligence`, `Levain Timing`, 9/10 each).
+
 ##### Hole@10 — most of what the ranker returns is unjudged
 
 ```
