@@ -791,6 +791,10 @@ export class VectorStoreService {
 					}
 				};
 
+				// Consecutive transport-level failures. Reset on any success, so a
+				// flaky connection that recovers does not accumulate toward the limit.
+				let consecutiveUnreachable = 0;
+
 				for (let i = 0; i < validChunks.length; i += batchSize) {
 					if (inst.abortController?.signal.aborted) {
 						Logger.log(`[VectorStore] Validation indexing cancelled for ${inst.indexId}`);
@@ -813,6 +817,8 @@ export class VectorStoreService {
 						// embedding call was in flight; bail before writing to a store
 						// that could now be closed.
 						if (inst.abortController?.signal.aborted) break;
+						// The connection answered, so any earlier failure was transient.
+						consecutiveUnreachable = 0;
 						if (!vectors || vectors.length === 0) {
 							Logger.error(`[VectorStore] embedDocuments returned empty result for ${inst.indexId}`);
 							for (const entry of batch) noteSkipped(entry.file.path);
@@ -844,6 +850,15 @@ export class VectorStoreService {
 						// provider the user just asked us to stop talking to.
 						if (error instanceof Error && error.name === "AbortError") break;
 						Logger.error("[VectorStore] Batch validation indexing failed:", error);
+						// A transport failure will hit every remaining chunk the same way,
+						// so retrying this batch entry-by-entry is pure waste. Give the
+						// connection one more chance, then stop the whole run.
+						if (this.isProviderUnreachable(error)) {
+							consecutiveUnreachable++;
+							if (this.abortForUnreachableProvider(inst, error, consecutiveUnreachable)) break;
+							continue;
+						}
+						consecutiveUnreachable = 0;
 						for (const entry of batch) {
 							if (inst.abortController?.signal.aborted) break;
 							try {
@@ -1171,6 +1186,54 @@ export class VectorStoreService {
 	}
 
 	/**
+	 * True when an error means "the provider is not reachable" rather than "this
+	 * particular document could not be embedded".
+	 *
+	 * The distinction decides whether retrying can possibly help. A malformed
+	 * document, a token-limit rejection or a content filter is specific to one
+	 * input, so the per-entry fallback is worth running. A transport failure is a
+	 * property of the *connection*, and will hit every remaining chunk identically.
+	 */
+	private isProviderUnreachable(error: unknown): boolean {
+		if (error instanceof Error && (error.name === "AbortError" || error.name === "TimeoutError")) return true;
+		const message = error instanceof Error ? error.message : String(error);
+		return /network error|you are offline|connection may have changed|fetch failed|failed to fetch|timed out|ECONNREFUSED|ENOTFOUND|ETIMEDOUT|socket hang up|502|503|504/i.test(
+			message,
+		);
+	}
+
+	/**
+	 * Abort the run when the provider has failed repeatedly, rather than grinding
+	 * through every remaining chunk against a host that is plainly not answering.
+	 *
+	 * Without this, an unreachable endpoint produces one failed batch, then a
+	 * per-entry retry of every chunk in it, then the next batch, and so on —
+	 * hundreds of doomed requests (each with the SDK's own internal retries) while
+	 * the progress notice sits frozen. Measured against a disconnected provider:
+	 * still "Embedding batch 1" and unchanged at 310/370 after 107 s.
+	 *
+	 * The threshold is >1 so a single blip (one flaky request, a transient 502
+	 * under load) still gets the existing per-entry retry path. Two consecutive
+	 * transport failures is no longer a blip.
+	 */
+	private readonly UNREACHABLE_FAILURE_LIMIT = 2;
+
+	private abortForUnreachableProvider(inst: IndexInstance, error: unknown, consecutiveFailures: number): boolean {
+		if (!this.isProviderUnreachable(error) || consecutiveFailures < this.UNREACHABLE_FAILURE_LIMIT) return false;
+
+		const reason = error instanceof Error ? error.message : String(error);
+		Logger.error(
+			`[VectorStore] Stopping indexing for ${inst.indexId}: provider unreachable after ${consecutiveFailures} consecutive failures — ${reason}`,
+		);
+		new Notice(
+			"Indexing stopped — the embedding provider is not reachable.\nCheck the connection, then resume from settings.",
+			10_000,
+		);
+		inst.abortController?.abort();
+		return true;
+	}
+
+	/**
 	 * Get the configured batch size for an index, falling back to provider defaults.
 	 */
 	private getBatchSize(indexId: string, providerId: string): number {
@@ -1286,6 +1349,9 @@ export class VectorStoreService {
 				}
 			};
 
+			// Consecutive transport-level failures; see the validation loop.
+			let consecutiveUnreachable = 0;
+
 			for (let i = 0; i < validChunks.length; i += batchSize) {
 				if (inst.abortController?.signal.aborted) {
 					Logger.log(`[VectorStore] Indexing cancelled for ${inst.indexId}`);
@@ -1307,6 +1373,8 @@ export class VectorStoreService {
 					// embedding call was in flight; bail before writing to a store
 					// that could now be closed.
 					if (inst.abortController?.signal.aborted) break;
+					// The connection answered, so any earlier failure was transient.
+					consecutiveUnreachable = 0;
 					if (!vectors || vectors.length === 0) {
 						Logger.error(`[VectorStore] embedDocuments returned empty result for ${inst.indexId}`);
 						for (const entry of batch) noteSkipped(entry.file.path, "embed-error");
@@ -1342,6 +1410,14 @@ export class VectorStoreService {
 						`[VectorStore] Batch ${Math.floor(i / batchSize) + 1} failed, falling back to sequential:`,
 						error,
 					);
+					// Transport failure: the sequential retry below would hit the same
+					// dead connection once per chunk. Allow one retry, then stop.
+					if (this.isProviderUnreachable(error)) {
+						consecutiveUnreachable++;
+						if (this.abortForUnreachableProvider(inst, error, consecutiveUnreachable)) break;
+						continue;
+					}
+					consecutiveUnreachable = 0;
 
 					for (const entry of batch) {
 						if (inst.abortController?.signal.aborted) break;
