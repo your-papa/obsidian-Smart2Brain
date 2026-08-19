@@ -13,7 +13,7 @@
  */
 
 import { type App, type TFile, getAllTags } from "obsidian";
-import type { SpaceSegment, ViewFilter, ViewFilterGroup, ViewFilterLeaf } from "../types/graph";
+import type { ViewFilter, ViewFilterGroup, ViewFilterLeaf } from "../types/viewFilter";
 import { matchesPathPrefix, normalizeVaultPath } from "../utils/pathUtils";
 
 // ---------------------------------------------------------------------------
@@ -402,31 +402,6 @@ export function describeViewFilter(filter: ViewFilter): string {
 	return `${filter.type}(${inner})`;
 }
 
-/**
- * Build a `ViewFilter` from a set of selected `SpaceSegment`s.
- *
- * - If every segment maps cleanly to a dynamic leaf (folder/tag/extension),
- *   produce a single leaf or `any(…)` group.
- * - Otherwise fall back to a frozen `paths` leaf.
- */
-export function buildFilterFromSegments(segments: SpaceSegment[]): { filter: ViewFilter; label: string } {
-	const labels: string[] = [];
-	const leaves: ViewFilter[] = [];
-
-	for (const g of segments) {
-		labels.push(g.label);
-		const leaf = segmentToLeaf(g);
-		if (leaf) {
-			leaves.push(leaf);
-		} else {
-			// Fallback: freeze paths for segments without a clean dynamic mapping
-			leaves.push({ type: "paths", value: [...g.paths] });
-		}
-	}
-
-	const filter: ViewFilter = leaves.length === 1 ? leaves[0] : { type: "any", conditions: leaves };
-	return { filter, label: labels.join(" + ") };
-}
 function normalizeSpaceMembershipDraft(draft: SpaceMembershipDraft): SpaceMembershipDraft {
 	return {
 		manualPaths: dedupeStrings(draft.manualPaths),
@@ -619,25 +594,6 @@ function cloneViewFilterLeaf(filter: ViewFilterLeaf): ViewFilterLeaf {
 
 function dedupeStrings(values: string[]): string[] {
 	return [...new Set(values)];
-}
-
-/**
- * Try to map a `SpaceSegment` to a dynamic `ViewFilterLeaf`.
- * Returns `null` if the segment can't be represented as a single leaf
- * (e.g. semantic clusters, lasso selections).
- */
-function segmentToLeaf(segment: SpaceSegment): ViewFilterLeaf | null {
-	switch (segment.source) {
-		case "folder":
-			return { type: "folder", value: segment.label };
-		case "tag":
-			return { type: "tag", value: segment.label.startsWith("#") ? segment.label : `#${segment.label}` };
-		case "extension":
-			return { type: "extension", value: segment.label.startsWith(".") ? segment.label.slice(1) : segment.label };
-		default:
-			// semantic clusters, "none", etc. → freeze paths
-			return null;
-	}
 }
 
 // ---------------------------------------------------------------------------
