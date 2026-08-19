@@ -370,9 +370,30 @@ export const RELEVANCE_JUDGMENTS: readonly RelevanceJudgment[] = [
 		query: "griechischer salat",
 		tier: "hard",
 		axis: "cross-lingual",
-		knownFailure:
-			"German `salat` prefix-matches English `salt`, and the three winning notes carry 'Salt' in their TITLE, so they collect calculateTitleBoost on top of the term match. The right answer has no title match at all — 'Greek Salad (Horiatiki)' is an H2 inside the note — so it competes on content score alone and lands at rank 4. Measured hybrid: Salt Tolerance Across Species / Salt Type and Mineral Content / Salt Percentage and Aging Duration, then the recipe note. The English 'greek salad' returns it at rank 1, which isolates the cause to the false cognate rather than to retrieval.",
-		probes: "false-cognate prefix match: a two-word German query whose second token is a prefix of an unrelated English word that several filler notes own in their titles. Prefix matching is deliberate here (`prefix: shouldContentPrefixMatch`, `weights.prefix = 0.3`), so this is not a switch to flip — it measures whether the semantic half can recover a query the lexical half actively misdirects.",
+		// `knownFailure` removed 2026-08-18. Partial improvement, not a fix:
+		// 0.431 → **0.500** (rank 4 → rank 3) after `SEMANTIC_SOURCE_WEIGHT`
+		// 0.78 → 0.86 in `finalSearchRanking.ts`.
+		//
+		// **A 1.000 was briefly recorded for this case and is wrong — do not trust it.**
+		// It was measured while the working tree was stashed onto `dev`, where the vault
+		// still had `Topics/` (20 notes), `Large Notes/` (2) and 7 loose root notes
+		// alongside `Zettel/`. Those 29 extra notes change the result-set normalization
+		// in `rankSearchResults`, which is what produced the better ranking — not the
+		// ranker. Re-measured on this branch's consolidated layout against the *same*
+		// index build (harrier, built 14:02): 0.500, reproduced exactly across two runs.
+		//
+		// The annotation stays off regardless: 0.500 is a genuine improvement over the
+		// 0.431 that justified the annotation, and labelling a partially-working case as
+		// a known failure is its own kind of wrong. But the mechanism is still live —
+		// German `salat` prefix-matches English `salt`, and two "Salt …" filler notes
+		// still take ranks 1-2 on `calculateTitleBoost`. The semantic leg ranks the
+		// correct note 3rd (0.5593) behind two German notes, so it does not fully
+		// recover a query the lexical half misdirects.
+		//
+		// Kept as a live case: it remains a real guard against the lexical leg being
+		// re-weighted upward. The "Salt" notes are pinned in `REQUIRED_FILLER` so a
+		// rename cannot make it pass for the wrong reason.
+		probes: "false-cognate prefix match: a two-word German query whose second token is a prefix of an unrelated English word that several filler notes own in their titles. Prefix matching is deliberate here (`prefix: shouldContentPrefixMatch`, `weights.prefix = 0.3`), so this is not a switch to flip — it measures whether the semantic half can recover a query the lexical half actively misdirects. Was a knownFailure at 0.431; 0.500 at SEMANTIC_SOURCE_WEIGHT 0.86 — improved, not fixed.",
 		grades: {
 			"Zettel/Cooking Mediterranean Recipes.md": 2,
 			// Honest fermentation notes about salt concentration. Nothing about salad,
@@ -411,15 +432,40 @@ export const RELEVANCE_JUDGMENTS: readonly RelevanceJudgment[] = [
 	},
 
 	// ── dilution ────────────────────────────────────────────────────────────
-	// Reproduces the measured multi-topic signal collapse: the note-level
-	// embedding averages over six unrelated admin topics plus one real answer,
-	// so the answer's contribution to the note vector is heavily attenuated.
+	// Originally written to reproduce a measured multi-topic signal collapse: a
+	// note-level embedding averaging six unrelated admin topics plus one real
+	// answer, so the answer's contribution to the note vector was attenuated.
+	//
+	// **That mechanism is solved, and these cases no longer test it (2026-08-18).**
+	// Retrieval is chunk-level and `chunkAggregation.ts` scores a note as
+	// `best_chunk * (1 + support)`, so the answering chunk is found on its own
+	// merits and the other five topics cannot average it away by construction.
+	// A low score here is therefore NOT evidence of a chunking regression — do not
+	// go looking in `chunkAggregation.ts` for it.
+	//
+	// What the cases measure now is **topical proximity vs. answerhood**: the
+	// target is a note that answers the question while a sibling that is *more
+	// obviously about the topic* does not (see the `Hinting and Rasterization`
+	// grade-1 below). That is closer in shape to `multi-hop` than to the original
+	// dilution premise.
+	//
+	// Kept rather than deleted, for two measured reasons:
+	//  1. It discriminates between models again. It looked saturated while only
+	//     harrier and Qwen3 had been measured (both 1.0000), but
+	//     `text-embedding-3-small` scores 0.7754 — the weakest of the three on this
+	//     axis while being the strongest overall, which is exactly the kind of
+	//     disagreement with the aggregate that an axis exists to surface.
+	//  2. The hinting case is one of two that fall 1.000 → 0.689 at
+	//     `SEMANTIC_SOURCE_WEIGHT = 1.0`, so it actively constrains that constant.
+	//
+	// The axis name is left alone deliberately: renaming it would break comparison
+	// with every figure already recorded in `integration/README.md`.
 
 	{
 		query: "does survey timing change the herbivore counts",
 		tier: "hard",
 		axis: "dilution",
-		probes: "answer is one section inside a six-topic logistics note (permits, boats, cameras, training...). Note-level similarity is diluted; only chunk-level retrieval recovers it.",
+		probes: "answer is one section inside a six-topic logistics note (permits, boats, cameras, training...). Chunk-level retrieval makes the note-level dilution a non-issue by construction, so what this now measures is whether the answering section wins against siblings that are more obviously on-topic.",
 		grades: {
 			[`${C}/Marine Biology/Reef Survey Field Notes.md`]: 2,
 		},
@@ -595,13 +641,20 @@ export const RELEVANCE_JUDGMENTS: readonly RelevanceJudgment[] = [
 	// ── provenance ──────────────────────────────────────────────────────────
 	// Scoped by where a note came from rather than what it is about.
 	//
-	// Deliberately ONE case, not an axis. `calculatePathBoost` and
-	// `calculateTagBoost` (`src/search/searchRanking.ts:306,345`) match the *whole
-	// query string* against a path segment or tag — equality, prefix, or substring —
-	// so a conversational query returns 0 from both. They only fire when the query is
-	// essentially the bare folder or tag name. Every provenance case would therefore
-	// score near zero on every model, which is no resolving power at all: a case that
-	// every model fails cannot distinguish two models any more than one they all ace.
+	// Deliberately ONE case, not an axis. When this case was written, both
+	// `calculatePathBoost` and `calculateTagBoost` matched the *whole query string*
+	// against a path segment or tag, so a conversational query returned 0 from both
+	// and every provenance case would have scored near zero on every model — no
+	// resolving power, and a case every model fails cannot discriminate any better
+	// than one they all ace.
+	//
+	// **Updated 2026-08-18:** `calculatePathBoost` is now token-wise, so it *can*
+	// fire on a conversational query. `calculateTagBoost` deliberately is not —
+	// token-wise tag matching was measured and regressed `polysemy` 0.7560 → 0.7154,
+	// because the note tagged `#review` is the wrong answer for "the review is
+	// blocking me". See the docblock on `calculateTagBoost` for the full measurement.
+	// Neither changed this case's score: it does not sit under a folder whose name
+	// shares terms with the query.
 	//
 	// **The prediction was half wrong, and the case is kept as the record of that.**
 	// Path and tag boosts really do return 0 here — that part held. But the case does
@@ -621,7 +674,7 @@ export const RELEVANCE_JUDGMENTS: readonly RelevanceJudgment[] = [
 		query: "notes from the vendor call",
 		tier: "hard",
 		axis: "provenance",
-		probes: "provenance scoping: 'from the vendor call' is a source, not a subject. Path/tag boosts cannot fire (they match the whole query string) and arbitrary frontmatter fields are not indexed, so this passes only because 'vendor' and 'call' also appear in the notes' title and body — not because provenance is understood.",
+		probes: "provenance scoping: 'from the vendor call' is a source, not a subject. Tag boosts cannot fire (whole-query only, deliberately) and arbitrary frontmatter fields are not indexed; the path boost is token-wise but these notes sit in a flat folder that shares no term with the query. So this passes only because 'vendor' and 'call' also appear in the notes' title and body — not because provenance is understood.",
 		grades: {
 			"Zettel/Vendor Call - Observability Tooling.md": 2,
 			// Same `source: vendor call` frontmatter, so a ranker that *could* read
@@ -730,4 +783,126 @@ export function reciprocalRank(rankedPaths: string[], grades: Record<string, num
 		if ((grades[path] ?? 0) === 2) return 1 / (i + 1);
 	}
 	return 0;
+}
+
+// ── significance ─────────────────────────────────────────────────────────────
+//
+// Every comparison in this suite is two means over the *same* queries, and the
+// per-query scores are strongly bimodal — mostly 0.000 or 1.000, so a couple of
+// queries flipping moves a tier mean by several points. Reporting a bare delta
+// invites reading noise as signal: the `polysemy` axis moved -0.0072 during the
+// tag-boost work and that was one case changing rank, not a trend.
+//
+// Paired bootstrap is the standard IR answer (resample queries, not documents,
+// keeping each query's pair of scores together). **Read our intervals narrowly.**
+// The textbook interpretation assumes queries are an i.i.d. draw from a query
+// population; ours are not, on two counts:
+//
+//   - hard-tier cases were *selected* for being hard ("kept only if the correct
+//     answer did not already win"), which is deliberate non-random sampling;
+//   - several are near-duplicates by construction — three `size-bias` cases
+//     restate `core`/`recency` queries verbatim — so they are not independent.
+//
+// So a CI here bounds resampling noise **on these queries**. It does not
+// generalise to queries a user might type.
+
+/** Deterministic PRNG (mulberry32), so a CI reproduces exactly across runs. */
+function makeRng(seed: number): () => number {
+	let a = seed >>> 0;
+	return () => {
+		a = (a + 0x6d2b79f5) >>> 0;
+		let t = Math.imul(a ^ (a >>> 15), 1 | a);
+		t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+		return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+	};
+}
+
+export interface BootstrapResult {
+	/** mean(a) - mean(b). */
+	delta: number;
+	/** Lower bound of the 95% CI on `delta`. */
+	ciLow: number;
+	/** Upper bound of the 95% CI on `delta`. */
+	ciHigh: number;
+	/** True when the CI excludes 0 — i.e. the sign of `delta` is stable. */
+	significant: boolean;
+	/** Number of paired observations. */
+	n: number;
+}
+
+/**
+ * Paired bootstrap confidence interval on the difference of two systems' mean
+ * per-query scores.
+ *
+ * `a[i]` and `b[i]` must be the *same query* under two configurations; the pair
+ * is resampled together, which is what makes this paired and therefore far more
+ * powerful than treating the two arrays as independent samples.
+ *
+ * Seeded, so repeated runs give byte-identical bounds — everything else in this
+ * suite reproduces exactly and a wobbling CI would be indistinguishable from a
+ * real change.
+ */
+export function pairedBootstrapCI(a: number[], b: number[], iterations = 10_000, seed = 0x5eed_1234): BootstrapResult {
+	if (a.length !== b.length) {
+		throw new Error(`paired bootstrap needs equal-length inputs, got ${a.length} and ${b.length}`);
+	}
+
+	const n = a.length;
+	const mean = (xs: number[]) => (xs.length ? xs.reduce((s, x) => s + x, 0) / xs.length : 0);
+	const delta = mean(a) - mean(b);
+	if (n === 0) {
+		return { delta: 0, ciLow: 0, ciHigh: 0, significant: false, n: 0 };
+	}
+
+	const rng = makeRng(seed);
+	const deltas: number[] = [];
+	for (let iteration = 0; iteration < iterations; iteration++) {
+		let sumA = 0;
+		let sumB = 0;
+		for (let draw = 0; draw < n; draw++) {
+			// One index per draw, used for BOTH systems — the pairing.
+			const index = Math.floor(rng() * n);
+			sumA += a[index];
+			sumB += b[index];
+		}
+		deltas.push((sumA - sumB) / n);
+	}
+
+	deltas.sort((x, y) => x - y);
+	const ciLow = deltas[Math.floor(iterations * 0.025)];
+	const ciHigh = deltas[Math.min(iterations - 1, Math.floor(iterations * 0.975))];
+
+	return { delta, ciLow, ciHigh, significant: ciLow > 0 || ciHigh < 0, n };
+}
+
+export interface SignTestResult {
+	aWins: number;
+	bWins: number;
+	ties: number;
+}
+
+/**
+ * Distribution-free companion to the bootstrap: how many queries each side wins.
+ *
+ * Worth printing alongside the CI because our per-query scores are bimodal, and
+ * "hybrid won 7, semantic won 3, 15 tied" is often easier to reason about than an
+ * interval — it shows immediately when a tier mean is being carried by two or
+ * three queries rather than a broad trend.
+ */
+export function signTest(a: number[], b: number[], epsilon = 1e-9): SignTestResult {
+	if (a.length !== b.length) {
+		throw new Error(`sign test needs equal-length inputs, got ${a.length} and ${b.length}`);
+	}
+
+	let aWins = 0;
+	let bWins = 0;
+	let ties = 0;
+	for (const [index, left] of a.entries()) {
+		const diff = left - b[index];
+		if (Math.abs(diff) <= epsilon) ties++;
+		else if (diff > 0) aWins++;
+		else bWins++;
+	}
+
+	return { aWins, bWins, ties };
 }

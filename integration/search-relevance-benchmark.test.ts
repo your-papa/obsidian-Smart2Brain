@@ -7,7 +7,13 @@ import {
 	pollEval,
 	waitForStandaloneMiniSearch,
 } from "./helpers/cli.ts";
-import { RELEVANCE_JUDGMENTS, ndcgAt, reciprocalRank } from "./helpers/relevanceJudgments.ts";
+import {
+	RELEVANCE_JUDGMENTS,
+	ndcgAt,
+	pairedBootstrapCI,
+	reciprocalRank,
+	signTest,
+} from "./helpers/relevanceJudgments.ts";
 
 /*
  * Graded relevance benchmark for the hybrid search ranking.
@@ -100,9 +106,19 @@ const RESULT_LIMIT = 25;
  * verified identical) gave core 0.8821 and a `size-bias` axis 0.12 lower. HNSW graph
  * construction is order-dependent, so `BASELINE_TOLERANCE` does not cover it; measure
  * both sides of any comparison against the same build.
+ *
+ * **Raised 0.88 → 0.93 (2026-08-18)** after `SEMANTIC_SOURCE_WEIGHT` 0.78 → 0.86 in
+ * `finalSearchRanking.ts`. Measured on `harrier-oss-v1-0.6b-MLX-8bit` against a
+ * single index build: core 0.9085 → **0.9355**, MRR 0.8929 → **0.9286**. The floor
+ * sits just under the measured value, as before.
+ *
+ * Only `harrier` has been re-measured at this weight. If `qwen3` (which scored
+ * higher at every previous weight) comes in below this, lower it rather than
+ * assuming a regression — but re-sweep the weight for that model first, since the
+ * plateau's upper edge moved with the corpus once already.
  */
-const BASELINE_MEAN_NDCG = 0.88;
-const BASELINE_MEAN_RR = 0.85;
+const BASELINE_MEAN_NDCG = 0.93;
+const BASELINE_MEAN_RR = 0.9;
 
 /**
  * Separate floor for the `recency` tier, which cannot share the core one.
@@ -118,8 +134,14 @@ const BASELINE_MEAN_RR = 0.85;
  * under the weaker. The per-case `> 0.5` guard below is what actually protects
  * recency behaviour — it still catches a recent note outranking the right
  * answer, which is what this tier exists for.
+ *
+ * **Raised 0.8 → 0.88 (2026-08-18)** with the same `SEMANTIC_SOURCE_WEIGHT` change:
+ * `harrier` 0.8155 → **0.9077**. Recency was never the subject of that change — the
+ * tier improved because two of its four cases restate `size-bias` queries, so
+ * strengthening the semantic leg helped the real answer beat the padded distractor
+ * here too.
  */
-const RECENCY_FLOOR_MEAN_NDCG = 0.8;
+const RECENCY_FLOOR_MEAN_NDCG = 0.88;
 
 /**
  * Floor for the `hard` tier — the model-discrimination cases.
@@ -180,6 +202,24 @@ interface QueryOutcome {
 	topPaths: string[];
 	knownFailure?: string;
 	axis?: string;
+	/**
+	 * How many of the returned top-`NDCG_K` results carry no grade at all.
+	 *
+	 * BEIR calls this Hole@k, and it is the standard diagnostic for *pooling
+	 * bias*: nDCG scores an ungraded document as 0, identically to one judged
+	 * irrelevant, so a system that surfaces good-but-unjudged notes is punished
+	 * for it. BEIR's own authors found this materially understated dense
+	 * retrievers — on TREC-COVID, annotating 980 previously-unjudged pairs moved
+	 * ANCE from 0.654 (below BM25) to 0.735 (6.7 points above it), while a lexical
+	 * system barely moved.
+	 *
+	 * This suite is *more* exposed than BEIR, not less: judgments here are
+	 * hand-written per query rather than pooled, so anything the author did not
+	 * think of is a hole by default. A high number does not invalidate a score,
+	 * but it does mean the score is a lower bound, and it flags which queries are
+	 * worth re-grading before trusting a small delta on them.
+	 */
+	holes: number;
 }
 
 /** The regression-guarding cases (everything without an explicit tier). */
@@ -257,6 +297,8 @@ function scoreOutcome(judgment: (typeof RELEVANCE_JUDGMENTS)[number], paths: str
 		topPaths: paths.slice(0, 5),
 		knownFailure: judgment.knownFailure,
 		axis: judgment.axis,
+		// Hole@k: returned-but-ungraded results in the scored window.
+		holes: paths.slice(0, NDCG_K).filter((path) => judgment.grades[path] === undefined).length,
 	};
 }
 
@@ -276,7 +318,7 @@ function scoreOutcome(judgment: (typeof RELEVANCE_JUDGMENTS)[number], paths: str
  */
 async function scoreQueries(
 	keyPrefix: string,
-	algorithm: "hybrid" | "lexical",
+	algorithm: "hybrid" | "lexical" | "semantic",
 	judgments: readonly (typeof RELEVANCE_JUDGMENTS)[number][],
 	{ parallel = true } = {},
 ): Promise<QueryOutcome[]> {
@@ -333,7 +375,7 @@ async function scoreQueries(
 }
 
 /** Fire-and-forget expression for a single query, used by the sequential path. */
-function fireOne(globalKey: string, algorithm: "hybrid" | "lexical", query: string): string {
+function fireOne(globalKey: string, algorithm: "hybrid" | "lexical" | "semantic", query: string): string {
 	return `(function(){ window.${globalKey} = "pending"; ${PLUGIN}.searchNotesForBenchmark(${JSON.stringify(query)}, ${JSON.stringify(algorithm)}, ${RESULT_LIMIT}).then(function(r){ window.${globalKey} = JSON.stringify(r.map(function(d){ return d.path; })); }).catch(function(e){ window.${globalKey} = JSON.stringify({error: String(e && e.message || e)}); }); return "started"; })()`;
 }
 
@@ -363,6 +405,16 @@ function report(label: string, outcomes: QueryOutcome[]): void {
 	const rest = outcomes.filter((o) => !o.knownFailure);
 	lines.push(
 		`${" ".repeat(19)}ALL      nDCG@${NDCG_K}=${mean(outcomes.map((o) => o.ndcg)).toFixed(4)} MRR=${mean(outcomes.map((o) => o.rr)).toFixed(4)} (n=${outcomes.length})`,
+	);
+
+	// Hole@k (pooling bias). Aggregate plus the worst offenders — printing it per
+	// row would bury the scores. A query whose top-10 is mostly ungraded is scored
+	// against a judgment set that never considered what the ranker actually
+	// returned, so its nDCG is a lower bound rather than a verdict.
+	const worstHoles = [...outcomes].sort((a, b) => b.holes - a.holes).slice(0, 3);
+	lines.push(
+		`${" ".repeat(19)}HOLE@${NDCG_K}  mean=${mean(outcomes.map((o) => o.holes)).toFixed(1)}/${NDCG_K} ungraded` +
+			` — worst: ${worstHoles.map((o) => `${o.holes} (${o.query.slice(0, 28)})`).join(", ")}`,
 	);
 	if (known.length > 0) {
 		lines.push(
@@ -615,6 +667,97 @@ describe("search relevance benchmark", () => {
 		});
 
 		/**
+		 * The `semantic` algorithm — embeddings only, no lexical leg.
+		 *
+		 * **Reported, not gated.** This is a *user-selected* mode, not the default: the
+		 * search modal's Tab toggle picks it (`SearchModal.activeAlgorithm`) because by
+		 * the time a user toggles, they have already seen and rejected the lexical
+		 * ordering. Gating it would assert that one retrieval strategy must beat another
+		 * on a corpus that cannot represent the thing that distinguishes them — the
+		 * suite scores every query cold, with no notion of "these results were already
+		 * shown and dismissed".
+		 *
+		 * **It is not equivalent to `SEMANTIC_SOURCE_WEIGHT = 1.0`.** Dropping the
+		 * lexical leg entirely puts `rankSearchResults` on its single-source branch,
+		 * which skips RRF rank-mixing *and* swaps `FUSION_TITLE_BOOST_MAX` (0.18) for
+		 * `SEMANTIC_ONLY_TITLE_BOOST_MAX` (0.30). Any earlier weight-sweep row is
+		 * therefore not a prediction of these numbers.
+		 *
+		 * Both tiers are run so the hybrid/semantic comparison is like-for-like.
+		 */
+		it("reports the semantic-only algorithm beside hybrid (user-selected mode)", async () => {
+			// Both algorithms over the same judgments, so the comparison is paired and
+			// the bootstrap below is valid. Hybrid is re-run here rather than reusing
+			// the earlier tiers' numbers: those are separate `it` blocks and a shared
+			// mutable result would couple them.
+			const [semCore, semHard, hybCore, hybHard] = [
+				await scoreQueries("__s2bBenchSemCore", "semantic", CORE_JUDGMENTS),
+				await scoreQueries("__s2bBenchSemHard", "semantic", HARD_JUDGMENTS),
+				await scoreQueries("__s2bBenchHybCore2", "hybrid", CORE_JUDGMENTS),
+				await scoreQueries("__s2bBenchHybHard2", "hybrid", HARD_JUDGMENTS),
+			];
+
+			const axes = [...new Set(semHard.map((o) => o.axis ?? "unknown"))].sort();
+			const lines = [
+				"",
+				"──────── SEMANTIC-ONLY algorithm (reported, not gated) ────────",
+				`  core     nDCG@${NDCG_K}=${mean(semCore.map((o) => o.ndcg)).toFixed(4)} MRR=${mean(semCore.map((o) => o.rr)).toFixed(4)} (n=${semCore.length})`,
+				`  hard     nDCG@${NDCG_K}=${mean(semHard.map((o) => o.ndcg)).toFixed(4)} MRR=${mean(semHard.map((o) => o.rr)).toFixed(4)} (n=${semHard.length})`,
+				"  by axis:",
+			];
+			for (const axis of axes) {
+				const inAxis = semHard.filter((o) => (o.axis ?? "unknown") === axis);
+				lines.push(
+					`    ${axis.padEnd(14)} nDCG@${NDCG_K}=${mean(inAxis.map((o) => o.ndcg)).toFixed(4)}` +
+						` MRR=${mean(inAxis.map((o) => o.rr)).toFixed(4)} (n=${inAxis.length})`,
+				);
+			}
+
+			// Significance. Without it a tier mean moving by a few points reads as a
+			// trend when it is often one query flipping between 0 and 1 — the per-query
+			// scores here are strongly bimodal.
+			lines.push("", "  ─── hybrid vs semantic (paired bootstrap, 10k resamples, seeded) ───");
+			for (const [label, hyb, sem] of [
+				["core", hybCore, semCore],
+				["hard", hybHard, semHard],
+			] as const) {
+				const ci = pairedBootstrapCI(
+					hyb.map((o) => o.ndcg),
+					sem.map((o) => o.ndcg),
+				);
+				const st = signTest(
+					hyb.map((o) => o.ndcg),
+					sem.map((o) => o.ndcg),
+				);
+				const sign = ci.delta >= 0 ? "+" : "";
+				lines.push(
+					`    ${label.padEnd(6)} δ=${sign}${ci.delta.toFixed(4)}` +
+						`  95% CI [${ci.ciLow.toFixed(4)}, ${ci.ciHigh.toFixed(4)}]` +
+						`  ${ci.significant ? "✓ significant" : "✗ not significant"}  (n=${ci.n})`,
+					`           sign test: hybrid ${st.aWins} / semantic ${st.bWins} / ${st.ties} tied`,
+				);
+			}
+
+			lines.push(
+				"",
+				"    ⚠ Hard-tier queries are adversarially selected (kept only if the ranker",
+				"      already failed them) and partly duplicated across tiers, so a CI here",
+				"      bounds resampling noise on THESE queries — it does not generalise to",
+				"      queries a user might type.",
+				"    ⚠ No per-axis CI: n=1..5 per axis. Axis rows are directional only.",
+				"",
+				"  Compare against the HYBRID and HARD blocks above, per embedding model.",
+				"  This is a distinct algorithm, NOT the SEMANTIC_SOURCE_WEIGHT=1.0 sweep row.",
+				"",
+			);
+			console.log(lines.join("\n"));
+
+			// Only that the harness produced a score for every query — see the docblock.
+			expect(semCore).toHaveLength(CORE_JUDGMENTS.length);
+			expect(semHard).toHaveLength(HARD_JUDGMENTS.length);
+		});
+
+		/**
 		 * Direction sensitivity: the sharpest single diagnostic in the suite.
 		 *
 		 * "feedback i received" and "feedback i gave someone" are near-identical strings
@@ -642,6 +785,22 @@ describe("search relevance benchmark", () => {
 		 *
 		 * **Turn the `expect` back on once the ranker distinguishes them**, so the suite
 		 * starts defending the fix. Until then it prints a loud ⚠ line.
+		 *
+		 * **Investigated 2026-08-18 — the fix is not in ranking.** The wrong note is
+		 * rank 1 in the lexical *and* the semantic leg simultaneously, while both
+		 * correct answers are absent from lexical entirely and sit at semantic ranks 7
+		 * and 13. No reweighting of two sources can promote a note that loses on both,
+		 * which rules out the entire fusion-tuning family — including the
+		 * `SEMANTIC_SOURCE_WEIGHT` lever that fixed `size-bias`.
+		 *
+		 * The embedder *does* resolve direction given a richer query ("criticism my
+		 * manager gave me about my work" → correct note at rank 1, wrong note down to
+		 * rank 7), so the real defect is single-term topical dominance in a short
+		 * query, and the lever is query expansion *upstream* of retrieval rather than
+		 * anything here. Full measurements in `integration/README.md`.
+		 *
+		 * So do not re-enable this assertion until that upstream step exists: it would
+		 * assert a property nothing in the current pipeline can deliver.
 		 */
 		it("reports whether direction is distinguished: 'feedback i received' vs 'gave'", async () => {
 			const PAIR = ["feedback i received", "feedback i gave someone"];

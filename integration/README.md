@@ -305,7 +305,7 @@ the last three where *any* model must resolve meaning rather than topic:
 | `multi-hop` | Answer requires joining two facts held in different sections | Needs compositional signal, not single-passage similarity |
 | `cross-lingual` | German notes ↔ English queries (both directions) | bge-micro-v2 is English-distilled; harrier/qwen3 are multilingual |
 | `long-context` | Answer buried ~900–1100 words into one heading-free section | Exceeds a 512-token window, so the answer is truncated away |
-| `dilution` | Answer is one section inside a six-topic note | Note-level embedding averages the answer into unrelated topics |
+| `dilution` | Answer is one section inside a six-topic note, competing against siblings that are more obviously on-topic | Must prefer the section that *answers* over the note that is *about* the subject (the original note-level averaging premise is solved — see below) |
 | `size-bias` | A long padded note out-chunks the short note that answers the query | A note's score is the max over its chunks, and max-of-N grows with N regardless of relevance |
 | `polysemy` | One word, two legitimate senses, neither note off-topic | Both notes are honestly about the query's topic; only sense separates them |
 | `intent-frame` | Same topic words, opposite relational role ("feedback I received" vs "gave") | Requires the *direction* of a relation, which term overlap cannot express |
@@ -344,12 +344,12 @@ Two mechanics worth knowing when reading these scores:
   `gave` are *not* stopwords and score at full weight — but the target notes avoid
   them ("Priya said", "I told him"), as real notes do, so lexical is reduced to the
   one term both candidates share.
-- **`provenance` is one case, not a full axis, and is marked `knownFailure`.**
-  `calculatePathBoost` / `calculateTagBoost` match the **whole query string** against
-  a path segment or tag, so a conversational query like *"notes from the vendor
-  call"* returns 0 from both. Every provenance case would score ~0 on every model —
-  no resolving power, so a full axis would measure the same known gap repeatedly.
-  Remove the annotation if path/tag matching becomes token-wise.
+- **`provenance` is one case, not a full axis.**
+  `calculatePathBoost` **now matches token-wise** (2026-08-18), so a conversational
+  query can earn folder credit; `calculateTagBoost` deliberately still does not —
+  see *Token-wise path and tag matching* below for the measurement that split them.
+  The case passes anyway, and for an unrelated reason (the semantic half finds the
+  notes from title and body text), which is why it is one case rather than an axis.
 
 The suite also asserts one property no aggregate can express: **"feedback i
 received" and "feedback i gave someone" must not return the same top note.** Both
@@ -375,8 +375,13 @@ Cross-lingual notes are monolingual German down to the filler vocabulary
 sentences, which handed an English-only model free traction and made the axis
 measure nothing.
 
-**Cross-lingual is the lowest-scoring axis (0.5253 harrier / 0.6483 qwen3), and that
-is a model limit rather than a ranking bug.** Investigated 2026-08-18; the evidence:
+**Cross-lingual was the lowest-scoring axis (0.5253 harrier / 0.6483 qwen3), and was
+diagnosed as a model limit rather than a ranking bug.** Investigated 2026-08-18; the
+evidence below is all still valid, but **the conclusion it was used to support was
+overturned later the same day** — the axis reaches 0.7500 on `harrier` with no model
+change, purely by re-weighting fusion. Read this list as *why the German note loses
+the semantic contest*, not as *why the axis cannot be fixed*; the correction follows
+it.
 
 - The three cases behave completely differently — German→English scores 0.945, while
   `keeping a sourdough starter active in a cold kitchen` scores 0.000. There is no
@@ -400,8 +405,51 @@ is a model limit rather than a ranking bug.** Investigated 2026-08-18; the evide
   not a targeted fix. The note's rank did improve (43 → 15) but never reached the
   top 10.
 
-The lever that would actually move this axis is a **more multilingual embedding
-model**, which is what the axis exists to reveal. Do not chase it in the ranker.
+**Superseded 2026-08-18 — this axis was a ranking problem after all.** The paragraph
+that stood here read: *"The lever that would actually move this axis is a more
+multilingual embedding model, which is what the axis exists to reveal. Do not chase
+it in the ranker."* That was measured at `SEMANTIC_SOURCE_WEIGHT = 0.78`, and it is
+wrong at 0.86: raising the weight takes `cross-lingual` **0.5154 → 0.7500 with no
+model change**, on the same index build.
+
+The diagnosis above is still correct in every particular — the encoder really does
+lose ~0.12 of similarity crossing languages, and the German note really is absent
+from lexical. What the conclusion missed is *who was casting the deciding vote*. The
+English same-topic siblings that overtake the German note do so because the **lexical**
+leg prefers them (they share literal query terms; the German note shares none). At
+0.78 the lexical leg had enough weight to carry that preference through fusion. The
+semantic leg had the right answer the whole time and was being outvoted.
+
+Note the earlier "credit a missing source" experiment failed for a *different* reason
+and its verdict stands — that approach broadly boosted the majority of results, where
+this one narrows the lexical leg's influence globally. The full weight sweep is in the
+`SEMANTIC_SOURCE_WEIGHT` docblock (`src/search/finalSearchRanking.ts`).
+
+The general lesson worth keeping: **an axis attributed to a model limit should be
+re-tested against the fusion weights before it is written off**, because a weak-but-
+correct semantic ranking and a confident-but-wrong lexical one are indistinguishable
+from "the model cannot do this" if you only look at the fused output.
+
+**`dilution` no longer measures dilution (2026-08-18).** It was written for a real
+defect — a six-topic note whose *note-level* embedding averaged the answer away — but
+retrieval is chunk-level and `chunkAggregation.ts` scores a note as
+`best_chunk * (1 + support)`, so the answering chunk is now found on its own merits and
+the surrounding topics cannot dilute it by construction. **A low score here is not
+evidence of a chunking regression**; do not go looking in `chunkAggregation.ts` for it.
+
+What the two cases measure now is **topical proximity vs. answerhood** — the target
+answers the question while a sibling that is more obviously *about* the topic does not
+(`Foundry Operations Log` over `Hinting and Rasterization`). That is nearer in shape to
+`multi-hop` than to the original premise.
+
+It is kept rather than retired for two measured reasons. It *does* still discriminate:
+it looked saturated at 1.0000 while only `harrier` and `Qwen3-4B` had been measured,
+but `text-embedding-3-small` scores **0.7754** — the weakest of the three on this axis
+while being the strongest overall, which is exactly the disagreement-with-the-aggregate
+an axis exists to surface. And the hinting case is one of two that fall 1.000 → 0.689
+at `SEMANTIC_SOURCE_WEIGHT = 1.0`, so it actively constrains that constant. The axis
+*name* is deliberately unchanged, since renaming it would break comparison with every
+figure already recorded below.
 
 `size-bias` is the one axis that measures the ranker more than the model, and the
 only place in the suite where a many-chunk note is the **wrong** answer. Everywhere
@@ -449,6 +497,31 @@ entire burden.
 received` and `feedback i gave someone` still return the *same* top note. The semantic
 half raises the core tier from 0.7110 to 0.9085, but it does not recover the
 relational frame — which is why `intent-frame` is one of the two weakest axes.
+
+**Refined 2026-08-18: the frame is recoverable in the semantic leg, but two
+independent failures stack.** The embedder *does* encode direction when the query
+carries enough content — for `criticism my manager gave me about my work` the
+**semantic leg alone** ranks `1-1 with Priya` first (0.5778, up from 0.5007/rank 13
+on the bare `feedback i received`), and `Feedback Scoring Service` leaves the top 5
+entirely. So query expansion genuinely repairs the semantic half.
+
+**It does not fix the end-to-end result, though.** On that same query the *hybrid*
+top hit is still wrong — `Internal Pitch for the Platform Work`, because its title
+contains "Work" and it therefore saturates the lexical leg at score 1.0. Fusion
+carries that through. This is a *second*, independent defect of the same shape as
+`griechischer salat`: an incidental lexical title match outvoting a correct semantic
+ranking.
+
+The consequence for planning: query expansion is necessary but **not sufficient** for
+this axis. Both the query-side gap and the lexical-saturation gap have to close
+before `intent-frame` moves *on a given model*.
+
+**But the axis is also strongly model-sensitive**, which the single-model analysis
+above could not see: it ranges 0.6057 (Qwen3-4B) to 0.7169 (text-embedding-3-small) at
+hybrid 0.86, and reaches **0.7616** on text-embedding-3-small at semantic-only. So
+"unfixable in ranking" remains true and "stuck at ~0.63" does not — swapping the
+encoder moves it more than anything tried in the ranker. Full measurements under
+*Recording results per model*.
 
 #### Why the layer is small but weighted (measured 2026-08-18)
 
@@ -533,7 +606,12 @@ Prefix matching is deliberate and already tuned (`prefix: shouldContentPrefixMat
 `weights: { prefix: 0.3 }` in `MiniSearchService.ts`), with a documented history of
 exactly this class of problem — so this is not a switch to flip. The case measures
 whether the semantic half can recover a query the lexical half actively misdirects.
-Currently it cannot, hence `knownFailure`.
+It could not at `SEMANTIC_SOURCE_WEIGHT = 0.78`, and the case carried a `knownFailure`
+annotation for that reason. **Fixed 2026-08-18 at weight 0.86** — the case now scores
+**1.000** on hybrid and the annotation has been removed. Nothing about the cognate
+collision changed; cutting the lexical leg's vote was enough to stop the misdirection
+carrying through fusion, which is precisely the property this case exists to measure.
+It stays in the suite as a live guard against the lexical weight being raised again.
 
 Note the collision was *created* by giving the filler realistic titles: those notes
 were previously `brine-concentration-N.md`, with no "Salt" in the title and therefore
@@ -563,10 +641,336 @@ discriminate between models.
 
 #### Recording results per model
 
-##### 2026-08-18 — `omlx:harrier-oss-v1-0.6b-MLX-8bit`, current corpus
+#### ⚠ Correction: some 2026-08-18 hard-tier figures were measured on the wrong vault
+
+**Affected: the hard-tier totals and the `cross-lingual` axis. The ratcheted tiers are
+unaffected and reproduce exactly.**
+
+Part-way through the 2026-08-18 session the working tree was stashed and the repo moved
+to `dev`. On `dev` the vault still contains `Topics/` (20 notes), `Large Notes/` (2) and
+7 loose root notes *alongside* `Zettel/` — the consolidation described under *Vault
+layout* exists only on `test/search-benchmark-realistic-corpus`. Measurements taken in
+that window therefore ran against **29 extra notes**, which changes the within-result-set
+normalization in `rankSearchResults`.
+
+Re-measured after restoring the branch, against the **same** index build (harrier, built
+14:02 — verified by timestamp, so this is not HNSW rebuild variance) and reproduced
+exactly across two runs:
+
+| tier / axis | recorded | corrected |
+|---|---|---|
+| core (ratcheted) | 0.9355 | **0.9355** ✓ unchanged |
+| recency (ratcheted) | 0.9077 | **0.9077** ✓ unchanged |
+| lexical-only | 0.7110 | **0.7110** ✓ unchanged |
+| **hard — all** | 0.7872 | **0.7702** |
+| **`cross-lingual`** | 0.7500 | **0.6250** |
+| `intent-frame` | 0.6364 | 0.6402 |
+| `polysemy` | 0.7488 | 0.7591 |
+| all other axes | — | unchanged |
+
+The whole difference is one case: **`griechischer salat` is 0.500 (rank 3), not the
+1.000 that was recorded.** So the claim that `SEMANTIC_SOURCE_WEIGHT = 0.86` *fixed* that
+case is wrong — it improved it from 0.431 to 0.500. Its `knownFailure` annotation stays
+removed (0.500 is a real improvement over the 0.431 that justified the annotation), but
+the hard tier having "zero known failures" should be read as an annotation decision, not
+as evidence the case passes.
+
+**What still holds:** the `SEMANTIC_SOURCE_WEIGHT` 0.78 → 0.86 change is unaffected on
+every ratcheted tier, and `cross-lingual` still improves substantially (0.5154 → 0.6250,
++0.11 rather than +0.23). The conclusion that the axis was a fusion-weight problem rather
+than a model limit is unchanged; only its magnitude was overstated.
+
+**Re-measured:** the matrix has been re-run for `harrier` and `Qwen3-4B` on the corrected
+layout — see *corrected matrix* below, which supersedes their rows. `sap-hai:
+text-embedding-3-small` could **not** be re-measured (its endpoint hangs; see that
+section), so its rows remain provisional and it is currently unranked against the other
+two.
+
+#### Significance and judgment holes (added 2026-08-18)
+
+The suite now reports two diagnostics borrowed from IR-evaluation practice. Both
+qualify conclusions already recorded below, so read them first.
+
+##### Paired bootstrap — the hybrid/semantic gap is directional, not significant
+
+`pairedBootstrapCI` (`helpers/relevanceJudgments.ts`) resamples *queries* with
+replacement, 10k times, keeping each query's pair of scores together; seeded, so bounds
+reproduce exactly. Measured on `harrier`:
+
+```
+core   δ=-0.0016  95% CI [-0.0235, 0.0186]  ✗ not significant   sign: hybrid 1 / semantic 1 / 12 tied
+hard   δ=+0.0493  95% CI [-0.0015, 0.1038]  ✗ not significant   sign: hybrid 10 / semantic 2 / 13 tied
+```
+
+**The hard-tier hybrid advantage does not clear significance** — the interval's lower
+bound is −0.0015, fractionally the wrong side of zero. With n=25 and strongly bimodal
+per-query scores (mostly 0.000 or 1.000), a few queries flipping moves the mean several
+points, so the interval is wide by construction.
+
+Two claims have to be separated here, and the earlier write-up conflated them:
+
+- **Magnitude** — "hybrid is worth ~0.05 nDCG on the hard tier" is **not** supported by
+  one run.
+- **Direction** — "hybrid ≥ semantic on hard" *is* well-supported: the sign test splits
+  10:2 in hybrid's favour, and the sign is the same on all three embedding models. Three
+  independent models agreeing is stronger evidence than any single CI.
+
+Consequence for the `polysemy` −0.0072 recorded during the tag-boost work: that was one
+case changing rank, and it is comfortably inside the noise band. It was correctly acted
+on for a *mechanistic* reason (the note tagged `#review` is the wrong answer, which is a
+reason independent of the score), but it should not be cited as a measured regression.
+
+**No per-axis CIs**, deliberately: n=1..5 per axis makes an interval meaningless. Axis
+rows are directional indicators, not numbers a 0.05 difference can be defended on.
+
+##### Hole@10 — most of what the ranker returns is unjudged
+
+```
+core (hybrid)    mean 7.4/10 ungraded
+core (lexical)   mean 8.1/10 ungraded
+hard (hybrid)    mean 7.8/10 ungraded
+hard (semantic)  mean 8.5/10 ungraded
+```
+
+**Only ~2 of every 10 returned results carry a judgment.** nDCG scores an ungraded
+document exactly like one judged irrelevant, so every figure in this file is a **lower
+bound**, not a verdict.
+
+This is the pooling-bias problem BEIR documents, and this suite has it *worse*: BEIR
+pools judgments from many contributing systems, whereas these are hand-written per query,
+so anything the author did not anticipate is a hole by default. It compounds with a
+second, self-inflicted bias — hard-tier cases were "measured before being written… kept
+only if the correct answer did not already win", which is deliberate non-random sampling.
+
+The direction of the bias matters for the hybrid/semantic question specifically. BEIR's
+authors annotated 980 previously-unjudged pairs on TREC-COVID and found the *dense*
+retriever had been badly understated (ANCE 0.654 → 0.735, from below BM25 to 6.7 points
+above), while a lexical system moved 0.001. Ungraded-means-irrelevant systematically
+punishes whichever system surfaces good-but-unanticipated notes — and semantic-only
+returns the most unjudged results here (8.5/10). **So hybrid's edge over semantic may
+partly be judgment coverage rather than retrieval quality.**
+
+That does not overturn the shipped decision — the modal choice rests on the toggle-intent
+argument, not on this number — but it does mean the hard-tier gap should not be quoted as
+a clean measurement of hybrid's superiority. Filling holes on the worst offenders
+(`when do prices rise so fast…` has 10/10 ungraded) is the highest-value next step for the
+corpus.
+
+##### 2026-08-18 (re-measured) — corrected matrix on the consolidated layout
+
+Re-run after restoring `test/search-benchmark-realistic-corpus`, so these supersede the
+rows in the block below for `harrier` and `Qwen3-4B`. Same index builds throughout (no
+reindex — the indexes were verified aligned: Corpus 308 / Zettel 59, 0 stale, all 70
+graded paths resolving), consolidated `Zettel/` layout, `SEMANTIC_SOURCE_WEIGHT = 0.86`.
+
+| model | core: hybrid | core: semantic | hard: hybrid | hard: semantic | Δ hard |
+|---|---|---|---|---|---|
+| `omlx:harrier-oss-v1-0.6b-MLX-8bit` | 0.9355 | 0.9930 | **0.7702** | 0.7200 | −0.050 |
+| `omlx:Qwen3-Embedding-4B-4bit-DWQ` | **0.9939** | 0.9936 | **0.7548** | 0.7127 | −0.042 |
+| `sap-hai:text-embedding-3-small` | — | — | — | — | **not measured** |
+
+Per axis, hybrid @ 0.86:
+
+| axis | harrier | Qwen3-4B |
+|---|---|---|
+| `cross-lingual` | **0.6250** | 0.6577 |
+| `intent-frame` | **0.6402** | 0.6057 |
+| `multi-hop` | **0.7500** | 0.6309 |
+| `polysemy` | **0.7591** | 0.6713 |
+| `size-bias` | 0.8770 | **1.0000** |
+| `dilution` / `long-context` | 1.0000 | 1.0000 |
+| `provenance` | 0.9871 | 0.9871 |
+
+**`sap-hai:text-embedding-3-small` could not be re-measured.** Its embedding calls hang
+indefinitely — no error, no rejection, `dev:errors` clean; a direct probe was still
+pending after 45s while `omlx` models answered in ~10s. It is a SAP-internal endpoint, so
+expired credentials or missing VPN is the likely cause. **Its rows in the block below were
+measured on the wrong (unconsolidated) vault and remain uncorrected — treat them as
+provisional.** Since it scored best overall there, the "which model is strongest" question
+is currently open.
+
+What the corrected numbers change, and what they do not:
+
+- **Hybrid still beats semantic on the hard tier**, on both measurable models (−0.050,
+  −0.042). Direction unchanged from the earlier run.
+- **Neither delta is significant.** harrier hard δ=+0.0497, 95% CI [−0.0247, 0.1279];
+  Qwen3 hard δ=+0.0369, CI [−0.0407, 0.1032]. As before, the *direction* is supported by
+  consistency across models, not by any single interval.
+- **Semantic-only still wins core**, and on harrier decisively (0.9355 → 0.9930). On
+  Qwen3 the two are effectively tied (δ=+0.0003, CI [0.0000, 0.0008] — a real but
+  negligible edge to hybrid, and a good example of a statistically-clean difference that
+  is practically meaningless).
+- **`multi-hop` moved on Qwen3**: 0.5655 → 0.6309 hybrid. Another axis whose earlier
+  value was distorted by the 29 extra notes.
+
+##### 2026-08-18 — the `semantic` algorithm, three models (⚠ measured on the wrong layout)
+
+A third `SearchAlgorithm` was added: `semantic` — embeddings only, **no lexical leg**.
+The search modal's Tab toggle now selects it (`SearchModal.activeAlgorithm`) instead of
+`hybrid`; the agent's `search_notes` tool is unchanged and still defaults to hybrid.
+
+**This is not the `SEMANTIC_SOURCE_WEIGHT = 1.0` sweep row.** Dropping the lexical leg
+entirely puts `rankSearchResults` on its single-source branch, which skips RRF
+rank-mixing *and* swaps `FUSION_TITLE_BOOST_MAX` (0.18) for
+`SEMANTIC_ONLY_TITLE_BOOST_MAX` (0.30). The difference is large and was measured, not
+assumed — on `harrier`, weight-1.0 gives hard 0.7798 while true semantic mode gives
+**0.7200**.
+
+| model | core (sem) | hard: hybrid | hard: **semantic** | Δ |
+|---|---|---|---|---|
+| `sap-hai:text-embedding-3-small` | 0.9835 (MRR 1.0) | **0.8166** | 0.7673 | −0.049 |
+| `omlx:harrier-oss-v1-0.6b-MLX-8bit` | 0.9930 (MRR 1.0) | **0.7872** | 0.7200 | −0.067 |
+| `omlx:Qwen3-Embedding-4B-4bit-DWQ` | 0.9936 (MRR 1.0) | **0.7514** | 0.7143 | −0.037 |
+
+Per axis, semantic-only:
+
+| axis | text-emb-3-small | harrier | Qwen3-4B |
+|---|---|---|---|
+| `cross-lingual` | 0.6721 | 0.6160 | 0.7083 |
+| `dilution` | 0.6377 | 0.7934 | 0.8984 |
+| `intent-frame` | **0.7157** | 0.6879 | 0.5201 |
+| `long-context` | 0.7426 | **0.5413** | 0.8803 |
+| `multi-hop` | 0.8155 | 0.8155 | 0.7500 |
+| `polysemy` | 0.7659 | 0.6240 | 0.5732 |
+| `size-bias` | **1.0000** | **1.0000** | **1.0000** |
+
+**Hybrid wins the hard tier on all three models**, by 0.037–0.067. Two axes drive it:
+`long-context` (harrier 1.0000 → 0.5413) and `polysemy` (0.7488 → 0.6240), both cases
+where the literal query terms are what find or disambiguate the answer.
+
+> **Qualify this with the significance section above.** A paired bootstrap on `harrier`
+> puts the hard-tier delta at 95% CI [−0.0015, 0.1038] — *not* significant at n=25. The
+> **direction** is well-supported (sign test 10:2, and the same sign on all three
+> models); the **magnitude** is not established by one run. And with 7.8–8.5 of every
+> top-10 ungraded, part of the gap may be judgment coverage rather than retrieval
+> quality, since semantic-only returns the most unjudged results.
+
+**But `core` goes the other way**, and decisively: semantic-only reaches **MRR 1.0000 on
+all three models** (harrier core 0.9355 → 0.9930). Every core query returns its correct
+answer at rank 1. `size-bias` also hits 1.0000 everywhere, since a padded note cannot win
+on breadth-of-terms when there is no term-breadth signal.
+
+So the two modes are genuinely different tools rather than better/worse:
+
+- **Ordinary lookups** — semantic-only is flawless (MRR 1.0) and hybrid is not.
+- **Adversarial retrieval** — hybrid is better, because the lexical leg supplies the
+  literal-term signal that buried and polysemous answers depend on.
+
+That split is what justifies exposing it as a *mode* rather than picking a winner. It
+also means the earlier reasoning — that lexical's only genuine rescue was a note already
+at lexical rank 1, so the leg contributes nothing after the user rejects it — holds for
+the `core`-shaped queries it was derived from, and **not** for the hard tier. The modal
+toggle is the right place for the choice precisely because the suite cannot know which
+kind of query the user just typed.
+
+Manual confirmation the mode is live and distinct (all three differ):
+
+```
+"griechischer salat"  lexical  → 1. Salt Tolerance Across Species     ← wrong
+                      hybrid   → 1. Cooking Mediterranean Recipes     ← correct
+                      semantic → 1. Sauerteigführung im Winter, 3. Cooking Mediterranean
+```
+
+Note `hybrid` now returns the right answer at rank 1 for `griechischer salat` — that is
+the `SEMANTIC_SOURCE_WEIGHT` 0.78 → 0.86 change, not the new mode. Its `knownFailure`
+annotation has been **removed** (the suite printed `✅ FIXED` for it), so the hard tier
+now has **zero** known failures and its gated mean equals its overall mean: 0.7872 over
+all 25 cases on `harrier`.
+
+##### 2026-08-18 — three-model × two-weight matrix
+
+All six runs below were measured back-to-back with **no reindex**: each model's index
+was built once (all three hold 369 notes) and the plugin was switched between them via
+`setEmbedIndex`, which is non-destructive — `harrier` reproduced 0.9355 / 0.7872
+exactly after two round-trips through the other indexes, confirming the switch does not
+perturb an index.
+
+**Hard tier (nDCG@10), the model-discrimination number:**
+
+| model | dims | hybrid 0.86 | semantic-only 1.0 |
+|---|---|---|---|
+| `sap-hai:text-embedding-3-small` | 1536 | **0.8166** ← best overall | 0.7918 |
+| `omlx:harrier-oss-v1-0.6b-MLX-8bit` | 1024 | 0.7872 | 0.7798 |
+| `omlx:Qwen3-Embedding-4B-4bit-DWQ` | 2560 | 0.7514 | 0.7336 |
+
+**Core / recency (the ratcheted tiers):**
+
+| model | core 0.86 | core 1.0 | recency 0.86 | recency 1.0 |
+|---|---|---|---|---|
+| text-embedding-3-small | 0.9819 (MRR 0.9643) | 0.9892 (MRR 1.0) | 1.0000 | 1.0000 |
+| harrier-0.6b | 0.9355 (MRR 0.9286) | 0.9930 (MRR 1.0) | 0.9077 | 1.0000 |
+| Qwen3-4B | **0.9939** (MRR 1.0) | 0.9939 (MRR 1.0) | 1.0000 | 1.0000 |
+
+**Per axis at hybrid 0.86:**
+
+| axis | text-emb-3-small | harrier-0.6b | Qwen3-4B |
+|---|---|---|---|
+| `cross-lingual` | 0.6992 | **0.7500** | 0.6577 |
+| `intent-frame` | **0.7169** | 0.6364 | 0.6057 |
+| `multi-hop` | **1.0000** | 0.7500 | 0.5655 |
+| `polysemy` | **0.7980** | 0.7488 | 0.6805 |
+| `size-bias` | **1.0000** | 0.8770 | **1.0000** |
+| `long-context` | 0.8984 | **1.0000** | **1.0000** |
+| `dilution` | 0.7754 | **1.0000** | **1.0000** |
+| `provenance` | 0.9790 | 0.9871 | 0.9871 |
+
+Four things worth reading off this.
+
+**Hybrid beats semantic-only on all three models**, by 0.018–0.025 on the hard tier.
+That is the clearest evidence yet for keeping the lexical leg at 0.86 rather than
+dropping it: the result is not model-specific, and it holds for the two strongest
+models as well as the weakest. Note the direction reverses on *core* for the two local
+models (harrier 0.9355 → 0.9930), so the trade is real but lands on the hard axes.
+
+**Parameter count does not predict quality here.** Qwen3-4B is the largest model and
+the weakest on the hard tier (0.7514), losing badly on `multi-hop` (0.5655) and
+`polysemy` (0.6805) — while topping the *core* tier at 0.9939. A model can saturate
+the easy tier and still be the worst of the three at the discriminating cases, which
+is precisely what the hard tier exists to expose.
+
+**`intent-frame` is not a fixed ceiling.** It ranges 0.6057 → 0.7169 across models —
+`text-embedding-3-small` scores **0.7616** on it at semantic-only, the best figure any
+configuration has produced. The axis is genuinely model-sensitive, so the earlier
+reading of it as "needs query expansion, full stop" is too absolute: a better encoder
+moves it materially, even though the two-legs-both-wrong analysis above still explains
+why *ranking* changes cannot.
+
+**`cross-lingual` still favours the local multilingual model** (harrier 0.7500 vs
+0.6992 / 0.6577), which is the axis behaving as designed.
+
+##### 2026-08-18 (later) — `omlx:harrier-oss-v1-0.6b-MLX-8bit`, **current state**
+
+After `SEMANTIC_SOURCE_WEIGHT` 0.78 → 0.86. This is the row to compare future runs
+against; the block below it is the pre-change baseline, kept for provenance.
+
+| tier | nDCG@10 | MRR | n |
+|---|---|---|---|
+| **core** (ratcheted) | **0.9355** | 0.9286 | 14 |
+| **recency** (ratcheted) | **0.9077** | 0.8750 | 4 |
+| hard — all | **0.7872** | 0.7846 | 25 |
+| hard — gated (excl. 1 known failure) | 0.7784 | 0.7756 | 24 |
+| lexical-only baseline | 0.7110 | 0.6784 | 14 |
+
+Hard tier by axis, weakest first:
+
+| axis | nDCG@10 | MRR | n | reading |
+|---|---|---|---|---|
+| `intent-frame` | **0.6364** | 0.6210 | 6 | now the weakest axis; needs query expansion, not ranking |
+| `polysemy` | 0.7488 | 0.8111 | 5 | the only axis that lost anything (−0.007) |
+| `cross-lingual` | 0.7500 | 0.7500 | 4 | **was 0.5154** — see the correction above |
+| `multi-hop` | 0.7500 | 0.6667 | 2 | |
+| `size-bias` | 0.8770 | 0.8333 | 3 | |
+| `provenance` | 0.9871 | 1.0000 | 1 | |
+| `dilution` | 1.0000 | 1.0000 | 2 | saturated |
+| `long-context` | 1.0000 | 1.0000 | 2 | saturated |
+
+`intent-frame` is now the weakest axis by a clear margin, which is the correct
+outcome: it is the one axis whose blocker is demonstrably *not* in the ranker.
+
+##### 2026-08-18 (earlier) — same model, pre-reweighting baseline
 
 The first run of the hybrid tier against the reworked corpus (Zettel layer, realistic
-filenames, realistic-use axes).
+filenames, realistic-use axes), at `SEMANTIC_SOURCE_WEIGHT = 0.78`.
 
 | tier | nDCG@10 | MRR | n |
 |---|---|---|---|
@@ -617,6 +1021,10 @@ still reproduces on hybrid: `feedback i received` and `feedback i gave someone` 
 the *same* top note (`Feedback Scoring Service`), so the direction-sensitivity
 assertion fails. The semantic half does not fix it.
 
+> Superseded: `cross-lingual` reaches 0.7500 at `SEMANTIC_SOURCE_WEIGHT = 0.86` —
+> it was a fusion-weight problem, not a headroom-by-design one. `intent-frame` is
+> now the weakest axis on its own. See the *current state* block above.
+
 **`provenance` scored 0.9871, not ~0 as predicted.** The prediction — that path and tag
 boosts cannot fire for conversational queries — was correct about the mechanism and
 wrong about the outcome. The case returns both grade-2 notes at ranks 1-2 and the
@@ -629,6 +1037,184 @@ scoped queries are answerable *when the source words also appear in the text*. A
 whose provenance exists **only** in frontmatter (`type: meeting` with no "meeting"
 anywhere in the body) would be the real test of the gap, and the corpus does not have
 one yet. That is the obvious next case for this axis.
+
+##### 2026-08-18 — ranking work against the weakest axes
+
+Four changes were attempted against the `intent-frame`, `cross-lingual` and
+`provenance` gaps. **Two shipped, one was measured and reverted, one was closed as
+out of scope.** All figures below were measured on the *same* index build — the vault
+was not reindexed at any point, and the before-side reproduced core 0.9085 / hard
+0.7456 / recency 0.8155 exactly before any code changed, which is what makes the
+comparison meaningful (see the reindex warning).
+
+| tier / axis | before | after | change |
+|---|---|---|---|
+| **core** (ratcheted) | 0.9085 | **0.9355** | **+0.0270** |
+| **recency** (ratcheted) | 0.8155 | **0.9077** | **+0.0922** |
+| lexical-only | 0.7110 | 0.7110 | — |
+| **hard — all** | 0.7456 | **0.7872** | **+0.0416** |
+| **`cross-lingual`** | 0.5154 | **0.7500** | **+0.2346** |
+| `multi-hop` | 0.7153 | **0.7500** | +0.0347 |
+| `intent-frame` | 0.6250 | **0.6364** | +0.0114 |
+| `polysemy` | 0.7560 | 0.7488 | −0.0072 |
+| `size-bias` | 0.8770 | 0.8770 | — |
+| `long-context` | 1.0000 | 1.0000 | — |
+| `dilution` | 1.0000 | 1.0000 | — |
+| `provenance` | 0.9871 | 0.9871 | — |
+
+Essentially all of this comes from **one line**: `SEMANTIC_SOURCE_WEIGHT` 0.78 → 0.86.
+`polysemy` gives up 0.007, which is the only cost anywhere.
+
+Ratchets raised accordingly: `BASELINE_MEAN_NDCG` 0.88 → 0.93, `BASELINE_MEAN_RR`
+0.85 → 0.90, `RECENCY_FLOOR_MEAN_NDCG` 0.80 → 0.88.
+
+###### Lexical was over-weighted — found by user observation, not by the benchmark
+
+Worth recording how this was found, because the benchmark did **not** surface it. The
+prompt that opened this work stated `cross-lingual` was a model limit (the README said
+so) and pointed at `intent-frame` as the target. Both framings came from measurements
+taken at 0.78, and both were distorted by it.
+
+What exposed it was a user noticing that the search modal returned a lexically-matched
+note at rank 1 for a query where the semantic leg had ranked the right answer first —
+i.e. *"when the user actively decides to do semantic search, lexical matches still have
+too much weight."* That is exactly what the sweep then confirmed. See the
+`SEMANTIC_SOURCE_WEIGHT` docblock for the full table and the shape of the plateau.
+
+Note there is no "semantic-only" mode to defer to: `SearchAlgorithm` is
+`"lexical" | "hybrid"` (`src/types/plugin.ts`), and the search modal does not expose
+it as a choice at all — `SearchModal.ts` derives it as `semanticEnabled ? "hybrid" :
+"lexical"`. (The dropdown in `ToolConfigForm.svelte` sets it for the *agent's*
+`search_notes` tool, not the modal.) So enabling semantic search is a binary switch,
+and `SEMANTIC_SOURCE_WEIGHT` is the *only* control over how much the lexical leg still
+counts once it is on. That is what makes this constant worth getting right rather than
+leaving at a value tuned against an older corpus.
+
+###### The suite cannot score the semantic-toggle *intent* — read aggregates with care
+
+`semanticEnabled` starts `false` and resets to `false` on every open
+(`SearchModal.ts`), so the real flow is: the user types, sees **lexical** results,
+decides they are not what they wanted, and toggles semantic on. There is even a
+`semanticOneShotQuery` capturing the query at toggle time. In other words, by the time
+the semantic leg runs, *the user has already rejected the lexical ordering*.
+
+**No case in this suite can express that.** Every query is judged cold, with no notion
+of "these results were already shown and dismissed". That matters for how the numbers
+below are read: pure semantic (weight 1.0) and the shipped 0.86 score almost the same
+on the hard tier (0.7798 vs 0.7872) **while failing on different queries** — so
+aggregate parity is *not* evidence that the two behave equivalently in use.
+
+Measured at weight 1.0, for whoever picks this up:
+
+| tier / axis | 0.86 | 1.0 |
+|---|---|---|
+| core | 0.9355 | **0.9930** (MRR **1.0000**) |
+| recency | 0.9077 | **1.0000** |
+| hard overall | **0.7872** | 0.7798 |
+| `intent-frame` | 0.6364 | **0.6911** |
+| `size-bias` | 0.8770 | **1.0000** |
+| `griechischer salat` (knownFailure) | 0.431 | **1.000** ✅ |
+| `long-context` | **1.0000** | 0.8984 |
+| `dilution` | **1.0000** | 0.8443 |
+| `polysemy` | **0.7488** | 0.6751 |
+
+Two things worth knowing before acting on this:
+
+- **The regressions are not recall.** All three regressing targets are still retrieved
+  by the semantic leg at ranks 1, 2 and 2 — they merely lose the *tiebreak* to a
+  distractor. A "retrieve with lexical, rank without it" variant was considered on the
+  assumption that lexical was supplying missing notes; the measurement above shows it
+  is not, so that variant would change nothing.
+- Which means every remaining loss at 1.0 is lexical acting as a tiebreaker among
+  notes semantic already found — i.e. exactly the vote the user dismissed by toggling.
+
+0.86 is shipped rather than 1.0 because these figures are `harrier`-only, and because
+the `long-context`/`dilution` cost is the mechanism those axes exist to measure. But
+the case for 1.0 in the *modal specifically* is a judgement about user intent that the
+benchmark is structurally unable to settle — not a question more tuning will answer.
+
+###### Token-wise path and tag matching — shipped for paths, reverted for tags
+
+`calculatePathBoost` and `calculateTagBoost` compared the **whole query string**
+against a segment or tag, so both returned 0 for any conversational query. Both were
+made token-wise, with overlap scored as `min(query coverage, target coverage)`,
+stopwords excluded from both sides, and the result capped at 35% of the whole-query
+boost.
+
+Paths: **no measured effect on any tier.** The capability is real and verified live
+(`what is monetary policy doing to rates` now yields `pathBoost = 6.125` against the
+`Monetary Policy/` folder, previously 0), but nothing in the graded set depends on
+folder names — `Corpus/` is the only folder-shaped region and its queries already win
+on content. Kept because it closes a genuine gap for real vaults at zero measured
+cost, not because the benchmark rewards it.
+
+Tags: **measured as a net loss and reverted.** Hard fell 0.7456 → 0.7375, entirely
+from `polysemy` 0.7560 → 0.7154. The failing case is `the review is blocking me`:
+
+| note | tags | correct? |
+|---|---|---|
+| `Weekly Review 2026-03-14` | `zettel`, `review` | no |
+| `PR Review Backlog` | `zettel`, `platform` | **yes** |
+
+The note tagged `#review` is the wrong answer. Tags record what a note *is*, while a
+query naming a topic often wants a note *about* it — so precisely on the queries where
+senses collide, tag identity points away from the answer. Halving the share
+(0.35 → 0.15) did not recover the case: the boost was widening a lead the wrong note
+already held lexically (base 24 vs 21.5), not creating one. Paths do not share the
+defect because a folder is a *location*, not a claim about word sense.
+
+###### `intent-frame` — not fixable in ranking; needs query understanding
+
+Investigated and closed. The measurements:
+
+- **The wrong note wins both retrieval legs at once.** For `feedback i received`,
+  `Feedback Scoring Service` is **rank 1 in lexical *and* rank 1 in semantic**, while
+  both correct answers are **absent from lexical entirely** (not in the top 50) and sit
+  at semantic ranks 7 and 13. No monotone reweighting of two sources can promote a note
+  that loses on both — this rules out the entire fusion-tuning family, including the
+  `SEMANTIC_SOURCE_WEIGHT` lever that fixed `size-bias`.
+- **The embedder is not actually blind to relational direction.** Given a query with
+  enough content it resolves the frame correctly — **in the semantic leg**. These are
+  raw `semanticSearch` results, *not* what the search modal shows:
+
+  | query | semantic-leg top result |
+  |---|---|
+  | `feedback i received` | `Feedback Scoring Service` ✗ |
+  | `criticism my manager gave me about my work` | `1-1 with Priya - March` ✓ (rank 1, 0.5778; service note out of the top 5) |
+  | `feedback i gave to my report` | `Notes Before Review Season` ✓ (rank 3, ahead of the received-note) |
+
+  So the diagnosis in the axis description is *too pessimistic*. The failure is not
+  "direction cannot be represented" but **single-term topical dominance in short
+  queries**: any query containing the literal word `feedback` puts the service note at
+  rank 1 with cosine ~0.61, and two or three remaining words cannot outvote it.
+- **But the hybrid result for the expanded query is still wrong, for an unrelated
+  reason.** Measured end-to-end on `criticism my manager gave me about my work`:
+
+  | leg | rank 1 | note |
+  |---|---|---|
+  | semantic | `1-1 with Priya - March` (0.5778) | correct |
+  | lexical | `Internal Pitch for the Platform Work` (**1.000**, saturated) | title contains "Work" |
+  | **hybrid** | `Internal Pitch for the Platform Work` (0.955) | **wrong** |
+
+  An incidental title match on a common word saturates the lexical leg and fusion
+  carries it to rank 1 — the same shape as `griechischer salat`. Query expansion is
+  therefore **necessary but not sufficient** for this axis: the lexical-saturation
+  defect has to close too.
+- **The wrong note wins at a weak absolute score.** Its cosine is 0.61 on these
+  queries, against 0.74 when it is genuinely the right answer and 0.55 when it is
+  correctly mid-pack. It is the best of a bad field, not a confident match — the
+  correct answers sit at 0.50–0.52.
+
+The lever that would move this axis is **query expansion / rewriting upstream of
+retrieval** (the measurements above are effectively a manual demonstration of it
+working), not a ranking signal. Frontmatter `type:` was considered as a
+"personal note vs project note" discriminator and rejected: `type: project` is a
+graded-**2** correct answer for `what's in the pipeline`, so a type-based penalty
+would fit this fixture rather than fix the ranker.
+
+The direction check in `search-relevance-benchmark.test.ts` therefore still prints
+`⚠ NOT DISTINGUISHED`, and its `expect` stays off. Turning it on would assert a
+property nothing in the current pipeline can deliver.
 
 ##### Earlier runs — different corpus, not comparable
 
