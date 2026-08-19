@@ -20,9 +20,9 @@ function colorByAnchor(graph: GraphData, communities: Record<string, number>): M
 	return result;
 }
 
-describe("topic colour stability across zoom", () => {
+describe("topic colour stability across granularity levels", () => {
 	/**
-	 * Two topics whose *relative sizes* swap between zoom levels. Under the old
+	 * Two topics whose *relative sizes* swap between granularity levels. Under the old
 	 * rank-based colouring this alone repainted both topics; colour must instead
 	 * follow the group's content.
 	 */

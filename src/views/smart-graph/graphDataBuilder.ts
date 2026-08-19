@@ -290,7 +290,7 @@ const NEUTRAL_CLUSTER_COLOR = "hsl(0, 0%, 50%)";
 /**
  * Fixed number of palette slots topics hash into.
  *
- * Keeping this constant is what lets a topic hold its colour across zoom levels:
+ * Keeping this constant is what lets a topic hold its colour across granularity levels:
  * if the palette were sized to the current topic count, the same hash would land
  * on a different slot at every level.
  */
@@ -879,7 +879,7 @@ function resolveSegmentsByLeiden(
 		.sort((a, b) => b[1].length - a[1].length || a[0] - b[0]);
 	if (sorted.length === 0) return [];
 	// Palette size is fixed rather than sized to the current topic count: a hashed
-	// slot must land the same way at every zoom level, and `colors.length` would
+	// slot must land the same way at every granularity level, and `colors.length` would
 	// otherwise change with the number of topics and remap every colour.
 	const colors = generateClusterColors(Math.max(TOPIC_COLOR_SLOTS, sorted.length), themeColors);
 
@@ -901,8 +901,8 @@ function resolveSegmentsByLeiden(
 	});
 
 	// Colour is keyed to each topic's *representative note*, not its rank in this
-	// list. Rank shifts whenever zoom changes topic sizes, which would repaint the
-	// whole graph on every zoom step; anchoring to a note means a topic keeps its
+	// list. Rank shifts whenever granularity changes topic sizes, which would repaint the
+	// whole graph on every granularity step; anchoring to a note means a topic keeps its
 	// colour for as long as it keeps its core, so the eye can follow a group from
 	// one level to the next.
 	//

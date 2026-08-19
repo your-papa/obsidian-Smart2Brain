@@ -620,7 +620,7 @@ export class PixiRenderer {
 			fadeAlpha: number;
 			/**
 			 * Hull shapes from the previous topic grouping, drawn underneath at
-			 * `outgoingAlpha`. Zoom changes reassign every cluster id at once, so
+			 * `outgoingAlpha`. Granularity changes reassign every cluster id at once, so
 			 * there is no stable identity to tween between — cross-fading the two
 			 * sets turns that hard cut into a dissolve.
 			 */

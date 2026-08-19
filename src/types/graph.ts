@@ -286,7 +286,7 @@ export const DEFAULT_SMART_GRAPH_SETTINGS: SmartGraphSettings = {
 	segmentBy: "none",
 	markdownOnly: false,
 	leidenSeed: 42,
-	// Zoom level 3 on the ladder in topicHierarchy.ts. Kept exactly on a rung so
+	// Granularity level 3 on the ladder in topicHierarchy.ts. Kept exactly on a rung so
 	// the slider doesn't silently shift γ the first time it's touched.
 	leidenResolution: 1.0,
 	bridgeThreshold: 0.4,

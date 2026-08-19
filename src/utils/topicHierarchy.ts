@@ -121,11 +121,11 @@ export function coarseResolutionFor(fineResolution: number): number {
 }
 
 // ============================================================================
-// Zoom
+// Granularity
 // ============================================================================
 
 /**
- * Zoom exposes Leiden's resolution γ as a small ladder of named levels.
+ * Granularity exposes Leiden's resolution γ as a small ladder of named levels.
  *
  * γ itself is a poor thing to show a user: the useful range is non-linear (0.1 →
  * 0.4 reshapes the graph far more than 2.0 → 2.3), and a continuous control
@@ -134,13 +134,13 @@ export function coarseResolutionFor(fineResolution: number): number {
  *
  * Discrete levels instead, each a distinct grouping the user can return to.
  *
- * Which γ values become levels is **derived per vault** ({@link deriveZoomLadder}),
+ * Which γ values become levels is **derived per vault** ({@link deriveGranularityLadder}),
  * not fixed: how many distinct groupings exist depends entirely on a vault's size
  * and structure. A small, uniform vault may only support four meaningfully
  * different partitions; a large varied one may support a dozen. This ladder is
  * only the fallback used before the probe has run.
  */
-export const ZOOM_LEVEL_RESOLUTIONS = [0.15, 0.5, 1.0, 1.5, 2.2, 3.0, 4.2, 6.0] as const;
+export const GRANULARITY_LEVEL_RESOLUTIONS = [0.15, 0.5, 1.0, 1.5, 2.2, 3.0, 4.2, 6.0] as const;
 
 /**
  * γ values probed when deriving a vault's ladder.
@@ -148,12 +148,14 @@ export const ZOOM_LEVEL_RESOLUTIONS = [0.15, 0.5, 1.0, 1.5, 2.2, 3.0, 4.2, 6.0] 
  * Spans well past the fallback's range at both ends, since a very large vault
  * needs high γ to split at all while a tiny one saturates early. Probing is
  * cheap relative to its payoff: each result also warms the Leiden cache, so
- * every zoom step afterwards is instant.
+ * every granularity step afterwards is instant.
  */
-export const ZOOM_PROBE_RESOLUTIONS = [0.1, 0.2, 0.35, 0.5, 0.75, 1.0, 1.4, 1.8, 2.4, 3.0, 4.0, 5.0, 6.5, 8.0] as const;
+export const GRANULARITY_PROBE_RESOLUTIONS = [
+	0.1, 0.2, 0.35, 0.5, 0.75, 1.0, 1.4, 1.8, 2.4, 3.0, 4.0, 5.0, 6.5, 8.0,
+] as const;
 
 /** Never derive a ladder longer than this, however varied the vault. */
-export const MAX_DERIVED_ZOOM_LEVELS = 10;
+export const MAX_DERIVED_GRANULARITY_LEVELS = 10;
 
 /**
  * Smallest group that counts as a topic.
@@ -212,7 +214,7 @@ export function summarizePartition(communities: CommunityMap): { topicCount: num
  * Returns null when fewer than two usable levels exist — the caller falls back
  * to the static ladder rather than showing a slider that cannot move.
  */
-export function deriveZoomLadder(
+export function deriveGranularityLadder(
 	probes: Array<{ resolution: number; topicCount: number; isFragmented?: boolean }>,
 ): number[] | null {
 	const byCount = new Map<number, number>();
@@ -229,48 +231,54 @@ export function deriveZoomLadder(
 		.sort((a, b) => a - b);
 
 	if (ladder.length < 2) return null;
-	if (ladder.length <= MAX_DERIVED_ZOOM_LEVELS) return ladder;
+	if (ladder.length <= MAX_DERIVED_GRANULARITY_LEVELS) return ladder;
 
 	// Too many distinct groupings — keep the endpoints and sample evenly between
 	// them so the slider stays a manageable length.
 	const trimmed: number[] = [];
-	for (let i = 0; i < MAX_DERIVED_ZOOM_LEVELS; i++) {
-		const index = Math.round((i / (MAX_DERIVED_ZOOM_LEVELS - 1)) * (ladder.length - 1));
+	for (let i = 0; i < MAX_DERIVED_GRANULARITY_LEVELS; i++) {
+		const index = Math.round((i / (MAX_DERIVED_GRANULARITY_LEVELS - 1)) * (ladder.length - 1));
 		const value = ladder[index];
 		if (!trimmed.includes(value)) trimmed.push(value);
 	}
 	return trimmed;
 }
 
-/** Lowest selectable zoom level (broadest topics). */
-export const MIN_ZOOM_LEVEL = 1;
+/** Lowest selectable granularity level (broadest topics). */
+export const MIN_GRANULARITY_LEVEL = 1;
 
 /** Highest level on a given ladder. */
-export function maxZoomLevel(ladder: readonly number[] = ZOOM_LEVEL_RESOLUTIONS): number {
-	return Math.max(MIN_ZOOM_LEVEL, ladder.length);
+export function maxGranularityLevel(ladder: readonly number[] = GRANULARITY_LEVEL_RESOLUTIONS): number {
+	return Math.max(MIN_GRANULARITY_LEVEL, ladder.length);
 }
 
-export const MIN_ZOOM_RESOLUTION = ZOOM_LEVEL_RESOLUTIONS[0];
-export const MAX_ZOOM_RESOLUTION = ZOOM_LEVEL_RESOLUTIONS[ZOOM_LEVEL_RESOLUTIONS.length - 1];
+export const MIN_GRANULARITY_RESOLUTION = GRANULARITY_LEVEL_RESOLUTIONS[0];
+export const MAX_GRANULARITY_RESOLUTION = GRANULARITY_LEVEL_RESOLUTIONS[GRANULARITY_LEVEL_RESOLUTIONS.length - 1];
 
-/** Convert a 1-based zoom level to a Leiden resolution. Level 1 = broadest. */
-export function zoomToResolution(level: number, ladder: readonly number[] = ZOOM_LEVEL_RESOLUTIONS): number {
-	const rungs = ladder.length > 0 ? ladder : ZOOM_LEVEL_RESOLUTIONS;
-	const clamped = Math.min(rungs.length, Math.max(MIN_ZOOM_LEVEL, Math.round(level)));
+/** Convert a 1-based granularity level to a Leiden resolution. Level 1 = broadest. */
+export function granularityToResolution(
+	level: number,
+	ladder: readonly number[] = GRANULARITY_LEVEL_RESOLUTIONS,
+): number {
+	const rungs = ladder.length > 0 ? ladder : GRANULARITY_LEVEL_RESOLUTIONS;
+	const clamped = Math.min(rungs.length, Math.max(MIN_GRANULARITY_LEVEL, Math.round(level)));
 	return rungs[clamped - 1];
 }
 
 /**
- * Inverse of {@link zoomToResolution}, for restoring the slider from a stored γ.
+ * Inverse of {@link granularityToResolution}, for restoring the slider from a stored γ.
  *
  * A stored γ needn't be one of the ladder values — it may predate this mapping,
  * come from the dev panel, or belong to a ladder derived before the vault
  * changed — so this snaps to the nearest level rather than requiring an exact
  * match.
  */
-export function resolutionToZoom(resolution: number, ladder: readonly number[] = ZOOM_LEVEL_RESOLUTIONS): number {
-	const rungs = ladder.length > 0 ? ladder : ZOOM_LEVEL_RESOLUTIONS;
-	let bestLevel = MIN_ZOOM_LEVEL;
+export function resolutionToGranularity(
+	resolution: number,
+	ladder: readonly number[] = GRANULARITY_LEVEL_RESOLUTIONS,
+): number {
+	const rungs = ladder.length > 0 ? ladder : GRANULARITY_LEVEL_RESOLUTIONS;
+	let bestLevel = MIN_GRANULARITY_LEVEL;
 	let bestDistance = Number.POSITIVE_INFINITY;
 	for (let i = 0; i < rungs.length; i++) {
 		const distance = Math.abs(rungs[i] - resolution);

@@ -192,7 +192,7 @@ describe("buildCollapsedGraph", () => {
 	});
 
 	it("ignores collapsed ids that no longer exist", () => {
-		// Zoom can drop a topic while it is still in the collapsed set.
+		// A granularity change can drop a topic while it is still in the collapsed set.
 		const collapsed = buildCollapsedGraph(twoTopicGraph(), { collapsedTopics: new Set([0, 99]) });
 
 		expect(collapsed.nodes.some((n) => n.id === topicNodeId(99))).toBe(false);

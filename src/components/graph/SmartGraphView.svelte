@@ -29,14 +29,14 @@ import { labelTopics } from "../../views/smart-graph/topicLabeler";
 import {
 	buildTopicHierarchy,
 	coarseResolutionFor,
-	deriveZoomLadder,
-	maxZoomLevel,
-	MIN_ZOOM_LEVEL,
-	resolutionToZoom,
+	deriveGranularityLadder,
+	maxGranularityLevel,
+	MIN_GRANULARITY_LEVEL,
+	resolutionToGranularity,
 	summarizePartition,
-	ZOOM_LEVEL_RESOLUTIONS,
-	ZOOM_PROBE_RESOLUTIONS,
-	zoomToResolution,
+	GRANULARITY_LEVEL_RESOLUTIONS,
+	GRANULARITY_PROBE_RESOLUTIONS,
+	granularityToResolution,
 	type TopicHierarchy,
 } from "../../utils/topicHierarchy";
 import { edgeKey } from "../../utils/graphUtils";
@@ -78,20 +78,20 @@ let defaultClusterLabels: Record<number, string> = $state({});
 let topicHierarchy: TopicHierarchy | null = $state(null);
 
 /**
- * The zoom slider's rungs for this vault, derived by probing (see
- * {@link deriveZoomLevels}). Holds the static fallback until probing lands; the
+ * The granularity slider's rungs for this vault, derived by probing (see
+ * {@link deriveGranularityLevels}). Holds the static fallback until probing lands; the
  * slider stays hidden until then so its range never changes under the user.
  */
-let zoomLadder: number[] = $state([...ZOOM_LEVEL_RESOLUTIONS]);
+let granularityLadder: number[] = $state([...GRANULARITY_LEVEL_RESOLUTIONS]);
 
 /**
  * True once probing has settled the ladder for the current graph. Gates both the
  * slider's appearance and the probe itself, so dragging can't re-trigger it.
  */
-let hasDerivedZoomLadder = $state(false);
+let hasDerivedGranularityLadder = $state(false);
 
 /** Guards against overlapping probe runs while one is already in flight. */
-let isDerivingZoomLadder = false;
+let isDerivingGranularityLadder = false;
 
 /**
  * Set after a build's initial fit, cleared when the first topics arrive.
@@ -242,7 +242,7 @@ let graphData: GraphData = $state({ nodes: [], edges: [] });
  * the two entry points consistent — whatever the user does, this set is the
  * single answer to "what is folded right now".
  *
- * Independent of zoom: zoom decides *how many* topics exist, this decides
+ * Independent of granularity: granularity decides *how many* topics exist, this decides
  * whether each is drawn as a group or as its notes.
  */
 let collapsedTopics: Set<number> = $state(new Set());
@@ -259,7 +259,7 @@ let allTopicIds: number[] = $derived.by(() => {
 /**
  * Collapse-all as a *mode* rather than an enumerated set.
  *
- * Storing "every id at the time you pressed it" breaks under zoom: changing γ
+ * Storing "every id at the time you pressed it" breaks under granularity: changing γ
  * re-runs Leiden, which both invents new topics and renumbers existing ones, so
  * a stored id set stops describing the graph almost immediately. As a mode, any
  * topic the new resolution produces is collapsed too — which is what the button
@@ -500,9 +500,9 @@ async function buildGraph() {
 		// Graph structure changed — previous Leiden runs are no longer valid.
 		leidenCache.clear();
 		topicHierarchy = null;
-		zoomLadder = [...ZOOM_LEVEL_RESOLUTIONS];
+		granularityLadder = [...GRANULARITY_LEVEL_RESOLUTIONS];
 		// The ladder describes the old graph; hide the slider until it's re-derived.
-		hasDerivedZoomLadder = false;
+		hasDerivedGranularityLadder = false;
 		// A pending refit belongs to the build being replaced.
 		refitAfterTopicsSettle = false;
 
@@ -921,11 +921,11 @@ async function runLeidenSegmentation() {
 		leidenCommunities = cached.communities;
 		leidenCentrality = cached.centrality;
 		resolveAndApplySegments(graphData);
-		// The hierarchy and the zoom ladder describe the *graph*, not the current γ,
+		// The hierarchy and the granularity ladder describe the *graph*, not the current γ,
 		// so they're computed once per build. Re-running them here would fire on
 		// every step of a slider drag, which is exactly the hot path.
 		void computeTopicHierarchy(topicEdges);
-		if (!hasDerivedZoomLadder) void deriveZoomLevels(topicEdges);
+		if (!hasDerivedGranularityLadder) void deriveGranularityLevels(topicEdges);
 		return;
 	}
 
@@ -964,11 +964,11 @@ async function runLeidenSegmentation() {
 	leidenCentrality = result.centrality;
 	resolveAndApplySegments(graphData);
 	void computeTopicHierarchy(topicEdges);
-	void deriveZoomLevels(topicEdges);
+	void deriveGranularityLevels(topicEdges);
 }
 
 /**
- * Derive this vault's zoom ladder by probing candidate resolutions.
+ * Derive this vault's granularity ladder by probing candidate resolutions.
  *
  * How many *distinct* groupings a vault supports depends on its size and
  * structure — a fixed ladder is right for one vault and wrong for the next. So
@@ -978,9 +978,9 @@ async function runLeidenSegmentation() {
  * Every probe also fills the Leiden cache, so this pays for itself: after it
  * finishes, moving the slider is instant at every level.
  */
-async function deriveZoomLevels(topicEdges: GraphEdge[]) {
-	if (isDerivingZoomLadder || hasDerivedZoomLadder) return;
-	isDerivingZoomLadder = true;
+async function deriveGranularityLevels(topicEdges: GraphEdge[]) {
+	if (isDerivingGranularityLadder || hasDerivedGranularityLadder) return;
+	isDerivingGranularityLadder = true;
 
 	const localBuildVersion = buildVersion;
 	// Captured once: the probe loop awaits between rungs, and every cached entry it
@@ -994,7 +994,7 @@ async function deriveZoomLevels(topicEdges: GraphEdge[]) {
 	const start = performance.now();
 
 	try {
-		for (const resolution of ZOOM_PROBE_RESOLUTIONS) {
+		for (const resolution of GRANULARITY_PROBE_RESOLUTIONS) {
 			if (localBuildVersion !== buildVersion) return;
 
 			const cacheKey = partitionKey(resolution, linkOnly);
@@ -1007,7 +1007,7 @@ async function deriveZoomLevels(topicEdges: GraphEdge[]) {
 					communities = result.communities;
 				} catch (error) {
 					// A failed probe just means one fewer candidate rung.
-					Logger.error(`[SmartGraph] Zoom probe failed at γ=${resolution}:`, error);
+					Logger.error(`[SmartGraph] Granularity probe failed at γ=${resolution}:`, error);
 					continue;
 				}
 			}
@@ -1016,20 +1016,20 @@ async function deriveZoomLevels(topicEdges: GraphEdge[]) {
 
 		if (localBuildVersion !== buildVersion) return;
 
-		const ladder = deriveZoomLadder(probes);
+		const ladder = deriveGranularityLadder(probes);
 		if (ladder) {
-			zoomLadder = ladder;
+			granularityLadder = ladder;
 			Logger.info(
-				`[SmartGraph] Zoom ladder: ${ladder.length} levels (γ ${ladder.map((g) => g.toFixed(2)).join(", ")}) in ${Math.round(performance.now() - start)}ms`,
+				`[SmartGraph] Granularity ladder: ${ladder.length} levels (γ ${ladder.map((g) => g.toFixed(2)).join(", ")}) in ${Math.round(performance.now() - start)}ms`,
 			);
 		} else {
 			// Too few distinct groupings to build a ladder from — keep the fallback,
 			// but still reveal the slider so the control isn't withheld forever.
-			Logger.info("[SmartGraph] Zoom ladder: too few distinct groupings, keeping the default");
+			Logger.info("[SmartGraph] Granularity ladder: too few distinct groupings, keeping the default");
 		}
-		hasDerivedZoomLadder = true;
+		hasDerivedGranularityLadder = true;
 	} finally {
-		isDerivingZoomLadder = false;
+		isDerivingGranularityLadder = false;
 	}
 }
 
@@ -1081,11 +1081,11 @@ async function computeTopicHierarchy(topicEdges: GraphEdge[]) {
 /**
  * Clear the Leiden cache and re-run at the current γ. Used when the seed changes — old
  * cached entries are no longer valid because they cluster to different communities.
- * The zoom ladder is re-derived too, since its rungs came from the old seed.
+ * The granularity ladder is re-derived too, since its rungs came from the old seed.
  */
 async function handleSeedChange() {
 	leidenCache.clear();
-	hasDerivedZoomLadder = false;
+	hasDerivedGranularityLadder = false;
 	await runLeidenSegmentation();
 }
 
@@ -1366,7 +1366,7 @@ async function handleSkeletonToggle() {
  * invert the mix instead of collapsing it.
  *
  * Under collapse-all the state is stored as *exceptions* (`expandedTopics`) so
- * that topics introduced by a later zoom still arrive collapsed; outside it,
+ * that topics introduced by a later granularity change still arrive collapsed; outside it,
  * as the collapsed set itself. Both directions have to write to whichever set
  * is currently authoritative.
  */
@@ -1419,21 +1419,21 @@ function handleTopicsCommit(resolution: number) {
 }
 
 /**
- * Zoom level (0–100) derived from the stored resolution, so the slider position
+ * Granularity level derived from the stored resolution, so the slider position
  * survives a reload and stays in sync if γ is changed from elsewhere.
  */
-let zoomLevel = $derived(resolutionToZoom(settings.leidenResolution ?? 1.0, zoomLadder));
+let granularityLevel = $derived(resolutionToGranularity(settings.leidenResolution ?? 1.0, granularityLadder));
 /** Highest selectable level — shrinks to however many groupings this vault supports. */
-let zoomMaxLevel = $derived(maxZoomLevel(zoomLadder));
+let granularityMaxLevel = $derived(maxGranularityLevel(granularityLadder));
 
 /**
- * Commit a new zoom level: map it to γ and re-run community detection.
+ * Commit a new granularity level: map it to γ and re-run community detection.
  *
- * Zooming changes how many topics exist; collapsing (the atom) changes whether
+ * Changing granularity changes how many topics exist; collapsing (the atom) changes whether
  * they're drawn as groups or notes. The two are independent.
  */
-function handleZoomCommit(zoom: number) {
-	handleTopicsCommit(zoomToResolution(zoom, zoomLadder));
+function handleGranularityCommit(level: number) {
+	handleTopicsCommit(granularityToResolution(level, granularityLadder));
 }
 
 /**
@@ -1444,27 +1444,27 @@ function handleZoomCommit(zoom: number) {
  * naturally rate-limited by the settle, and out-of-range steps no-op so the
  * ends of the ladder feel like ends rather than silently wrapping.
  */
-function handleZoomStep(delta: number) {
-	if (!hasDerivedZoomLadder) return;
-	const next = zoomLevel + delta;
-	if (next < MIN_ZOOM_LEVEL || next > zoomMaxLevel) return;
-	handleZoomCommit(next);
+function handleGranularityStep(delta: number) {
+	if (!hasDerivedGranularityLadder) return;
+	const next = granularityLevel + delta;
+	if (next < MIN_GRANULARITY_LEVEL || next > granularityMaxLevel) return;
+	handleGranularityCommit(next);
 }
 
 /**
- * Apply a zoom level *while the user is still dragging*.
+ * Apply a granularity level *while the user is still dragging*.
  *
  * Every rung was computed during probing, so re-segmenting at a new level is a
  * cache hit and lands on the same frame — the graph re-groups under the knob
- * instead of after release, which is what makes zoom feel like a continuous view
+ * instead of after release, which is what makes granularity feel like a continuous view
  * of one structure rather than a series of separate queries.
  *
  * A level that somehow isn't cached is skipped rather than awaited: firing
  * Leiden runs mid-drag would queue work the user has already scrolled past.
  * `oncommit` still fires on release, so the final position always resolves.
  */
-function handleZoomChange(zoom: number) {
-	const resolution = zoomToResolution(zoom, zoomLadder);
+function handleGranularityChange(level: number) {
+	const resolution = granularityToResolution(level, granularityLadder);
 	if (resolution === settings.leidenResolution) return;
 
 	const cached = leidenCache.get(partitionKey(resolution));
@@ -1527,7 +1527,7 @@ function handleHoverPreview(event: MouseEvent, path: string, targetEl: HTMLEleme
       onOpenAllSelected={handleOpenAllSelected}
       onSendToChat={() => void handleSendToChat()}
       onOpenPaths={(paths) => void handleOpenPaths(paths)}
-      onZoomStep={handleZoomStep}
+      onGranularityStep={handleGranularityStep}
     />
   {/if}
 
@@ -1589,11 +1589,11 @@ function handleHoverPreview(event: MouseEvent, path: string, targetEl: HTMLEleme
     onRefresh={handleRefresh}
     onReapplySegments={() => resolveAndApplySegments(graphData)}
     onSeedChange={() => void handleSeedChange()}
-    {zoomLevel}
-    {zoomMaxLevel}
-    zoomReady={hasDerivedZoomLadder}
-    onZoomChange={handleZoomChange}
-    onZoomCommit={handleZoomCommit}
+    {granularityLevel}
+    {granularityMaxLevel}
+    granularityReady={hasDerivedGranularityLadder}
+    onGranularityChange={handleGranularityChange}
+    onGranularityCommit={handleGranularityCommit}
     isLeidenRunning={isLeidenRunning}
     {isLabeling}
     onLabelTopics={handleLabelTopics}

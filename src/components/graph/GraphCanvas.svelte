@@ -68,7 +68,7 @@ interface Props {
 	/** Open an explicit set of notes, sharing the bulk-open confirmation. */
 	onOpenPaths?: (paths: string[]) => void;
 	/** Step topic granularity (Leiden γ) by one level. Arrow keys. */
-	onZoomStep?: (delta: number) => void;
+	onGranularityStep?: (delta: number) => void;
 }
 
 let {
@@ -105,7 +105,7 @@ let {
 	onOpenAllSelected,
 	onSendToChat,
 	onOpenPaths,
-	onZoomStep,
+	onGranularityStep,
 }: Props = $props();
 
 let containerEl: HTMLButtonElement;
@@ -258,7 +258,7 @@ const RETARGET_ALPHA = 0.3;
 const RETARGET_HOLD_MS = 1200;
 
 /**
- * Re-clustering transition (zoom level change).
+ * Re-clustering transition (granularity level change).
  *
  * Deliberately gentler than a retarget: every node gets a new destination at
  * once, so a high alpha with the default decay makes the whole graph snap. A
@@ -296,7 +296,7 @@ let hoverAnimFrameId: number | null = null;
 /**
  * Hull cross-fade state.
  *
- * A zoom change reassigns every cluster id at once (ids are size-sorted segment
+ * A granularity change reassigns every cluster id at once (ids are size-sorted segment
  * positions, so "cluster 3" before and after are unrelated groups). There's no
  * stable identity to tween between, so instead the previous shapes are held and
  * faded out while the new ones fade in — the grouping dissolves rather than cuts.
@@ -436,12 +436,12 @@ function handleKeyDown(e: KeyboardEvent) {
 		// right splits topics further.
 		case "ArrowUp": {
 			e.preventDefault();
-			onZoomStep?.(1);
+			onGranularityStep?.(1);
 			break;
 		}
 		case "ArrowDown": {
 			e.preventDefault();
-			onZoomStep?.(-1);
+			onGranularityStep?.(-1);
 			break;
 		}
 	}
@@ -591,7 +591,7 @@ function findNodeAt(screenX: number, screenY: number): GraphNode | null {
  * Ask for another frame while the hull cross-fade is still running.
  *
  * The force simulation drives most redraws, but it can already be at rest when a
- * grouping changes (e.g. zooming with a settled layout), so the fade needs its
+ * grouping changes (e.g. changing granularity with a settled layout), so the fade needs its
  * own frame source to finish.
  */
 function scheduleFrame() {

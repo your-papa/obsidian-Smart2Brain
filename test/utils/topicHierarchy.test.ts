@@ -3,15 +3,15 @@ import {
 	buildTopicHierarchy,
 	coarseResolutionFor,
 	countChildrenByParent,
-	deriveZoomLadder,
-	MAX_DERIVED_ZOOM_LEVELS,
-	maxZoomLevel,
-	MAX_ZOOM_RESOLUTION,
-	MIN_ZOOM_LEVEL,
-	MIN_ZOOM_RESOLUTION,
-	resolutionToZoom,
+	deriveGranularityLadder,
+	MAX_DERIVED_GRANULARITY_LEVELS,
+	maxGranularityLevel,
+	MAX_GRANULARITY_RESOLUTION,
+	MIN_GRANULARITY_LEVEL,
+	MIN_GRANULARITY_RESOLUTION,
+	resolutionToGranularity,
 	summarizePartition,
-	zoomToResolution,
+	granularityToResolution,
 } from "../../src/utils/topicHierarchy";
 import { DEFAULT_SMART_GRAPH_SETTINGS } from "../../src/types/graph";
 
@@ -116,16 +116,16 @@ describe("countChildrenByParent", () => {
 	});
 });
 
-describe("zoom mapping", () => {
+describe("granularity mapping", () => {
 	it("spans the full resolution range", () => {
-		expect(zoomToResolution(MIN_ZOOM_LEVEL)).toBeCloseTo(MIN_ZOOM_RESOLUTION, 5);
-		expect(zoomToResolution(maxZoomLevel())).toBeCloseTo(MAX_ZOOM_RESOLUTION, 5);
+		expect(granularityToResolution(MIN_GRANULARITY_LEVEL)).toBeCloseTo(MIN_GRANULARITY_RESOLUTION, 5);
+		expect(granularityToResolution(maxGranularityLevel())).toBeCloseTo(MAX_GRANULARITY_RESOLUTION, 5);
 	});
 
 	it("increases monotonically — right means more topics", () => {
 		let previous = -1;
-		for (let level = MIN_ZOOM_LEVEL; level <= maxZoomLevel(); level++) {
-			const resolution = zoomToResolution(level);
+		for (let level = MIN_GRANULARITY_LEVEL; level <= maxGranularityLevel(); level++) {
+			const resolution = granularityToResolution(level);
 			expect(resolution).toBeGreaterThan(previous);
 			previous = resolution;
 		}
@@ -133,57 +133,57 @@ describe("zoom mapping", () => {
 
 	it("gives every level a distinct resolution", () => {
 		const seen = new Set<number>();
-		for (let level = MIN_ZOOM_LEVEL; level <= maxZoomLevel(); level++) {
-			seen.add(zoomToResolution(level));
+		for (let level = MIN_GRANULARITY_LEVEL; level <= maxGranularityLevel(); level++) {
+			seen.add(granularityToResolution(level));
 		}
-		expect(seen.size).toBe(maxZoomLevel());
+		expect(seen.size).toBe(maxGranularityLevel());
 	});
 
 	it("weights steps toward the fine end where the partition actually changes", () => {
 		// Measured: γ 0.1–0.8 barely moves the topic count, γ >1.3 moves it a lot.
 		// So adjacent-level ratios should shrink as levels get finer, spending more
 		// rungs in the range that produces distinct groupings.
-		const firstRatio = zoomToResolution(2) / zoomToResolution(1);
-		const lastRatio = zoomToResolution(maxZoomLevel()) / zoomToResolution(maxZoomLevel() - 1);
+		const firstRatio = granularityToResolution(2) / granularityToResolution(1);
+		const lastRatio = granularityToResolution(maxGranularityLevel()) / granularityToResolution(maxGranularityLevel() - 1);
 		expect(lastRatio).toBeLessThan(firstRatio);
 	});
 
 	it("keeps the default resolution exactly on a rung", () => {
 		// Otherwise the first slider touch silently shifts γ.
 		const defaultResolution = DEFAULT_SMART_GRAPH_SETTINGS.leidenResolution;
-		expect(zoomToResolution(resolutionToZoom(defaultResolution))).toBe(defaultResolution);
+		expect(granularityToResolution(resolutionToGranularity(defaultResolution))).toBe(defaultResolution);
 	});
 
 	it("clamps out-of-range input", () => {
-		expect(zoomToResolution(-5)).toBeCloseTo(MIN_ZOOM_RESOLUTION, 5);
-		expect(zoomToResolution(999)).toBeCloseTo(MAX_ZOOM_RESOLUTION, 5);
+		expect(granularityToResolution(-5)).toBeCloseTo(MIN_GRANULARITY_RESOLUTION, 5);
+		expect(granularityToResolution(999)).toBeCloseTo(MAX_GRANULARITY_RESOLUTION, 5);
 	});
 
 	it("rounds a fractional level to the nearest step", () => {
-		expect(zoomToResolution(3.4)).toBe(zoomToResolution(3));
-		expect(zoomToResolution(3.6)).toBe(zoomToResolution(4));
+		expect(granularityToResolution(3.4)).toBe(granularityToResolution(3));
+		expect(granularityToResolution(3.6)).toBe(granularityToResolution(4));
 	});
 
-	it("round-trips through resolutionToZoom", () => {
-		for (let level = MIN_ZOOM_LEVEL; level <= maxZoomLevel(); level++) {
-			expect(resolutionToZoom(zoomToResolution(level))).toBe(level);
+	it("round-trips through resolutionToGranularity", () => {
+		for (let level = MIN_GRANULARITY_LEVEL; level <= maxGranularityLevel(); level++) {
+			expect(resolutionToGranularity(granularityToResolution(level))).toBe(level);
 		}
 	});
 
 	it("snaps an arbitrary stored resolution to the nearest level", () => {
 		// Values that predate the ladder (or came from the dev panel) must still
 		// place the slider somewhere sensible.
-		expect(resolutionToZoom(0.001)).toBe(MIN_ZOOM_LEVEL);
-		expect(resolutionToZoom(99)).toBe(maxZoomLevel());
+		expect(resolutionToGranularity(0.001)).toBe(MIN_GRANULARITY_LEVEL);
+		expect(resolutionToGranularity(99)).toBe(maxGranularityLevel());
 		// Exactly between two rungs resolves to one of them, not off the ladder.
-		const midpoint = (zoomToResolution(3) + zoomToResolution(4)) / 2;
-		expect([3, 4]).toContain(resolutionToZoom(midpoint));
+		const midpoint = (granularityToResolution(3) + granularityToResolution(4)) / 2;
+		expect([3, 4]).toContain(resolutionToGranularity(midpoint));
 	});
 });
 
-describe("deriveZoomLadder", () => {
+describe("deriveGranularityLadder", () => {
 	it("keeps one rung per distinct topic count", () => {
-		const ladder = deriveZoomLadder([
+		const ladder = deriveGranularityLadder([
 			{ resolution: 0.1, topicCount: 3 },
 			{ resolution: 0.2, topicCount: 3 },
 			{ resolution: 0.5, topicCount: 5 },
@@ -196,7 +196,7 @@ describe("deriveZoomLadder", () => {
 	});
 
 	it("keeps the lowest resolution achieving each grouping", () => {
-		const ladder = deriveZoomLadder([
+		const ladder = deriveGranularityLadder([
 			{ resolution: 3.0, topicCount: 4 },
 			{ resolution: 1.0, topicCount: 4 },
 			{ resolution: 2.0, topicCount: 7 },
@@ -206,7 +206,7 @@ describe("deriveZoomLadder", () => {
 	});
 
 	it("returns a sorted ladder", () => {
-		const ladder = deriveZoomLadder([
+		const ladder = deriveGranularityLadder([
 			{ resolution: 2.0, topicCount: 8 },
 			{ resolution: 0.5, topicCount: 3 },
 			{ resolution: 1.0, topicCount: 5 },
@@ -216,7 +216,7 @@ describe("deriveZoomLadder", () => {
 	});
 
 	it("ignores probes that found no topics", () => {
-		const ladder = deriveZoomLadder([
+		const ladder = deriveGranularityLadder([
 			{ resolution: 0.1, topicCount: 0 },
 			{ resolution: 0.5, topicCount: 2 },
 			{ resolution: 1.0, topicCount: 4 },
@@ -226,11 +226,11 @@ describe("deriveZoomLadder", () => {
 	});
 
 	it("returns null when the vault supports fewer than two groupings", () => {
-		expect(deriveZoomLadder([])).toBeNull();
-		expect(deriveZoomLadder([{ resolution: 1.0, topicCount: 4 }])).toBeNull();
+		expect(deriveGranularityLadder([])).toBeNull();
+		expect(deriveGranularityLadder([{ resolution: 1.0, topicCount: 4 }])).toBeNull();
 		// Every probe gives the same grouping — a slider would have nothing to do.
 		expect(
-			deriveZoomLadder([
+			deriveGranularityLadder([
 				{ resolution: 0.5, topicCount: 6 },
 				{ resolution: 1.0, topicCount: 6 },
 				{ resolution: 2.0, topicCount: 6 },
@@ -244,9 +244,9 @@ describe("deriveZoomLadder", () => {
 			topicCount: i + 2,
 		}));
 
-		const ladder = deriveZoomLadder(probes);
+		const ladder = deriveGranularityLadder(probes);
 
-		expect(ladder!.length).toBeLessThanOrEqual(MAX_DERIVED_ZOOM_LEVELS);
+		expect(ladder!.length).toBeLessThanOrEqual(MAX_DERIVED_GRANULARITY_LEVELS);
 		// The extremes must survive trimming, or the slider loses reach.
 		expect(ladder![0]).toBeCloseTo(0.1, 5);
 		expect(ladder![ladder!.length - 1]).toBeCloseTo(0.1 + 29 * 0.25, 5);
@@ -280,9 +280,9 @@ describe("summarizePartition", () => {
 	});
 });
 
-describe("deriveZoomLadder with fragmentation", () => {
+describe("deriveGranularityLadder with fragmentation", () => {
 	it("rejects levels that shattered into singletons", () => {
-		const ladder = deriveZoomLadder([
+		const ladder = deriveGranularityLadder([
 			{ resolution: 0.5, topicCount: 4, isFragmented: false },
 			{ resolution: 1.0, topicCount: 8, isFragmented: false },
 			// γ pushed high enough that the vault fell apart — not a usable level.
@@ -294,7 +294,7 @@ describe("deriveZoomLadder with fragmentation", () => {
 
 	it("returns null when every level is fragmented", () => {
 		expect(
-			deriveZoomLadder([
+			deriveGranularityLadder([
 				{ resolution: 3.0, topicCount: 20, isFragmented: true },
 				{ resolution: 5.0, topicCount: 40, isFragmented: true },
 			]),
@@ -302,28 +302,28 @@ describe("deriveZoomLadder with fragmentation", () => {
 	});
 });
 
-describe("zoom mapping with a derived ladder", () => {
+describe("granularity mapping with a derived ladder", () => {
 	const ladder = [0.3, 0.9, 2.5];
 
 	it("maps levels onto the supplied ladder", () => {
-		expect(zoomToResolution(1, ladder)).toBe(0.3);
-		expect(zoomToResolution(3, ladder)).toBe(2.5);
+		expect(granularityToResolution(1, ladder)).toBe(0.3);
+		expect(granularityToResolution(3, ladder)).toBe(2.5);
 	});
 
 	it("clamps to the ladder's own length", () => {
-		expect(zoomToResolution(99, ladder)).toBe(2.5);
-		expect(maxZoomLevel(ladder)).toBe(3);
+		expect(granularityToResolution(99, ladder)).toBe(2.5);
+		expect(maxGranularityLevel(ladder)).toBe(3);
 	});
 
 	it("round-trips against the supplied ladder", () => {
 		for (let level = 1; level <= ladder.length; level++) {
-			expect(resolutionToZoom(zoomToResolution(level, ladder), ladder)).toBe(level);
+			expect(resolutionToGranularity(granularityToResolution(level, ladder), ladder)).toBe(level);
 		}
 	});
 
 	it("falls back to the static ladder when given an empty one", () => {
-		expect(zoomToResolution(1, [])).toBe(MIN_ZOOM_RESOLUTION);
-		expect(maxZoomLevel([])).toBe(MIN_ZOOM_LEVEL);
+		expect(granularityToResolution(1, [])).toBe(MIN_GRANULARITY_RESOLUTION);
+		expect(maxGranularityLevel([])).toBe(MIN_GRANULARITY_LEVEL);
 	});
 });
 

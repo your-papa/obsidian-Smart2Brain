@@ -10,10 +10,10 @@ import {
 	type SpaceSegment,
 	DEFAULT_SMART_GRAPH_SETTINGS,
 } from "../../types/graph";
-import { maxZoomLevel, MIN_ZOOM_LEVEL } from "../../utils/topicHierarchy";
+import { maxGranularityLevel, MIN_GRANULARITY_LEVEL } from "../../utils/topicHierarchy";
 
 /** Slider length before the vault's real ladder has been derived. */
-const MAX_ZOOM_LEVEL_FALLBACK = maxZoomLevel();
+const MAX_GRANULARITY_LEVEL_FALLBACK = maxGranularityLevel();
 
 interface Props {
 	settings: SmartGraphSettings;
@@ -24,16 +24,16 @@ interface Props {
 	onRefresh: () => void;
 	onReapplySegments?: () => void;
 	onSeedChange?: () => void;
-	/** Current zoom level, derived from the active Leiden resolution. */
-	zoomLevel?: number;
-	/** Highest selectable level — varies per vault, see deriveZoomLadder. */
-	zoomMaxLevel?: number;
-	/** False until the vault's zoom levels have been established. */
-	zoomReady?: boolean;
+	/** Current granularity level, derived from the active Leiden resolution. */
+	granularityLevel?: number;
+	/** Highest selectable level — varies per vault, see deriveGranularityLadder. */
+	granularityMaxLevel?: number;
+	/** False until the vault's granularity levels have been established. */
+	granularityReady?: boolean;
 	/** Apply a level mid-drag (cache hits only). */
-	onZoomChange?: (zoom: number) => void;
-	/** Commit a new zoom level — re-runs topic detection at the matching resolution. */
-	onZoomCommit?: (zoom: number) => void;
+	onGranularityChange?: (level: number) => void;
+	/** Commit a new granularity level — re-runs topic detection at the matching resolution. */
+	onGranularityCommit?: (level: number) => void;
 	isLeidenRunning?: boolean;
 	/** True while topic names are being generated. */
 	isLabeling?: boolean;
@@ -65,11 +65,11 @@ let {
 	onRefresh,
 	onReapplySegments,
 	onSeedChange,
-	zoomLevel = 3,
-	zoomMaxLevel = MAX_ZOOM_LEVEL_FALLBACK,
-	zoomReady = false,
-	onZoomChange,
-	onZoomCommit,
+	granularityLevel = 3,
+	granularityMaxLevel = MAX_GRANULARITY_LEVEL_FALLBACK,
+	granularityReady = false,
+	onGranularityChange,
+	onGranularityCommit,
 	isLeidenRunning = false,
 	isLabeling = false,
 	onLabelTopics,
@@ -244,10 +244,10 @@ const lassoTooltip = onMobile ? "Lasso selection" : "Lasso selection (or hold Sh
 
       <!-- Held back until the vault's levels are known: the slider's length is
            derived, so showing it early would change its range under the user. -->
-      {#if zoomReady}
-        <!-- Not "Zoom": the graph has a literal one (scroll, +/-) that changes
-             scale, while this changes how finely notes are grouped into topics.
-             Two controls sharing that name in one panel is the confusion. -->
+      {#if granularityReady}
+        <!-- Distinct from the camera zoom (scroll, +/-), which changes scale.
+             This changes how finely notes are grouped into topics — hence the
+             separate `granularity*` vocabulary throughout. -->
         <SettingContainer
           name="Granularity"
           desc={onMobile
@@ -256,18 +256,18 @@ const lassoTooltip = onMobile ? "Lasso selection" : "Lasso selection (or hold Sh
           compact
         >
           <RangeSlider
-            value={zoomLevel}
-            min={MIN_ZOOM_LEVEL}
-            max={zoomMaxLevel}
+            value={granularityLevel}
+            min={MIN_GRANULARITY_LEVEL}
+            max={granularityMaxLevel}
             step={1}
             showValue={true}
-            onchange={(v) => onZoomChange?.(v)}
-            oncommit={(v) => onZoomCommit?.(v)}
+            onchange={(v) => onGranularityChange?.(v)}
+            oncommit={(v) => onGranularityCommit?.(v)}
           />
         </SettingContainer>
       {:else}
         <SettingContainer name="Granularity" desc="Working out this vault's topic levels…" compact>
-          <span class="zoom-pending">…</span>
+          <span class="granularity-pending">…</span>
         </SettingContainer>
       {/if}
 
@@ -582,7 +582,7 @@ const lassoTooltip = onMobile ? "Lasso selection" : "Lasso selection (or hold Sh
     padding-bottom: 2px;
   }
 
-  .zoom-pending {
+  .granularity-pending {
     font-size: var(--font-ui-small);
     color: var(--text-faint);
     padding-right: 4px;
@@ -626,7 +626,7 @@ const lassoTooltip = onMobile ? "Lasso selection" : "Lasso selection (or hold Sh
   }
 
   /* Segment list */
-  /* The topic list is unbounded — a high zoom level can produce dozens of
+  /* The topic list is unbounded — a high granularity level can produce dozens of
      entries. Cap it and let it scroll on its own, so it can never push the
      Display toggles (or itself) out of the panel. */
   .segment-list {
