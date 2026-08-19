@@ -154,6 +154,7 @@ export class PixiRenderer {
 	private containerEl!: HTMLElement;
 
 	// Layers (world-space, inside viewport)
+	private hullLayer!: Container;
 	private edgeLayer!: Container;
 	private nodeLayer!: Container;
 	private labelLayer!: Container;
@@ -165,6 +166,7 @@ export class PixiRenderer {
 	private tooltipLayer!: Container;
 
 	// Display objects
+	private hullGraphics!: Graphics;
 	private edgeGraphics!: Graphics;
 	private lassoGraphics!: Graphics;
 	private nodeGraphicsMap: Map<string, Graphics> = new Map();
@@ -292,15 +294,22 @@ export class PixiRenderer {
 			this._onViewportMoved?.();
 		});
 
-		// World-space layers (inside viewport)
+		// World-space layers (inside viewport). Hulls sit at the bottom so topic
+		// regions read as background, never over edges or nodes.
+		this.hullLayer = new Container();
 		this.edgeLayer = new Container();
 		this.nodeLayer = new Container();
 		this.labelLayer = new Container();
 		this.lassoLayer = new Container();
+		this.viewport.addChild(this.hullLayer);
 		this.viewport.addChild(this.edgeLayer);
 		this.viewport.addChild(this.nodeLayer);
 		this.viewport.addChild(this.labelLayer);
 		this.viewport.addChild(this.lassoLayer);
+
+		// Hull graphics (single batched)
+		this.hullGraphics = new Graphics();
+		this.hullLayer.addChild(this.hullGraphics);
 
 		// Edge graphics (single batched)
 		this.edgeGraphics = new Graphics();
@@ -592,6 +601,76 @@ export class PixiRenderer {
 		return this.nodeGraphicsMap.get(id);
 	}
 
+	// ── Hull rendering ─────────────────────────────────────
+
+	/**
+	 * Draw a tinted region behind each topic.
+	 *
+	 * Colour alone makes grouping hard to read once topics interleave — a region
+	 * gives each one a visible extent, so hierarchy is legible at any zoom rather
+	 * than inferred from dot colours.
+	 *
+	 * Paths arrive already smoothed and padded in world space
+	 * ({@link buildTopicRegion}); this only fills and strokes them.
+	 */
+	drawHulls(
+		hulls: Array<{ cluster: number; color: string; path: Array<{ x: number; y: number }> }>,
+		opts: {
+			focusedClusters: Set<number>;
+			fadeAlpha: number;
+			/**
+			 * Hull shapes from the previous topic grouping, drawn underneath at
+			 * `outgoingAlpha`. Granularity changes reassign every cluster id at once, so
+			 * there is no stable identity to tween between — cross-fading the two
+			 * sets turns that hard cut into a dissolve.
+			 */
+			outgoing?: Array<{ cluster: number; color: string; path: Array<{ x: number; y: number }> }>;
+			outgoingAlpha?: number;
+		},
+	): void {
+		const g = this.hullGraphics;
+		g.clear();
+
+		const outgoing = opts.outgoing ?? [];
+		const outgoingAlpha = clampUnitInterval(opts.outgoingAlpha ?? 0, 0);
+		if (hulls.length === 0 && outgoing.length === 0) return;
+
+		const c = this._theme;
+		const scale = this.viewport.scaled || 1;
+		const fade = clampUnitInterval(opts.fadeAlpha, 1);
+
+		const paint = (
+			set: Array<{ cluster: number; color: string; path: Array<{ x: number; y: number }> }>,
+			multiplier: number,
+		) => {
+			if (multiplier <= 0) return;
+			for (const hull of set) {
+				if (hull.path.length < 3) continue;
+
+				// Dim topics outside the focus, matching how nodes and edges behave.
+				const isFocused = opts.focusedClusters.size === 0 || opts.focusedClusters.has(hull.cluster);
+				const fillAlpha = (isFocused ? 0.1 : 0.02) * fade * multiplier;
+				const strokeAlpha = (isFocused ? 0.35 : 0.08) * fade * multiplier;
+				if (fillAlpha <= 0 && strokeAlpha <= 0) continue;
+
+				const color = hull.color.startsWith("#") ? hull.color : resolveColor(hull.color, c.accent);
+
+				g.moveTo(hull.path[0].x, hull.path[0].y);
+				for (let i = 1; i < hull.path.length; i++) {
+					g.lineTo(hull.path[i].x, hull.path[i].y);
+				}
+				g.closePath();
+				g.fill({ color, alpha: fillAlpha });
+				// Counter-scale so the outline keeps a constant on-screen weight.
+				g.stroke({ color, width: 1.5 / scale, alpha: strokeAlpha });
+			}
+		};
+
+		// Outgoing first so the incoming grouping reads on top as it resolves.
+		paint(outgoing, outgoingAlpha);
+		paint(hulls, 1 - outgoingAlpha);
+	}
+
 	// ── Edge rendering ─────────────────────────────────────
 
 	/**
@@ -599,12 +678,14 @@ export class PixiRenderer {
 	 */
 	drawEdges(
 		edges: Array<{
-			source: { id: string; x: number; y: number };
-			target: { id: string; x: number; y: number };
+			source: { id: string; x: number; y: number; kind?: string };
+			target: { id: string; x: number; y: number; kind?: string };
 			type: string;
+			weight?: number;
 		}>,
 		opts: {
 			showWikiLinks: boolean;
+			showSemanticLinks?: boolean;
 			directedWikiEdges?: boolean;
 			hoveredNodeId: string | null;
 			adjacency: Map<string, Set<string>>;
@@ -619,12 +700,23 @@ export class PixiRenderer {
 		const g = this.edgeGraphics;
 		g.clear();
 
-		if (!opts.showWikiLinks) return;
+		const showWiki = opts.showWikiLinks;
+		const showSemantic = opts.showSemanticLinks !== false;
+		if (!showWiki && !showSemantic) return;
 
 		const c = this._theme;
 		const scale = this.viewport.scaled || 1;
 		const normalWidth = 1.2 / scale;
 		const highlightWidth = 1.6 / scale;
+		// Inferred edges read as a quieter background layer behind authored links.
+		const semanticWidth = 0.9 / scale;
+		const semanticAlphaScale = 0.45;
+		const dash = 5 / scale;
+		const dashGap = 4 / scale;
+
+		// Dashed segments can't share the batched line buckets (each needs its own
+		// sub-path walk), so they collect separately and draw underneath.
+		const semanticLineBuckets = new Map<string, Array<{ sx: number; sy: number; tx: number; ty: number }>>();
 
 		// Batch edges by style bucket to minimize draw calls.
 		// Key: "color|width|alpha" → list of segments
@@ -640,6 +732,9 @@ export class PixiRenderer {
 		>();
 
 		for (const edge of edges) {
+			const isSemantic = edge.type === "semantic";
+			if (isSemantic ? !showSemantic : !showWiki) continue;
+
 			const sx = edge.source.x;
 			const sy = edge.source.y;
 			const tx = edge.target.x;
@@ -677,15 +772,37 @@ export class PixiRenderer {
 			const rawAlpha =
 				(!inFocus ? 0.05 : !inSelection ? 0.05 : isHighlighted ? 0.9 : safeBaseEdgeAlpha) *
 				safeEdgeFadeAlpha *
-				(isHighlighted ? 1 : edgeHoverAlpha / 0.85);
+				(isHighlighted ? 1 : edgeHoverAlpha / 0.85) *
+				// Fade inferred edges unless they're the ones being hovered, so hovering a
+				// note still reveals why it sits where it does.
+				(isSemantic && !isHighlighted ? semanticAlphaScale : 1);
 
 			// Quantize alpha to reduce unique buckets (round to nearest 0.05)
 			const alpha = clampUnitInterval(Math.round(rawAlpha * 20) / 20, 0);
 			if (alpha <= 0) continue;
 
 			const color = isHighlighted ? c.accent : c.graphLine;
-			const width = isHighlighted ? highlightWidth : normalWidth;
+			const baseWidth = isHighlighted ? highlightWidth : isSemantic ? semanticWidth : normalWidth;
+			// A collapsed topic edge's weight counts how many note-level links cross
+			// between the two topics, so thickness is the at-a-glance read of which
+			// areas of the vault are actually coupled. Log-scaled: crossing counts
+			// are heavy-tailed and a linear map would leave weak pairs invisible.
+			const isTopicEdge = edge.source.kind === "topic" || edge.target.kind === "topic";
+			const weightScale = isTopicEdge ? Math.min(4, 1 + Math.log2(Math.max(1, edge.weight ?? 1)) * 0.45) : 1;
+			const width = baseWidth * weightScale;
 			const key = `${color}|${width.toFixed(4)}|${alpha.toFixed(2)}`;
+
+			if (isSemantic) {
+				let semanticBucket = semanticLineBuckets.get(key);
+				if (!semanticBucket) {
+					semanticBucket = [];
+					semanticLineBuckets.set(key, semanticBucket);
+				}
+				semanticBucket.push({ sx, sy, tx, ty });
+				// Arrowheads denote authored direction; an inferred similarity has none.
+				continue;
+			}
+
 			const targetLineBuckets = isHighlighted ? highlightLineBuckets : normalLineBuckets;
 			let bucket = targetLineBuckets.get(key);
 			if (!bucket) {
@@ -758,7 +875,22 @@ export class PixiRenderer {
 			}
 		};
 
-		// Always draw hovered connections last so dim edges/arrows never sit on top of them.
+		const drawDashedBuckets = (buckets: Map<string, Array<{ sx: number; sy: number; tx: number; ty: number }>>) => {
+			for (const [key, segments] of buckets) {
+				const [color, widthStr, alphaStr] = key.split("|");
+				const width = Number(widthStr);
+				const alpha = Number(alphaStr);
+
+				for (const seg of segments) {
+					drawDashedLine(g, seg.sx, seg.sy, seg.tx, seg.ty, dash, dashGap);
+				}
+				g.stroke({ color, width, alpha });
+			}
+		};
+
+		// Inferred edges sit underneath, then authored links, then hovered connections
+		// last so dim edges/arrows never sit on top of them.
+		drawDashedBuckets(semanticLineBuckets);
 		drawLineBuckets(normalLineBuckets);
 		if (opts.directedWikiEdges) {
 			drawArrowBuckets(normalArrowBuckets);
@@ -913,6 +1045,11 @@ export class PixiRenderer {
 			const p = placements[i];
 			const obj = this.clusterPillObjects[i];
 			obj.container.visible = true;
+			// Dim the whole pill — background, border and text together — so an
+			// unfocused label stays readable enough to Shift-click without competing
+			// with the selection. Per-element alpha would leave the text at full
+			// strength, which is the part that actually reads.
+			obj.container.alpha = p.isFocused ? 1 : 0.45;
 
 			const g = obj.graphics;
 			g.clear();

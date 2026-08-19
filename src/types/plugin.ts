@@ -495,7 +495,7 @@ export interface PluginData {
 	/** Controls whether listed files are exposed or private for untrusted providers. */
 	privacyMode: PrivacyMode;
 	/** Filter-backed private file set used to block files for untrusted providers. */
-	privacyFilter: import("./graph").ViewFilter;
+	privacyFilter: import("./viewFilter").ViewFilter;
 
 	// ============================================================================
 	// UI State

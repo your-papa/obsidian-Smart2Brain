@@ -1,8 +1,8 @@
 <script lang="ts">
 import type { App } from "obsidian";
-import type { ViewFilter } from "../../types/graph";
+import type { ViewFilter } from "../../types/viewFilter";
 import { icon as iconDirective } from "../../utils/utils";
-import ViewFilterBuilder from "../graph/ViewFilterBuilder.svelte";
+import ViewFilterBuilder from "../settings/ViewFilterBuilder.svelte";
 import Button from "../ui/Button.svelte";
 import FileSetEntryRow from "./FileSetEntryRow.svelte";
 import { SearchModal, type SearchModalPickerText } from "./SearchModal";

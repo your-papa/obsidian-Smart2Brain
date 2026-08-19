@@ -11,6 +11,7 @@ import { kMeans, suggestK, hdbscan, type KMeansResult, type HDBSCANResult } from
 import { project2D, reduceDimensions } from "./projection";
 import type { ProjectionMethod } from "../types/graph";
 import type { ComputeWorkerRequest, ComputeWorkerResponse, SerializedVectorBatch } from "./computeWorker";
+import { scanSemanticPairs, type SemanticPair } from "./semanticEdges";
 import ComputeWorkerConstructor from "./computeWorker?worker&inline";
 import Graph from "graphology";
 import betweennessCentrality from "graphology-metrics/centrality/betweenness";
@@ -104,7 +105,12 @@ function cloneRequestForRecovery(request: ComputeWorkerRequest): ComputeWorkerRe
 	const { data, count, dim } = request.vectors;
 	// `data.slice()` allocates a fresh backing buffer, decoupled from the one
 	// about to be transferred.
-	return { ...request, vectors: { data: data.slice(), count, dim } };
+	const vectors = { data: data.slice(), count, dim };
+	// semanticEdges transfers a second buffer, which needs the same treatment.
+	if (request.type === "semanticEdges") {
+		return { ...request, vectors, chunkOwners: request.chunkOwners.slice() };
+	}
+	return { ...request, vectors };
 }
 
 /**
@@ -141,6 +147,8 @@ function getTransferList(request: ComputeWorkerRequest): Transferable[] {
 		case "project2D":
 		case "reduceDimensions":
 			return [request.vectors.data.buffer];
+		case "semanticEdges":
+			return [request.vectors.data.buffer, request.chunkOwners.buffer];
 		case "leiden":
 			return [];
 	}
@@ -245,6 +253,21 @@ function runOnMainThread(request: ComputeWorkerRequest): ComputeWorkerResponse |
 				centrality = betweennessCentrality(gGraph, { normalized: true, getEdgeWeight: "weight" });
 			}
 			return { id: request.id, type: "leiden" as const, result: { communities, centrality } };
+		}
+		case "semanticEdges": {
+			const result = scanSemanticPairs(
+				request.vectors.data,
+				request.vectors.count,
+				request.vectors.dim,
+				request.chunkOwners,
+				request.noteCount,
+				{
+					neighborCount: request.neighborCount,
+					threshold: request.threshold,
+					excludePairs: request.excludePairs ? new Set(request.excludePairs) : undefined,
+				},
+			);
+			return { id: request.id, type: "semanticEdges" as const, result };
 		}
 	}
 }
@@ -373,6 +396,34 @@ export async function leidenAsync(
 		communities: resp.result.communities,
 		centrality: resp.result.centrality ?? {},
 	};
+}
+
+/**
+ * Run the semantic pairwise scan off the main thread.
+ *
+ * Takes chunk-level vectors plus the note each chunk belongs to, and returns
+ * scored note-index pairs. Indices refer to the caller's own note ordering.
+ */
+export async function semanticEdgesAsync(
+	vectors: Float32Array[],
+	chunkOwners: Int32Array,
+	noteCount: number,
+	options: { neighborCount?: number; threshold?: number; excludePairs?: Set<string> } = {},
+): Promise<SemanticPair[]> {
+	if (vectors.length === 0 || noteCount < 2) return [];
+
+	const id = ++requestId;
+	const resp = await postRequest<Extract<ComputeWorkerResponse, { type: "semanticEdges" }>>({
+		id,
+		type: "semanticEdges",
+		vectors: toTransferable(vectors),
+		chunkOwners,
+		noteCount,
+		neighborCount: options.neighborCount,
+		threshold: options.threshold,
+		excludePairs: options.excludePairs ? [...options.excludePairs] : undefined,
+	});
+	return resp.result;
 }
 
 /**

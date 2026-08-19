@@ -7,9 +7,13 @@
  *   - a **group**: ALL/ANY/NONE toggle + child list + add/remove buttons
  *
  * The component mutates a `ViewFilter` object in-place via `onchange`.
+ *
+ * Lives under settings, not graph: its only consumer is the privacy list, via
+ * `FileSetEditor`. It sat in `components/graph/` because filters were once part
+ * of the graph's saved views, which no longer exist.
  */
 import { formatPropertyValues, parsePropertyValues } from "../../lib/propertyValues";
-import type { ViewFilter, ViewFilterLeaf, ViewFilterGroup } from "../../types/graph";
+import type { ViewFilter, ViewFilterLeaf, ViewFilterGroup } from "../../types/viewFilter";
 import Dropdown from "../ui/Dropdown.svelte";
 import Text from "../ui/Text.svelte";
 import Icon from "../ui/Icon.svelte";

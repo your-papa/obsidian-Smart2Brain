@@ -1,3 +1,13 @@
+/**
+ * DISABLED FOR INITIAL RELEASE — not registered, not reachable.
+ *
+ * View wrapper for the per-note context graph. `main.ts` has its registerView,
+ * hover-link source, `open-note-context` command and `activateNoteContextView`
+ * all commented out, so this class is never instantiated.
+ *
+ * Kept for a later release; see the component at
+ * `components/graph/NoteContextView.svelte`.
+ */
 import { ItemView, MarkdownView, type EventRef, type TFile, type WorkspaceLeaf } from "obsidian";
 import { mount, unmount } from "svelte";
 import type SecondBrainPlugin from "../../main";

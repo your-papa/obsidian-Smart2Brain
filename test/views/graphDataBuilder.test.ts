@@ -2,11 +2,13 @@ import { describe, expect, it, vi } from "vitest";
 import {
 	buildGraph,
 	buildGraphStructure,
+	buildSemanticEdges,
 	buildWikiGraph,
 	applyColorGroups,
 	computeClusters,
 	deriveClusterLabelsFromGraph,
 } from "../../src/views/smart-graph/graphDataBuilder";
+import { edgeKey } from "../../src/utils/graphUtils";
 import type { App, CachedMetadata, TFile } from "obsidian";
 import type { DocumentVector } from "../../src/vectorstore/types";
 
@@ -86,6 +88,128 @@ const defaultSettings = {
 	clusteringAlgorithm: "kmeans" as const,
 	minClusterSize: 5,
 };
+
+describe("buildSemanticEdges", () => {
+	/** Two tight topics that share no vocabulary — the shape a folder-organised vault has. */
+	function createTwoTopicDocs(): DocumentVector[] {
+		return [
+			createMockDocumentVector("bio1.md", [1, 0, 0, 0]),
+			createMockDocumentVector("bio2.md", [0.98, 0.02, 0, 0]),
+			createMockDocumentVector("bio3.md", [0.96, 0.05, 0, 0]),
+			createMockDocumentVector("type1.md", [0, 0, 1, 0]),
+			createMockDocumentVector("type2.md", [0, 0, 0.98, 0.02]),
+			createMockDocumentVector("type3.md", [0, 0.02, 0.96, 0]),
+		];
+	}
+	const allPaths = (docs: DocumentVector[]) => new Set(docs.map((d) => d.path));
+
+	it("connects notes within a topic and not across topics", async () => {
+		const docs = createTwoTopicDocs();
+		const edges = await buildSemanticEdges(docs, allPaths(docs), { threshold: 0.5 });
+
+		expect(edges.length).toBeGreaterThan(0);
+		for (const edge of edges) {
+			expect(edge.type).toBe("semantic");
+			// Every edge should stay inside one topic ("bio" or "type").
+			expect(edge.source.slice(0, 3)).toBe(edge.target.slice(0, 3));
+		}
+	});
+
+	it("emits each pair only once", async () => {
+		const docs = createTwoTopicDocs();
+		const edges = await buildSemanticEdges(docs, allPaths(docs), { threshold: 0.5 });
+
+		const keys = edges.map((e) => edgeKey(e.source, e.target));
+		expect(new Set(keys).size).toBe(keys.length);
+	});
+
+	it("skips pairs that already have a wiki link", async () => {
+		const docs = createTwoTopicDocs();
+		const excluded = edgeKey("bio1.md", "bio2.md");
+		const edges = await buildSemanticEdges(docs, allPaths(docs), {
+			threshold: 0.5,
+			excludeEdgeKeys: new Set([excluded]),
+		});
+
+		expect(edges.map((e) => edgeKey(e.source, e.target))).not.toContain(excluded);
+	});
+
+	it("respects the similarity threshold", async () => {
+		// Deliberately graded similarities so a mid threshold discriminates:
+		// a↔b are near-identical, c is loosely related, d is unrelated.
+		const docs = [
+			createMockDocumentVector("a.md", [1, 0, 0, 0]),
+			createMockDocumentVector("b.md", [0.99, 0.14, 0, 0]),
+			createMockDocumentVector("c.md", [0.7, 0.7, 0, 0]),
+			createMockDocumentVector("d.md", [0, 0, 1, 0]),
+		];
+		const paths = allPaths(docs);
+
+		const permissive = await buildSemanticEdges(docs, paths, { threshold: 0.5 });
+		const strict = await buildSemanticEdges(docs, paths, { threshold: 0.95 });
+
+		expect(strict.length).toBeLessThan(permissive.length);
+		// Every surviving edge must clear the bar it was given.
+		for (const edge of strict) {
+			expect(edge.weight).toBeGreaterThanOrEqual(0.95);
+		}
+		// The unrelated note is never connected at a sane threshold.
+		expect(strict.some((e) => e.source === "d.md" || e.target === "d.md")).toBe(false);
+	});
+
+	it("caps how many neighbours each note contributes", async () => {
+		const docs = createTwoTopicDocs();
+		const edges = await buildSemanticEdges(docs, allPaths(docs), { threshold: 0.0, neighborCount: 1 });
+
+		// With k=1 each of the 6 notes proposes one partner; dedup collapses mutual picks.
+		expect(edges.length).toBeLessThanOrEqual(6);
+		expect(edges.length).toBeGreaterThan(0);
+	});
+
+	it("returns nothing when neighbourCount is zero", async () => {
+		const docs = createTwoTopicDocs();
+		expect(await buildSemanticEdges(docs, allPaths(docs), { neighborCount: 0 })).toHaveLength(0);
+	});
+
+	it("only connects notes in the include set", async () => {
+		const docs = createTwoTopicDocs();
+		const edges = await buildSemanticEdges(docs, new Set(["bio1.md", "bio2.md"]), { threshold: 0.5 });
+
+		for (const edge of edges) {
+			expect(["bio1.md", "bio2.md"]).toContain(edge.source);
+			expect(["bio1.md", "bio2.md"]).toContain(edge.target);
+		}
+	});
+
+	it("scores multi-chunk notes by their best matching chunk", async () => {
+		// A note whose *second* chunk matches the target. A mean-vector approach would
+		// dilute this below threshold; best-chunk keeps the pair connected.
+		const docs: DocumentVector[] = [
+			{ ...createMockDocumentVector("multi.md", [1, 0, 0, 0]), id: "multi.md#0", chunkIndex: 0 },
+			{ ...createMockDocumentVector("multi.md", [0, 0, 1, 0]), id: "multi.md#1", chunkIndex: 1 },
+			createMockDocumentVector("target.md", [0, 0, 1, 0]),
+		];
+		const edges = await buildSemanticEdges(docs, allPaths(docs), { threshold: 0.9 });
+
+		expect(edges).toHaveLength(1);
+		expect(edgeKey(edges[0].source, edges[0].target)).toBe(edgeKey("multi.md", "target.md"));
+		expect(edges[0].weight).toBeCloseTo(1, 5);
+	});
+
+	it("returns nothing for fewer than two notes", async () => {
+		const docs = [createMockDocumentVector("only.md", [1, 0, 0, 0])];
+		expect(await buildSemanticEdges(docs, allPaths(docs), { threshold: 0 })).toHaveLength(0);
+	});
+
+	it("connects an unlinked note to its topic — the link-sparse vault case", async () => {
+		const docs = createTwoTopicDocs();
+		// bio3 has no wiki links at all; it must still reach its topic semantically.
+		const edges = await buildSemanticEdges(docs, allPaths(docs), { threshold: 0.5 });
+		const touchingBio3 = edges.filter((e) => e.source === "bio3.md" || e.target === "bio3.md");
+
+		expect(touchingBio3.length).toBeGreaterThan(0);
+	});
+});
 
 describe("buildGraph", () => {
 	it("should return empty graph for no documents", async () => {

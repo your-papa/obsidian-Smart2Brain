@@ -452,8 +452,9 @@ export default class SecondBrainPlugin extends Plugin {
 		});
 		this.registerView(VIEW_TYPE_SMART_GRAPH, (leaf) => new SmartGraphView(leaf, this));
 		// DISABLED FOR INITIAL RELEASE — Note Context view. Re-enable together with the
-		// "open-note-context" command and the graph EmbeddingIndexSection in GraphSettings
-		// (it is the only consumer of graphEmbedIndex / semantic edges).
+		// "open-note-context" command. Note that graphEmbedIndex is no longer gated on this:
+		// the Smart Graph consumes it for semantic edges, so the index selector lives in
+		// GraphSettings and the index is opened at startup.
 		// this.registerHoverLinkSource(VIEW_TYPE_NOTE_CONTEXT, {
 		// 	display: "S2B Note Context",
 		// 	defaultMod: true,

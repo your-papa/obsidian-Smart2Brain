@@ -1,6 +1,6 @@
 <script lang="ts">
 import { getAllTags, type App } from "obsidian";
-import type { ViewFilter } from "../../types/graph";
+import type { ViewFilter } from "../../types/viewFilter";
 import {
 	buildSpaceMembershipRulesEditorFilter,
 	cloneSpaceMembershipDraft,

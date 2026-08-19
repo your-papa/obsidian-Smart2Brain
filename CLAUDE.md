@@ -42,7 +42,7 @@ Resources defined in `btca.config.jsonc`: `svelte`, `tailwindcss`, `langchainjs`
 - Constructs the data store, then registers views/commands/extensions synchronously.
 - Defers heavy init (`LexicalSearchService`, `VectorStoreService`, `SkillsService`, `AgentManager`) to `onLayoutReady` so the workspace renders immediately. If a chat opens before init finishes, `AgentManager.ensureAgent()` lazy-initializes.
 - Patches `WorkspaceLeaf.prototype.openFile` so `.chat` files always open in the configured sidebar split rather than replacing the active note.
-- Registers three views: `VIEW_TYPE_CHAT` (`.chat` FileView), `VIEW_TYPE_SMART_GRAPH`, `VIEW_TYPE_NOTE_CONTEXT`.
+- Registers three views: `VIEW_TYPE_CHAT` (`.chat` FileView), `VIEW_TYPE_SMART_GRAPH`, `VIEW_TYPE_ONBOARDING`. (`VIEW_TYPE_NOTE_CONTEXT` exists but is **disabled for the initial release** — its registration, command and activator are commented out in `main.ts`.)
 
 ### Layered structure
 
