@@ -1,4 +1,18 @@
 <script lang="ts">
+/**
+ * DISABLED FOR INITIAL RELEASE — not registered, not reachable.
+ *
+ * The per-note context graph. Its view wrapper (`views/note-context/`) and every
+ * hook in `main.ts` (registerView, the `open-note-context` command,
+ * `activateNoteContextView`) are commented out, so nothing mounts this today.
+ *
+ * Kept rather than deleted because it is a complete feature awaiting a later
+ * release, and it is the only other consumer of `GraphCanvas` — worth knowing
+ * before changing that component's props.
+ *
+ * To re-enable: uncomment the four blocks in `main.ts` marked
+ * "DISABLED FOR INITIAL RELEASE — Note Context".
+ */
 import { onDestroy, onMount } from "svelte";
 import type { EventRef } from "obsidian";
 import { getPlugin } from "../../stores/state.svelte";
