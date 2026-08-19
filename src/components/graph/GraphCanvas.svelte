@@ -179,6 +179,15 @@ let cachedDefaultLinkStrengthFn: ((link: SimLink, i: number, links: SimLink[]) =
 // change from a settings-object replacement that left every number untouched.
 // Cleared whenever a simulation is created so a fresh one always gets its forces.
 let lastPhysicsSignature: string | null = null;
+/**
+ * True while a re-cluster transition is running with its slower decay settings.
+ * `alphaDecay`/`velocityDecay` persist on the simulation, so they have to be
+ * restored once it settles or every later interaction inherits the slow feel.
+ */
+let isReclustering = false;
+/** The active simulation's own decay values, captured at construction. */
+let baseAlphaDecay = 0.02;
+let baseVelocityDecay = 0.3;
 
 // D3-compatible node/link types
 type SimNode = GraphNode & SimulationNodeDatum;
@@ -231,6 +240,20 @@ const RETARGET_ALPHA = 0.3;
  * middle, short enough that the graph still visibly comes to rest.
  */
 const RETARGET_HOLD_MS = 1200;
+
+/**
+ * Re-clustering transition (zoom level change).
+ *
+ * Deliberately gentler than a retarget: every node gets a new destination at
+ * once, so a high alpha with the default decay makes the whole graph snap. A
+ * lower starting alpha limits how hard nodes are pushed, the slow `alphaDecay`
+ * gives them time to arrive rather than being cut off mid-flight, and the high
+ * `velocityDecay` (drag) stops them overshooting and rebounding — that
+ * combination reads as flowing rather than jumping.
+ */
+const RECLUSTER_ALPHA = 0.22;
+const RECLUSTER_ALPHA_DECAY = 0.012;
+const RECLUSTER_VELOCITY_DECAY = 0.55;
 
 /**
  * Delay before the corrective fit that runs after the layout has stopped
@@ -1741,13 +1764,23 @@ function setupForceSimulation(
 			forceCollide<SimNode>().radius((d) => getNodeRadius(d) + 2),
 		)
 		.on("tick", () => {
+			// A finished re-cluster transition hands its slower decay back, so the
+			// next drag or retarget feels normal instead of inheriting the drift.
+			if (isReclustering && simulation && simulation.alpha() < 0.02) {
+				isReclustering = false;
+				simulation.alphaDecay(baseAlphaDecay).velocityDecay(baseVelocityDecay);
+			}
+
 			// During initial settling, continuously refit the camera so it
 			// tracks the expanding layout smoothly instead of staying zoomed-in.
 			if (needsInitialFit && pixi) {
 				forceTickCount++;
 				// Refit every 3 ticks (~50ms) with a short animation that
 				// overlaps the next refit, producing fluid camera motion.
-				if (forceTickCount % 3 === 0) {
+				// A re-cluster settles slowly, so its camera samples less often and
+				// eases for longer — otherwise the view is busier than the nodes.
+				const refitEvery = isReclustering ? 6 : 3;
+				if (forceTickCount % refitEvery === 0) {
 					const bounds = computeNodeBounds(simNodes);
 					if (bounds) {
 						const frame = framingTransform(
@@ -1757,7 +1790,7 @@ function setupForceSimulation(
 						);
 						const cx = (bounds.minX + bounds.maxX) / 2;
 						const cy = (bounds.minY + bounds.maxY) / 2;
-						pixi.animateToFrame(cx, cy, frame.scale, 150);
+						pixi.animateToFrame(cx, cy, frame.scale, isReclustering ? 400 : 150);
 					}
 				}
 				// Once settled, do one final smooth fit and stop tracking.
@@ -1780,6 +1813,12 @@ function setupForceSimulation(
 		})
 		.alphaDecay(isFreshLayout ? 0.04 : 0.02)
 		.velocityDecay(isFreshLayout ? 0.5 : 0.3);
+
+	// Remember this simulation's decay so a re-cluster transition can borrow
+	// slower values and hand them back exactly, rather than guessing a default.
+	baseAlphaDecay = simulation.alphaDecay();
+	baseVelocityDecay = simulation.velocityDecay();
+	isReclustering = false;
 
 	// On a fresh layout, hide the canvas briefly so the first visible frame is
 	// already partially settled rather than the initial random-pile explosion.
@@ -1845,13 +1884,16 @@ function setupGraph(data: GraphData) {
 	}
 
 	// Color-only update: topology unchanged, only colors/clusters differ.
-	// Patch simNodes in-place and re-render — do NOT touch the simulation.
-	// If cohesion > 0 it will naturally pull nodes toward their new cluster centroids.
-	// If cohesion = 0 no force acts on the reassigned clusters so nodes stay put.
+	// Patch simNodes in-place rather than rebuilding the simulation.
 	if (isColorOnlyChange(data)) {
+		// Reassigning clusters changes where the cohesion force wants nodes to sit,
+		// so the layout has to re-settle — but only when the assignment actually
+		// changed. A pure recolour (highlight toggles) must leave the graph still.
+		let clustersChanged = false;
 		for (const node of data.nodes) {
 			const sn = simNodeMap.get(node.id);
 			if (sn !== undefined) {
+				if (sn.cluster !== node.cluster) clustersChanged = true;
 				sn.color = node.color;
 				sn.cluster = node.cluster;
 				sn.highlighted = node.highlighted;
@@ -1876,6 +1918,23 @@ function setupGraph(data: GraphData) {
 			if (node.cluster == null) continue;
 			clusterNodeCounts.set(node.cluster, (clusterNodeCounts.get(node.cluster) ?? 0) + 1);
 		}
+
+		// New topics mean new cluster centroids, so the nodes have to move there.
+		// The cohesion force alone can't do it once alpha has decayed — it would be
+		// applied to a simulation that is no longer ticking, leaving colours and
+		// hulls updated over a frozen layout.
+		if (clustersChanged && clusterCohesionStrength > 0 && simulation && simulation.alpha() < RECLUSTER_ALPHA) {
+			simulation
+				.alpha(RECLUSTER_ALPHA)
+				.alphaDecay(RECLUSTER_ALPHA_DECAY)
+				.velocityDecay(RECLUSTER_VELOCITY_DECAY)
+				.restart();
+			isReclustering = true;
+			// Frame the regrouped layout, since re-clustering can move nodes far.
+			needsInitialFit = true;
+			forceTickCount = 0;
+		}
+
 		if (pixi) render();
 		return;
 	}
