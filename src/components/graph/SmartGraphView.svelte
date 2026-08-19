@@ -1355,9 +1355,9 @@ function handleClearFocusedClusters() {
 /**
  * Jump between the broadest topic level and wherever the user last was.
  *
- * This is a shortcut for dragging the Zoom slider to its left end — pressing it
- * again returns to the previous zoom. Every note stays on screen either way;
- * zooming out merges topics rather than hiding notes.
+ * This is a shortcut for dragging the Granularity slider to its left end —
+ * pressing it again returns to the previous level. Every note stays on screen
+ * either way; coarser grouping merges topics rather than hiding notes.
  */
 async function handleSkeletonToggle() {
 	// Guard against re-entry while a fresh Leiden run is in flight — otherwise rapid clicks
@@ -1459,7 +1459,7 @@ function handleZoomCommit(zoom: number) {
 }
 
 /**
- * Step the topic zoom by one level (arrow keys).
+ * Step topic granularity by one level (arrow keys).
  *
  * Commits rather than using the drag path: a keypress is a discrete choice, so
  * the level should resolve even when it isn't already cached. Held arrows are

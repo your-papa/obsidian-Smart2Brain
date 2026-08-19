@@ -70,7 +70,7 @@ interface Props {
 	onSendToChat?: () => void;
 	/** Open an explicit set of notes, sharing the bulk-open confirmation. */
 	onOpenPaths?: (paths: string[]) => void;
-	/** Step the *topic* zoom (Leiden granularity) by one level. Arrow keys. */
+	/** Step topic granularity (Leiden γ) by one level. Arrow keys. */
 	onZoomStep?: (delta: number) => void;
 }
 
@@ -435,7 +435,7 @@ function handleKeyDown(e: KeyboardEvent) {
 			zoomByFactor(1 / 1.2);
 			break;
 		}
-		// Arrows step *topic* zoom — more topics up, fewer down — while +/- stay
+		// Arrows step topic granularity — finer up, coarser down — while +/- stay
 		// on camera scale. Up meaning "finer" matches the slider, where dragging
 		// right splits topics further.
 		case "ArrowUp": {

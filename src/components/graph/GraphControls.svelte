@@ -236,17 +236,20 @@ const lassoTooltip = onMobile ? "Lasso selection" : "Lasso selection (or hold Sh
       </div>
 
       <!-- ── Topics ───────────────────────────── -->
-      <!-- Zoom and "Ignore inferred links" both decide *which topics exist* (they
-           re-run Leiden), so they belong together and above the topic list they
-           produce. Everything under Display only changes how the same topics are
-           drawn. -->
+      <!-- Granularity and "Ignore inferred links" both decide *which topics exist*
+           (they re-run Leiden), so they belong together and above the topic list
+           they produce. Everything under Display only changes how the same topics
+           are drawn. -->
       <span class="section-label">Topics</span>
 
       <!-- Held back until the vault's levels are known: the slider's length is
            derived, so showing it early would change its range under the user. -->
       {#if zoomReady}
+        <!-- Not "Zoom": the graph has a literal one (scroll, +/-) that changes
+             scale, while this changes how finely notes are grouped into topics.
+             Two controls sharing that name in one panel is the confusion. -->
         <SettingContainer
-          name="Zoom"
+          name="Granularity"
           desc={onMobile
             ? "Left: a few broad topics. Right: many specific ones. Every note stays visible."
             : "Left: a few broad topics. Right: many specific ones. Every note stays visible. (↑/↓ on the graph)"}
@@ -263,7 +266,7 @@ const lassoTooltip = onMobile ? "Lasso selection" : "Lasso selection (or hold Sh
           />
         </SettingContainer>
       {:else}
-        <SettingContainer name="Zoom" desc="Working out this vault's topic levels…" compact>
+        <SettingContainer name="Granularity" desc="Working out this vault's topic levels…" compact>
           <span class="zoom-pending">…</span>
         </SettingContainer>
       {/if}
