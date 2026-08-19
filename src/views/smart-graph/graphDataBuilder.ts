@@ -943,33 +943,6 @@ function resolveSegmentsByLeiden(
 	});
 }
 
-/**
- * Apply resolved segments to graph data — sets `color` on matching nodes.
- * First matching segment wins; unmatched nodes keep their existing color.
- */
-export function applySegments(graphData: GraphData, segments: SpaceSegment[]): GraphData {
-	if (segments.length === 0) return graphData;
-	// Build a path → (color, cluster index) lookup for O(1) per-node
-	const pathInfo = new Map<string, { color: string; cluster: number }>();
-	// First segment to claim a path wins (ordered)
-	for (let i = 0; i < segments.length; i++) {
-		for (const path of segments[i].paths) {
-			if (!pathInfo.has(path)) {
-				pathInfo.set(path, { color: segments[i].color, cluster: i });
-			}
-		}
-	}
-	return {
-		...graphData,
-		nodes: graphData.nodes.map((node) => {
-			const info = pathInfo.get(node.path);
-			if (info === undefined) return node; // not in any segment
-			if (!info.color) return { ...node, color: undefined, cluster: info.cluster };
-			return { ...node, color: info.color, cluster: info.cluster };
-		}),
-	};
-}
-
 function getPathBasename(path: string): string {
 	const name = path.split("/").pop() ?? path;
 	return name.replace(/\.[^.]+$/, "");

@@ -11,9 +11,7 @@ import {
 	type GraphData,
 	type GraphEdge,
 	type GraphNode,
-	type SegmentBy,
 	type SpaceSegment,
-	type ViewFilter,
 	type SmartGraphSettings,
 	DEFAULT_SMART_GRAPH_SETTINGS,
 	generateClusterColors,
@@ -24,7 +22,6 @@ import {
 	buildSemanticEdges,
 	readNativeGraphSettings,
 	resolveSegments,
-	applySegments,
 	type GraphFilter,
 } from "../../views/smart-graph/graphDataBuilder";
 import { getVectorStoreService, waitForVectorStore, waitForVectorStoreIndex } from "../../vectorstore";
@@ -32,7 +29,6 @@ import { labelTopics } from "../../views/smart-graph/topicLabeler";
 import {
 	buildTopicHierarchy,
 	coarseResolutionFor,
-	countChildrenByParent,
 	deriveZoomLadder,
 	maxZoomLevel,
 	MIN_ZOOM_LEVEL,
@@ -197,14 +193,9 @@ const UNSORTED_NODE_COLOR = "hsl(0, 0%, 55%)";
 // Detail level 0–100: 100 = full graph, <100 = skeleton backbone (fewer nodes per topic)
 let skeletonDetail = $state(100);
 
-// Segment / Color-by state — always leiden
-let segmentBy: SegmentBy = $derived("leiden" as SegmentBy);
+// Topics are always segmented by Leiden community; there is no other mode.
 let segments: SpaceSegment[] = $state([]);
 let focusedSegmentIds: Set<string> = $state(new Set());
-/** Per-segment color overrides set by the user. */
-let segmentColorOverrides: Record<string, string> = $state({});
-
-let pendingSpaceFilter: ViewFilter | null = $state(null);
 
 /** LLM-generated topic names, keyed by topic id. Overrides the hub-filename default. */
 let generatedClusterLabels: Record<number, string> = $state({});
@@ -221,58 +212,6 @@ let labelingAbort: AbortController | null = null;
 let effectiveClusterLabels: Record<number, string> = $derived({
 	...defaultClusterLabels,
 	...generatedClusterLabels,
-});
-
-/** Cluster entries for the inspector legend (cluster id → color, label, count). */
-let clusterLegendEntries = $derived.by(() => {
-	const map = new Map<number, { color: string; count: number }>();
-	for (const node of graphData.nodes) {
-		if (node.cluster == null) continue;
-		const existing = map.get(node.cluster);
-		if (existing) {
-			existing.count++;
-		} else {
-			map.set(node.cluster, { color: node.color ?? "", count: 1 });
-		}
-	}
-	return [...map.entries()]
-		.sort((a, b) => a[0] - b[0])
-		.map(([cluster, { color, count }]) => ({
-			cluster,
-			color,
-			label: effectiveClusterLabels[cluster] ?? `Cluster ${cluster}`,
-			count,
-		}));
-});
-
-let focusedClusterDetails = $derived.by(() => {
-	if (focusedClusters.size === 0) return [];
-
-	return [...focusedClusters]
-		.sort((left, right) => left - right)
-		.map((clusterId) => {
-			const nodes = graphData.nodes.filter((node) => node.cluster === clusterId);
-			const topNotes = [...nodes]
-				.sort((left, right) => {
-					const degreeDiff = (right.degree ?? 0) - (left.degree ?? 0);
-					if (degreeDiff !== 0) return degreeDiff;
-					return left.label.localeCompare(right.label);
-				})
-				.slice(0, 5)
-				.map((node) => ({
-					path: node.path,
-					label: node.label,
-					degree: node.degree ?? 0,
-				}));
-
-			return {
-				cluster: clusterId,
-				label: effectiveClusterLabels[clusterId] ?? `Cluster ${clusterId}`,
-				noteCount: nodes.length,
-				topNotes,
-			};
-		})
-		.filter((cluster) => cluster.noteCount > 0);
 });
 
 let graphData: GraphData = $state({ nodes: [], edges: [] });
@@ -338,9 +277,6 @@ let selectedTopicsCollapseAction: "collapse" | "expand" | null = $derived.by(() 
 	return allCollapsed ? "expand" : "collapse";
 });
 
-/** Topic names matching whichever level is on screen. */
-let displayClusterLabels: Record<number, string> = $derived(effectiveClusterLabels);
-
 /**
  * Detail view: shows only the top hubs and bridges per cluster, parameterised by skeletonDetail (0–100).
  *
@@ -352,7 +288,7 @@ let displayClusterLabels: Record<number, string> = $derived(effectiveClusterLabe
  * Edges: only wiki edges whose both endpoints survived the node filter.
  */
 let skeletonGraphData: GraphData = $derived.by(() => {
-	if (skeletonDetail >= 100 || segmentBy !== "leiden" || graphData.nodes.length === 0) return graphData;
+	if (skeletonDetail >= 100 || graphData.nodes.length === 0) return graphData;
 
 	const t = skeletonDetail / 100; // 0–1
 
@@ -769,8 +705,6 @@ function handleFocusCluster(cluster: number, pan = false, multi = true) {
 
 function handleSelectionChange(paths: string[]) {
 	selectedPaths = paths;
-	pendingSpaceFilter =
-		paths.length > 0 ? { type: "any", conditions: [{ type: "paths", value: paths.slice() }] } : null;
 	const messenger = getSessionRegistry();
 	if (messenger) {
 		// Ambient: mirror the live graph selection into every open chat's tray.
@@ -864,7 +798,6 @@ function handleClearSelection() {
 	selectedPaths = [];
 	focusedClusters = new Set();
 	focusedSegmentIds = new Set();
-	pendingSpaceFilter = null;
 	canvasComponent?.clearSelection();
 	const messenger = getSessionRegistry();
 	if (messenger) {
@@ -1096,14 +1029,6 @@ async function handleSeedChange() {
 	await runLeidenSegmentation();
 }
 
-function handleSegmentColorChange(segmentId: string, color: string) {
-	// "none" means revert to default theme color
-	const resolvedColor = color === "none" ? "" : color;
-	segmentColorOverrides = { ...segmentColorOverrides, [segmentId]: resolvedColor };
-	segments = segments.map((s) => (s.id === segmentId ? { ...s, color: resolvedColor } : s));
-	graphData = applySegments(graphData, segments);
-}
-
 function handleFocusSegment(segmentId: string, multi: boolean) {
 	const next = new Set(focusedSegmentIds);
 	if (multi) {
@@ -1146,7 +1071,6 @@ function handleFocusSegment(segmentId: string, multi: boolean) {
 	selectedPaths = paths;
 	const messenger = getSessionRegistry();
 	if (messenger) messenger.graphSelection = [...paths];
-	pendingSpaceFilter = { type: "any", conditions: [{ type: "paths", value: paths.slice() }] };
 	// A plain row click is "take me to this topic", so framing it helps. A
 	// Shift/⌘ click is building a multi-selection — moving the view mid-gesture
 	// would shift the rows and labels the user is still aiming at.
@@ -1157,21 +1081,13 @@ function handleFocusSegment(segmentId: string, multi: boolean) {
  * Resolve Leiden community segments from current graphData and apply coloring + centrality.
  */
 function resolveAndApplySegments(gd: GraphData) {
-	const by = "leiden" as SegmentBy;
 	const themeColors = resolveThemeColors();
-	const resolved = resolveSegments(plugin.app, gd, by, {
+	const resolved = resolveSegments(plugin.app, gd, "leiden", {
 		clusterMap: new Map(),
 		clusterLabels: effectiveClusterLabels,
 		themeColors,
 		leidenCommunities,
 	});
-	// Apply persistent color overrides (from user picks or bookmark restore)
-	for (let i = 0; i < resolved.length; i++) {
-		const override = segmentColorOverrides[resolved[i].id];
-		if (override !== undefined) {
-			resolved[i] = { ...resolved[i], color: override };
-		}
-	}
 	segments = resolved;
 	// Build path → segment lookup once so the single node-map pass below can do everything:
 	// strip stale color/cluster/centrality, apply betweenness centrality (leiden), apply segment color.
@@ -1183,7 +1099,7 @@ function resolveAndApplySegments(gd: GraphData) {
 			}
 		}
 	}
-	const isLeiden = by === "leiden" && Object.keys(leidenCentrality).length > 0;
+	const isLeiden = Object.keys(leidenCentrality).length > 0;
 	// Paths touched by at least one authored wiki link — drives the isolated highlight.
 	const linkedPaths = new Set<string>();
 	for (const edge of gd.edges) {
@@ -1531,14 +1447,13 @@ function handleHoverPreview(event: MouseEvent, path: string, targetEl: HTMLEleme
       showSemanticLinks={settings.showSemanticLinks ?? true}
       showTopicHulls={settings.showTopicHulls ?? true}
       {focusedClusters}
-      clusterLabels={displayClusterLabels}
+      clusterLabels={effectiveClusterLabels}
       showClusterLabels={settings.showClusterLabels ?? true}
       clusterCohesionStrength={settings.clusterCohesionStrength ?? 0.15}
       onNodeClick={handleNodeClick}
       onSetTopicCollapsed={(cluster, collapsed) => void setTopicsCollapsed([cluster], collapsed)}
       onRevealFile={handleRevealFile}
       onFocusCluster={handleFocusCluster}
-      onToggleWikiLinks={() => handleSettingsChange({ showWikiLinks: !settings.showWikiLinks })}
       {lassoMode}
       onSelectionChange={handleSelectionChange}
       onClearFocusedClusters={handleClearFocusedClusters}

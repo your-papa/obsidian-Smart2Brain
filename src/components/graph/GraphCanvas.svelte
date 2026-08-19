@@ -13,7 +13,6 @@ import {
 } from "d3-force";
 import type { GraphData, GraphNode, EdgeType } from "../../types/graph";
 import { deriveClusterRepresentativesFromGraph } from "../../views/smart-graph/graphDataBuilder";
-import { edgeKey } from "../../utils/graphUtils";
 import { computeNodeBounds, easeOutCubic, framingTransform, type FramingPadding } from "../../utils/graphAnimation";
 import { buildTopicRegion, centroid } from "../../utils/convexHull";
 import { resolveNodePaths, topicNodeId } from "../../utils/mergeNodes";
@@ -45,7 +44,6 @@ interface Props {
 	 */
 	clusterCohesionStrength?: number;
 	onNodeClick?: (path: string) => void;
-	/** Open or re-close a collapsed topic node. */
 	/** Fold or unfold one topic. Used by the context menu's direct actions. */
 	onSetTopicCollapsed?: (cluster: number, collapsed: boolean) => void;
 	onRevealFile?: (path: string) => void;
@@ -54,7 +52,6 @@ interface Props {
 	 * the camera. `multi` toggles membership instead of replacing the selection.
 	 */
 	onFocusCluster?: (cluster: number, pan?: boolean, multi?: boolean) => void;
-	onToggleWikiLinks?: () => void;
 	lassoMode?: boolean;
 	onSelectionChange?: (paths: string[]) => void;
 	onClearFocusedClusters?: () => void;
@@ -96,7 +93,6 @@ let {
 	onSetTopicCollapsed,
 	onRevealFile,
 	onFocusCluster,
-	onToggleWikiLinks,
 	lassoMode = false,
 	onSelectionChange,
 	onClearFocusedClusters,
@@ -451,10 +447,6 @@ function handleKeyDown(e: KeyboardEvent) {
 	}
 }
 
-// Edge lookup map: "nodeA\0nodeB" → SimLink (built once in setupSimulation)
-// Enables O(1) edge weight lookups for hover labels instead of O(n) scan.
-let edgeLookup: Map<string, SimLink> = new Map();
-
 // Persistent label occlusion grid — allocated once, zeroed at the start of each render.
 // Avoids a ~10KB allocation + GC at 60fps. Resized only when canvas dimensions change.
 let labelGrid: Uint8Array = new Uint8Array(0);
@@ -466,6 +458,30 @@ let simNodeMap: Map<string, SimNode> = new Map();
 let clusterRepresentativeIds: Set<string> = new Set();
 let clusterRepresentativeNodes: Map<number, SimNode> = new Map();
 let clusterNodeCounts: Map<number, number> = new Map();
+
+/**
+ * Re-derive the per-cluster metadata the topic pills read: which node speaks for
+ * each topic, and how many notes it holds.
+ *
+ * Needed on both paths into a new grouping — a full rebuild and the
+ * `isColorOnlyChange` fast path, which reassigns clusters without touching
+ * topology. Requires `simNodeMap` to already match `data`.
+ */
+function refreshClusterMetadata(data: GraphData) {
+	const representatives = deriveClusterRepresentativesFromGraph(data);
+	clusterRepresentativeIds = new Set([...representatives.values()].map((node) => node.id));
+	clusterRepresentativeNodes = new Map(
+		[...representatives].flatMap(([cluster, node]) => {
+			const simNode = simNodeMap.get(node.id);
+			return simNode ? [[cluster, simNode] as const] : [];
+		}),
+	);
+	clusterNodeCounts = new Map<number, number>();
+	for (const node of data.nodes) {
+		if (node.cluster == null) continue;
+		clusterNodeCounts.set(node.cluster, (clusterNodeCounts.get(node.cluster) ?? 0) + 1);
+	}
+}
 
 // Cached label sort order — rebuilt only when hover/selection/highlight state changes.
 // Between frames where only positions move, the priority of each node is stable.
@@ -739,11 +755,14 @@ function getNodeRadius(node: GraphNode): number {
  */
 function render() {
 	if (!pixi || !pixi.ready) return;
+	// Narrowed once here so the nested helpers below (which close over it) don't
+	// each have to re-check a field the early return already guaranteed.
+	const renderer = pixi;
 
-	const width = pixi.width;
-	const height = pixi.height;
-	const scale = pixi.scale;
-	const c = pixi.theme;
+	const width = renderer.width;
+	const height = renderer.height;
+	const scale = renderer.scale;
+	const c = renderer.theme;
 	const nodeClusterMap = getNodeClusterMap();
 
 	// Advance edge fade-in (smooth crossfade on mode / data changes)
@@ -808,7 +827,7 @@ function render() {
 			if (hullFadeProgress >= 1) outgoingHulls = [];
 			scheduleFrame();
 		}
-		pixi.drawHulls(hulls, {
+		renderer.drawHulls(hulls, {
 			focusedClusters,
 			fadeAlpha: edgeFadeAlpha,
 			outgoing: outgoingHulls,
@@ -821,11 +840,11 @@ function render() {
 		lastHullPaths = [];
 		lastHullSignature = "";
 		hullFadeProgress = 1;
-		pixi.drawHulls([], { focusedClusters, fadeAlpha: edgeFadeAlpha });
+		renderer.drawHulls([], { focusedClusters, fadeAlpha: edgeFadeAlpha });
 	}
 
 	// ── Edges ──────────────────────────────────────────────────
-	pixi.drawEdges(
+	renderer.drawEdges(
 		renderableSimLinks as unknown as Array<{
 			source: { id: string; x: number; y: number; kind?: string };
 			target: { id: string; x: number; y: number; kind?: string };
@@ -848,7 +867,7 @@ function render() {
 	);
 
 	// ── Nodes ──────────────────────────────────────────────────
-	pixi.syncNodes(simNodes, nodeSize, {
+	renderer.syncNodes(simNodes, nodeSize, {
 		selectedNodes,
 		hoveredNodeId: hoveredNode?.id ?? null,
 		draggedNodeId: draggedNode?.id ?? null,
@@ -896,7 +915,7 @@ function render() {
 		// LABEL_FONT_PX is already in screen px, so sw/sh are screen px directly
 		const sw = approxCharCount * LABEL_FONT_PX * 0.55;
 		const sh = LABEL_FONT_PX;
-		const screen = pixi?.worldToScreen(nodeX, labelY);
+		const screen = renderer.worldToScreen(nodeX, labelY);
 		const x1 = screen.x - sw / 2 - LABEL_PAD_X;
 		const y1 = screen.y - sh - LABEL_PAD_Y;
 		const x2 = screen.x + sw / 2 + LABEL_PAD_X;
@@ -1022,13 +1041,13 @@ function render() {
 		}
 	}
 
-	pixi.drawLabels(labelEntries);
+	renderer.drawLabels(labelEntries);
 
 	// ── Lasso ──────────────────────────────────────────────────
 	if (isLassoing && lassoPoints.length >= 2) {
-		pixi.drawLasso(lassoPoints);
+		renderer.drawLasso(lassoPoints);
 	} else {
-		pixi.clearLasso();
+		renderer.clearLasso();
 	}
 
 	// ── Cluster anchor pills (screen space) ────────────────────
@@ -1070,7 +1089,7 @@ function render() {
 			// it stands for.
 			if (node.kind === "topic") continue;
 
-			const screen = pixi.worldToScreen(node.x, node.y);
+			const screen = renderer.worldToScreen(node.x, node.y);
 			// Skip topics whose anchor is off-screen. Clamping them to the canvas
 			// edge (as this used to) stacks every out-of-view topic into the margin,
 			// far from the notes it describes — a label pointing nowhere is worse
@@ -1148,16 +1167,16 @@ function render() {
 			if (positioned) placed.push(candidate);
 		}
 
-		clusterAnchorHitAreas = pixi.drawClusterPills(placed);
+		clusterAnchorHitAreas = renderer.drawClusterPills(placed);
 	} else {
-		clusterAnchorHitAreas = pixi.drawClusterPills([]);
+		clusterAnchorHitAreas = renderer.drawClusterPills([]);
 	}
 
 	// ── Node tooltip ───────────────────────────────────────────
 	if (hoveredNode && hoveredNode.x != null && hoveredNode.y != null) {
-		pixi.showNodeTooltip(hoveredNode, clusterLabels, false, true);
+		renderer.showNodeTooltip(hoveredNode, clusterLabels, false, true);
 	} else {
-		pixi.hideTooltip();
+		renderer.hideTooltip();
 	}
 }
 
@@ -1677,7 +1696,6 @@ function inheritedPosition(
  */
 function buildInternalData(data: GraphData): {
 	oldPositions: Map<string, { x: number; y: number }>;
-	isSmooth: boolean;
 	allPositionsKnown: boolean;
 	isFreshLayout: boolean;
 } {
@@ -1758,24 +1776,10 @@ function buildInternalData(data: GraphData): {
 
 	// Pre-split by edge type to avoid filtering every render frame
 	renderableSimLinks = simLinks.filter((l) => l.type === "wiki" || l.type === "semantic");
-	const clusterRepresentatives = deriveClusterRepresentativesFromGraph(data);
-	clusterRepresentativeIds = new Set([...clusterRepresentatives.values()].map((node) => node.id));
-	clusterRepresentativeNodes = new Map(
-		[...clusterRepresentatives].flatMap(([cluster, node]) => {
-			const simNode = simNodeMap.get(node.id);
-			return simNode ? [[cluster, simNode] as const] : [];
-		}),
-	);
-	clusterNodeCounts = new Map<number, number>();
-	for (const node of data.nodes) {
-		if (node.cluster == null) continue;
-		clusterNodeCounts.set(node.cluster, (clusterNodeCounts.get(node.cluster) ?? 0) + 1);
-	}
+	refreshClusterMetadata(data);
 
 	// Build adjacency map for O(1) hover-dimming lookups
 	adjacency = new Map();
-	// Build edge lookup map for O(1) weight lookups on hover labels
-	edgeLookup = new Map();
 	for (const link of simLinks) {
 		const sId = (link.source as SimNode).id;
 		const tId = (link.target as SimNode).id;
@@ -1783,19 +1787,12 @@ function buildInternalData(data: GraphData): {
 		if (!adjacency.has(tId)) adjacency.set(tId, new Set());
 		adjacency.get(sId)?.add(tId);
 		adjacency.get(tId)?.add(sId);
-
-		// Store edge by canonical key; keep highest-weight edge per pair
-		const ek = edgeKey(sId, tId);
-		const existing = edgeLookup.get(ek);
-		if (!existing || link.weight > existing.weight) {
-			edgeLookup.set(ek, link);
-		}
 	}
 
 	// Start edge fade-in on full data change
 	edgeFadeAlpha = 0;
 
-	return { oldPositions, isSmooth: false, allPositionsKnown, isFreshLayout };
+	return { oldPositions, allPositionsKnown, isFreshLayout };
 }
 
 // ============================================================================
@@ -1803,9 +1800,7 @@ function buildInternalData(data: GraphData): {
 // ============================================================================
 
 function setupForceSimulation(
-	_data: GraphData,
 	oldPositions: Map<string, { x: number; y: number }>,
-	isSmooth: boolean,
 	allPositionsKnown: boolean,
 	isFreshLayout: boolean,
 ) {
@@ -1915,7 +1910,7 @@ function setupForceSimulation(
 	// All nodes restored from cache → gentle settle, no camera refit needed.
 	// Some nodes had prior positions (mode switch) → slow drift into place.
 	// No prior positions → full simulation from scratch.
-	else if (allPositionsKnown || isSmooth) {
+	else if (allPositionsKnown) {
 		simulation.alpha(0.05);
 		needsInitialFit = false;
 	} else if (oldPositions.size > 0) {
@@ -1977,19 +1972,7 @@ function setupGraph(data: GraphData) {
 		if (clusterForce) clusterForce.strength(clusterCohesionStrength);
 		// Re-derive cluster metadata so pills on the canvas reflect the new segmentation.
 		// (buildInternalData is not called in this path, so we update it explicitly.)
-		const clusterRepresentatives = deriveClusterRepresentativesFromGraph(data);
-		clusterRepresentativeIds = new Set([...clusterRepresentatives.values()].map((n) => n.id));
-		clusterRepresentativeNodes = new Map(
-			[...clusterRepresentatives].flatMap(([cluster, node]) => {
-				const simNode = simNodeMap.get(node.id);
-				return simNode ? [[cluster, simNode] as const] : [];
-			}),
-		);
-		clusterNodeCounts = new Map<number, number>();
-		for (const node of data.nodes) {
-			if (node.cluster == null) continue;
-			clusterNodeCounts.set(node.cluster, (clusterNodeCounts.get(node.cluster) ?? 0) + 1);
-		}
+		refreshClusterMetadata(data);
 
 		// New topics mean new cluster centroids, so the nodes have to move there.
 		// The cohesion force alone can't do it once alpha has decayed — it would be
@@ -2017,8 +2000,8 @@ function setupGraph(data: GraphData) {
 		simulation = null;
 	}
 
-	const { oldPositions, isSmooth, allPositionsKnown, isFreshLayout } = buildInternalData(data);
-	setupForceSimulation(data, oldPositions, isSmooth, allPositionsKnown, isFreshLayout);
+	const { oldPositions, allPositionsKnown, isFreshLayout } = buildInternalData(data);
+	setupForceSimulation(oldPositions, allPositionsKnown, isFreshLayout);
 }
 
 // React to graphData changes — setupGraph is called via untrack so that writes
