@@ -10,6 +10,10 @@ import {
 	type SpaceSegment,
 	DEFAULT_SMART_GRAPH_SETTINGS,
 } from "../../types/graph";
+import { maxZoomLevel, MIN_ZOOM_LEVEL } from "../../utils/topicHierarchy";
+
+/** Slider length before the vault's real ladder has been derived. */
+const MAX_ZOOM_LEVEL_FALLBACK = maxZoomLevel();
 
 interface Props {
 	settings: SmartGraphSettings;
@@ -20,8 +24,21 @@ interface Props {
 	onRefresh: () => void;
 	onReapplySegments?: () => void;
 	onSeedChange?: () => void;
-	onTopicsCommit?: (resolution: number) => void;
+	/** Current zoom level, derived from the active Leiden resolution. */
+	zoomLevel?: number;
+	/** Highest selectable level — varies per vault, see deriveZoomLadder. */
+	zoomMaxLevel?: number;
+	/** False until the vault's zoom levels have been established. */
+	zoomReady?: boolean;
+	/** Apply a level mid-drag (cache hits only). */
+	onZoomChange?: (zoom: number) => void;
+	/** Commit a new zoom level — re-runs topic detection at the matching resolution. */
+	onZoomCommit?: (zoom: number) => void;
 	isLeidenRunning?: boolean;
+	/** True while topic names are being generated. */
+	isLabeling?: boolean;
+	/** Manually (re)generate topic names via the configured graph model. */
+	onLabelTopics?: () => void;
 	lassoMode?: boolean;
 	onLassoModeChange?: (active: boolean) => void;
 	graphData?: GraphData;
@@ -30,6 +47,8 @@ interface Props {
 	segments?: SpaceSegment[];
 	focusedSegmentIds?: Set<string>;
 	onFocusSegment?: (id: string, multi: boolean) => void;
+	/** True when topics are collapsed into single nodes. */
+	isTopicsCollapsed?: boolean;
 	// Skeleton view
 	skeletonDetail?: number;
 	onSkeletonDetailChange?: (value: number) => void;
@@ -46,8 +65,14 @@ let {
 	onRefresh,
 	onReapplySegments,
 	onSeedChange,
-	onTopicsCommit,
+	zoomLevel = 3,
+	zoomMaxLevel = MAX_ZOOM_LEVEL_FALLBACK,
+	zoomReady = false,
+	onZoomChange,
+	onZoomCommit,
 	isLeidenRunning = false,
+	isLabeling = false,
+	onLabelTopics,
 	lassoMode = false,
 	onLassoModeChange,
 	graphData = { nodes: [], edges: [] },
@@ -55,6 +80,7 @@ let {
 	segments = [],
 	focusedSegmentIds = new Set<string>(),
 	onFocusSegment,
+	isTopicsCollapsed = false,
 	skeletonDetail = 100,
 	onSkeletonDetailChange,
 	onSkeletonDetailCommit,
@@ -66,6 +92,7 @@ let isDevCollapsed = $state(true);
 
 let sectionOpen: Record<string, boolean> = $state({
 	devLayout: false,
+	devSemantic: false,
 	devLeiden: false,
 });
 
@@ -77,11 +104,49 @@ let graphStats = $derived.by(() => {
 	const totalDegree = degrees.reduce((a, b) => a + b, 0);
 	const avgDegree = totalDegree / nodes.length;
 	const maxDegree = Math.max(...degrees);
-	const unlinkedNotes = degrees.filter((d) => d === 0).length;
+
+	// `degree` counts inferred semantic edges too, so it can't answer "how many notes
+	// did I never link?" — count authored wiki links directly instead.
+	const wikiLinkedPaths = new Set<string>();
+	for (const edge of edges) {
+		if (edge.type !== "wiki") continue;
+		wikiLinkedPaths.add(edge.source);
+		wikiLinkedPaths.add(edge.target);
+	}
+	const unlinkedNotes = nodes.filter((n) => !wikiLinkedPaths.has(n.path)).length;
 	const wikiEdges = edges.filter((e) => e.type === "wiki").length;
+	const semanticEdges = edges.filter((e) => e.type === "semantic").length;
 	const clusters = new Set(nodes.map((n) => n.cluster).filter((c) => c != null));
 
-	return { avgDegree, maxDegree, unlinkedNotes, wikiEdges, clusterCount: clusters.size };
+	return { avgDegree, maxDegree, unlinkedNotes, wikiEdges, semanticEdges, clusterCount: clusters.size };
+});
+
+/**
+ * Both states report a real number rather than describing the switch, because the
+ * interesting question — "how much of my vault does my own linking actually
+ * organise?" — is answered by comparing them. Turning inferred links off and
+ * watching the coverage drop is the point of the control.
+ */
+let inferredLinksOn = $derived(!(settings.linkOnlyTopics ?? false) && (settings.showSemanticLinks ?? true));
+
+let inferredLinksHint = $derived.by(() => {
+	const total = graphData.nodes.length;
+	if (!inferredLinksOn) {
+		// Only report link coverage when topics really are link-only. A stored
+		// half-state (hidden but still grouping) would make that number a lie.
+		if (!settings.linkOnlyTopics) {
+			return "Hidden, but still grouping notes. Toggle twice to exclude them from topics as well";
+		}
+		if (total === 0) return "Off — topics come from the links you wrote.";
+		const placed = graphData.nodes.filter((n) => n.cluster != null).length;
+		const percent = Math.round((placed / total) * 100);
+		return `Your links alone group ${placed} of ${total} notes (${percent}%). The other ${total - placed} are unlinked.`;
+	}
+	const inferred = graphData.edges.filter((e) => e.type === "semantic").length;
+	if (inferred === 0) {
+		return "Connect notes by meaning as well as by the links you wrote — needs a graph embedding index";
+	}
+	return `Adding ${inferred} similarity connections so unlinked notes still find a topic. Turn off to see what your own links cover.`;
 });
 
 function handleLinkDistanceChange(val: number) {
@@ -126,12 +191,12 @@ const lassoTooltip = onMobile ? "Lasso selection" : "Lasso selection (or hold Sh
     iconId="atom"
     tooltip={isLeidenRunning
       ? "Computing topics…"
-      : skeletonDetail < 100
-        ? "Exit outline view (S)"
-        : "Outline view: top topics and bridge notes only (S)"}
+      : isTopicsCollapsed
+        ? "Expand all topics back into notes (S)"
+        : "Collapse all topics into single nodes (S) — or click a topic label to fold just that one"}
     onClick={() => onSkeletonToggle?.()}
     disabled={isLeidenRunning}
-    styles={skeletonDetail < 100 ? "is-active" : ""}
+    styles={isTopicsCollapsed ? "is-active" : ""}
   />
   <div class="toolbar-icon-wrapper">
     <Button
@@ -163,7 +228,7 @@ const lassoTooltip = onMobile ? "Lasso selection" : "Lasso selection (or hold Sh
           {#if isLoading}
             <span class="loading-label">{loadingLabel}</span>
           {:else if graphStats}
-            {nodeCount} notes · {graphStats.unlinkedNotes} isolated · {graphStats.avgDegree.toFixed(1)} avg links
+            {nodeCount} notes · {graphStats.unlinkedNotes} unlinked · {graphStats.wikiEdges} links{#if graphStats.semanticEdges > 0}{" "}· {graphStats.semanticEdges} inferred{/if}
           {:else}
             {nodeCount} notes
           {/if}
@@ -171,11 +236,64 @@ const lassoTooltip = onMobile ? "Lasso selection" : "Lasso selection (or hold Sh
       </div>
 
       <!-- ── Topics ───────────────────────────── -->
-      {#if segments.length > 0}
-        <span class="section-label"
-          >Topics · {segments.length}
-          {#if !onMobile}<span class="section-label-hint">shift/⌘ multi-select</span>{/if}</span
+      <!-- Zoom and "Ignore inferred links" both decide *which topics exist* (they
+           re-run Leiden), so they belong together and above the topic list they
+           produce. Everything under Display only changes how the same topics are
+           drawn. -->
+      <span class="section-label">Topics</span>
+
+      <!-- Held back until the vault's levels are known: the slider's length is
+           derived, so showing it early would change its range under the user. -->
+      {#if zoomReady}
+        <SettingContainer
+          name="Zoom"
+          desc="Left: a few broad topics. Right: many specific ones. Every note stays visible."
+          compact
         >
+          <RangeSlider
+            value={zoomLevel}
+            min={MIN_ZOOM_LEVEL}
+            max={zoomMaxLevel}
+            step={1}
+            showValue={true}
+            onchange={(v) => onZoomChange?.(v)}
+            oncommit={(v) => onZoomCommit?.(v)}
+          />
+        </SettingContainer>
+      {:else}
+        <SettingContainer name="Zoom" desc="Working out this vault's topic levels…" compact>
+          <span class="zoom-pending">…</span>
+        </SettingContainer>
+      {/if}
+
+      <!-- One switch for the whole concept: inferred links are either part of the
+           graph (drawn *and* grouping notes) or absent. Splitting "draw" from
+           "count" allowed a state where hidden edges silently decided the topics.
+           `showDesc` because the off-state description is a live measurement of
+           the user's own linking — the whole point of turning this off. -->
+      <SettingContainer name="Inferred links" desc={inferredLinksHint} compact showDesc>
+        <Toggle
+          checked={!(settings.linkOnlyTopics ?? false) && (settings.showSemanticLinks ?? true)}
+          onchange={(value) =>
+            onSettingsChange({ linkOnlyTopics: !value, showSemanticLinks: value })}
+        />
+      </SettingContainer>
+
+      {#if segments.length > 0}
+        <div class="section-label section-label--with-action">
+          <span
+            >Found · {segments.length}
+            {#if !onMobile}<span class="section-label-hint">shift/⌘ multi-select</span>{/if}</span
+          >
+          <Button
+            iconId={isLabeling ? "loader" : "sparkles"}
+            ariaLabel="Name topics with AI"
+            tooltip={isLabeling ? "Naming topics…" : "Name topics with AI"}
+            onClick={() => onLabelTopics?.()}
+            disabled={isLabeling}
+            styles={isLabeling ? "is-spinning" : ""}
+          />
+        </div>
         <div class="segment-list">
           {#each segments as seg (seg.id)}
             <button
@@ -192,29 +310,6 @@ const lassoTooltip = onMobile ? "Lasso selection" : "Lasso selection (or hold Sh
         </div>
       {/if}
 
-      <!-- ── Topics / Detail sliders ───────────── -->
-      <SettingContainer name="Topics" desc="Number of topics — lower groups notes broadly, higher splits them finely" compact>
-        <RangeSlider
-          value={Math.round((settings.leidenResolution ?? 1.0) * 100)}
-          min={10}
-          max={300}
-          step={5}
-          showValue={true}
-          oncommit={(v) => onTopicsCommit?.(v / 100)}
-        />
-      </SettingContainer>
-      <SettingContainer name="Detail" desc="Nodes per topic — lower keeps only the top hubs and bridges" compact>
-        <RangeSlider
-          value={skeletonDetail}
-          min={0}
-          max={100}
-          step={1}
-          showValue={true}
-          onchange={onSkeletonDetailChange}
-          oncommit={onSkeletonDetailCommit}
-        />
-      </SettingContainer>
-
       <!-- ── Display ───────────────────────────── -->
       <span class="section-label">Display</span>
       <SettingContainer
@@ -225,6 +320,16 @@ const lassoTooltip = onMobile ? "Lasso selection" : "Lasso selection (or hold Sh
         <Toggle
           checked={settings.markdownOnly}
           onchange={(value) => onSettingsChange({ markdownOnly: value })}
+        />
+      </SettingContainer>
+      <SettingContainer
+        name="Topic regions"
+        desc="Tint the area behind each topic so groups read at a glance"
+        compact
+      >
+        <Toggle
+          checked={settings.showTopicHulls ?? true}
+          onchange={(value) => onSettingsChange({ showTopicHulls: value })}
         />
       </SettingContainer>
       <SettingContainer
@@ -300,6 +405,48 @@ const lassoTooltip = onMobile ? "Lasso selection" : "Lasso selection (or hold Sh
           <SettingContainer name="Cluster cohesion" desc="How strongly nodes are pulled toward their cluster center" compact>
             <RangeSlider value={Math.round((settings.clusterCohesionStrength ?? 0.15) * 100)} min={0} max={100} step={1} showValue={true} oncommit={handleClusterCohesionStrengthChange} />
           </SettingContainer>
+          <SettingContainer name="Detail" desc="Nodes per topic — lower keeps only the top hubs and bridges" compact>
+            <RangeSlider
+              value={skeletonDetail}
+              min={0}
+              max={100}
+              step={1}
+              showValue={true}
+              onchange={onSkeletonDetailChange}
+              oncommit={onSkeletonDetailCommit}
+            />
+          </SettingContainer>
+        {/if}
+
+        <button
+          type="button"
+          class="section-label section-label--collapsible"
+          onclick={() => (sectionOpen.devSemantic = !sectionOpen.devSemantic)}
+        >
+          <span>Semantic edges</span>
+          <svg class="section-chevron" class:open={sectionOpen.devSemantic} xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+        </button>
+        {#if sectionOpen.devSemantic}
+          <SettingContainer name="Neighbors (k)" desc="Max inferred neighbors contributed per note" compact>
+            <RangeSlider
+              value={settings.semanticNeighborCount ?? 5}
+              min={0}
+              max={20}
+              step={1}
+              showValue={true}
+              oncommit={(v) => onSettingsChange({ semanticNeighborCount: v })}
+            />
+          </SettingContainer>
+          <SettingContainer name="Similarity threshold" desc="Min cosine similarity for an inferred edge (×100)" compact>
+            <RangeSlider
+              value={Math.round((settings.semanticThreshold ?? 0.55) * 100)}
+              min={0}
+              max={100}
+              step={1}
+              showValue={true}
+              oncommit={(v) => onSettingsChange({ semanticThreshold: v / 100 })}
+            />
+          </SettingContainer>
         {/if}
 
         <button
@@ -328,12 +475,6 @@ const lassoTooltip = onMobile ? "Lasso selection" : "Lasso selection (or hold Sh
           </SettingContainer>
           <SettingContainer name="Detail bridge centrality" desc="Min betweenness centrality for bridges to survive at low Detail" compact>
             <RangeSlider value={Math.round((settings.skeletonBridgeCentralityThreshold ?? 0.05) * 1000)} min={0} max={200} step={1} showValue={true} oncommit={(v) => onSettingsChange({ skeletonBridgeCentralityThreshold: v / 1000 })} />
-          </SettingContainer>
-          <SettingContainer name="Outline Topics" desc="Topics value the atom toggle collapses to (γ ×100)" compact>
-            <RangeSlider value={Math.round((settings.outlineViewResolution ?? 0.5) * 100)} min={10} max={300} step={5} showValue={true} oncommit={(v) => onSettingsChange({ outlineViewResolution: v / 100 })} />
-          </SettingContainer>
-          <SettingContainer name="Outline Detail" desc="Detail value the atom toggle collapses to (0–100)" compact>
-            <RangeSlider value={settings.outlineViewDetail ?? 30} min={0} max={100} step={1} showValue={true} oncommit={(v) => onSettingsChange({ outlineViewDetail: v })} />
           </SettingContainer>
         {/if}
 
@@ -436,6 +577,30 @@ const lassoTooltip = onMobile ? "Lasso selection" : "Lasso selection (or hold Sh
     padding-bottom: 2px;
   }
 
+  .zoom-pending {
+    font-size: var(--font-ui-small);
+    color: var(--text-faint);
+    padding-right: 4px;
+  }
+
+  .section-label--with-action {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  /* The label button reuses Obsidian's clickable-icon chrome; only the spin is ours. */
+  .section-label--with-action :global(.is-spinning svg) {
+    animation: s2b-label-spin 1s linear infinite;
+  }
+
+  @keyframes s2b-label-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
   .section-label-hint {
     font-weight: 400;
     text-transform: none;
@@ -456,11 +621,20 @@ const lassoTooltip = onMobile ? "Lasso selection" : "Lasso selection (or hold Sh
   }
 
   /* Segment list */
+  /* The topic list is unbounded — a high zoom level can produce dozens of
+     entries. Cap it and let it scroll on its own, so it can never push the
+     Display toggles (or itself) out of the panel. */
   .segment-list {
     display: flex;
     flex-direction: column;
     gap: 1px;
     padding: 2px 0 6px;
+    max-height: 40vh;
+    overflow-y: auto;
+    /* Without this a flex child refuses to shrink below its content height,
+       which would defeat the cap entirely. */
+    min-height: 0;
+    overscroll-behavior: contain;
   }
 
   .segment-row {
