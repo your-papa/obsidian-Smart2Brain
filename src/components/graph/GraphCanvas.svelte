@@ -46,10 +46,14 @@ interface Props {
 	clusterCohesionStrength?: number;
 	onNodeClick?: (path: string) => void;
 	/** Open or re-close a collapsed topic node. */
-	onToggleTopic?: (cluster: number) => void;
+	/** Fold or unfold one topic. Used by the context menu's direct actions. */
+	onSetTopicCollapsed?: (cluster: number, collapsed: boolean) => void;
 	onRevealFile?: (path: string) => void;
-	/** `pan` frames the cluster in the viewport; omit it to select without moving the camera. */
-	onFocusCluster?: (cluster: number, pan?: boolean) => void;
+	/**
+	 * `pan` frames the cluster in the viewport; omit it to select without moving
+	 * the camera. `multi` toggles membership instead of replacing the selection.
+	 */
+	onFocusCluster?: (cluster: number, pan?: boolean, multi?: boolean) => void;
 	onToggleWikiLinks?: () => void;
 	lassoMode?: boolean;
 	onSelectionChange?: (paths: string[]) => void;
@@ -58,6 +62,16 @@ interface Props {
 	onSkeletonToggle?: () => void;
 	immersed?: boolean;
 	onExitImmerse?: () => void;
+	// Selection-bar verbs, mirrored as keyboard shortcuts so a selection made on
+	// the canvas can be acted on without moving to the bar.
+	onCollapseSelectedTopics?: () => void;
+	onImmerse?: () => void;
+	onOpenAllSelected?: () => void;
+	onSendToChat?: () => void;
+	/** Open an explicit set of notes, sharing the bulk-open confirmation. */
+	onOpenPaths?: (paths: string[]) => void;
+	/** Step the *topic* zoom (Leiden granularity) by one level. Arrow keys. */
+	onZoomStep?: (delta: number) => void;
 }
 
 let {
@@ -79,7 +93,7 @@ let {
 	isLabeling = false,
 	clusterCohesionStrength = 0.15,
 	onNodeClick,
-	onToggleTopic,
+	onSetTopicCollapsed,
 	onRevealFile,
 	onFocusCluster,
 	onToggleWikiLinks,
@@ -90,6 +104,12 @@ let {
 	onSkeletonToggle,
 	immersed = false,
 	onExitImmerse,
+	onCollapseSelectedTopics,
+	onImmerse,
+	onOpenAllSelected,
+	onSendToChat,
+	onOpenPaths,
+	onZoomStep,
 }: Props = $props();
 
 let containerEl: HTMLButtonElement;
@@ -363,6 +383,10 @@ function handleKeyDown(e: KeyboardEvent) {
 	const renderer = pixi;
 	if (!renderer) return;
 
+	// Bare keys only. ⌘O / ⌘A / ⌘C are real Obsidian and system shortcuts, and a
+	// graph pane that swallowed them would break copy and "open file".
+	if (e.metaKey || e.ctrlKey || e.altKey) return;
+
 	switch (e.key) {
 		case "Escape":
 			if (isLassoing) {
@@ -388,6 +412,20 @@ function handleKeyDown(e: KeyboardEvent) {
 		case "s":
 			onSkeletonToggle?.();
 			break;
+		// Selection-bar verbs. All no-op without a selection, so they stay inert
+		// while panning an unselected graph.
+		case "c":
+			onCollapseSelectedTopics?.();
+			break;
+		case "i":
+			if (selectedNodes.size > 0) onImmerse?.();
+			break;
+		case "o":
+			if (selectedNodes.size > 0) onOpenAllSelected?.();
+			break;
+		case "a":
+			if (selectedNodes.size > 0) onSendToChat?.();
+			break;
 		case "=":
 		case "+": {
 			zoomByFactor(1.2);
@@ -395,6 +433,19 @@ function handleKeyDown(e: KeyboardEvent) {
 		}
 		case "-": {
 			zoomByFactor(1 / 1.2);
+			break;
+		}
+		// Arrows step *topic* zoom — more topics up, fewer down — while +/- stay
+		// on camera scale. Up meaning "finer" matches the slider, where dragging
+		// right splits topics further.
+		case "ArrowUp": {
+			e.preventDefault();
+			onZoomStep?.(1);
+			break;
+		}
+		case "ArrowDown": {
+			e.preventDefault();
+			onZoomStep?.(-1);
 			break;
 		}
 	}
@@ -474,7 +525,9 @@ export function clearSelection() {
  * Get paths for all nodes belonging to any of the given clusters.
  */
 export function getNodePathsForClusters(clusters: Set<number>): string[] {
-	return simNodes.filter((n) => n.cluster != null && clusters.has(n.cluster)).map((n) => n.path);
+	// A collapsed topic's own `path` is its synthetic id, so resolve through
+	// `resolveNodePaths` to get the real member notes it stands for.
+	return simNodes.filter((n) => n.cluster != null && clusters.has(n.cluster)).flatMap(resolveNodePaths);
 }
 
 /**
@@ -482,7 +535,9 @@ export function getNodePathsForClusters(clusters: Set<number>): string[] {
  */
 export function selectNodesByPaths(paths: string[]) {
 	const pathSet = new Set(paths);
-	selectedNodes = new Set(simNodes.filter((n) => pathSet.has(n.path)).map((n) => n.id));
+	// Match collapsed topics too: a topic node is selected when any note it
+	// stands for is in the set, so a selection survives folding and unfolding.
+	selectedNodes = new Set(simNodes.filter((n) => resolveNodePaths(n).some((p) => pathSet.has(p))).map((n) => n.id));
 	render();
 }
 
@@ -1320,24 +1375,25 @@ function handleClick(e: MouseEvent) {
 
 	const pill = clusterPillAt(x, y);
 	if (pill) {
-		// A topic's label is the natural handle for collapsing that topic —
-		// click it to fold the group into one node, click the node to unfold.
-		// Shift/⌘ selects the topic's notes instead, matching the modifier that
-		// multi-selects rows in the Topics panel.
-		if (e.shiftKey || e.metaKey || e.ctrlKey) {
-			onFocusCluster?.(pill.cluster);
-		} else {
-			onToggleTopic?.(pill.cluster);
-		}
+		// A topic's label selects that topic — the same act as clicking its row in
+		// the Topics panel, with the same modifier for multi-select. Selection is
+		// the noun the selection bar's verbs (Immerse, Open all, Collapse…) act on,
+		// so the label stays one consistent gesture and collapsing moves there.
+		onFocusCluster?.(pill.cluster, false, e.shiftKey || e.metaKey || e.ctrlKey);
 		render();
 		return;
 	}
 	const node = findNodeAt(x, y);
 
 	if (node) {
-		// A collapsed topic has no file behind it — clicking opens the group.
+		// A collapsed topic has no file behind it, so clicking selects the topic —
+		// the same gesture as clicking its label. Expanding it is a verb in the
+		// selection bar, which keeps "click a topic" meaning one thing whether the
+		// topic is folded or not.
 		if (node.kind === "topic") {
-			if (node.cluster != null) onToggleTopic?.(node.cluster);
+			if (node.cluster != null) {
+				onFocusCluster?.(node.cluster, false, e.shiftKey || e.metaKey || e.ctrlKey);
+			}
 		} else if (onNodeClick) {
 			onNodeClick(node.path);
 		}
@@ -1418,7 +1474,7 @@ function openNodeMenu(node: GraphNode, clientX: number, clientY: number) {
 				.setTitle("Expand topic")
 				.setIcon("expand")
 				.onClick(() => {
-					if (node.cluster != null) onToggleTopic?.(node.cluster);
+					if (node.cluster != null) onSetTopicCollapsed?.(node.cluster, false);
 				}),
 		);
 		menu.addItem((item) =>
@@ -1426,7 +1482,9 @@ function openNodeMenu(node: GraphNode, clientX: number, clientY: number) {
 				.setTitle(`Open all ${node.memberPaths?.length ?? 0} notes`)
 				.setIcon("files")
 				.onClick(() => {
-					for (const path of node.memberPaths ?? []) onNodeClick?.(path);
+					// Route through the shared handler so a 60-note topic hits the
+					// same confirmation the selection bar's "Open all" does.
+					onOpenPaths?.(node.memberPaths ?? []);
 				}),
 		);
 	} else {
@@ -1462,6 +1520,20 @@ function openNodeMenu(node: GraphNode, clientX: number, clientY: number) {
 				}
 			}),
 	);
+
+	// Clicking a label selects rather than folds, so the per-topic fold needs a
+	// home — here, alongside the collapsed node's "Expand topic".
+	if (node.kind !== "topic" && node.cluster != null) {
+		const cluster = node.cluster;
+		menu.addItem((item) =>
+			item
+				.setTitle("Collapse topic")
+				.setIcon("shrink")
+				.onClick(() => {
+					onSetTopicCollapsed?.(cluster, true);
+				}),
+		);
+	}
 
 	menu.addItem((item) =>
 		item

@@ -193,7 +193,7 @@ const lassoTooltip = onMobile ? "Lasso selection" : "Lasso selection (or hold Sh
       ? "Computing topics…"
       : isTopicsCollapsed
         ? "Expand all topics back into notes (S)"
-        : "Collapse all topics into single nodes (S) — or click a topic label to fold just that one"}
+        : "Collapse all topics into single nodes (S) — or select topics and use Collapse"}
     onClick={() => onSkeletonToggle?.()}
     disabled={isLeidenRunning}
     styles={isTopicsCollapsed ? "is-active" : ""}
@@ -247,7 +247,9 @@ const lassoTooltip = onMobile ? "Lasso selection" : "Lasso selection (or hold Sh
       {#if zoomReady}
         <SettingContainer
           name="Zoom"
-          desc="Left: a few broad topics. Right: many specific ones. Every note stays visible."
+          desc={onMobile
+            ? "Left: a few broad topics. Right: many specific ones. Every note stays visible."
+            : "Left: a few broad topics. Right: many specific ones. Every note stays visible. (↑/↓ on the graph)"}
           compact
         >
           <RangeSlider

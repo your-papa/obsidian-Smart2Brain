@@ -5,6 +5,8 @@ import { getPlugin } from "../../stores/state.svelte";
 import { getData } from "../../stores/dataStore.svelte";
 import { getIndexableVaultFiles, isAgentFilePath } from "../../utils/fileFiltering";
 import { Logger } from "../../utils/logging";
+import { isMobileUI } from "../../utils/platform";
+import { ConfirmModal } from "../modal/ConfirmModal";
 import {
 	type GraphData,
 	type GraphEdge,
@@ -320,6 +322,21 @@ let effectiveCollapsedTopics: Set<number> = $derived(
 
 /** True when the graph is in collapse-all mode — drives the atom button. */
 let isTopicsCollapsed = $derived(collapseAll);
+
+/**
+ * Collapse/expand in the selection bar acts on whole *topics*, so it's offered
+ * only for a topic selection (`focusedClusters`), not an arbitrary lasso — a
+ * freehand selection that happens to cover a topic's notes isn't the same as
+ * choosing that topic, and folding it would surprise.
+ *
+ * The button expands when every selected topic is already collapsed, and
+ * collapses otherwise, so a mixed selection resolves to one obvious action.
+ */
+let selectedTopicsCollapseAction: "collapse" | "expand" | null = $derived.by(() => {
+	if (focusedClusters.size === 0) return null;
+	const allCollapsed = [...focusedClusters].every((c) => effectiveCollapsedTopics.has(c));
+	return allCollapsed ? "expand" : "collapse";
+});
 
 /** Topic names matching whichever level is on screen. */
 let displayClusterLabels: Record<number, string> = $derived(effectiveClusterLabels);
@@ -709,19 +726,25 @@ function handleRevealFile(path: string) {
 }
 
 /**
- * Toggle a topic in the focused set and select its notes.
+ * Focus a topic and select its notes.
  *
- * `pan` is opt-in because the two callers want opposite things: the "Focus on
- * this cluster" context-menu item exists to fly the camera there, while
- * Shift-clicking a topic label is a multi-select gesture — moving the view
- * between clicks would push the next label you meant to click off-screen.
+ * `pan` is opt-in because the callers want opposite things: the "Focus on this
+ * cluster" context-menu item exists to fly the camera there, while clicking a
+ * topic label is a selection gesture — moving the view between clicks would
+ * push the next label you meant to click off-screen.
+ *
+ * `multi` mirrors `handleFocusSegment`: plain click replaces the selection
+ * (or clears it if this was the only one), Shift/⌘ toggles membership.
  */
-function handleFocusCluster(cluster: number, pan = false) {
-	// Toggle: add or remove this cluster from the focused set
+function handleFocusCluster(cluster: number, pan = false, multi = true) {
 	const next = new Set(focusedClusters);
-	if (next.has(cluster)) {
-		next.delete(cluster);
+	if (multi) {
+		if (next.has(cluster)) next.delete(cluster);
+		else next.add(cluster);
+	} else if (next.size === 1 && next.has(cluster)) {
+		next.clear();
 	} else {
+		next.clear();
 		next.add(cluster);
 	}
 	focusedClusters = next;
@@ -767,10 +790,46 @@ function handleLassoModeChange(active: boolean) {
 	}
 }
 
-function handleOpenAllSelected() {
-	for (const path of selectedPaths) {
+/**
+ * Notes above which "Open all" asks first. Opening a tab per note has no undo,
+ * and this is now reachable from a single keypress — a stray `O` on a 76-note
+ * topic would bury the workspace.
+ */
+const OPEN_ALL_CONFIRM_THRESHOLD = 10;
+
+// Touch devices have no keyboard, so don't advertise shortcuts they can't press.
+const onMobile = isMobileUI();
+/** Append a shortcut hint to a tooltip on desktop only. */
+const withKey = (tooltip: string, key: string) => (onMobile ? tooltip : `${tooltip} (${key})`);
+
+/**
+ * Open a set of notes in tabs, confirming first past the threshold.
+ *
+ * Shared by the selection bar's "Open all" and a collapsed topic's context
+ * menu — the latter routinely covers a whole topic, so it needs the guard at
+ * least as much.
+ */
+async function handleOpenPaths(paths: string[]) {
+	if (paths.length === 0) return;
+
+	if (paths.length > OPEN_ALL_CONFIRM_THRESHOLD) {
+		const modal = new ConfirmModal(
+			plugin.app,
+			"Open all notes",
+			`This opens ${paths.length} notes in new tabs. Closing them again is manual.`,
+			`Open ${paths.length} tabs`,
+		);
+		modal.open();
+		if (!(await modal.promise)) return;
+	}
+
+	for (const path of paths) {
 		plugin.app.workspace.openLinkText(path, "", "tab");
 	}
+}
+
+function handleOpenAllSelected() {
+	void handleOpenPaths(selectedPaths);
 }
 
 async function handleSendToChat() {
@@ -1322,30 +1381,57 @@ async function handleSkeletonToggle() {
 }
 
 /**
- * Fold or unfold a single topic.
+ * Fold or unfold a set of topics.
  *
- * Reached from the topic's label pill (fold) and from the collapsed node itself
- * (unfold), so the same gesture reverses in place.
+ * Takes an explicit target state rather than toggling each topic, because a
+ * mixed selection has to resolve to one outcome — toggling per topic would
+ * invert the mix instead of collapsing it.
+ *
+ * Under collapse-all the state is stored as *exceptions* (`expandedTopics`) so
+ * that topics introduced by a later zoom still arrive collapsed; outside it,
+ * as the collapsed set itself. Both directions have to write to whichever set
+ * is currently authoritative.
  */
-async function handleToggleTopic(cluster: number) {
+async function setTopicsCollapsed(clusters: Iterable<number>, collapsed: boolean) {
+	const targets = [...clusters];
+	if (targets.length === 0) return;
+
 	if (collapseAll) {
-		// Inside collapse-all, folding state is expressed as exceptions so that
-		// topics introduced by a later zoom still arrive collapsed.
 		const next = new Set(expandedTopics);
-		if (next.has(cluster)) next.delete(cluster);
-		else next.add(cluster);
+		for (const cluster of targets) {
+			if (collapsed) next.delete(cluster);
+			else next.add(cluster);
+		}
 		expandedTopics = next;
 	} else {
 		const next = new Set(collapsedTopics);
-		if (next.has(cluster)) next.delete(cluster);
-		else next.add(cluster);
+		for (const cluster of targets) {
+			if (collapsed) next.add(cluster);
+			else next.delete(cluster);
+		}
 		collapsedTopics = next;
 	}
 
-	// Folding one topic is a local change, but it can still move the bounds
-	// enough to strand nodes off-screen, so follow the settle like collapse-all.
+	// Folding is a local change, but it can still move the bounds enough to
+	// strand nodes off-screen, so follow the settle like collapse-all.
 	await tick();
+
+	// Folding swaps a topic's notes for one synthetic node, so the selection has
+	// to be re-derived against the new graph — otherwise it empties, the
+	// selection bar disappears, and the Expand button goes with it.
+	if (focusedClusters.size > 0) {
+		const paths = canvasComponent?.getNodePathsForClusters(focusedClusters) ?? [];
+		canvasComponent?.selectNodesByPaths(paths);
+		handleSelectionChange(paths);
+	}
+
 	canvasComponent?.followLayout();
+}
+
+/** Apply the selection bar's collapse/expand verb to the selected topics. */
+async function handleCollapseSelectedTopics() {
+	if (selectedTopicsCollapseAction === null) return;
+	await setTopicsCollapsed(focusedClusters, selectedTopicsCollapseAction === "collapse");
 }
 
 /** Commit a new topic resolution (γ) and re-run community detection. */
@@ -1370,6 +1456,21 @@ let zoomMaxLevel = $derived(maxZoomLevel(zoomLadder));
  */
 function handleZoomCommit(zoom: number) {
 	handleTopicsCommit(zoomToResolution(zoom, zoomLadder));
+}
+
+/**
+ * Step the topic zoom by one level (arrow keys).
+ *
+ * Commits rather than using the drag path: a keypress is a discrete choice, so
+ * the level should resolve even when it isn't already cached. Held arrows are
+ * naturally rate-limited by the settle, and out-of-range steps no-op so the
+ * ends of the ladder feel like ends rather than silently wrapping.
+ */
+function handleZoomStep(delta: number) {
+	if (!hasDerivedZoomLadder) return;
+	const next = zoomLevel + delta;
+	if (next < MIN_ZOOM_LEVEL || next > zoomMaxLevel) return;
+	handleZoomCommit(next);
 }
 
 /**
@@ -1434,7 +1535,7 @@ function handleHoverPreview(event: MouseEvent, path: string, targetEl: HTMLEleme
       showClusterLabels={settings.showClusterLabels ?? true}
       clusterCohesionStrength={settings.clusterCohesionStrength ?? 0.15}
       onNodeClick={handleNodeClick}
-      onToggleTopic={handleToggleTopic}
+      onSetTopicCollapsed={(cluster, collapsed) => void setTopicsCollapsed([cluster], collapsed)}
       onRevealFile={handleRevealFile}
       onFocusCluster={handleFocusCluster}
       onToggleWikiLinks={() => handleSettingsChange({ showWikiLinks: !settings.showWikiLinks })}
@@ -1445,6 +1546,12 @@ function handleHoverPreview(event: MouseEvent, path: string, targetEl: HTMLEleme
       onSkeletonToggle={handleSkeletonToggle}
       immersed={isImmersed}
       onExitImmerse={handleExitImmerse}
+      onCollapseSelectedTopics={() => void handleCollapseSelectedTopics()}
+      onImmerse={() => void handleImmerse()}
+      onOpenAllSelected={handleOpenAllSelected}
+      onSendToChat={() => void handleSendToChat()}
+      onOpenPaths={(paths) => void handleOpenPaths(paths)}
+      onZoomStep={handleZoomStep}
     />
   {/if}
 
@@ -1460,13 +1567,33 @@ function handleHoverPreview(event: MouseEvent, path: string, targetEl: HTMLEleme
       <div class="selection-actions">
         {#if selectedPaths.length > 0}
           <Button iconId="scan" onClick={handleZoomToSelection} tooltip="Zoom to selection (F)" />
-          <Button buttonText="Immerse" onClick={handleImmerse} tooltip="Rebuild graph with selected notes only" />
-          <Button buttonText="Open all" onClick={handleOpenAllSelected} tooltip="Open all selected notes in new tabs" />
+          {#if selectedTopicsCollapseAction !== null}
+            <Button
+              buttonText={selectedTopicsCollapseAction === "collapse" ? "Collapse" : "Expand"}
+              onClick={() => void handleCollapseSelectedTopics()}
+              tooltip={withKey(
+                selectedTopicsCollapseAction === "collapse"
+                  ? "Fold the selected topics into single nodes"
+                  : "Unfold the selected topics back into notes",
+                "C",
+              )}
+            />
+          {/if}
+          <Button
+            buttonText="Immerse"
+            onClick={handleImmerse}
+            tooltip={withKey("Rebuild graph with selected notes only", "I")}
+          />
+          <Button
+            buttonText="Open all"
+            onClick={handleOpenAllSelected}
+            tooltip={withKey("Open all selected notes in new tabs", "O")}
+          />
           {#if !hasOpenChat}
             <Button
               buttonText="Open in chat"
               onClick={handleSendToChat}
-              tooltip="Reveal the chat and attach the selected notes"
+              tooltip={withKey("Reveal the chat and attach the selected notes", "A")}
             />
           {/if}
           <Button buttonText="Clear" onClick={handleClearSelection} tooltip="Clear selection (Esc)" />
