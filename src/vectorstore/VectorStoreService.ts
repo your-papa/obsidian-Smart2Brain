@@ -808,7 +808,7 @@ export class VectorStoreService {
 
 					try {
 						const texts = batch.map((entry) => entry.embedText);
-						const vectors = await embeddings.embedDocuments(texts);
+						const vectors = await this.embedWithCancellation(inst, embeddings.embedDocuments(texts));
 						// The run may have been aborted (e.g. index deleted) while the
 						// embedding call was in flight; bail before writing to a store
 						// that could now be closed.
@@ -839,11 +839,18 @@ export class VectorStoreService {
 						indexed += batch.length;
 						if (notice) this.updateNotice(notice, inst.progress);
 					} catch (error) {
+						// A cancelled batch must not fall through to the per-entry retry
+						// below: that would re-issue every request in the batch against a
+						// provider the user just asked us to stop talking to.
+						if (error instanceof Error && error.name === "AbortError") break;
 						Logger.error("[VectorStore] Batch validation indexing failed:", error);
 						for (const entry of batch) {
 							if (inst.abortController?.signal.aborted) break;
 							try {
-								const vector = await embeddings.embedQuery(entry.embedText);
+								const vector = await this.embedWithCancellation(
+									inst,
+									embeddings.embedQuery(entry.embedText),
+								);
 								if (!vector || vector.length === 0) {
 									Logger.error(
 										`[VectorStore] embedQuery returned empty result for ${entry.file.path}`,
@@ -864,6 +871,10 @@ export class VectorStoreService {
 								indexed++;
 								if (entry.chunkIndex === entry.chunkCount - 1) noteValidated(entry.file.path);
 							} catch (entryError) {
+								// Cancellation is not a per-file failure. Without this guard,
+								// aborting mid-batch fires one error Notice per remaining
+								// file and buries the "cancelled" message under them.
+								if (entryError instanceof Error && entryError.name === "AbortError") throw entryError;
 								Logger.error(`[VectorStore] Failed to index ${entry.file.path}:`, entryError);
 								const reason = entryError instanceof Error ? entryError.message : String(entryError);
 								new Notice(`Failed to embed ${entry.file.basename}: ${reason}`);
@@ -1126,6 +1137,40 @@ export class VectorStoreService {
 	}
 
 	/**
+	 * Race an embedding call against the instance's abort signal.
+	 *
+	 * Every abort check in the indexing loops runs *after* an awaited embedding
+	 * call, so they only fire if that call returns. When a provider endpoint is
+	 * unreachable the request can hang far longer than any user will wait (and,
+	 * before `REQUEST_TIMEOUT_MS` existed in `obsidianFetch`, indefinitely) — so
+	 * Cancel appeared to do nothing and the progress notice froze at its last count.
+	 *
+	 * Racing makes Cancel take effect immediately. The underlying request is left
+	 * running; it is bounded by the fetch-level timeout and its result is discarded,
+	 * which is the right trade against pinning the UI on a dead endpoint.
+	 *
+	 * Throws `AbortError` when cancelled, so callers can distinguish "user stopped
+	 * this" from a genuine provider failure.
+	 */
+	private async embedWithCancellation<T>(inst: IndexInstance, work: Promise<T>): Promise<T> {
+		const signal = inst.abortController?.signal;
+		if (!signal) return work;
+
+		return Promise.race([
+			work,
+			new Promise<never>((_, reject) => {
+				if (signal.aborted) {
+					reject(new DOMException("Indexing cancelled", "AbortError"));
+					return;
+				}
+				signal.addEventListener("abort", () => reject(new DOMException("Indexing cancelled", "AbortError")), {
+					once: true,
+				});
+			}),
+		]);
+	}
+
+	/**
 	 * Get the configured batch size for an index, falling back to provider defaults.
 	 */
 	private getBatchSize(indexId: string, providerId: string): number {
@@ -1257,7 +1302,7 @@ export class VectorStoreService {
 
 				try {
 					const texts = batch.map((entry) => entry.embedText);
-					const vectors = await embeddings.embedDocuments(texts);
+					const vectors = await this.embedWithCancellation(inst, embeddings.embedDocuments(texts));
 					// The run may have been aborted (e.g. index deleted) while the
 					// embedding call was in flight; bail before writing to a store
 					// that could now be closed.
@@ -1290,6 +1335,9 @@ export class VectorStoreService {
 
 					this.updateNotice(notice, inst.progress);
 				} catch (error) {
+					// See the matching guard in the validation loop: a cancelled batch
+					// must not fall through to the sequential retry.
+					if (error instanceof Error && error.name === "AbortError") break;
 					Logger.warn(
 						`[VectorStore] Batch ${Math.floor(i / batchSize) + 1} failed, falling back to sequential:`,
 						error,
@@ -1298,7 +1346,10 @@ export class VectorStoreService {
 					for (const entry of batch) {
 						if (inst.abortController?.signal.aborted) break;
 						try {
-							const vector = await embeddings.embedQuery(entry.embedText);
+							const vector = await this.embedWithCancellation(
+								inst,
+								embeddings.embedQuery(entry.embedText),
+							);
 							if (!vector || vector.length === 0) {
 								Logger.error(`[VectorStore] embedQuery returned empty result for ${entry.file.path}`);
 								noteSkipped(entry.file.path, "embed-error");
@@ -1315,6 +1366,9 @@ export class VectorStoreService {
 							await inst.store.upsert(doc);
 							noteIndexed(entry.file.path);
 						} catch (entryError) {
+							// See the matching guard in the validation loop: cancellation
+							// must not be reported as a per-file embedding failure.
+							if (entryError instanceof Error && entryError.name === "AbortError") throw entryError;
 							Logger.error(`[VectorStore] Failed to index ${entry.file.path}:`, entryError);
 							const reason = entryError instanceof Error ? entryError.message : String(entryError);
 							new Notice(`Failed to embed ${entry.file.basename}: ${reason}`);
@@ -1594,8 +1648,37 @@ export class VectorStoreService {
 			return filteredResults;
 		} catch (error) {
 			Logger.error("[VectorStore] Search failed:", error);
+			// Returning [] alone makes a dead provider indistinguishable from "no
+			// matching notes": the user sees an empty result list and concludes their
+			// vault has no answer, when in fact the embedding endpoint never replied.
+			// Surface it once, cheaply — the caller still gets [] so hybrid search can
+			// fall back to its lexical leg rather than failing outright.
+			this.noticeSearchFailureOnce(error);
 			return [];
 		}
+	}
+
+	/**
+	 * Timestamp of the last search-failure Notice, for rate limiting.
+	 *
+	 * Search runs on every keystroke in the modal (debounced), so an unreachable
+	 * provider would otherwise stack a Notice per query and bury the UI.
+	 */
+	private lastSearchFailureNoticeAt = 0;
+
+	private noticeSearchFailureOnce(error: unknown): void {
+		const now = Date.now();
+		if (now - this.lastSearchFailureNoticeAt < 30_000) return;
+		this.lastSearchFailureNoticeAt = now;
+
+		const reason = error instanceof Error ? error.message : String(error);
+		const offline = /network|offline|fetch failed|timed out|ECONNREFUSED|ENOTFOUND/i.test(reason);
+		new Notice(
+			offline
+				? "Semantic search unavailable — the embedding provider is not reachable. Showing no semantic results."
+				: `Semantic search failed: ${reason.slice(0, 120)}`,
+			8000,
+		);
 	}
 
 	/**
@@ -1870,7 +1953,10 @@ export class VectorStoreService {
 		const inst = this.instances.get(indexId);
 		if (inst?.abortController) {
 			inst.abortController.abort();
-			new Notice("Cancelling indexing… will stop after the current embedding finishes.");
+			// The in-flight embedding call is raced against this signal rather than
+			// awaited (`embedWithCancellation`), so cancelling takes effect at once —
+			// it no longer waits out a request that may never return.
+			new Notice("Cancelling indexing…");
 		}
 	}
 

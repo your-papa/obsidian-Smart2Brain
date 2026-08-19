@@ -115,3 +115,128 @@ describe("createObsidianFetch header normalization", () => {
 		expect(res.status).toBe(200);
 	});
 });
+
+/*
+ * Timeout and cancellation.
+ *
+ * Neither `requestUrl` nor native fetch has a timeout of its own, so an
+ * unreachable host left the returned promise permanently unsettled. That is the
+ * same *symptom* as the header bug above (indexing frozen at N/M, no error), but a
+ * different cause — and it survived the header fix, so it needs its own guard.
+ */
+describe("createObsidianFetch timeout", () => {
+	beforeEach(() => {
+		mockRequestUrl.mockReset();
+	});
+
+	it("rejects instead of hanging when requestUrl never settles", async () => {
+		vi.useFakeTimers();
+		try {
+			// A host that accepts the connection and never responds: the promise
+			// neither resolves nor rejects. Before the timeout this pinned the caller
+			// forever, and Cancel could not reach it either.
+			mockRequestUrl.mockReturnValue(new Promise(() => {}) as ReturnType<typeof requestUrl>);
+
+			const fetchImpl = createObsidianFetch();
+			const pending = fetchImpl("https://unreachable.example/v1/embeddings", { method: "POST", body: "{}" });
+			const assertion = expect(pending).rejects.toThrow();
+
+			await vi.advanceTimersByTimeAsync(60_000);
+			await assertion;
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("propagates the caller's abort signal", async () => {
+		mockRequestUrl.mockReturnValue(new Promise(() => {}) as ReturnType<typeof requestUrl>);
+
+		const controller = new AbortController();
+		const fetchImpl = createObsidianFetch();
+		const pending = fetchImpl("https://unreachable.example/v1/embeddings", {
+			method: "POST",
+			body: "{}",
+			signal: controller.signal,
+		});
+		const assertion = expect(pending).rejects.toThrow(/abort/i);
+
+		controller.abort();
+		await assertion;
+	});
+
+	it("rejects immediately when handed an already-aborted signal", async () => {
+		mockRequestUrl.mockReturnValue(new Promise(() => {}) as ReturnType<typeof requestUrl>);
+
+		const fetchImpl = createObsidianFetch();
+		await expect(
+			fetchImpl("https://unreachable.example/v1/embeddings", {
+				method: "POST",
+				body: "{}",
+				signal: AbortSignal.abort(),
+			}),
+		).rejects.toThrow(/abort/i);
+	});
+
+	it("does not fall back to requestUrl when native fetch times out", async () => {
+		vi.useFakeTimers();
+		try {
+			// Falling through would start a *second* unbounded request against a host
+			// already known to be unresponsive, doubling the wait the timeout exists
+			// to bound.
+			const nativeFetch = vi.fn(
+				(_input: RequestInfo | URL, init?: RequestInit) =>
+					new Promise<Response>((_, reject) => {
+						init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")));
+					}),
+			);
+			const fetchImpl = createObsidianFetch(nativeFetch);
+			const pending = fetchImpl("https://unreachable.example/v1/embeddings", { method: "POST", body: "{}" });
+			const assertion = expect(pending).rejects.toThrow();
+
+			await vi.advanceTimersByTimeAsync(60_000);
+			await assertion;
+			expect(mockRequestUrl).not.toHaveBeenCalled();
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("still falls back to requestUrl on an ordinary native-fetch failure", async () => {
+		// The CORS fallback must keep working — the timeout guard only suppresses it
+		// for aborts, not for genuine errors.
+		mockRequestUrl.mockResolvedValue({
+			status: 200,
+			headers: { "content-type": "application/json" },
+			text: '{"ok":true}',
+			json: { ok: true },
+		} as Awaited<ReturnType<typeof requestUrl>>);
+		const nativeFetch = vi.fn(async () => {
+			throw new TypeError("Failed to fetch");
+		});
+
+		const fetchImpl = createObsidianFetch(nativeFetch);
+		const response = await fetchImpl("https://example.com/v1/embeddings", { method: "POST", body: "{}" });
+
+		expect(response.status).toBe(200);
+		expect(mockRequestUrl).toHaveBeenCalledTimes(1);
+	});
+
+	it("clears its timer on success, so a fast call leaves nothing pending", async () => {
+		vi.useFakeTimers();
+		try {
+			mockRequestUrl.mockResolvedValue({
+				status: 200,
+				headers: { "content-type": "application/json" },
+				text: '{"ok":true}',
+				json: { ok: true },
+			} as Awaited<ReturnType<typeof requestUrl>>);
+
+			const fetchImpl = createObsidianFetch();
+			await fetchImpl("https://example.com/v1/embeddings", { method: "POST", body: "{}" });
+
+			expect(vi.getTimerCount()).toBe(0);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+});
