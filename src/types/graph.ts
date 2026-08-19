@@ -54,6 +54,14 @@ export interface SpaceSegment {
 	source: SegmentBy;
 	/** Resolved file paths that belong to this segment */
 	paths: Set<string>;
+	/**
+	 * For `leiden` segments: the underlying community id.
+	 *
+	 * Segments are ordered by size, so a segment's position is NOT its community
+	 * id. Anything that needs to join segments back to raw community data (e.g.
+	 * the topic hierarchy) must go through this rather than the index.
+	 */
+	communityId?: number;
 }
 
 // ─── View Filter Types ───────────────────────────────────────
@@ -105,8 +113,9 @@ export interface ColorGroup {
 
 /**
  * The type of relationship an edge represents.
- * - "wiki": An explicit wiki link between notes in Obsidian
- * - "semantic": Reserved for future local semantic graph relationships
+ * - "wiki": An explicit wiki link authored by the user in Obsidian
+ * - "semantic": An inferred similarity link between notes whose embeddings are
+ *   close. Weight is the cosine similarity rather than a link count.
  */
 export type EdgeType = "wiki" | "semantic";
 
@@ -114,9 +123,14 @@ export type EdgeType = "wiki" | "semantic";
  * A node in the graph representing a vault note.
  */
 export interface GraphNode {
-	/** Unique identifier (file path) */
+	/** Unique identifier (file path, or `topic:<cluster>` for a collapsed topic) */
 	id: string;
-	/** Vault-relative file path */
+	/**
+	 * Vault-relative file path.
+	 *
+	 * For a `kind: "topic"` node this is a synthetic id, NOT a real file — every
+	 * path that opens, reveals, or previews a file must check {@link kind} first.
+	 */
 	path: string;
 	/** Display label (file basename without extension) */
 	label: string;
@@ -136,6 +150,16 @@ export interface GraphNode {
 	highlighted?: boolean;
 	/** Number of connections (degree) for sizing */
 	degree?: number;
+	/**
+	 * What this node stands for.
+	 *
+	 * `"note"` (the default when absent) is a real vault file. `"topic"` is a
+	 * synthetic node standing in for a whole collapsed topic — it has no file
+	 * behind it, so file-opening interactions must branch on this.
+	 */
+	kind?: "note" | "topic";
+	/** For `kind: "topic"` — the vault paths this node stands for. */
+	memberPaths?: string[];
 	/**
 	 * Normalized betweenness centrality (0–1).
 	 * High values indicate "bridge" nodes that connect otherwise distant parts of the graph.
@@ -186,6 +210,18 @@ export interface SmartGraphSettings {
 	clusterCohesionStrength: number;
 	/** Whether to show wiki link edges overlaid on the semantic graph */
 	showWikiLinks: boolean;
+	/** Whether to draw inferred semantic similarity edges (they always inform topics) */
+	showSemanticLinks: boolean;
+	/**
+	 * When true, topics are detected from authored wiki links alone, ignoring
+	 * semantic edges. Shows how much structure the user's own linking provides —
+	 * notes left without a topic are ones they never linked.
+	 */
+	linkOnlyTopics: boolean;
+	/** Max semantic neighbours contributed per note when building semantic edges */
+	semanticNeighborCount: number;
+	/** Minimum cosine similarity for a semantic edge (0–1) */
+	semanticThreshold: number;
 	/** Whether to render arrows for directed wiki links */
 	directedWikiEdges: boolean;
 	/** Chat model used for LLM-powered graph features (e.g., cluster labeling) */
@@ -210,16 +246,14 @@ export interface SmartGraphSettings {
 	bridgeThreshold: number;
 	/** Skeleton bridge centrality threshold: min betweenness centrality for a node to survive in the outline view (0–1) */
 	skeletonBridgeCentralityThreshold: number;
-	/** Outline view (atom toggle) target Leiden resolution — collapsed γ used when outline is entered */
-	outlineViewResolution: number;
-	/** Outline view (atom toggle) target Detail slider value (0–100) — nodes-per-topic when outline is entered */
-	outlineViewDetail: number;
 	/** Highlight isolated notes (degree 0) in the graph */
 	highlightIsolated: boolean;
 	/** Highlight bridge notes (nodes spanning multiple communities) in the graph */
 	highlightBridges: boolean;
 	/** Whether to draw the cluster/topic label pills over the graph */
 	showClusterLabels: boolean;
+	/** Whether to draw a tinted region behind each topic's notes */
+	showTopicHulls: boolean;
 }
 
 /**
@@ -228,12 +262,21 @@ export interface SmartGraphSettings {
 export const DEFAULT_SMART_GRAPH_SETTINGS: SmartGraphSettings = {
 	defaultK: 5,
 	autoK: true,
-	linkDistance: 250,
-	chargeStrength: -1000,
-	centerStrength: 0.1,
+	// Layout defaults are tuned for the *fused* graph (wiki + semantic edges),
+	// which is far denser than a wikilink-only one — most notes now have ~8 edges
+	// instead of none. Obsidian's own values (linkDistance 250, charge -1000)
+	// blow that apart into a ring of nodes with no visible grouping. Short links,
+	// mild repulsion and strong cluster cohesion keep topics as compact blobs.
+	linkDistance: 60,
+	chargeStrength: -120,
+	centerStrength: 0.05,
 	linkStrength: 1,
-	clusterCohesionStrength: 0.15,
+	clusterCohesionStrength: 0.55,
 	showWikiLinks: true,
+	showSemanticLinks: true,
+	linkOnlyTopics: false,
+	semanticNeighborCount: 5,
+	semanticThreshold: 0.55,
 	directedWikiEdges: true,
 	graphChatModel: null,
 	autoLabelClusters: false,
@@ -243,14 +286,15 @@ export const DEFAULT_SMART_GRAPH_SETTINGS: SmartGraphSettings = {
 	segmentBy: "none",
 	markdownOnly: false,
 	leidenSeed: 42,
+	// Zoom level 3 on the ladder in topicHierarchy.ts. Kept exactly on a rung so
+	// the slider doesn't silently shift γ the first time it's touched.
 	leidenResolution: 1.0,
 	bridgeThreshold: 0.4,
 	skeletonBridgeCentralityThreshold: 0.05,
-	outlineViewResolution: 0.5,
-	outlineViewDetail: 30,
 	highlightIsolated: false,
 	highlightBridges: false,
 	showClusterLabels: true,
+	showTopicHulls: true,
 };
 
 /**
