@@ -606,6 +606,11 @@ $effect(() => {
 			return;
 		}
 		if (graphData.nodes.length === 0) return;
+		// The ladder's rungs are the groupings *these* edges support, so switching
+		// between fused and link-only invalidates them: link-only sees far fewer
+		// edges and usually supports fewer distinct levels. Re-derive rather than
+		// leave the slider offering levels the current edge set can't produce.
+		hasDerivedGranularityLadder = false;
 		void runLeidenSegmentation();
 	});
 });
@@ -1015,6 +1020,22 @@ async function deriveGranularityLevels(topicEdges: GraphEdge[]) {
 		}
 
 		if (localBuildVersion !== buildVersion) return;
+		// The rungs describe the edge set the probes ran over. If the user switched
+		// link mode meanwhile, publishing them would give the slider levels derived
+		// from a graph that is no longer on screen — and because the probes seeded
+		// the cache under the *old* mode, dragging would then hit misses and skip
+		// levels.
+		//
+		// Re-probing has to happen from here. The mode change already called
+		// `runLeidenSegmentation`, and that call's `deriveGranularityLevels` was
+		// turned away by the `isDerivingGranularityLadder` guard while this run held
+		// it — so nothing else is left to rebuild the ladder.
+		if (linkOnly !== settings.linkOnlyTopics) {
+			Logger.info("[SmartGraph] Re-probing the granularity ladder: link mode changed mid-derivation");
+			isDerivingGranularityLadder = false;
+			void deriveGranularityLevels(getTopicEdges());
+			return;
+		}
 
 		const ladder = deriveGranularityLadder(probes);
 		if (ladder) {
@@ -1047,6 +1068,11 @@ async function computeTopicHierarchy(topicEdges: GraphEdge[]) {
 	const fineResolution = settings.leidenResolution ?? 1.0;
 	const coarseResolution = coarseResolutionFor(fineResolution);
 	const cacheKey = partitionKey(coarseResolution);
+	// The hierarchy nests the *live* `leidenCommunities` inside the coarse result
+	// computed here, so the two have to come from the same partition. Remember
+	// which one that is: the coarse Leiden below may await long enough for γ, the
+	// seed or the link mode to move on.
+	const finePartition = currentPartitionKey();
 
 	let communities: Record<string, number>;
 	const cached = leidenCache.get(cacheKey);
@@ -1072,6 +1098,13 @@ async function computeTopicHierarchy(topicEdges: GraphEdge[]) {
 	}
 
 	if (localBuildVersion !== buildVersion) return;
+	// Pairing this coarse partition with a fine one it never nested under would
+	// describe a parent structure that matches neither the controls nor the
+	// canvas. The run triggered by whatever changed will rebuild it.
+	if (currentPartitionKey() !== finePartition) {
+		Logger.info("[SmartGraph] Discarding a hierarchy whose fine partition has moved on");
+		return;
+	}
 	topicHierarchy = buildTopicHierarchy(communities, leidenCommunities);
 	Logger.info(
 		`[SmartGraph] Hierarchy: ${topicHierarchy.children.length} topics under ${topicHierarchy.parents.size} parents (γ ${coarseResolution.toFixed(2)} → ${fineResolution.toFixed(2)})`,
