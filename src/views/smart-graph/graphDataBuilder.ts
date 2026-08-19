@@ -1,12 +1,16 @@
 /**
  * Graph Data Builder
  *
- * Constructs a semantic map from document embeddings.
- * Node positions are projected from high-dimensional embedding space into 2D.
- * Clusters are assigned via K-Means — decoupled from edge/layout rebuilds so
- * users can change projection and clustering settings without losing their
- * cluster assignments. Wiki link edges can be optionally overlaid on top of
- * the projected map as authored structure.
+ * Builds the node/edge structure behind the smart graph.
+ *
+ * Edges come from two sources that are fused into one graph:
+ * - **wiki** — authored `[[links]]` from Obsidian's `resolvedLinks`.
+ * - **semantic** — inferred top-K embedding neighbours ({@link buildSemanticEdges}).
+ *
+ * The fusion matters because most vaults are link-sparse: with wiki links alone
+ * the great majority of notes have degree 0, so community detection cannot place
+ * them and they render as an unstructured cloud. Semantic edges give every
+ * indexed note a way into a topic without the user linking anything by hand.
  */
 
 import type { App, TFile } from "obsidian";
@@ -14,7 +18,8 @@ import { getAllTags } from "obsidian";
 
 import type { DocumentVector } from "../../vectorstore/types";
 import { getIndexableVaultFiles } from "../../utils/fileFiltering";
-import { kMeansAsync, suggestKAsync, hdbscanAsync } from "../../utils/computeWorkerManager";
+import { kMeansAsync, suggestKAsync, hdbscanAsync, semanticEdgesAsync } from "../../utils/computeWorkerManager";
+import { DEFAULT_SEMANTIC_NEIGHBOR_COUNT, DEFAULT_SEMANTIC_THRESHOLD, pairKey } from "../../utils/semanticEdges";
 import {
 	type GraphData,
 	type GraphEdge,
@@ -26,7 +31,8 @@ import {
 	type SegmentBy,
 	type SpaceSegment,
 } from "../../types/graph";
-import { edgeKey } from "../../utils/graphUtils";
+import { edgeKey, splitEdgeKey } from "../../utils/graphUtils";
+import { MIN_TOPIC_SIZE } from "../../utils/topicHierarchy";
 
 // ============================================================================
 // Cluster Assignment
@@ -122,6 +128,113 @@ function buildWikiEdges(app: App, filteredPathSet: Set<string>): GraphEdge[] {
 	return edges;
 }
 
+// ============================================================================
+// Semantic edges
+// ============================================================================
+
+export interface SemanticEdgeOptions {
+	/** Max semantic neighbours contributed per note. */
+	neighborCount?: number;
+	/** Minimum cosine similarity for an edge to be emitted. */
+	threshold?: number;
+	/** Edge keys (from `edgeKey`) that already exist as wiki links and must not be duplicated. */
+	excludeEdgeKeys?: Set<string>;
+}
+
+/**
+ * Flatten per-chunk vectors into the worker's transfer shape.
+ *
+ * The vector store embeds large notes as several chunks (`path#chunkIndex`), so
+ * a raw `getAll()` contains multiple rows per note. We keep every chunk (the
+ * scan scores note pairs by their best-matching chunks) and carry a parallel
+ * `chunkOwners` array mapping each chunk back to its note index.
+ *
+ * Chunks whose dimensionality doesn't match the first vector are dropped — a
+ * stale index entry from a previous embedding model would otherwise corrupt the
+ * flat batch, whose stride assumes a single dim.
+ */
+function flattenChunksByNote(
+	documents: DocumentVector[],
+	allowedPaths: Set<string>,
+): { paths: string[]; vectors: Float32Array[]; chunkOwners: Int32Array } {
+	const noteIndexByPath = new Map<string, number>();
+	const paths: string[] = [];
+	const vectors: Float32Array[] = [];
+	const owners: number[] = [];
+	let dim = -1;
+
+	for (const document of documents) {
+		if (!allowedPaths.has(document.path)) continue;
+		if (dim === -1) dim = document.vector.length;
+		if (document.vector.length !== dim) continue;
+
+		let noteIndex = noteIndexByPath.get(document.path);
+		if (noteIndex === undefined) {
+			noteIndex = paths.length;
+			noteIndexByPath.set(document.path, noteIndex);
+			paths.push(document.path);
+		}
+		vectors.push(document.vector);
+		owners.push(noteIndex);
+	}
+
+	return { paths, vectors, chunkOwners: Int32Array.from(owners) };
+}
+
+/**
+ * Build semantic similarity edges between notes from their embeddings.
+ *
+ * Each note proposes its top-`neighborCount` most similar notes above
+ * `threshold`; the result is the union of those proposals, deduped so a pair
+ * appears once. Pairs already joined by a wiki link are skipped — an authored
+ * link is the stronger statement and rendering both would double-count the pair
+ * in community detection.
+ *
+ * The O(n²) scan itself runs in the compute worker (falling back to the main
+ * thread only when workers are unavailable), so a large vault doesn't stall the
+ * UI while the graph builds.
+ */
+export async function buildSemanticEdges(
+	documents: DocumentVector[],
+	includePaths: Set<string>,
+	options: SemanticEdgeOptions = {},
+): Promise<GraphEdge[]> {
+	const neighborCount = options.neighborCount ?? DEFAULT_SEMANTIC_NEIGHBOR_COUNT;
+	if (neighborCount <= 0) return [];
+
+	const { paths, vectors, chunkOwners } = flattenChunksByNote(documents, includePaths);
+	if (paths.length < 2) return [];
+
+	// The worker speaks note indices; translate the caller's path-keyed exclusions
+	// into that space by walking the exclusion set itself (not every pair), and
+	// drop any whose notes aren't both in this graph.
+	let excludePairs: Set<string> | undefined;
+	if (options.excludeEdgeKeys?.size) {
+		const indexByPath = new Map(paths.map((path, index) => [path, index]));
+		excludePairs = new Set<string>();
+		for (const key of options.excludeEdgeKeys) {
+			const [left, right] = splitEdgeKey(key);
+			const a = indexByPath.get(left);
+			const b = indexByPath.get(right);
+			if (a === undefined || b === undefined || a === b) continue;
+			excludePairs.add(pairKey(a, b));
+		}
+	}
+
+	const pairs = await semanticEdgesAsync(vectors, chunkOwners, paths.length, {
+		neighborCount,
+		threshold: options.threshold ?? DEFAULT_SEMANTIC_THRESHOLD,
+		excludePairs,
+	});
+
+	return pairs.map((pair) => ({
+		source: paths[pair.source],
+		target: paths[pair.target],
+		weight: pair.score,
+		type: "semantic" as const,
+	}));
+}
+
 function buildDegreeMap(edges: GraphEdge[]): Map<string, number> {
 	const degreeMap = new Map<string, number>();
 	for (const edge of edges) {
@@ -173,6 +286,15 @@ export type ClusterRepresentativeMap = Map<number, GraphNode>;
  */
 
 const NEUTRAL_CLUSTER_COLOR = "hsl(0, 0%, 50%)";
+
+/**
+ * Fixed number of palette slots topics hash into.
+ *
+ * Keeping this constant is what lets a topic hold its colour across zoom levels:
+ * if the palette were sized to the current topic count, the same hash would land
+ * on a different slot at every level.
+ */
+const TOPIC_COLOR_SLOTS = 24;
 const LARGE_GRAPH_CLUSTERING_THRESHOLD = 2000;
 const LARGE_GRAPH_CLUSTERING_SAMPLE_SIZE = 900;
 const LARGE_GRAPH_CLUSTERING_MAX_K = 24;
@@ -510,30 +632,15 @@ function convertObsidianQuery(query: string): string | null {
  */
 interface ObsidianGraphConfig {
 	colorGroups?: ObsidianGraphColorEntry[];
-	/** Target link distance (positive number). Maps 1:1 to SmartGraphSettings.linkDistance. */
-	linkDistance?: number;
-	/** Repel strength (positive number). Maps to SmartGraphSettings.chargeStrength with negation. */
-	repelStrength?: number;
-	/** Center force strength (0–1). Maps 1:1 to SmartGraphSettings.centerStrength. */
-	centerStrength?: number;
-	/** Link force strength (0–1). Maps 1:1 to SmartGraphSettings.linkStrength. */
-	linkStrength?: number;
 }
 
 /**
  * Read settings from Obsidian's native graph view configuration.
  * The settings are stored in `<configDir>/graph.json`.
  *
- * Returns a `Partial<SmartGraphSettings>` containing only the fields that
- * have a meaningful counterpart in the Smart Graph plugin:
- *
- * | Obsidian field    | SmartGraphSettings field | Transform          |
- * |-------------------|--------------------------|--------------------|
- * | `linkDistance`     | `linkDistance`            | direct (1:1)       |
- * | `repelStrength`   | `chargeStrength`          | negate (`-value`)  |
- * | `centerStrength`  | `centerStrength`          | direct (1:1)       |
- * | `linkStrength`    | `linkStrength`            | direct (1:1)       |
- * | `colorGroups`     | `colorGroups`             | query/color parse  |
+ * Only `colorGroups` is imported — the user's colour rules carry over, since
+ * they describe their vault rather than a layout. Physics settings are not; see
+ * the note in the body for why.
  *
  * Returns an empty object if the file doesn't exist or cannot be read.
  */
@@ -560,26 +667,14 @@ export async function readNativeGraphSettings(app: App): Promise<Partial<SmartGr
 			if (groups.length > 0) result.colorGroups = groups;
 		}
 
-		// --- Physics: link distance ---
-		if (typeof config.linkDistance === "number" && config.linkDistance > 0) {
-			result.linkDistance = config.linkDistance;
-		}
-
-		// --- Physics: charge strength (Obsidian stores positive repelStrength) ---
-		// Obsidian clamps abs(repelStrength) < 1 to -1 (see sim.js).
-		if (typeof config.repelStrength === "number") {
-			result.chargeStrength = Math.abs(config.repelStrength) < 1 ? -1 : -config.repelStrength;
-		}
-
-		// --- Physics: center strength ---
-		if (typeof config.centerStrength === "number") {
-			result.centerStrength = config.centerStrength;
-		}
-
-		// --- Physics: link strength ---
-		if (typeof config.linkStrength === "number") {
-			result.linkStrength = config.linkStrength;
-		}
+		// NOTE: physics values (linkDistance / repelStrength / centerStrength /
+		// linkStrength) are deliberately NOT imported.
+		//
+		// The user tuned those for Obsidian's native graph, which draws wiki links
+		// only. Ours fuses in semantic edges, so a typical note goes from ~0 edges
+		// to ~8 — and Obsidian-scale values (linkDistance 250, charge -1000) fling
+		// that denser graph into a ring with no visible grouping. Our own defaults
+		// are tuned for the fused graph; see DEFAULT_SMART_GRAPH_SETTINGS.
 
 		return result;
 	} catch {
@@ -775,12 +870,21 @@ function resolveSegmentsByLeiden(
 		internalDegree.set(edge.target, (internalDegree.get(edge.target) ?? 0) + 1);
 	}
 
-	// Sort communities by size descending so the largest get the most prominent colors
-	const sorted = [...communityNodes.entries()].sort((a, b) => b[1].length - a[1].length || a[0] - b[0]);
-	const colors = generateClusterColors(sorted.length, themeColors);
+	// Sort communities by size descending so the largest get the most prominent colors.
+	// Groups below MIN_TOPIC_SIZE are dropped: a lone note isn't a topic, it's a note
+	// that failed to join one, and listing hundreds of them buries the real topics.
+	// Those notes still render — they simply keep the default colour and no label.
+	const sorted = [...communityNodes.entries()]
+		.filter(([, nodeIds]) => nodeIds.length >= MIN_TOPIC_SIZE)
+		.sort((a, b) => b[1].length - a[1].length || a[0] - b[0]);
+	if (sorted.length === 0) return [];
+	// Palette size is fixed rather than sized to the current topic count: a hashed
+	// slot must land the same way at every zoom level, and `colors.length` would
+	// otherwise change with the number of topics and remap every colour.
+	const colors = generateClusterColors(Math.max(TOPIC_COLOR_SLOTS, sorted.length), themeColors);
 
-	return sorted.map(([, nodeIds], i) => {
-		// Pick representative: highest internal degree, fall back to total degree
+	// Representative first (it anchors both label and colour), then build segments.
+	const withRepresentative = sorted.map(([communityId, nodeIds], i) => {
 		let bestId = nodeIds[0];
 		let bestInternal = Number.NEGATIVE_INFINITY;
 		let bestTotal = Number.NEGATIVE_INFINITY;
@@ -793,15 +897,48 @@ function resolveSegmentsByLeiden(
 				bestId = id;
 			}
 		}
-		const label = nodeById.get(bestId)?.label ?? nodeById.get(bestId)?.path ?? `Community ${i + 1}`;
+		return { communityId, nodeIds, bestId, index: i };
+	});
+
+	// Colour is keyed to each topic's *representative note*, not its rank in this
+	// list. Rank shifts whenever zoom changes topic sizes, which would repaint the
+	// whole graph on every zoom step; anchoring to a note means a topic keeps its
+	// colour for as long as it keeps its core, so the eye can follow a group from
+	// one level to the next.
+	//
+	// Allocation walks the anchors in sorted order rather than in rank order:
+	// palette slots are finite, so two topics can hash to the same one, and
+	// resolving that by insertion order would let a single collision reshuffle
+	// every colour after it — exactly the instability this is meant to remove.
+	const anchorOf = (bestId: string, communityId: number) => nodeById.get(bestId)?.path ?? String(communityId);
+	const colorByAnchor = new Map<string, string>();
+	const takenSlots = new Set<number>();
+	for (const { bestId, communityId } of [...withRepresentative].sort((a, b) =>
+		anchorOf(a.bestId, a.communityId).localeCompare(anchorOf(b.bestId, b.communityId)),
+	)) {
+		const anchor = anchorOf(bestId, communityId);
+		let hash = 5381;
+		for (let i = 0; i < anchor.length; i++) hash = ((hash * 33) ^ anchor.charCodeAt(i)) >>> 0;
+		for (let probe = 0; probe < colors.length; probe++) {
+			const slot = (hash + probe) % colors.length;
+			if (takenSlots.has(slot)) continue;
+			takenSlots.add(slot);
+			colorByAnchor.set(anchor, colors[slot]);
+			break;
+		}
+	}
+
+	return withRepresentative.map(({ communityId, nodeIds, bestId, index }) => {
+		const label = nodeById.get(bestId)?.label ?? nodeById.get(bestId)?.path ?? `Community ${index + 1}`;
 		const paths = new Set(nodeIds.map((id) => nodeById.get(id)?.path).filter((p): p is string => p != null));
 
 		return {
-			id: `leiden:${i}`,
+			id: `leiden:${index}`,
 			label,
-			color: colors[i],
+			color: colorByAnchor.get(anchorOf(bestId, communityId)) ?? colors[index],
 			source: "leiden" as SegmentBy,
 			paths,
+			communityId,
 		};
 	});
 }
