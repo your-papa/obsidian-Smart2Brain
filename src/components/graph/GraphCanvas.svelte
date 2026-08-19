@@ -14,7 +14,9 @@ import {
 import type { GraphData, GraphNode, EdgeType } from "../../types/graph";
 import { deriveClusterRepresentativesFromGraph } from "../../views/smart-graph/graphDataBuilder";
 import { edgeKey } from "../../utils/graphUtils";
-import { computeNodeBounds, framingTransform, type FramingPadding } from "../../utils/graphAnimation";
+import { computeNodeBounds, easeOutCubic, framingTransform, type FramingPadding } from "../../utils/graphAnimation";
+import { buildTopicRegion, centroid } from "../../utils/convexHull";
+import { resolveNodePaths, topicNodeId } from "../../utils/mergeNodes";
 import { PixiRenderer, readThemeColors, type ClusterPillHit } from "./pixiRenderer";
 
 interface Props {
@@ -28,6 +30,10 @@ interface Props {
 	centerStrength?: number;
 	linkStrength?: number;
 	showWikiLinks?: boolean;
+	/** When false, inferred semantic similarity edges are not drawn (they still inform topics). */
+	showSemanticLinks?: boolean;
+	/** When false, the tinted topic regions are not drawn. */
+	showTopicHulls?: boolean;
 	focusedClusters?: Set<number>;
 	clusterLabels?: Record<number, string>;
 	/** When false, the cluster/topic label pills are not drawn over the graph. */
@@ -39,8 +45,11 @@ interface Props {
 	 */
 	clusterCohesionStrength?: number;
 	onNodeClick?: (path: string) => void;
+	/** Open or re-close a collapsed topic node. */
+	onToggleTopic?: (cluster: number) => void;
 	onRevealFile?: (path: string) => void;
-	onFocusCluster?: (cluster: number) => void;
+	/** `pan` frames the cluster in the viewport; omit it to select without moving the camera. */
+	onFocusCluster?: (cluster: number, pan?: boolean) => void;
 	onToggleWikiLinks?: () => void;
 	lassoMode?: boolean;
 	onSelectionChange?: (paths: string[]) => void;
@@ -62,12 +71,15 @@ let {
 	centerStrength = 0.1,
 	linkStrength = 1,
 	showWikiLinks = true,
+	showSemanticLinks = true,
+	showTopicHulls = true,
 	focusedClusters = new Set<number>(),
 	clusterLabels = {},
 	showClusterLabels = true,
 	isLabeling = false,
 	clusterCohesionStrength = 0.15,
 	onNodeClick,
+	onToggleTopic,
 	onRevealFile,
 	onFocusCluster,
 	onToggleWikiLinks,
@@ -121,11 +133,20 @@ function cancelLongPress() {
 // without going through Svelte's $state proxy (wiki mode only)
 let dragSimNode: SimNode | null = null;
 
+/**
+ * Framing margin for camera fits.
+ *
+ * `computeNodeBounds` measures node *centres*, so anything drawn around a node
+ * falls outside the box: its own radius, its label, and — the big one — the
+ * topic hull, which extends `HULL_PADDING` plus a node radius past the
+ * outermost member. Without room for that, fits clip the top and bottom
+ * clusters even though every node centre is technically in view.
+ */
 const GRAPH_FIT_PADDING: FramingPadding = {
-	top: 44,
-	right: 20,
-	bottom: 20,
-	left: 20,
+	top: 90,
+	right: 70,
+	bottom: 70,
+	left: 70,
 };
 
 // Lasso selection state
@@ -154,6 +175,10 @@ let simulation: ReturnType<typeof forceSimulation<SimNode>> | null = $state(null
 // D3's default link strength function, captured at simulation init so the
 // hot-update effect can reuse it (it depends on the link topology).
 let cachedDefaultLinkStrengthFn: ((link: SimLink, i: number, links: SimLink[]) => number) | null = null;
+// Last applied force parameters, so the hot-update effect can tell a real physics
+// change from a settings-object replacement that left every number untouched.
+// Cleared whenever a simulation is created so a fresh one always gets its forces.
+let lastPhysicsSignature: string | null = null;
 
 // D3-compatible node/link types
 type SimNode = GraphNode & SimulationNodeDatum;
@@ -162,18 +187,92 @@ type SimLink = SimulationLinkDatum<SimNode> & { weight: number; type: EdgeType }
 let simNodes: SimNode[] = [];
 let simLinks: SimLink[] = [];
 
-// Pre-split edge arrays – built once in setupSimulation, reused every frame
-let wikiSimLinks: SimLink[] = [];
+// Pre-split edge arrays – built once in setupSimulation, reused every frame.
+// Holds every drawable edge type; per-type visibility is decided in drawEdges.
+let renderableSimLinks: SimLink[] = [];
 
 // Edge fade-in: edges start invisible and fade to full opacity after each
 // setupSimulation call, providing a smooth crossfade on mode/data changes.
 let edgeFadeAlpha = 1;
 const EDGE_FADE_RATE = 0.04; // reaches 1 in 25 ticks (~0.4s at 60fps)
 
+/** Cross-fade speed for topic regions — reaches 1 in ~15 frames (~250ms at 60fps). */
+const HULL_FADE_RATE = 0.067;
+
+/** How much each doubling of an edge's weight increases its pull. */
+const WEIGHT_PULL_SCALE = 0.35;
+/** Ceiling on weight-based pull, so one dominant pair can't collapse together. */
+const WEIGHT_PULL_MAX = 3;
+
+/**
+ * Crossing-link count at which a topic pair reaches its shortest rest length.
+ * Above this the distance stops shrinking, so one dominant pair can't drag two
+ * topics on top of each other.
+ */
+const WEIGHT_DISTANCE_SATURATION = 64;
+/** Shortest a topic link may become, as a fraction of the normal link distance. */
+const MIN_TOPIC_LINK_DISTANCE_FACTOR = 0.45;
+
+/**
+ * How far a topic's notes are seeded from its collapsed position when expanding.
+ * Just enough that the force sim has a gradient to push them apart — seeding
+ * them all on the exact same point would leave them stuck there.
+ */
+const EXPAND_SCATTER_RADIUS = 45;
+
+/**
+ * Alpha held during a collapse/expand transition — matches what releasing a drag
+ * uses, since that is the pull strength observed to actually recentre a stranded
+ * node.
+ */
+const RETARGET_ALPHA = 0.3;
+/**
+ * How long that alpha is held. Long enough for a distant topic to travel to the
+ * middle, short enough that the graph still visibly comes to rest.
+ */
+const RETARGET_HOLD_MS = 1200;
+
+/**
+ * Delay before the corrective fit that runs after the layout has stopped
+ * drifting. Long enough that the residual creep past the tracking threshold has
+ * finished, short enough not to feel like a late lurch.
+ */
+const SETTLE_FIT_DELAY_MS = 900;
+
+/** Extra world-space breathing room between a topic's outermost node and its region edge. */
+const HULL_PADDING = 26;
+
+/**
+ * How far past the median centroid distance a member may sit before it stops
+ * shaping its topic's region. Low enough to keep strays from stretching a hull
+ * across the canvas, high enough not to clip genuinely spread-out topics.
+ */
+const HULL_OUTLIER_FACTOR = 2.2;
+
 // Smooth hover highlighting: per-node alpha lerps toward target on each frame.
 // 0 = fully dimmed, 1 = fully visible. Drives node, edge, and label opacity.
 let hoverAlphas: Map<string, number> = new Map();
 let hoverAnimFrameId: number | null = null;
+
+/**
+ * Hull cross-fade state.
+ *
+ * A zoom change reassigns every cluster id at once (ids are size-sorted segment
+ * positions, so "cluster 3" before and after are unrelated groups). There's no
+ * stable identity to tween between, so instead the previous shapes are held and
+ * faded out while the new ones fade in — the grouping dissolves rather than cuts.
+ */
+let outgoingHulls: Array<{ cluster: number; color: string; path: Array<{ x: number; y: number }> }> = [];
+let hullFadeProgress = 1;
+let hullAnimFrameId: number | null = null;
+/** Releases the sustained alpha after a collapse/expand transition. */
+let retargetTimer: ReturnType<typeof setTimeout> | null = null;
+/** Fires the corrective fit once post-settle drift has stopped. */
+let settleFitTimer: ReturnType<typeof setTimeout> | null = null;
+/** Signature of the current grouping; a change starts a new cross-fade. */
+let lastHullSignature = "";
+/** Most recently built hull shapes, captured so a change can fade from them. */
+let lastHullPaths: Array<{ cluster: number; color: string; path: Array<{ x: number; y: number }> }> = [];
 const HOVER_LERP_SPEED = 0.06; // per-frame blend factor (~250ms to settle)
 
 // Adjacency map: nodeId → Set of connected node ids (O(1) hover lookup)
@@ -187,6 +286,17 @@ let lastHoverFingerprint = "";
 
 // Cluster legend hit areas for click detection (screen space)
 let clusterAnchorHitAreas: ClusterPillHit[] = [];
+
+/** The topic pill under a screen-space point, if any. */
+function clusterPillAt(x: number, y: number): ClusterPillHit | undefined {
+	return clusterAnchorHitAreas.find(
+		(area) => x >= area.x && x <= area.x + area.w && y >= area.y && y <= area.y + area.h,
+	);
+}
+
+function isOverClusterPill(x: number, y: number): boolean {
+	return clusterPillAt(x, y) !== undefined;
+}
 
 // Labeling animation loop
 let labelAnimFrameId: number | null = null;
@@ -384,6 +494,148 @@ function findNodeAt(screenX: number, screenY: number): GraphNode | null {
 }
 
 /**
+ * Ask for another frame while the hull cross-fade is still running.
+ *
+ * The force simulation drives most redraws, but it can already be at rest when a
+ * grouping changes (e.g. zooming with a settled layout), so the fade needs its
+ * own frame source to finish.
+ */
+function scheduleFrame() {
+	if (hullAnimFrameId != null) return;
+	hullAnimFrameId = requestAnimationFrame(() => {
+		hullAnimFrameId = null;
+		render();
+	});
+}
+
+/**
+ * Build one smoothed region per topic from the simulation's current positions.
+ *
+ * Recomputed every frame rather than cached because nodes move continuously
+ * while the force layout settles — a stale hull would visibly lag its notes.
+ * Cost is O(n log n) over ~hundreds of nodes, which is negligible next to the
+ * per-frame edge and node work already happening.
+ *
+ * Outlier members are trimmed first: a single node flung far from its topic
+ * would otherwise stretch the region across the whole canvas and swallow
+ * unrelated topics.
+ */
+function computeTopicHulls(): Array<{ cluster: number; color: string; path: Array<{ x: number; y: number }> }> {
+	if (simNodes.length === 0) return [];
+
+	const byCluster = new Map<number, SimNode[]>();
+	for (const node of simNodes) {
+		if (node.cluster == null) continue;
+		// A collapsed topic node already *is* its group — drawing a region around
+		// a single node would just ring it in a redundant bubble.
+		if (node.kind === "topic") continue;
+		const list = byCluster.get(node.cluster);
+		if (list) list.push(node);
+		else byCluster.set(node.cluster, [node]);
+	}
+
+	// Start a cross-fade when *membership* changes, not when nodes merely move —
+	// positions shift every frame while the simulation settles, and re-triggering
+	// on those would restart the fade forever.
+	const signature = [...byCluster.entries()]
+		.map(([cluster, nodes]) => `${cluster}:${nodes.length}`)
+		.sort()
+		.join("|");
+	if (signature !== lastHullSignature) {
+		// Hold the shapes as they last looked, so they can fade from that state.
+		if (lastHullSignature !== "" && lastHullPaths.length > 0) {
+			outgoingHulls = lastHullPaths;
+			hullFadeProgress = 0;
+		}
+		lastHullSignature = signature;
+	}
+
+	const padding = getNodeRadius({ degree: 0 } as GraphNode) + HULL_PADDING;
+	const hulls: Array<{ cluster: number; color: string; path: Array<{ x: number; y: number }> }> = [];
+
+	for (const [cluster, nodes] of byCluster) {
+		const points = nodes
+			.map((node) => ({ x: node.x ?? 0, y: node.y ?? 0 }))
+			.filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
+		if (points.length === 0) continue;
+
+		const path = buildTopicRegion(trimOutliers(points), padding);
+		if (!path) continue;
+
+		hulls.push({ cluster, color: nodes[0].color ?? "", path });
+	}
+
+	lastHullPaths = hulls;
+	return hulls;
+}
+
+/**
+ * Drop members that sit far outside their topic's core.
+ *
+ * A convex hull is defined by its extremes, so one stray node drags the whole
+ * region with it. Anything beyond {@link HULL_OUTLIER_FACTOR} times the median
+ * distance from the centroid is excluded from the shape — the node still
+ * renders, it just doesn't define the boundary.
+ */
+function trimOutliers(points: Array<{ x: number; y: number }>): Array<{ x: number; y: number }> {
+	if (points.length < 4) return points;
+
+	const center = centroid(points);
+	const distances = points.map((point) => Math.hypot(point.x - center.x, point.y - center.y));
+	const sorted = [...distances].sort((a, b) => a - b);
+	const median = sorted[Math.floor(sorted.length / 2)];
+	if (median <= 0) return points;
+
+	const limit = median * HULL_OUTLIER_FACTOR;
+	const kept = points.filter((_, index) => distances[index] <= limit);
+	// Never trim away so much that the region stops representing the topic.
+	return kept.length >= 3 ? kept : points;
+}
+
+/**
+ * Extra pull applied to an edge based on its weight.
+ *
+ * Only collapsed topic-to-topic edges use this. Their weight is a *count* of how
+ * many note-level links cross between two topics, so without it a pair joined by
+ * 200 links sits exactly as far apart as one joined by 3 — the edge would encode
+ * coupling without the layout ever showing it.
+ *
+ * Log-scaled and clamped: crossing counts are heavy-tailed, so a linear mapping
+ * would let one dominant pair collapse onto each other while everything else
+ * drifted apart. Note-level edges are left alone — their weights are cosine
+ * scores and small link counts that already behave.
+ */
+function weightPull(link: SimLink): number {
+	const source = link.source as SimNode;
+	const target = link.target as SimNode;
+	if (source?.kind !== "topic" && target?.kind !== "topic") return 1;
+
+	const weight = Math.max(1, link.weight);
+	return Math.min(WEIGHT_PULL_MAX, 1 + Math.log2(weight) * WEIGHT_PULL_SCALE);
+}
+
+/**
+ * Rest length for a link, shortened for heavily-crossed topic pairs.
+ *
+ * Strength alone cannot express coupling: in d3-force every link is a spring
+ * with a rest length and a stiffness, and stiffness only changes how *fast* a
+ * pair converges — not where it settles. With one fixed distance, two topics
+ * joined by 200 links come to rest exactly as far apart as two joined by 3.
+ * Shortening the spring is what actually pulls coupled topics together.
+ */
+function weightedLinkDistance(link: SimLink): number {
+	const source = link.source as SimNode;
+	const target = link.target as SimNode;
+	if (source?.kind !== "topic" && target?.kind !== "topic") return linkDistance;
+
+	// Same log curve as the pull, inverted: the heaviest edges sit at
+	// MIN_TOPIC_LINK_DISTANCE_FACTOR of the normal length.
+	const weight = Math.max(1, link.weight);
+	const t = Math.min(1, Math.log2(weight) / Math.log2(WEIGHT_DISTANCE_SATURATION));
+	return linkDistance * (1 - t * (1 - MIN_TOPIC_LINK_DISTANCE_FACTOR));
+}
+
+/**
  * Get the draw radius for a node based on its degree, centrality, and the user-configurable nodeSize.
  *
  * When betweenness centrality is available (Leiden mode), it is blended with degree:
@@ -468,15 +720,43 @@ function render() {
 		});
 	}
 
+	// ── Topic regions ──────────────────────────────────────────
+	if (showTopicHulls) {
+		const hulls = computeTopicHulls();
+		// Advance the cross-fade toward the new grouping. Eased so the dissolve
+		// starts quickly and settles gently, matching the camera animations.
+		if (hullFadeProgress < 1) {
+			hullFadeProgress = Math.min(1, hullFadeProgress + HULL_FADE_RATE);
+			if (hullFadeProgress >= 1) outgoingHulls = [];
+			scheduleFrame();
+		}
+		pixi.drawHulls(hulls, {
+			focusedClusters,
+			fadeAlpha: edgeFadeAlpha,
+			outgoing: outgoingHulls,
+			outgoingAlpha: outgoingHulls.length > 0 ? 1 - easeOutCubic(hullFadeProgress) : 0,
+		});
+	} else {
+		// Regions are hidden — drop any in-flight fade so re-enabling them starts
+		// clean rather than dissolving from a grouping that's since gone stale.
+		outgoingHulls = [];
+		lastHullPaths = [];
+		lastHullSignature = "";
+		hullFadeProgress = 1;
+		pixi.drawHulls([], { focusedClusters, fadeAlpha: edgeFadeAlpha });
+	}
+
 	// ── Edges ──────────────────────────────────────────────────
 	pixi.drawEdges(
-		wikiSimLinks as Array<{
-			source: { id: string; x: number; y: number };
-			target: { id: string; x: number; y: number };
+		renderableSimLinks as unknown as Array<{
+			source: { id: string; x: number; y: number; kind?: string };
+			target: { id: string; x: number; y: number; kind?: string };
 			type: string;
+			weight?: number;
 		}>,
 		{
 			showWikiLinks,
+			showSemanticLinks,
 			directedWikiEdges,
 			hoveredNodeId: hoveredNode?.id ?? null,
 			adjacency,
@@ -677,6 +957,15 @@ function render() {
 	if (showClusterAnchors) {
 		const ANCHOR_PILL_H = 20;
 		const ANCHOR_GAP = 4;
+		/**
+		 * Vertical offsets tried before a pill is dropped, in preference order:
+		 * its natural spot, then progressively further above and below. Enough to
+		 * rescue a label in mild crowding without letting it drift so far from its
+		 * topic that the leader line stops being legible.
+		 */
+		const ANCHOR_NUDGE_OFFSETS = [0, -26, 26, -52, 52];
+		/** How far outside the viewport a topic anchor may sit and still be labelled. */
+		const ANCHOR_OFFSCREEN_MARGIN = 40;
 
 		const anchorPlacements: Array<{
 			cluster: number;
@@ -689,13 +978,32 @@ function render() {
 			y: number;
 			isFocused: boolean;
 			color: string;
+			/** Topic size — biggest topics claim label space first. */
+			nodeCount: number;
 		}> = [];
 
 		for (const [cluster, node] of clusterRepresentativeNodes) {
 			if (node.x == null || node.y == null) continue;
 			if (focusedClusters.size > 0 && !focusedClusters.has(cluster)) continue;
+			// A collapsed topic node already renders its own name, and its "cluster"
+			// is just itself — a pill here would read "Topic · 1" beside the group
+			// it stands for.
+			if (node.kind === "topic") continue;
 
 			const screen = pixi.worldToScreen(node.x, node.y);
+			// Skip topics whose anchor is off-screen. Clamping them to the canvas
+			// edge (as this used to) stacks every out-of-view topic into the margin,
+			// far from the notes it describes — a label pointing nowhere is worse
+			// than no label.
+			if (
+				screen.x < -ANCHOR_OFFSCREEN_MARGIN ||
+				screen.x > width + ANCHOR_OFFSCREEN_MARGIN ||
+				screen.y < -ANCHOR_OFFSCREEN_MARGIN ||
+				screen.y > height + ANCHOR_OFFSCREEN_MARGIN
+			) {
+				continue;
+			}
+
 			const anchorLabel = clusterLabels[cluster] ?? node.label;
 			const nodeCount = clusterNodeCounts.get(cluster) ?? 0;
 			const anchorText = `${anchorLabel} · ${nodeCount}`;
@@ -715,38 +1023,44 @@ function render() {
 				y: pillY,
 				isFocused: focusedClusters.has(cluster),
 				color: node.color ?? c.graphNode,
+				// Drives placement priority: the biggest topics claim space first.
+				nodeCount,
 			});
 		}
 
-		// Greedy overlap resolution
-		anchorPlacements.sort((a, b) => a.y - b.y);
-		for (let pass = 0; pass < 3; pass++) {
-			for (let i = 0; i < anchorPlacements.length; i++) {
-				const a = anchorPlacements[i];
-				for (let j = i + 1; j < anchorPlacements.length; j++) {
-					const b = anchorPlacements[j];
-					const overlapX = a.x < b.x + b.pillW + ANCHOR_GAP && a.x + a.pillW + ANCHOR_GAP > b.x;
-					const overlapY = a.y < b.y + b.pillH + ANCHOR_GAP && a.y + a.pillH + ANCHOR_GAP > b.y;
-					if (overlapX && overlapY) {
-						const overlapDepthY =
-							Math.min(a.y + a.pillH + ANCHOR_GAP, b.y + b.pillH + ANCHOR_GAP) - Math.max(a.y, b.y);
-						const overlapDepthX =
-							Math.min(a.x + a.pillW + ANCHOR_GAP, b.x + b.pillW + ANCHOR_GAP) - Math.max(a.x, b.x);
-						if (overlapDepthY <= overlapDepthX) {
-							const pushY = overlapDepthY / 2 + 1;
-							a.y = Math.max(8, a.y - pushY);
-							b.y = Math.min(height - b.pillH - 8, b.y + pushY);
-						} else {
-							const pushX = overlapDepthX / 2 + 1;
-							a.x = Math.max(8, a.x - pushX);
-							b.x = Math.min(width - b.pillW - 8, b.x + pushX);
-						}
-					}
+		// Overlap resolution: nudge, then DROP whatever still collides.
+		//
+		// Nudging alone is only viable while there's somewhere to nudge to. Past a
+		// few dozen topics the canvas simply cannot hold every pill, and pushing
+		// them around produces an unreadable pile — so labels are placed biggest
+		// topic first and any that still collide are left out. A dropped topic
+		// keeps its coloured region and its row in the panel; only the pill goes.
+		anchorPlacements.sort((a, b) => (b.nodeCount ?? 0) - (a.nodeCount ?? 0) || a.y - b.y);
+
+		const placed: typeof anchorPlacements = [];
+		const collides = (a: (typeof anchorPlacements)[number], b: (typeof anchorPlacements)[number]) =>
+			a.x < b.x + b.pillW + ANCHOR_GAP &&
+			a.x + a.pillW + ANCHOR_GAP > b.x &&
+			a.y < b.y + b.pillH + ANCHOR_GAP &&
+			a.y + a.pillH + ANCHOR_GAP > b.y;
+
+		for (const candidate of anchorPlacements) {
+			// Try the preferred spot, then a few offsets above/below the anchor
+			// before giving up — a small nudge saves most labels in mild crowding.
+			let positioned = false;
+			for (const dy of ANCHOR_NUDGE_OFFSETS) {
+				const y = Math.max(8, Math.min(height - candidate.pillH - 8, candidate.y + dy));
+				const trial = { ...candidate, y };
+				if (!placed.some((other) => collides(trial, other))) {
+					candidate.y = y;
+					positioned = true;
+					break;
 				}
 			}
+			if (positioned) placed.push(candidate);
 		}
 
-		clusterAnchorHitAreas = pixi.drawClusterPills(anchorPlacements);
+		clusterAnchorHitAreas = pixi.drawClusterPills(placed);
 	} else {
 		clusterAnchorHitAreas = pixi.drawClusterPills([]);
 	}
@@ -781,6 +1095,13 @@ function handleMouseDown(e: PointerEvent) {
 	const y = e.clientY - rect.top;
 	pointerDownScreenPos = { x, y };
 
+	// Topic pills are screen-space overlays drawn on top of everything, so they
+	// claim the pointer before the lasso does. Without this, Shift+pointerdown on
+	// a pill starts a lasso, which sets `lassoJustFinished` and makes handleClick
+	// bail before it ever reaches the pill hit-test — the label would look clickable
+	// with Shift but do nothing.
+	if (isOverClusterPill(x, y)) return;
+
 	// Shift+click on a node toggles its selection; Shift+drag on empty space starts lasso
 	if (lassoMode || e.shiftKey) {
 		const node = findNodeAt(x, y);
@@ -792,7 +1113,7 @@ function handleMouseDown(e: PointerEvent) {
 				next.add(node.id);
 			}
 			selectedNodes = next;
-			onSelectionChange?.(simNodes.filter((n) => next.has(n.id)).map((n) => n.path));
+			onSelectionChange?.(simNodes.filter((n) => next.has(n.id)).flatMap(resolveNodePaths));
 			lassoJustFinished = true;
 			render();
 			return;
@@ -880,15 +1201,7 @@ function handleMouseMove(e: PointerEvent) {
 		render();
 	} else {
 		// Hover detection: check cluster legend first, then nodes
-		let overClusterAnchor = false;
-		for (const area of clusterAnchorHitAreas) {
-			if (x >= area.x && x <= area.x + area.w && y >= area.y && y <= area.y + area.h) {
-				overClusterAnchor = true;
-				break;
-			}
-		}
-
-		if (overClusterAnchor) {
+		if (isOverClusterPill(x, y)) {
 			canvas.style.cursor = "pointer";
 			if (hoveredNode) {
 				hoveredNode = null;
@@ -927,7 +1240,7 @@ function handleMouseUp(_e: PointerEvent) {
 			}
 			if (merged.size !== selectedNodes.size) {
 				selectedNodes = merged;
-				onSelectionChange?.(simNodes.filter((n) => merged.has(n.id)).map((n) => n.path));
+				onSelectionChange?.(simNodes.filter((n) => merged.has(n.id)).flatMap(resolveNodePaths));
 			}
 		}
 		lassoPoints = [];
@@ -972,18 +1285,27 @@ function handleClick(e: MouseEvent) {
 		if (dx * dx + dy * dy > 16) return;
 	}
 
-	for (const area of clusterAnchorHitAreas) {
-		if (x >= area.x && x <= area.x + area.w && y >= area.y && y <= area.y + area.h) {
-			onFocusCluster?.(area.cluster);
-			render();
-			return;
+	const pill = clusterPillAt(x, y);
+	if (pill) {
+		// A topic's label is the natural handle for collapsing that topic —
+		// click it to fold the group into one node, click the node to unfold.
+		// Shift/⌘ selects the topic's notes instead, matching the modifier that
+		// multi-selects rows in the Topics panel.
+		if (e.shiftKey || e.metaKey || e.ctrlKey) {
+			onFocusCluster?.(pill.cluster);
+		} else {
+			onToggleTopic?.(pill.cluster);
 		}
+		render();
+		return;
 	}
-
 	const node = findNodeAt(x, y);
 
 	if (node) {
-		if (onNodeClick) {
+		// A collapsed topic has no file behind it — clicking opens the group.
+		if (node.kind === "topic") {
+			if (node.cluster != null) onToggleTopic?.(node.cluster);
+		} else if (onNodeClick) {
 			onNodeClick(node.path);
 		}
 	} else {
@@ -1017,6 +1339,9 @@ function triggerNodePreview(event: MouseEvent | KeyboardEvent, node: GraphNode) 
 	const containerRect = containerEl.getBoundingClientRect();
 	const offsetX = canvasRect.left - containerRect.left;
 	const offsetY = canvasRect.top - containerRect.top;
+	// Nothing to preview for a synthetic topic node.
+	if (node.kind === "topic") return;
+
 	hoverAnchorEl.href = node.path;
 	hoverAnchorEl.dataset.href = node.path;
 	hoverAnchorEl.setAttribute("aria-label", node.label);
@@ -1053,23 +1378,43 @@ function handleContextMenu(e: MouseEvent) {
 function openNodeMenu(node: GraphNode, clientX: number, clientY: number) {
 	const menu = new Menu();
 
-	menu.addItem((item) =>
-		item
-			.setTitle("Open file")
-			.setIcon("file-text")
-			.onClick(() => {
-				onNodeClick?.(node.path);
-			}),
-	);
+	if (node.kind === "topic") {
+		// No file behind a collapsed topic — offer the group actions instead.
+		menu.addItem((item) =>
+			item
+				.setTitle("Expand topic")
+				.setIcon("expand")
+				.onClick(() => {
+					if (node.cluster != null) onToggleTopic?.(node.cluster);
+				}),
+		);
+		menu.addItem((item) =>
+			item
+				.setTitle(`Open all ${node.memberPaths?.length ?? 0} notes`)
+				.setIcon("files")
+				.onClick(() => {
+					for (const path of node.memberPaths ?? []) onNodeClick?.(path);
+				}),
+		);
+	} else {
+		menu.addItem((item) =>
+			item
+				.setTitle("Open file")
+				.setIcon("file-text")
+				.onClick(() => {
+					onNodeClick?.(node.path);
+				}),
+		);
 
-	menu.addItem((item) =>
-		item
-			.setTitle("Reveal in file explorer")
-			.setIcon("folder-open")
-			.onClick(() => {
-				onRevealFile?.(node.path);
-			}),
-	);
+		menu.addItem((item) =>
+			item
+				.setTitle("Reveal in file explorer")
+				.setIcon("folder-open")
+				.onClick(() => {
+					onRevealFile?.(node.path);
+				}),
+		);
+	}
 
 	menu.addSeparator();
 
@@ -1079,7 +1424,8 @@ function openNodeMenu(node: GraphNode, clientX: number, clientY: number) {
 			.setIcon("scan")
 			.onClick(() => {
 				if (node.cluster != null) {
-					onFocusCluster?.(node.cluster);
+					// Framing the cluster is the whole point of this menu item.
+					onFocusCluster?.(node.cluster, true);
 				}
 			}),
 	);
@@ -1164,6 +1510,63 @@ function clusterCohesionForce(nodes: SimNode[], strength: number) {
 // ============================================================================
 
 /**
+ * Position a node inherits when its id is new but the *thing* it represents was
+ * already on screen.
+ *
+ * Collapsing and expanding change node ids — a note is `Corpus/x.md`, its topic
+ * is `topic:3` — so the position cache misses in both directions and the layout
+ * scatters everything onto a ring, which reads as nodes flying in from nowhere.
+ * Mapping between the two forms keeps the transition in place:
+ *
+ * - collapsing: the topic node starts at its members' centroid
+ * - expanding: each note starts where its topic node was, then spreads out
+ *
+ * Returns null when there's nothing to inherit from, leaving the caller's
+ * existing ring-scatter fallback in charge.
+ */
+function inheritedPosition(
+	node: GraphNode,
+	oldPositions: Map<string, { x: number; y: number }>,
+): { x: number; y: number } | null {
+	// Only positions from the frame we're leaving count. Falling back to the
+	// persistent cache here would inherit from a layout that is no longer on
+	// screen, which is exactly the jump this function exists to prevent.
+	const lookup = (id: string) => oldPositions.get(id);
+
+	// Collapsing: average wherever this topic's members currently sit.
+	if (node.kind === "topic" && node.memberPaths?.length) {
+		let x = 0;
+		let y = 0;
+		let found = 0;
+		for (const path of node.memberPaths) {
+			const position = lookup(path);
+			if (!position) continue;
+			x += position.x;
+			y += position.y;
+			found++;
+		}
+		if (found === 0) return null;
+		return { x: x / found, y: y / found };
+	}
+
+	// Expanding: start from the topic node this note was folded into. A small
+	// deterministic offset keeps the members from stacking exactly on top of each
+	// other, which would leave the force sim with no gradient to separate them.
+	if (node.cluster != null) {
+		const topicPosition = lookup(topicNodeId(node.cluster));
+		if (topicPosition) {
+			let hash = 5381;
+			for (let i = 0; i < node.id.length; i++) hash = ((hash * 33) ^ node.id.charCodeAt(i)) >>> 0;
+			const angle = (hash % 360) * (Math.PI / 180);
+			const radius = EXPAND_SCATTER_RADIUS * (0.4 + ((hash >>> 9) % 100) / 100);
+			return { x: topicPosition.x + Math.cos(angle) * radius, y: topicPosition.y + Math.sin(angle) * radius };
+		}
+	}
+
+	return null;
+}
+
+/**
  * Build the internal node/link data structures from the incoming GraphData.
  * This is shared between wiki (d3-force) and smart (static) modes.
  */
@@ -1209,7 +1612,11 @@ function buildInternalData(data: GraphData): {
 	const circleRadius = Math.max(150, Math.sqrt(unknownCount) * linkDistance * 0.5);
 	simNodes = data.nodes.map((n) => {
 		const sn: SimNode = { ...n };
-		const old = oldPositions.get(n.id) ?? persistentPositionCache.get(n.id);
+		// Priority matters: a position inherited from what this node *replaces on
+		// screen right now* beats a cached one from some earlier layout. The cache
+		// exists to restore a view you navigated away from; during a collapse or
+		// expand it holds stale coordinates that make nodes jump.
+		const old = oldPositions.get(n.id) ?? inheritedPosition(n, oldPositions) ?? persistentPositionCache.get(n.id);
 		if (old) {
 			sn.x = old.x;
 			sn.y = old.y;
@@ -1245,7 +1652,7 @@ function buildInternalData(data: GraphData): {
 		}));
 
 	// Pre-split by edge type to avoid filtering every render frame
-	wikiSimLinks = simLinks.filter((l) => l.type === "wiki");
+	renderableSimLinks = simLinks.filter((l) => l.type === "wiki" || l.type === "semantic");
 	const clusterRepresentatives = deriveClusterRepresentativesFromGraph(data);
 	clusterRepresentativeIds = new Set([...clusterRepresentatives.values()].map((node) => node.id));
 	clusterRepresentativeNodes = new Map(
@@ -1301,10 +1708,14 @@ function setupForceSimulation(
 	// a multiplier, matching how Obsidian's native graph works.
 	const baseLinkForce = forceLink<SimNode, SimLink>(simLinks)
 		.id((d) => d.id)
-		.distance(linkDistance);
+		.distance(weightedLinkDistance);
 	const defaultLinkStrengthFn = baseLinkForce.strength() as (link: SimLink, i: number, links: SimLink[]) => number;
 	cachedDefaultLinkStrengthFn = defaultLinkStrengthFn;
-	baseLinkForce.strength((l, i, links) => linkStrength * defaultLinkStrengthFn(l, i, links));
+	baseLinkForce.strength((l, i, links) => linkStrength * defaultLinkStrengthFn(l, i, links) * weightPull(l));
+
+	// A fresh simulation has no applied parameters yet, so the hot-update effect
+	// must treat its next run as a real change rather than a no-op repeat.
+	lastPhysicsSignature = null;
 
 	simulation = forceSimulation<SimNode>(simNodes);
 	simulation
@@ -1344,6 +1755,15 @@ function setupForceSimulation(
 					needsInitialFit = false;
 					forceTickCount = 0;
 					animateCameraToNodes(undefined, GRAPH_FIT_PADDING, 500);
+					// The layout can still creep after alpha drops below the tracking
+					// threshold — clusters keep spreading for a while — so that "final"
+					// fit is often already stale. Take one more measurement after the
+					// drift has actually stopped.
+					if (settleFitTimer != null) clearTimeout(settleFitTimer);
+					settleFitTimer = setTimeout(() => {
+						settleFitTimer = null;
+						animateCameraToNodes(undefined, GRAPH_FIT_PADDING, 500);
+					}, SETTLE_FIT_DELAY_MS);
 				}
 			}
 			render();
@@ -1468,10 +1888,12 @@ $effect(() => {
 	untrack(() => setupGraph(graphData));
 });
 
-// Re-render when appearance settings change (nodeSize, showWikiLinks)
+// Re-render when appearance settings change (nodeSize, showWikiLinks, …)
 $effect(() => {
 	void nodeSize;
 	void showWikiLinks;
+	void showSemanticLinks;
+	void showTopicHulls;
 	void alwaysRefitOnDataChange;
 	void directedWikiEdges;
 	void showClusterLabels;
@@ -1502,10 +1924,14 @@ $effect(() => {
 
 	const link = sim.force("link") as ReturnType<typeof forceLink<SimNode, SimLink>> | undefined;
 	if (link) {
-		link.distance(_link);
+		// Re-apply the weight-aware functions, not flat constants: assigning
+		// `distance(_link)` / a plain strength here would silently drop the
+		// coupling scaling every time any physics setting changed.
+		void _link;
+		link.distance(weightedLinkDistance);
 		if (cachedDefaultLinkStrengthFn) {
 			const baseFn = cachedDefaultLinkStrengthFn;
-			link.strength((l: SimLink, i: number, links: SimLink[]) => _linkStr * baseFn(l, i, links));
+			link.strength((l: SimLink, i: number, links: SimLink[]) => _linkStr * baseFn(l, i, links) * weightPull(l));
 		}
 	}
 
@@ -1515,8 +1941,15 @@ $effect(() => {
 	const clusterForce = sim.force("cluster") as ReturnType<typeof clusterCohesionForce> | undefined;
 	if (clusterForce) clusterForce.strength(_cohesion);
 
-	// Reheat if settled so the param change is immediately visible.
-	if (sim.alpha() < 0.05) {
+	// Reheat only when a force parameter really changed. `settings` is replaced
+	// wholesale on every write (`{ ...settings, ...partial }`), which invalidates
+	// each property read even when the number is identical — so without this
+	// comparison a purely visual toggle (topic labels, highlights) would restart
+	// the layout at alpha 0.3 and visibly re-shuffle the graph.
+	const signature = `${_charge}:${_link}:${_center}:${_linkStr}:${_cohesion}`;
+	const changed = signature !== lastPhysicsSignature;
+	lastPhysicsSignature = signature;
+	if (changed && sim.alpha() < 0.05) {
 		sim.alpha(0.3).restart();
 	}
 });
@@ -1606,6 +2039,9 @@ onMount(() => {
 	return () => {
 		(containerEl as any).__graphCleanup?.();
 		if (hoverAnimFrameId != null) cancelAnimationFrame(hoverAnimFrameId);
+		if (hullAnimFrameId != null) cancelAnimationFrame(hullAnimFrameId);
+		if (retargetTimer != null) clearTimeout(retargetTimer);
+		if (settleFitTimer != null) clearTimeout(settleFitTimer);
 		if (canvasRevealTimer != null) clearTimeout(canvasRevealTimer);
 		if (simulation) {
 			simulation.stop();
@@ -1630,6 +2066,38 @@ function animateCameraToNodes(
 	const centerX = (bounds.minX + bounds.maxX) / 2;
 	const centerY = (bounds.minY + bounds.maxY) / 2;
 	pixi.animateToFrame(centerX, centerY, target.scale, duration);
+}
+
+/**
+ * Track the layout with the camera until it settles.
+ *
+ * Reuses the same per-tick refit the initial layout uses: a short animation
+ * every few ticks, each overlapping the next, so the camera follows the nodes
+ * continuously instead of jumping between fixed snapshots. Use this whenever the
+ * node set changes shape under the user (collapse, expand) — a one-shot
+ * `fitToView` frames positions the simulation is still moving away from, which
+ * reads as a stutter.
+ */
+export function followLayout() {
+	if (simNodes.length === 0 || !simulation) return;
+	needsInitialFit = true;
+	forceTickCount = 0;
+
+	// Hold a high alpha for a moment rather than bumping it once and letting it
+	// decay. Collapsing replaces a wide note layout with a handful of nodes that
+	// inherit their members' centroid, so an outlying topic can start thousands
+	// of pixels out — and the centering force is deliberately weak (0.05) to keep
+	// the note-level graph from being squashed. A decaying nudge barely moves
+	// such a node, which is why the view stayed zoomed out until the node was
+	// dragged: releasing a drag sets alphaTarget(0.3), and *that* sustained pull
+	// is what recentred it. This gives the transition the same treatment.
+	simulation.alphaTarget(RETARGET_ALPHA).restart();
+	if (retargetTimer != null) clearTimeout(retargetTimer);
+	retargetTimer = setTimeout(() => {
+		retargetTimer = null;
+		// Back to 0 so the layout can actually come to rest.
+		simulation?.alphaTarget(0);
+	}, RETARGET_HOLD_MS);
 }
 
 /**
