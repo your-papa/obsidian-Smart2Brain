@@ -47,6 +47,7 @@ import { ObsidianChatManager } from "./ObsidianChatManager";
 import type { ThreadSnapshot } from "./memory/ThreadStore";
 import { BASE_SYSTEM_PROMPT, DEFAULT_MEMORY_PROMPT, buildMemoryFolderHeader } from "./prompts";
 import { getBundledSkill } from "../skills/defaults";
+import { extractErrorMessage } from "../utils/errorMessage";
 import { LangSmithTelemetry, type Telemetry } from "./telemetry";
 import { createExecuteJavaScriptTool } from "./tools/executeJavaScript";
 import { createPluginApiExecTool } from "./tools/executePluginApi";
@@ -516,10 +517,20 @@ export class AgentManager {
 			this.plugin,
 			{
 				getPrompt: () => current,
+				// The modal closes synchronously after calling this, so a rejected write would
+				// otherwise read as a successful save (and leave an unhandled rejection). The
+				// edit only exists in the closed editor at that point, so say so explicitly
+				// rather than letting the user believe it landed.
 				setPrompt: (text: string) => {
-					void skills.writeSkillFile(skillName, text).then(() => {
-						this.invalidateSystemPromptCaches();
-					});
+					void skills
+						.writeSkillFile(skillName, text)
+						.then(() => {
+							this.invalidateSystemPromptCaches();
+						})
+						.catch((error) => {
+							Logger.error(`Failed to save skill ${skillName}:`, error);
+							new Notice(`Could not save the "${skillName}" skill: ${extractErrorMessage(error)}`);
+						});
 				},
 				defaultPrompt: bundled.content,
 			},

@@ -290,6 +290,24 @@ describe("SkillsService.bootstrapDefaultSkills", () => {
 		expect(state.staleSkills).toEqual([]);
 	});
 
+	/*
+	 * The diff modal closes synchronously after calling setPrompt, so a failed write must
+	 * reject rather than resolve quietly — that rejection is what drives the error Notice.
+	 * Swallowing it here would show the user a successful save that never happened.
+	 */
+	it("propagates a failed write instead of reporting success", async () => {
+		const adapter = makeAdapter({ [SUBJECT_PATH]: `${SUBJECT.content}\n\nMine.` });
+		const svc = makeService(adapter);
+		await svc.bootstrapDefaultSkills();
+		adapter.write.mockRejectedValueOnce(new Error("EACCES"));
+
+		await expect(svc.writeSkillFile(SUBJECT.name, SUBJECT.content)).rejects.toThrow("EACCES");
+
+		// The file never changed, so the notice must survive — clearing it would tell the
+		// user the drift is resolved when it isn't.
+		expect(state.staleSkills).toEqual([SUBJECT.name]);
+	});
+
 	it("keeps the stale mark when the diff view saves a further edit", async () => {
 		const adapter = makeAdapter({ [SUBJECT_PATH]: `${SUBJECT.content}\n\nMine.` });
 		const svc = makeService(adapter);
