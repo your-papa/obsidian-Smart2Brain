@@ -2,8 +2,10 @@
 import {
 	DEFAULT_TOOLS_CONFIG,
 	READ_CONTENT_DESC_DEFAULTS,
+	SEARCH_NOTES_DESC_DEFAULTS,
 	getData,
 	getReadContentDescription,
+	getSearchNotesDescription,
 } from "../../stores/dataStore.svelte";
 import type { BuiltInToolId, DiffViewMode, SearchAlgorithm, ToolConfig } from "../../types/plugin";
 import type { ChatModel } from "../../stores/chatStore.svelte";
@@ -74,24 +76,6 @@ let contextLines = $state(
 	(initialToolConfig?.settings as { contextLines?: number })?.contextLines ??
 		(defaultConfig.settings as { contextLines?: number })?.contextLines ??
 		2,
-);
-let algorithm = $state<SearchAlgorithm>(
-	(initialToolConfig?.settings as { algorithm?: SearchAlgorithm })?.algorithm ??
-		(defaultConfig.settings as { algorithm?: SearchAlgorithm })?.algorithm ??
-		"lexical",
-);
-let searchShowPath = $state(
-	(initialToolConfig?.settings as { showPath?: boolean })?.showPath ?? pluginData.searchShowPath,
-);
-let searchShowTags = $state(
-	(initialToolConfig?.settings as { showTags?: boolean })?.showTags ?? pluginData.searchShowTags,
-);
-let searchShowMatchBadges = $state(
-	(initialToolConfig?.settings as { showMatchBadges?: boolean })?.showMatchBadges ?? pluginData.searchShowMatchBadges,
-);
-let searchShowMatchContext = $state(
-	(initialToolConfig?.settings as { showMatchContext?: boolean })?.showMatchContext ??
-		pluginData.searchShowMatchContext,
 );
 let allowCreate = $state(
 	(initialToolConfig?.settings as { allowCreate?: boolean })?.allowCreate ??
@@ -198,11 +182,6 @@ interface ToolConfigSnapshot {
 	name: string;
 	description: string;
 	maxResults: number;
-	algorithm: SearchAlgorithm;
-	searchShowPath: boolean;
-	searchShowTags: boolean;
-	searchShowMatchBadges: boolean;
-	searchShowMatchContext: boolean;
 	allowCreate: boolean;
 	allowUpdate: boolean;
 	allowDelete: boolean;
@@ -225,18 +204,6 @@ const initialSnapshot: ToolConfigSnapshot = {
 		(initialToolConfig?.settings as { maxResults?: number })?.maxResults ??
 		(defaultConfig.settings as { maxResults?: number })?.maxResults ??
 		10,
-	algorithm:
-		(initialToolConfig?.settings as { algorithm?: SearchAlgorithm })?.algorithm ??
-		(defaultConfig.settings as { algorithm?: SearchAlgorithm })?.algorithm ??
-		"lexical",
-	searchShowPath: (initialToolConfig?.settings as { showPath?: boolean })?.showPath ?? pluginData.searchShowPath,
-	searchShowTags: (initialToolConfig?.settings as { showTags?: boolean })?.showTags ?? pluginData.searchShowTags,
-	searchShowMatchBadges:
-		(initialToolConfig?.settings as { showMatchBadges?: boolean })?.showMatchBadges ??
-		pluginData.searchShowMatchBadges,
-	searchShowMatchContext:
-		(initialToolConfig?.settings as { showMatchContext?: boolean })?.showMatchContext ??
-		pluginData.searchShowMatchContext,
 	allowCreate:
 		(initialToolConfig?.settings as { allowCreate?: boolean })?.allowCreate ??
 		(defaultConfig.settings as { allowCreate?: boolean })?.allowCreate ??
@@ -262,11 +229,6 @@ const defaultSnapshot: ToolConfigSnapshot = {
 	name: defaultConfig.name,
 	description: defaultConfig.description,
 	maxResults: (defaultConfig.settings as { maxResults?: number })?.maxResults ?? 10,
-	algorithm: (defaultConfig.settings as { algorithm?: SearchAlgorithm })?.algorithm ?? "lexical",
-	searchShowPath: pluginData.searchShowPath,
-	searchShowTags: pluginData.searchShowTags,
-	searchShowMatchBadges: pluginData.searchShowMatchBadges,
-	searchShowMatchContext: pluginData.searchShowMatchContext,
 	allowCreate: (defaultConfig.settings as { allowCreate?: boolean })?.allowCreate ?? true,
 	allowUpdate: (defaultConfig.settings as { allowUpdate?: boolean })?.allowUpdate ?? true,
 	allowDelete: (defaultConfig.settings as { allowDelete?: boolean })?.allowDelete ?? true,
@@ -281,6 +243,18 @@ function snapshotKey(snapshot: ToolConfigSnapshot): string {
 	return JSON.stringify(snapshot);
 }
 
+/**
+ * Is this description still one the plugin ships, rather than a user's own text?
+ *
+ * Two tools have more than one shipped default and swap between them automatically —
+ * `read_content` by processor capability, `search_notes` by whether an embedding index
+ * exists — so a plain equality check against `defaultConfig.description` would flag an
+ * untouched config as customized and offer a pointless "Reset to default".
+ */
+function isDefaultDescription(value: string): boolean {
+	return READ_CONTENT_DESC_DEFAULTS.has(value) || SEARCH_NOTES_DESC_DEFAULTS.has(value);
+}
+
 const initialSnapshotKey = snapshotKey(initialSnapshot);
 const defaultSnapshotKey = snapshotKey(defaultSnapshot);
 
@@ -291,11 +265,6 @@ const isDirty = $derived.by(() => {
 		name,
 		description,
 		maxResults,
-		algorithm,
-		searchShowPath,
-		searchShowTags,
-		searchShowMatchBadges,
-		searchShowMatchContext,
 		allowCreate,
 		allowUpdate,
 		allowDelete,
@@ -310,15 +279,11 @@ const isDirty = $derived.by(() => {
 const isAtDefault = $derived.by(() => {
 	const currentSnapshot: ToolConfigSnapshot = {
 		name,
-		// Normalize known-default description variants so processor-triggered
-		// auto-swaps don't make the config appear "non-default".
-		description: READ_CONTENT_DESC_DEFAULTS.has(description) ? defaultConfig.description : description,
+		// Normalize known-default description variants so an automatic swap doesn't make
+		// the config appear "non-default": read_content's varies by processor capability,
+		// search_notes' by whether an embedding index exists.
+		description: isDefaultDescription(description) ? defaultConfig.description : description,
 		maxResults,
-		algorithm,
-		searchShowPath,
-		searchShowTags,
-		searchShowMatchBadges,
-		searchShowMatchContext,
 		allowCreate,
 		allowUpdate,
 		allowDelete,
@@ -343,6 +308,10 @@ function buildConfigPatch(): Partial<ToolConfig> {
 		const hasPdf = resolveHasProcessor(pdfProcessorMode, pdfProcessor, chatModelSupportsPdf);
 		if (READ_CONTENT_DESC_DEFAULTS.has(description))
 			resolvedDescription = getReadContentDescription(hasImg, hasPdf);
+	} else if (capturedToolId === "search_notes" && SEARCH_NOTES_DESC_DEFAULTS.has(description)) {
+		// Same reasoning as read_content: don't freeze an untouched default at whichever
+		// variant happened to be current when the modal opened.
+		resolvedDescription = getSearchNotesDescription(Boolean(pluginData.searchEmbedIndex));
 	}
 
 	const updatedConfig: Partial<ToolConfig> = {
@@ -351,14 +320,11 @@ function buildConfigPatch(): Partial<ToolConfig> {
 	};
 
 	if (capturedToolId === "search_notes") {
-		updatedConfig.settings = {
-			maxResults,
-			algorithm,
-			showPath: searchShowPath,
-			showTags: searchShowTags,
-			showMatchBadges: searchShowMatchBadges,
-			showMatchContext: searchShowMatchContext,
-		};
+		// `algorithm` is now a per-call tool parameter the model chooses, and the four
+		// display flags are hardcoded on for the agent — neither is user-configurable.
+		// `maxResults` is kept because it bounds how much of the result set reaches the
+		// context window, which is a real budget decision.
+		updatedConfig.settings = { maxResults };
 	} else if (capturedToolId === "read_content") {
 		// Build settings with three-state processors:
 		// undefined = auto, null = disabled, ChatModel = custom
@@ -396,13 +362,12 @@ function handleResetToDefault() {
 	description = defaultConfig.description;
 
 	if (capturedToolId === "search_notes" && defaultConfig.settings) {
-		const settings = defaultConfig.settings as { maxResults: number; algorithm: SearchAlgorithm };
+		// Reset to the variant matching this vault, not whichever one ships in
+		// DEFAULT_TOOLS_CONFIG — otherwise "reset" could hand a vault with no embedding
+		// index a description advertising semantic search.
+		description = getSearchNotesDescription(Boolean(pluginData.searchEmbedIndex));
+		const settings = defaultConfig.settings as { maxResults: number };
 		maxResults = settings.maxResults;
-		algorithm = settings.algorithm;
-		searchShowPath = pluginData.searchShowPath;
-		searchShowTags = pluginData.searchShowTags;
-		searchShowMatchBadges = pluginData.searchShowMatchBadges;
-		searchShowMatchContext = pluginData.searchShowMatchContext;
 	} else if (capturedToolId === "read_content" && defaultConfig.settings) {
 		// Reset processors to "auto" mode
 		imageProcessor = undefined;
@@ -452,22 +417,18 @@ function openProcessorSelectionModal(currentProcessor: ChatModel | null, onSelec
 
 <div class="tool-config-modal-content">
   {#if capturedToolId === "search_notes"}
+    <!--
+      Retrieval strategy is deliberately NOT configurable here.
+
+      `algorithm` is a per-call parameter the model picks, because there is no globally
+      right answer — measured on the graded benchmark, semantic wins the core tier while
+      hybrid wins the hard tier, and neither difference is significant. The agent has the
+      query context needed to choose; the user does not.
+
+      The four result-detail toggles are hardcoded on for the agent. They still exist for
+      the search *modal*, under Settings → Search → Display.
+    -->
     <SettingGroup heading="Search Settings">
-      <SettingContainer name="Search Algorithm" desc="Choose the search algorithm the agent uses for retrieving notes.">
-        <Dropdown
-          type="options"
-          dropdown={[
-            { display: "Lexical (BM25)", value: "lexical" as SearchAlgorithm },
-            { display: "Semantic (embeddings only)", value: "semantic" as SearchAlgorithm },
-            { display: "Hybrid (BM25 + semantic)", value: "hybrid" as SearchAlgorithm },
-          ]}
-          selected={algorithm}
-          onchange={(v) => {
-            algorithm = v;
-            commit();
-          }}
-        />
-      </SettingContainer>
       <SettingContainer name="Max Notes to Return" desc="Maximum number of notes to return to the AI agent.">
         <Text
           inputType="number"
@@ -475,48 +436,6 @@ function openProcessorSelectionModal(currentProcessor: ChatModel | null, onSelec
           placeholder="10"
           onblur={(v) => {
             maxResults = Number.parseInt(String(v)) || 10;
-            commit();
-          }}
-        />
-      </SettingContainer>
-      <SettingContainer name="Include Paths" desc="Include the full note path for each visible result.">
-        <Toggle
-          checked={searchShowPath}
-          onchange={(checked) => {
-            searchShowPath = checked;
-            commit();
-          }}
-        />
-      </SettingContainer>
-      <SettingContainer name="Include Tags" desc="Include normalized note tags in each visible result.">
-        <Toggle
-          checked={searchShowTags}
-          onchange={(checked) => {
-            searchShowTags = checked;
-            commit();
-          }}
-        />
-      </SettingContainer>
-      <SettingContainer
-        name="Include Match Badges"
-        desc="Include why a note matched, such as title, tag, or content badges."
-      >
-        <Toggle
-          checked={searchShowMatchBadges}
-          onchange={(checked) => {
-            searchShowMatchBadges = checked;
-            commit();
-          }}
-        />
-      </SettingContainer>
-      <SettingContainer
-        name="Include Content Snippets"
-        desc="Include short match snippets or heading context for each visible result."
-      >
-        <Toggle
-          checked={searchShowMatchContext}
-          onchange={(checked) => {
-            searchShowMatchContext = checked;
             commit();
           }}
         />
