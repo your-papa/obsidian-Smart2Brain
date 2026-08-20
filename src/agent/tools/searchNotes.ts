@@ -1,7 +1,7 @@
 import { tool } from "@langchain/core/tools";
 import type { App } from "obsidian";
 import { z } from "zod";
-import type { SearchAlgorithm, SearchNotesSettings } from "../../types/plugin";
+import type { SearchAlgorithm } from "../../types/plugin";
 import { getLexicalSearchService, waitForLexicalSearch } from "../../search/LexicalSearchService";
 import { rankSearchResults } from "../../search/finalSearchRanking";
 import { buildRecentBoostMap, getRecentNotes } from "../../search/recentNotes";
@@ -48,26 +48,87 @@ interface SearchToolResultPayload {
 	message?: string;
 }
 
+/**
+ * How many notes to return when the caller does not say.
+ *
+ * 10 rather than a smaller number because the benchmark scores nDCG@10 and the useful
+ * signal is spread across that window, not concentrated at the top: the multi-target
+ * cases (`smart city sensors and data platforms` has two grade-2 targets and three
+ * grade-1s) lose real recall at 5.
+ */
+const DEFAULT_MAX_RESULTS = 10;
+
+/**
+ * Ceiling on `maxResults`, whatever the caller asks for.
+ *
+ * Each result carries a snippet, match badges and frontmatter, so the token cost is
+ * real. 25 matches `RESULT_LIMIT` in the relevance benchmark — chosen there as "wide
+ * enough that a target outside the top-10 is still visible" — and past it the tail is
+ * noise: semantic retrieval returns a full page of confident-looking neighbours for any
+ * query, including meaningless ones (measured at cosine 0.515-0.597 against 0.665-0.700
+ * for genuine matches).
+ */
+const MAX_RESULTS_CEILING = 25;
+
 interface ResolvedSearchToolSettings {
-	maxResults: number;
 	showPath: boolean;
 	showTags: boolean;
 	showMatchBadges: boolean;
 	showMatchContext: boolean;
 }
 
-/** Whether the vault has an embedding index, and so whether either semantic leg can run. */
+/** Whether the vault has an embedding index configured at all. */
 function hasSearchEmbeddingIndex(): boolean {
 	return Boolean(getData().searchEmbedIndex);
+}
+
+/** Why a semantic request could not run as asked. */
+type SemanticUnavailableReason = "not-configured" | "not-ready" | "empty";
+
+/**
+ * Can the semantic leg actually return anything right now?
+ *
+ * A configured index id is necessary but **not sufficient**, which is the trap here.
+ * `VectorStoreService.semanticSearch` returns a bare `[]` for at least six distinct
+ * conditions — index not initialized, no instance, no model, no embeddings, query too
+ * large, and a caught provider error — and `[]` is indistinguishable from "this query
+ * genuinely has no matches". Reporting the latter for the former makes the agent treat
+ * an infrastructure failure as evidence about the vault's contents, and reformulate
+ * against a leg that was never going to answer.
+ *
+ * This is the same class of defect as the indexing hang fixed earlier (a dead provider
+ * reported as progress); it just surfaces on the read path instead of the write path.
+ *
+ * `getStats()` is the cheapest honest signal: it resolves the instance, counts notes,
+ * and reports `isReady` (initialized AND a resolvable model), so it separates
+ * "misconfigured or unreachable" from "configured and populated".
+ */
+async function semanticAvailability(): Promise<{ available: boolean; reason?: SemanticUnavailableReason }> {
+	if (!hasSearchEmbeddingIndex()) return { available: false, reason: "not-configured" };
+
+	try {
+		if (!(await waitForVectorStore())) return { available: false, reason: "not-ready" };
+
+		const stats = await getVectorStoreService().getStats();
+		if (!stats.isReady) return { available: false, reason: "not-ready" };
+		if (stats.documentCount === 0) return { available: false, reason: "empty" };
+		return { available: true };
+	} catch (error) {
+		// getOrCreateInstance throws when an index fails to initialize. Treat any
+		// failure to *establish* availability as unavailable rather than letting it
+		// propagate — the tool's job is to answer the query, degraded if necessary.
+		Logger.warn("[search_notes] Could not determine semantic availability:", error);
+		return { available: false, reason: "not-ready" };
+	}
 }
 
 /**
  * Resolve the algorithm actually used for a call.
  *
- * Checked **per call** rather than once at tool-construction time: the schema is
- * static (all three values always offered), because an enum shaped at build time
- * cannot express an index that exists but is empty, still building, or backed by an
- * unreachable provider. One check covers every case.
+ * Checked **per call** rather than once at tool-construction time: the schema is static
+ * (all three values always offered), because an enum shaped at build time cannot express
+ * an index that exists but is empty, still building, or backed by an unreachable
+ * provider.
  *
  * The downgrade deliberately lives here and NOT in `performSearch`. That function is
  * shared with the search modal (which already gates on the same predicate before
@@ -75,21 +136,38 @@ function hasSearchEmbeddingIndex(): boolean {
  * the relevance benchmark silently measure lexical while reporting semantic, which is
  * exactly the kind of quiet substitution the benchmark exists to catch.
  */
-function resolveAlgorithm(requested: SearchAlgorithm): {
+async function resolveAlgorithm(requested: SearchAlgorithm): Promise<{
 	algorithm: SearchAlgorithm;
 	downgradedFrom?: SearchAlgorithm;
-} {
-	if (requested === "lexical" || hasSearchEmbeddingIndex()) {
-		return { algorithm: requested };
-	}
+	reason?: SemanticUnavailableReason;
+}> {
+	if (requested === "lexical") return { algorithm: requested };
 
-	return { algorithm: "lexical", downgradedFrom: requested };
+	const { available, reason } = await semanticAvailability();
+	if (available) return { algorithm: requested };
+
+	return { algorithm: "lexical", downgradedFrom: requested, reason };
 }
 
-const NO_EMBEDDING_INDEX_MESSAGE =
-	"Semantic search is unavailable because no embedding index is configured for this vault. " +
-	"Ran a lexical search instead, so results may miss synonym or cross-language matches. " +
-	"Do not retry with semantic or hybrid — this cannot change during the conversation.";
+/**
+ * Explain a downgrade in terms the agent can act on.
+ *
+ * The retry advice differs by cause, which is the whole point of distinguishing them:
+ * a missing index cannot appear mid-conversation, but an index that is still building
+ * can finish, so telling the agent "do not retry" in that case would be wrong.
+ */
+function downgradeMessage(reason: SemanticUnavailableReason | undefined): string {
+	const suffix = "Ran a lexical search instead, so results may miss synonym or cross-language matches.";
+
+	switch (reason) {
+		case "empty":
+			return `Semantic search is unavailable because the embedding index is empty or still building. ${suffix} It may become available later; prefer varying your search terms for now.`;
+		case "not-ready":
+			return `Semantic search is unavailable because the embedding index could not be initialized — the model or its provider may be unreachable. ${suffix} Do not treat this as evidence about the vault's contents.`;
+		default:
+			return `Semantic search is unavailable because no embedding index is configured for this vault. ${suffix} Do not retry with semantic or hybrid — this cannot change during the conversation.`;
+	}
+}
 
 function normalizeTags(tags: string[] | undefined): string[] | undefined {
 	if (!tags?.length) {
@@ -285,13 +363,12 @@ export function createSearchNotesTool(app: App) {
 	 * when deciding what to open, and the token cost is bounded by `maxResults`, so
 	 * there is nothing for a user to reasonably tune here.
 	 */
-	const resolveSettings = (settings?: SearchNotesSettings): ResolvedSearchToolSettings => ({
-		maxResults: settings?.maxResults ?? 10,
+	const settings: ResolvedSearchToolSettings = {
 		showPath: true,
 		showTags: true,
 		showMatchBadges: true,
 		showMatchContext: true,
-	});
+	};
 
 	const searchFn = async ({
 		query = "",
@@ -299,18 +376,28 @@ export function createSearchNotesTool(app: App) {
 		tags,
 		recentOnly = false,
 		algorithm: requestedAlgorithm = "lexical",
+		maxResults,
 	}: {
 		query?: string;
 		pathPrefix?: string;
 		tags?: string[];
 		recentOnly?: boolean;
 		algorithm?: SearchAlgorithm;
+		maxResults?: number;
 	}): Promise<string> => {
-		// Get fresh config each call to pick up any changes
-		const currentConfig = getSearchNotesConfig();
-		const settings = resolveSettings(currentConfig?.settings as SearchNotesSettings | undefined);
-		const { maxResults: limit, showMatchBadges, showMatchContext, showPath, showTags } = settings;
-		const { algorithm, downgradedFrom } = resolveAlgorithm(requestedAlgorithm);
+		const { showMatchBadges, showMatchContext, showPath, showTags } = settings;
+		// Clamp rather than reject: a model asking for 100 wants "as many as you can
+		// give me", and failing the call over it helps nobody. `Number.isFinite` guards
+		// a NaN slipping through, which would otherwise clamp to NaN and slice to empty.
+		const requestedLimit = Number.isFinite(maxResults) ? Math.trunc(maxResults as number) : DEFAULT_MAX_RESULTS;
+		const limit = Math.min(Math.max(requestedLimit, 1), MAX_RESULTS_CEILING);
+		// `recentOnly` reads the recent-notes list and never searches, so no algorithm
+		// applies to it. Resolving one anyway would label the returned history as lexical
+		// output and — on an empty history — claim a search found nothing, for a search
+		// that never ran.
+		const { algorithm, downgradedFrom, reason } = recentOnly
+			? { algorithm: requestedAlgorithm, downgradedFrom: undefined, reason: undefined }
+			: await resolveAlgorithm(requestedAlgorithm);
 
 		// Build filter from parameters
 		const filterPathPrefixes: string[] | undefined = pathPrefix ? [normalizeVaultPath(pathPrefix)] : undefined;
@@ -373,15 +460,21 @@ export function createSearchNotesTool(app: App) {
 		// The downgrade notice takes precedence over "no results": when semantic was
 		// asked for and could not run, an empty result set says nothing about the query.
 		if (downgradedFrom) {
+			const explanation = downgradeMessage(reason);
 			payload.message =
 				limitedResults.length === 0
-					? `${NO_EMBEDDING_INDEX_MESSAGE} The lexical search also found no notes matching "${query}".`
-					: NO_EMBEDDING_INDEX_MESSAGE;
+					? `${explanation} The lexical search also found no notes matching "${query}".`
+					: explanation;
 			return JSON.stringify(payload);
 		}
 
 		if (limitedResults.length === 0) {
-			payload.message = `No notes found matching "${query}". Try a different search term.`;
+			// An empty recent-notes list is not a failed search — nothing was searched.
+			// Telling the agent to "try a different search term" would send it
+			// reformulating a query that was never used.
+			payload.message = recentOnly
+				? "No recently opened notes to return. This is the recent-note history, not a search — a different query will not change it."
+				: `No notes found matching "${query}". Try a different search term.`;
 			return JSON.stringify(payload);
 		}
 
@@ -429,6 +522,15 @@ export function createSearchNotesTool(app: App) {
 				.optional()
 				.describe(
 					"When true, ignore query text and return recently opened notes, optionally filtered by pathPrefix and tags.",
+				),
+			// Deliberately no `.min()`/`.max()`: Zod rejects the whole tool call before the
+			// handler runs, costing the agent a turn over a number it can only guess at.
+			// The handler clamps instead, so an out-of-range ask still returns results.
+			maxResults: z
+				.number()
+				.optional()
+				.describe(
+					`How many notes to return (default ${DEFAULT_MAX_RESULTS}, max ${MAX_RESULTS_CEILING}; out-of-range values are clamped). Ask for fewer when you want one specific note and more when surveying what exists on a topic — each result carries a snippet and metadata, so a large value is a real context cost.`,
 				),
 			algorithm: z
 				.enum(["lexical", "semantic", "hybrid"])

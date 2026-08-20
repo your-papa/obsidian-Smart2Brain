@@ -171,20 +171,14 @@ export interface StaleGuidance {
 	label: string;
 }
 
-/**
- * Tool-specific settings for search_notes tool
+/*
+ * `SearchNotesSettings` was removed: the tool has no user-configurable settings.
+ *
+ * Retrieval algorithm and result count are per-call parameters the model picks — it has
+ * the query context to choose and the user does not — and the result-detail flags are
+ * hardcoded on for the agent (they remain user-facing for the search *modal*). See
+ * `SearchAlgorithm` and `createSearchNotesTool`.
  */
-export interface SearchNotesSettings {
-	/**
-	 * Maximum number of results to return.
-	 *
-	 * The only remaining setting: it bounds how much of the result set reaches the
-	 * context window, which is a genuine budget decision. The retrieval algorithm moved
-	 * to a per-call tool parameter, and the result-detail flags are hardcoded on for the
-	 * agent — see `SearchAlgorithm` and `createSearchNotesTool`.
-	 */
-	maxResults: number;
-}
 
 /**
  * Tool-specific settings for read_content tool
@@ -240,7 +234,6 @@ export interface ManageNotesSettings {
  * Union type of all tool-specific settings
  */
 export type ToolSpecificSettings =
-	| SearchNotesSettings
 	| ReadContentSettings
 	| GrepNotesSettings
 	| ManageNotesSettings

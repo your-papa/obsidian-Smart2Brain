@@ -923,10 +923,27 @@ describe("performSearch lexical startup behavior", () => {
  * comment on `mockSearchEmbedIndex`.
  */
 describe("search_notes algorithm parameter", () => {
-	function semanticStore(results: Array<{ path: string; name: string; score: number }>) {
+	/**
+	 * A vector store that is configured, initialized and populated — the only state in
+	 * which a semantic request runs as asked.
+	 *
+	 * `getStats` is part of the contract because a configured index id is necessary but
+	 * not sufficient: `semanticSearch` returns a bare `[]` for six different failure
+	 * conditions, and `[]` is indistinguishable from "no matches".
+	 */
+	function semanticStore(
+		results: Array<{ path: string; name: string; score: number }>,
+		stats: { isReady?: boolean; documentCount?: number } = {},
+	) {
 		mockWaitForVectorStore.mockResolvedValue(true);
 		const semanticSearch = vi.fn().mockResolvedValue(results);
-		mockGetVectorStoreService.mockReturnValue({ semanticSearch });
+		const getStats = vi.fn().mockResolvedValue({
+			isReady: stats.isReady ?? true,
+			documentCount: stats.documentCount ?? 42,
+			providerId: "openai",
+			modelId: "text-embedding-3-small",
+		});
+		mockGetVectorStoreService.mockReturnValue({ semanticSearch, getStats });
 		return semanticSearch;
 	}
 
@@ -1058,5 +1075,137 @@ describe("search_notes algorithm parameter", () => {
 		expect(createSearchNotesTool({} as App).description).toBe("Find my notes, my way");
 		mockSearchEmbedIndex = null;
 		expect(createSearchNotesTool({} as App).description).toBe("Find my notes, my way");
+	});
+
+	/*
+	 * A configured index id is necessary but NOT sufficient.
+	 *
+	 * `semanticSearch` returns a bare `[]` when the index is uninitialized, has no
+	 * instance, no model, no embeddings, the query is too large, or a provider call
+	 * threw — and `[]` reads identically to "this query has no matches". Reporting the
+	 * latter for the former makes the agent treat an infrastructure failure as evidence
+	 * about the vault's contents. These pin the distinction per cause, because the retry
+	 * advice differs: a missing index cannot appear mid-conversation, but a building one
+	 * can finish.
+	 */
+	it("downgrades when the index is configured but not initialized", async () => {
+		semanticStore([], { isReady: false });
+
+		const tool = createSearchNotesTool({} as App);
+		const parsed = JSON.parse(String(await tool.invoke({ query: "alpha", algorithm: "semantic" })));
+
+		expect(parsed.algorithm).toBe("lexical");
+		expect(parsed.requestedAlgorithm).toBe("semantic");
+		expect(parsed.message).toMatch(/could not be initialized/i);
+		// Must NOT tell the agent this is permanent — a provider can come back.
+		expect(parsed.message).not.toMatch(/do not retry/i);
+		expect(parsed.results.length).toBeGreaterThan(0);
+	});
+
+	it("downgrades when the index is configured but empty", async () => {
+		semanticStore([], { documentCount: 0 });
+
+		const tool = createSearchNotesTool({} as App);
+		const parsed = JSON.parse(String(await tool.invoke({ query: "alpha", algorithm: "hybrid" })));
+
+		expect(parsed.algorithm).toBe("lexical");
+		expect(parsed.requestedAlgorithm).toBe("hybrid");
+		expect(parsed.message).toMatch(/empty or still building/i);
+		expect(parsed.message).not.toMatch(/do not retry/i);
+	});
+
+	it("downgrades rather than throwing when availability cannot be determined", async () => {
+		mockWaitForVectorStore.mockResolvedValue(true);
+		mockGetVectorStoreService.mockReturnValue({
+			semanticSearch: vi.fn(),
+			getStats: vi.fn().mockRejectedValue(new Error("index failed to open")),
+		});
+
+		const tool = createSearchNotesTool({} as App);
+		const parsed = JSON.parse(String(await tool.invoke({ query: "alpha", algorithm: "semantic" })));
+
+		expect(parsed.algorithm).toBe("lexical");
+		expect(parsed.requestedAlgorithm).toBe("semantic");
+		expect(parsed.results.length).toBeGreaterThan(0);
+	});
+
+	/*
+	 * `recentOnly` returns the recent-note history and never searches, so no algorithm
+	 * applies. Resolving one anyway labelled the history as lexical output and, on an
+	 * empty history, claimed a search found nothing for a search that never ran —
+	 * sending the agent off to reformulate a query that was never used.
+	 */
+	it("does not claim a downgrade for a recentOnly call", async () => {
+		mockSearchEmbedIndex = null;
+
+		const tool = createSearchNotesTool({} as App);
+		const parsed = JSON.parse(String(await tool.invoke({ recentOnly: true, algorithm: "semantic" })));
+
+		// The point of the fix: no downgrade metadata for a path that never searched.
+		expect(parsed.requestedAlgorithm).toBeUndefined();
+		expect(parsed.message).not.toMatch(/semantic search is unavailable/i);
+	});
+
+	it("explains an empty recentOnly result as history, not a failed search", async () => {
+		mockSearchEmbedIndex = null;
+
+		const tool = createSearchNotesTool({} as App);
+		const parsed = JSON.parse(String(await tool.invoke({ recentOnly: true, algorithm: "hybrid" })));
+
+		expect(parsed.results).toHaveLength(0);
+		expect(parsed.message).toMatch(/not a search/i);
+		expect(parsed.message).not.toMatch(/try a different search term/i);
+	});
+});
+
+/*
+ * `maxResults` is a per-call parameter for the same reason as `algorithm`: "find the
+ * note about X" wants a handful and "what do I have on Y" wants a page, and only the
+ * caller knows which. It is clamped rather than rejected — a model asking for 100 means
+ * "as many as you can", and failing the call over it helps nobody.
+ */
+describe("search_notes maxResults parameter", () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+		mockRecentNotes.length = 0;
+		mockSearchEmbedIndex = null;
+		mockStoredDescription = "default description (embeddings available)";
+		mockWaitForVectorStore.mockResolvedValue(false);
+		mockWaitForLexicalSearch.mockResolvedValue(true);
+		mockShouldBlockFile.mockReturnValue(false);
+		mockGetLexicalSearchService.mockReturnValue({ search: mockLexicalSearch, browse: mockBrowse });
+		mockLexicalSearch.mockResolvedValue(
+			Array.from({ length: 40 }, (_, i) => ({ path: `Notes/n${i}.md`, name: `n${i}`, score: 100 - i })),
+		);
+	});
+
+	it("defaults to 10 when the caller does not ask", async () => {
+		const tool = createSearchNotesTool({} as App);
+		const parsed = JSON.parse(String(await tool.invoke({ query: "alpha" })));
+
+		expect(parsed.maxResults).toBe(10);
+		expect(parsed.results).toHaveLength(10);
+	});
+
+	it("honours a caller-supplied value", async () => {
+		const tool = createSearchNotesTool({} as App);
+		const parsed = JSON.parse(String(await tool.invoke({ query: "alpha", maxResults: 3 })));
+
+		expect(parsed.results).toHaveLength(3);
+	});
+
+	it("clamps above the ceiling instead of failing", async () => {
+		const tool = createSearchNotesTool({} as App);
+		const parsed = JSON.parse(String(await tool.invoke({ query: "alpha", maxResults: 500 })));
+
+		expect(parsed.maxResults).toBe(25);
+		expect(parsed.results).toHaveLength(25);
+	});
+
+	it("clamps a non-positive value to at least one result", async () => {
+		const tool = createSearchNotesTool({} as App);
+		const parsed = JSON.parse(String(await tool.invoke({ query: "alpha", maxResults: 0 })));
+
+		expect(parsed.results).toHaveLength(1);
 	});
 });

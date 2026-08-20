@@ -320,11 +320,11 @@ function buildConfigPatch(): Partial<ToolConfig> {
 	};
 
 	if (capturedToolId === "search_notes") {
-		// `algorithm` is now a per-call tool parameter the model chooses, and the four
-		// display flags are hardcoded on for the agent — neither is user-configurable.
-		// `maxResults` is kept because it bounds how much of the result set reaches the
-		// context window, which is a real budget decision.
-		updatedConfig.settings = { maxResults };
+		// Nothing here is user-configurable: `algorithm` and `maxResults` are per-call
+		// tool parameters the model chooses, and the four display flags are hardcoded on
+		// for the agent. Persist an empty settings object so a stale one from an earlier
+		// version stops being carried forward.
+		updatedConfig.settings = {};
 	} else if (capturedToolId === "read_content") {
 		// Build settings with three-state processors:
 		// undefined = auto, null = disabled, ChatModel = custom
@@ -361,13 +361,12 @@ function handleResetToDefault() {
 	name = defaultConfig.name;
 	description = defaultConfig.description;
 
-	if (capturedToolId === "search_notes" && defaultConfig.settings) {
+	if (capturedToolId === "search_notes") {
 		// Reset to the variant matching this vault, not whichever one ships in
 		// DEFAULT_TOOLS_CONFIG — otherwise "reset" could hand a vault with no embedding
-		// index a description advertising semantic search.
+		// index a description advertising semantic search. No settings to reset: the
+		// tool has no user-configurable ones.
 		description = getSearchNotesDescription(Boolean(pluginData.searchEmbedIndex));
-		const settings = defaultConfig.settings as { maxResults: number };
-		maxResults = settings.maxResults;
 	} else if (capturedToolId === "read_content" && defaultConfig.settings) {
 		// Reset processors to "auto" mode
 		imageProcessor = undefined;
@@ -425,22 +424,15 @@ function openProcessorSelectionModal(currentProcessor: ChatModel | null, onSelec
       hybrid wins the hard tier, and neither difference is significant. The agent has the
       query context needed to choose; the user does not.
 
+      `maxResults` is a per-call parameter for the same reason: "find the note about X"
+      wants a handful, "what do I have on Y" wants a page, and only the caller knows
+      which this is.
+
       The four result-detail toggles are hardcoded on for the agent. They still exist for
       the search *modal*, under Settings → Search → Display.
+
+      So this tool has no user-facing settings at all — nothing to render.
     -->
-    <SettingGroup heading="Search Settings">
-      <SettingContainer name="Max Notes to Return" desc="Maximum number of notes to return to the AI agent.">
-        <Text
-          inputType="number"
-          value={maxResults}
-          placeholder="10"
-          onblur={(v) => {
-            maxResults = Number.parseInt(String(v)) || 10;
-            commit();
-          }}
-        />
-      </SettingContainer>
-    </SettingGroup>
   {:else if capturedToolId === "grep_notes"}
     <SettingGroup heading="Grep Settings">
       <SettingContainer name="Context Lines" desc="Number of surrounding lines to show on each side of a match.">

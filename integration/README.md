@@ -794,6 +794,14 @@ built `1787061734704`), no reindex, each figure reproduced across two runs.
 
 `BASELINE_MEAN_NDCG` stays at 0.92 — 0.9245 clears it without adjustment.
 
+**Re-measured after an Obsidian restart the same day: core 0.9237, hard 0.7809** (both
+reproduced across two runs, same index build `1787061734704`, ranker byte-identical).
+The whole delta is one query — `Octopus Intelligence` 0.945 → 0.933 — reordering its
+graded *runners-up*; MRR is unchanged at 0.9286, so rank 1 is identical everywhere. This
+is the order-dependence documented above, and it is worth knowing that it survives a
+process restart on a persisted index, not just a rebuild: **treat differences below
+~0.002 as noise unless MRR moves with them.**
+
 **The hard tier went *up*, which is the opposite of the first pass.** The reason is worth
 recording: the first pass added only distractors, so it could only subtract. This one
 found a case where the *ranker was right and the judgments were wrong*.

@@ -304,9 +304,9 @@ export const DEFAULT_TOOLS_CONFIG: ToolsConfig = {
 		// lexical-only text at build time when no index is configured. Any value NOT in
 		// `SEARCH_NOTES_DESC_DEFAULTS` is treated as a user customization and left alone.
 		description: SEARCH_NOTES_DESC_EMBEDDINGS,
-		settings: {
-			maxResults: 10,
-		},
+		// No settings: retrieval algorithm and result count are per-call tool parameters
+		// the model picks, and the result-detail flags are hardcoded on for the agent.
+		settings: {},
 	},
 	list_directory: {
 		enabled: true,
