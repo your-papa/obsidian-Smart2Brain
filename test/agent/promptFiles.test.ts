@@ -169,6 +169,24 @@ describe("PromptFilesService", () => {
 		expect(svc.getBasePrompt("default-agent")).toBe("new base prompt");
 	});
 
+	/*
+	 * The diff modal closes synchronously after calling setPrompt, so its save must be able
+	 * to detect a failed write — that rejection is what drives the error Notice in
+	 * AgentManager.openSystemPromptDiff / openMemoryPromptDiff. Resolving quietly here would
+	 * show the user a successful save that never happened, with the edit lost to the closed
+	 * editor.
+	 */
+	it("propagates a failed write instead of resolving quietly", async () => {
+		const adapter = makeAdapter();
+		const svc = makeService(adapter);
+		adapter.write.mockRejectedValueOnce(new Error("EACCES"));
+
+		await expect(svc.writeBasePrompt("default-agent", "new base prompt")).rejects.toThrow("EACCES");
+
+		// The cache must not claim the write landed either.
+		expect(svc.getBasePrompt("default-agent")).not.toBe("new base prompt");
+	});
+
 	it("resetBasePrompt rewrites the file to the current default", async () => {
 		const adapter = makeAdapter({ [DEFAULT_PATH]: "drifted" });
 		const svc = makeService(adapter);

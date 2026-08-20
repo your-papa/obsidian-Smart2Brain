@@ -298,18 +298,10 @@ const memoryPromptDrifted = $derived.by(() => {
 
 function openMemoryPromptDiff() {
 	if (!selectedAgent) return;
-	const promptFiles = plugin.promptFilesService;
-	new SystemPromptModal(
-		plugin,
-		{
-			getPrompt: () => promptFiles?.getMemoryPrompt(agentId) ?? DEFAULT_MEMORY_PROMPT,
-			setPrompt: (prompt: string) => {
-				void promptFiles?.writeMemoryPrompt(agentId, prompt).then(() => applyChanges());
-			},
-			defaultPrompt: DEFAULT_MEMORY_PROMPT,
-		},
-		{ title: `Memory Instructions — ${selectedAgent.name}`, showDiff: true },
-	).open();
+	// Delegate rather than rebuild the modal here: AgentManager owns the save contract
+	// (invalidate caches on success, surface a Notice on failure), and duplicating it was
+	// how this call site ended up silently swallowing write errors.
+	plugin.agentManager?.openMemoryPromptDiff(agentId);
 	memoryPromptDriftTick++;
 }
 

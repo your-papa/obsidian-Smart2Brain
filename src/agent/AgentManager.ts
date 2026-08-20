@@ -453,10 +453,20 @@ export class AgentManager {
 			this.plugin,
 			{
 				getPrompt: () => promptFiles?.getBasePrompt(agentId) ?? BASE_SYSTEM_PROMPT,
+				// The modal closes synchronously after this, so a rejected write would read as
+				// a successful save (and leave an unhandled rejection). The edit only exists
+				// in the closed editor at that point — say so rather than letting the user
+				// believe it landed. Same contract as `openSkillDiff`.
 				setPrompt: (prompt: string) => {
-					void promptFiles?.writeBasePrompt(agentId, prompt).then(() => {
-						this.invalidateSystemPromptCaches();
-					});
+					void promptFiles
+						?.writeBasePrompt(agentId, prompt)
+						.then(() => {
+							this.invalidateSystemPromptCaches();
+						})
+						.catch((error) => {
+							Logger.error(`Failed to save the base prompt for ${agent.name}:`, error);
+							new Notice(`Could not save the system prompt: ${extractErrorMessage(error)}`);
+						});
 				},
 				defaultPrompt: BASE_SYSTEM_PROMPT,
 			},
@@ -478,10 +488,17 @@ export class AgentManager {
 			this.plugin,
 			{
 				getPrompt: () => promptFiles?.getMemoryPrompt(agentId) ?? DEFAULT_MEMORY_PROMPT,
+				// See `openSystemPromptDiff` — same close-then-save race.
 				setPrompt: (prompt: string) => {
-					void promptFiles?.writeMemoryPrompt(agentId, prompt).then(() => {
-						this.invalidateSystemPromptCaches();
-					});
+					void promptFiles
+						?.writeMemoryPrompt(agentId, prompt)
+						.then(() => {
+							this.invalidateSystemPromptCaches();
+						})
+						.catch((error) => {
+							Logger.error(`Failed to save the memory prompt for ${agent.name}:`, error);
+							new Notice(`Could not save the memory instructions: ${extractErrorMessage(error)}`);
+						});
 				},
 				defaultPrompt: DEFAULT_MEMORY_PROMPT,
 			},
