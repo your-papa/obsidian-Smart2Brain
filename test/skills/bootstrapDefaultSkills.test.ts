@@ -347,6 +347,43 @@ describe("SkillsService.bootstrapDefaultSkills", () => {
 		expect([...svc.getCachedSkills().keys()]).toEqual(before);
 	});
 
+	/*
+	 * A saved edit can change frontmatter the runtime depends on: `description` is advertised
+	 * to the model, `allowed-tools` decides which built-in tools get bound. Refreshing the
+	 * entry from the written bytes (rather than rescanning) means that lands even when the
+	 * folder scan would have failed — there is no I/O to fail.
+	 */
+	it("refreshes the saved skill's frontmatter without needing a folder rescan", async () => {
+		const adapter = makeAdapter();
+		const svc = makeService(adapter);
+		await svc.bootstrapDefaultSkills();
+		await svc.discoverSkills();
+
+		const edited = SUBJECT.content
+			.replace(/^description: .*$/m, "description: My own description")
+			.replace(/^allowed-tools: .*$/m, "allowed-tools: read_content");
+		// Any rescan would fail here; the refresh must not depend on one.
+		adapter.list.mockRejectedValueOnce(new Error("EIO"));
+
+		await svc.writeSkillFile(SUBJECT.name, edited);
+
+		const entry = svc.getCachedSkills().get(SUBJECT.name);
+		expect(entry?.frontmatter.description).toBe("My own description");
+		expect(entry?.frontmatter.allowedTools).toBe("read_content");
+	});
+
+	it("leaves other skills' cache entries untouched when one is saved", async () => {
+		const adapter = makeAdapter();
+		const svc = makeService(adapter);
+		await svc.bootstrapDefaultSkills();
+		await svc.discoverSkills();
+		const others = [...svc.getCachedSkills().keys()].filter((n) => n !== SUBJECT.name);
+
+		await svc.writeSkillFile(SUBJECT.name, `${SUBJECT.content}\n\nMine.`);
+
+		expect([...svc.getCachedSkills().keys()].filter((n) => n !== SUBJECT.name)).toEqual(others);
+	});
+
 	it("keeps the stale mark when the diff view saves a further edit", async () => {
 		const adapter = makeAdapter({ [SUBJECT_PATH]: `${SUBJECT.content}\n\nMine.` });
 		const svc = makeService(adapter);

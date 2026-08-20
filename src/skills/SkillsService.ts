@@ -781,10 +781,33 @@ export class SkillsService {
 			this.publishStaleSkills();
 		}
 
-		// Best-effort: rediscovery refreshes the metadata cache, but a failure here must not
-		// report the (already durable) save as failed. Log instead — the next discovery pass
-		// picks the file up, and reporting failure would both mislead the user and skip the
-		// caller's cache invalidation, which is what actually gets the edit into the next run.
+		// Refresh THIS skill's cache entry from the bytes we just wrote, rather than
+		// rescanning the folder. The edit may have changed frontmatter the runtime depends on
+		// — `description` (advertised to the model), `allowed-tools` (which built-in tools get
+		// bound), `metadata.linkedPlugin` — so leaving the old entry in place would let the
+		// next run advertise a stale description or attach the wrong tool set.
+		//
+		// Parsing in-process needs no I/O, so unlike a rescan it cannot half-fail; and it
+		// leaves every OTHER skill's entry untouched, so one save can't disturb the rest of
+		// the cache. A rename of the `name:` field is the one case that still needs a full
+		// scan (the old key would linger), so fall back to one there.
+		const { frontmatter } = parseFrontmatter(content);
+		const parsedName = frontmatter.name;
+		if (parsedName && parsedName === skillName) {
+			const { category, linkedPluginId, corePluginId } = this.extractSkillLinks(frontmatter.metadata);
+			this.skillsCache.set(skillName, {
+				frontmatter: frontmatter as SkillFrontmatter,
+				path: `${this.getSkillsDir()}/${skillName}`,
+				linkedPluginId,
+				category,
+				corePluginId,
+			});
+			return;
+		}
+
+		// Renamed (or unparseable) — the cache is keyed by name, so only a full scan can
+		// reconcile it. Still best-effort: the bytes are already durable, and reporting
+		// failure here would both mislead the user and skip the caller's cache invalidation.
 		try {
 			await this.discoverSkills();
 		} catch (error) {
