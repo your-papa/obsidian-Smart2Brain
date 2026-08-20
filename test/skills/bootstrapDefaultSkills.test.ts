@@ -390,6 +390,26 @@ describe("SkillsService.bootstrapDefaultSkills", () => {
 	 * the file. Discovery would skip it; the cache must agree rather than keep advertising a
 	 * description, tool set, or plugin wiring the file no longer declares.
 	 */
+	/*
+	 * `description` is interpolated unguarded into the <available_skills> block, so an entry
+	 * without one would throw in escapeXml and take down system-prompt assembly — one
+	 * malformed skill breaking every agent run. writeSkillFile applies discovery's own
+	 * validation so such an entry never reaches the cache.
+	 */
+	it("evicts rather than caching a save that drops the required description", async () => {
+		const adapter = makeAdapter();
+		const svc = makeService(adapter);
+		await svc.bootstrapDefaultSkills();
+		await svc.discoverSkills();
+
+		const noDescription = SUBJECT.content.replace(/^description: .*$/m, "description:");
+		await svc.writeSkillFile(SUBJECT.name, noDescription);
+
+		expect(svc.getCachedSkills().has(SUBJECT.name)).toBe(false);
+		// The prompt block must still assemble for the remaining skills.
+		expect(() => svc.generateContextXml()).not.toThrow();
+	});
+
 	it("evicts the cache entry when a save breaks the name/folder match", async () => {
 		const adapter = makeAdapter();
 		const svc = makeService(adapter);

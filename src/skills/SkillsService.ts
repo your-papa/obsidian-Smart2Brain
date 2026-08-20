@@ -793,17 +793,25 @@ export class SkillsService {
 		const { frontmatter } = parseFrontmatter(content);
 		const { category, linkedPluginId, corePluginId } = this.extractSkillLinks(frontmatter.metadata);
 
-		// `name:` must equal the containing folder — `validateNameMatchesDirectory`, enforced
-		// by discovery. We always write to `<skillName>/SKILL.md`, so an edit that changes or
-		// drops `name:` doesn't rename the skill: it makes the file invalid, and the next
-		// discovery would SKIP it. Mirror that here by evicting the entry, rather than
-		// leaving stale metadata that advertises a description, tool set, or plugin wiring
-		// the file on disk no longer declares. (A real rename is a folder move — `saveSkill`
-		// / `manage_skills` territory, not this path.)
-		if (frontmatter.name !== skillName) {
+		// Apply exactly the checks discovery applies, so this path can never admit a skill a
+		// folder scan would have rejected. That covers the name/folder match — we always
+		// write to `<skillName>/SKILL.md`, so an edit changing `name:` doesn't rename the
+		// skill, it invalidates the file — and the required `description`, which is
+		// interpolated unguarded into the `<available_skills>` block: caching an entry
+		// without one would throw in `escapeXml` and take down system-prompt assembly
+		// entirely, so an invalid save must not be able to break the next agent run.
+		//
+		// Evicting matches what the next discovery pass would do (it skips invalid files),
+		// rather than leaving stale metadata that advertises a description, tool set, or
+		// plugin wiring the file on disk no longer declares. (A real rename is a folder move
+		// — `saveSkill` / `manage_skills` territory, not this path.)
+		const validation = validateFrontmatter(frontmatter, skillName);
+		if (!validation.valid) {
 			this.skillsCache.delete(skillName);
 			Log.info(
-				`Skill ${skillName} saved with name "${frontmatter.name ?? "(none)"}", which does not match its folder — dropped from the cache until corrected`,
+				`Skill ${skillName} saved with invalid frontmatter (${validation.errors
+					.map((e) => e.message)
+					.join(", ")}) — dropped from the cache until corrected`,
 			);
 			return;
 		}
@@ -1053,8 +1061,14 @@ export class SkillsService {
 
 	/**
 	 * Escape special XML characters.
+	 *
+	 * Tolerates a missing value rather than throwing: every caller interpolates into the
+	 * `<available_skills>` block, so a `.replace` on undefined would abort system-prompt
+	 * assembly and break the whole agent run over one malformed skill. Entries are validated
+	 * before they enter the cache; this is the backstop for anything that slips past.
 	 */
-	private escapeXml(text: string): string {
+	private escapeXml(text: string | undefined): string {
+		if (!text) return "";
 		return text
 			.replace(/&/g, "&amp;")
 			.replace(/</g, "&lt;")
