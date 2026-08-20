@@ -226,6 +226,216 @@ describe("SkillsService.bootstrapDefaultSkills", () => {
 		expect(adapter.files.has(`${SKILLS}/${subject.name}/SKILL.md`)).toBe(false);
 	});
 
+	/*
+	 * A user can already have a skill for a plugin before we ship a bundled one — the
+	 * on-demand template names itself from the plugin's DISPLAY name, which needn't match our
+	 * bundled folder name (bundled `tasks` covers plugin id `obsidian-tasks-plugin`). Seeding
+	 * anyway would leave two skills describing the same plugin, both advertised to the model
+	 * with partly contradictory guidance. Their skill wins — it may already be specialized to
+	 * how they use the plugin.
+	 */
+	it("does not seed a bundled integration skill when the user already has one for that plugin", async () => {
+		const bundled = BUNDLED_SKILLS.find((s) => s.linkedPluginId === "obsidian-tasks-plugin");
+		expect(bundled).toBeDefined();
+		const subject = bundled as (typeof BUNDLED_SKILLS)[number];
+
+		// The user's own skill for the same plugin, under a different name.
+		const theirs = [
+			"---",
+			"name: my-tasks",
+			"description: How I use Tasks",
+			"metadata:",
+			'  linkedPlugin: "obsidian-tasks-plugin"',
+			"---",
+			"",
+			"My own guidance.",
+		].join("\n");
+		const adapter = makeAdapter({ [`${SKILLS}/my-tasks/SKILL.md`]: theirs });
+		const svc = makeService(adapter);
+		await svc.discoverSkills();
+
+		const seeded = await svc.seedIntegrationSkill("obsidian-tasks-plugin", "Tasks");
+
+		expect(seeded).toBe("my-tasks");
+		expect(adapter.files.has(`${SKILLS}/${subject.name}/SKILL.md`)).toBe(false);
+		expect(adapter.files.get(`${SKILLS}/my-tasks/SKILL.md`)).toBe(theirs);
+	});
+
+	it("still seeds the bundled skill when nothing else covers that plugin", async () => {
+		const subject = BUNDLED_SKILLS.find((s) => s.linkedPluginId === "obsidian-tasks-plugin") as (typeof BUNDLED_SKILLS)[number];
+		const adapter = makeAdapter();
+		const svc = makeService(adapter);
+		await svc.discoverSkills();
+
+		const seeded = await svc.seedIntegrationSkill("obsidian-tasks-plugin", "Tasks");
+
+		expect(seeded).toBe(subject.name);
+		expect(adapter.files.get(`${SKILLS}/${subject.name}/SKILL.md`)).toBe(subject.content);
+	});
+
+	/*
+	 * The skill diff view saves through writeSkillFile. Accepting the shipped body there must
+	 * clear the stale notice, or the user would fix the drift and still be nagged about it.
+	 */
+	it("clears a skill's stale mark when the diff view saves the shipped body", async () => {
+		const edited = `${SUBJECT.content}\n\nMy own section.`;
+		const adapter = makeAdapter({ [SUBJECT_PATH]: edited });
+		const svc = makeService(adapter);
+		await svc.bootstrapDefaultSkills();
+		expect(state.staleSkills).toEqual([SUBJECT.name]);
+
+		await svc.writeSkillFile(SUBJECT.name, SUBJECT.content);
+
+		expect(adapter.files.get(SUBJECT_PATH)).toBe(SUBJECT.content);
+		expect(state.staleSkills).toEqual([]);
+	});
+
+	/*
+	 * The diff modal closes synchronously after calling setPrompt, so a failed write must
+	 * reject rather than resolve quietly — that rejection is what drives the error Notice.
+	 * Swallowing it here would show the user a successful save that never happened.
+	 */
+	it("propagates a failed write instead of reporting success", async () => {
+		const adapter = makeAdapter({ [SUBJECT_PATH]: `${SUBJECT.content}\n\nMine.` });
+		const svc = makeService(adapter);
+		await svc.bootstrapDefaultSkills();
+		adapter.write.mockRejectedValueOnce(new Error("EACCES"));
+
+		await expect(svc.writeSkillFile(SUBJECT.name, SUBJECT.content)).rejects.toThrow("EACCES");
+
+		// The file never changed, so the notice must survive — clearing it would tell the
+		// user the drift is resolved when it isn't.
+		expect(state.staleSkills).toEqual([SUBJECT.name]);
+	});
+
+	/*
+	 * The mirror of the test above: once the bytes are on disk the edit IS saved, so a
+	 * failure in the best-effort rediscovery that follows must not reject. Rejecting would
+	 * tell the user their save failed when it didn't AND skip the caller's cache
+	 * invalidation — the step that actually gets the edit into the next agent run.
+	 */
+	it("still reports success when only the post-write rediscovery fails", async () => {
+		const adapter = makeAdapter({ [SUBJECT_PATH]: `${SUBJECT.content}\n\nMine.` });
+		const svc = makeService(adapter);
+		await svc.bootstrapDefaultSkills();
+		adapter.list.mockRejectedValueOnce(new Error("EIO"));
+
+		await expect(svc.writeSkillFile(SUBJECT.name, SUBJECT.content)).resolves.toBeUndefined();
+
+		expect(adapter.files.get(SUBJECT_PATH)).toBe(SUBJECT.content);
+		// The body matches the shipped default again, so the notice resolves regardless.
+		expect(state.staleSkills).toEqual([]);
+	});
+
+	/*
+	 * discoverSkills used to clear the cache before doing any I/O, so a mid-scan failure left
+	 * it EMPTY. Combined with callers treating a failed rediscovery as non-fatal, the next
+	 * agent run would assemble its prompt from no skills at all — every skill the user has,
+	 * silently gone until some later discovery happened to succeed.
+	 */
+	it("keeps the previous skill cache when a rediscovery scan fails", async () => {
+		const adapter = makeAdapter();
+		const svc = makeService(adapter);
+		await svc.bootstrapDefaultSkills();
+		await svc.discoverSkills();
+		const before = [...svc.getCachedSkills().keys()];
+		expect(before.length).toBeGreaterThan(0);
+
+		adapter.list.mockRejectedValueOnce(new Error("EIO"));
+		await svc.writeSkillFile(SUBJECT.name, SUBJECT.content);
+
+		expect([...svc.getCachedSkills().keys()]).toEqual(before);
+	});
+
+	/*
+	 * A saved edit can change frontmatter the runtime depends on: `description` is advertised
+	 * to the model, `allowed-tools` decides which built-in tools get bound. Refreshing the
+	 * entry from the written bytes (rather than rescanning) means that lands even when the
+	 * folder scan would have failed — there is no I/O to fail.
+	 */
+	it("refreshes the saved skill's frontmatter without needing a folder rescan", async () => {
+		const adapter = makeAdapter();
+		const svc = makeService(adapter);
+		await svc.bootstrapDefaultSkills();
+		await svc.discoverSkills();
+
+		const edited = SUBJECT.content
+			.replace(/^description: .*$/m, "description: My own description")
+			.replace(/^allowed-tools: .*$/m, "allowed-tools: read_content");
+		// Any rescan would fail here; the refresh must not depend on one.
+		adapter.list.mockRejectedValueOnce(new Error("EIO"));
+
+		await svc.writeSkillFile(SUBJECT.name, edited);
+
+		const entry = svc.getCachedSkills().get(SUBJECT.name);
+		expect(entry?.frontmatter.description).toBe("My own description");
+		expect(entry?.frontmatter.allowedTools).toBe("read_content");
+	});
+
+	it("leaves other skills' cache entries untouched when one is saved", async () => {
+		const adapter = makeAdapter();
+		const svc = makeService(adapter);
+		await svc.bootstrapDefaultSkills();
+		await svc.discoverSkills();
+		const others = [...svc.getCachedSkills().keys()].filter((n) => n !== SUBJECT.name);
+
+		await svc.writeSkillFile(SUBJECT.name, `${SUBJECT.content}\n\nMine.`);
+
+		expect([...svc.getCachedSkills().keys()].filter((n) => n !== SUBJECT.name)).toEqual(others);
+	});
+
+	/*
+	 * `name:` must equal the folder name (validateNameMatchesDirectory), and we always write
+	 * to `<skillName>/SKILL.md` — so editing `name:` doesn't rename the skill, it invalidates
+	 * the file. Discovery would skip it; the cache must agree rather than keep advertising a
+	 * description, tool set, or plugin wiring the file no longer declares.
+	 */
+	/*
+	 * `description` is interpolated unguarded into the <available_skills> block, so an entry
+	 * without one would throw in escapeXml and take down system-prompt assembly — one
+	 * malformed skill breaking every agent run. writeSkillFile applies discovery's own
+	 * validation so such an entry never reaches the cache.
+	 */
+	it("evicts rather than caching a save that drops the required description", async () => {
+		const adapter = makeAdapter();
+		const svc = makeService(adapter);
+		await svc.bootstrapDefaultSkills();
+		await svc.discoverSkills();
+
+		const noDescription = SUBJECT.content.replace(/^description: .*$/m, "description:");
+		await svc.writeSkillFile(SUBJECT.name, noDescription);
+
+		expect(svc.getCachedSkills().has(SUBJECT.name)).toBe(false);
+		// The prompt block must still assemble for the remaining skills.
+		expect(() => svc.generateContextXml()).not.toThrow();
+	});
+
+	it("evicts the cache entry when a save breaks the name/folder match", async () => {
+		const adapter = makeAdapter();
+		const svc = makeService(adapter);
+		await svc.bootstrapDefaultSkills();
+		await svc.discoverSkills();
+		expect(svc.getCachedSkills().has(SUBJECT.name)).toBe(true);
+
+		const renamed = SUBJECT.content.replace(/^name: .*$/m, "name: something-else");
+		await svc.writeSkillFile(SUBJECT.name, renamed);
+
+		expect(svc.getCachedSkills().has(SUBJECT.name)).toBe(false);
+		// And it doesn't reappear under the bogus name either — the folder still says
+		// otherwise, so a real discovery pass would skip it too.
+		expect(svc.getCachedSkills().has("something-else")).toBe(false);
+	});
+
+	it("keeps the stale mark when the diff view saves a further edit", async () => {
+		const adapter = makeAdapter({ [SUBJECT_PATH]: `${SUBJECT.content}\n\nMine.` });
+		const svc = makeService(adapter);
+		await svc.bootstrapDefaultSkills();
+
+		await svc.writeSkillFile(SUBJECT.name, `${SUBJECT.content}\n\nStill mine, revised.`);
+
+		expect(state.staleSkills).toEqual([SUBJECT.name]);
+	});
+
 	it("re-checks every skill on subsequent runs", async () => {
 		// The removed fast path returned early once all seed folders existed, which is what
 		// made a version bump unreachable — a second run must still inspect each file.

@@ -220,9 +220,14 @@ function dismiss(id: string): void {
 // an ordinary vault note, so it opens as one — there is no modal for skill bodies.
 function reviewNotice(notice: UpdateNotice): void {
 	if (notice.kind === "skill") {
-		if (notice.skillName) {
-			plugin.app.workspace.openLinkText(`${skillsDir()}/${notice.skillName}/SKILL.md`, "", true);
-		}
+		const skillName = notice.skillName;
+		if (!skillName) return;
+		// Bundled skills diff against the body we ship, so the user can see what moved and
+		// merge it. A user-created skill has no shipped default to compare with — fall back
+		// to just opening the note.
+		void plugin.agentManager?.openSkillDiff(skillName).then((opened) => {
+			if (!opened) plugin.app.workspace.openLinkText(`${skillsDir()}/${skillName}/SKILL.md`, "", true);
+		});
 		return;
 	}
 

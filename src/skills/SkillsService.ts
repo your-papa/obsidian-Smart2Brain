@@ -423,6 +423,20 @@ export class SkillsService {
 		const bundled = getBundledIntegrationSkillForPlugin(pluginId);
 
 		if (bundled) {
+			// The user may already have a skill for this plugin under a DIFFERENT name — the
+			// generated template is named from the plugin's display name, which needn't match
+			// our bundled folder name (e.g. "Tasks" → `tasks` vs our `tasks` for plugin id
+			// `obsidian-tasks-plugin`). Seeding regardless would leave two skills describing
+			// the same plugin, both advertised to the model. Their own skill wins: it's
+			// theirs, and it may already be specialized to how they use the plugin.
+			const existing = this.findSkillForPlugin(pluginId, bundled.name);
+			if (existing) {
+				Log.info(
+					`Skill "${existing}" already covers plugin ${pluginId}; not seeding bundled "${bundled.name}"`,
+				);
+				return existing;
+			}
+
 			// Same three-way reconcile as startup bootstrap, so a community integration skill
 			// that improves upstream reaches vaults that already have it — the on-demand path
 			// had the identical skip-if-exists gap. Fold the outcome into the stale set too:
@@ -441,6 +455,22 @@ export class SkillsService {
 		}
 		const result = await this.saveSkill(generated);
 		return result.valid ? generated.frontmatter.name : null;
+	}
+
+	/**
+	 * An already-discovered skill covering `pluginId` under some name other than `exceptName`,
+	 * or undefined. Matches on `metadata.linkedPlugin` — the field that actually wires a skill
+	 * to its `exec_<plugin>` tool — rather than on the folder name, because a user's generated
+	 * skill is named from the plugin's *display* name and needn't match our bundled name.
+	 *
+	 * Relies on the discovery cache; if discovery hasn't run there is nothing to collide with
+	 * from this service's point of view, and the pre-write existence check still applies.
+	 */
+	private findSkillForPlugin(pluginId: string, exceptName: string): string | undefined {
+		for (const [name, metadata] of this.skillsCache) {
+			if (name !== exceptName && metadata.linkedPluginId === pluginId) return name;
+		}
+		return undefined;
 	}
 
 	/**
@@ -614,10 +644,16 @@ export class SkillsService {
 	 */
 	async discoverSkills(): Promise<Map<string, SkillMetadata>> {
 		const skillsDir = this.getSkillsDir();
-		this.skillsCache.clear();
+		// Build into a fresh map and swap it in only once the scan completes. Clearing the
+		// live cache up front would leave it EMPTY if any I/O below threw — and since callers
+		// may (correctly) treat a failed rediscovery as non-fatal, the next agent run would
+		// then assemble its prompt from no skills at all, silently dropping every skill the
+		// user has until some later discovery happened to succeed.
+		const discovered = new Map<string, SkillMetadata>();
 
 		if (!(await this.adapter.exists(skillsDir))) {
 			Log.debug("Skills directory does not exist yet");
+			this.skillsCache = discovered;
 			this.discovered = true;
 			return this.skillsCache;
 		}
@@ -669,7 +705,7 @@ export class SkillsService {
 					corePluginId,
 				};
 
-				this.skillsCache.set(skillName, metadata);
+				discovered.set(skillName, metadata);
 				Log.debug(`Discovered skill: ${skillName}`);
 			} catch (error) {
 				Log.error(`Error reading skill from ${folder}:`, error);
@@ -687,6 +723,9 @@ export class SkillsService {
 			StartupProfiler.setMeta("slowestSkillFolderMs", Math.round(slowestFolderMs));
 		}
 
+		// Scan completed: publish it. Anything that threw above skipped this line, leaving the
+		// previous cache intact rather than empty.
+		this.skillsCache = discovered;
 		this.discovered = true;
 		Log.info(`Discovered ${this.skillsCache.size} skills`);
 		return this.skillsCache;
@@ -711,6 +750,81 @@ export class SkillsService {
 	 * @param skillName - Name of the skill to load
 	 * @returns Full Skill object or null if not found
 	 */
+	/**
+	 * A skill's raw `SKILL.md` bytes, unparsed. The diff view compares against the bundled
+	 * body verbatim, so it must not round-trip through parse/serialize — that would normalize
+	 * the text and show spurious differences (and, if saved, change the file's fingerprint).
+	 */
+	async readSkillFile(skillName: string): Promise<string> {
+		return this.adapter.read(`${this.getSkillsDir()}/${skillName}/${SKILL_FILENAME}`);
+	}
+
+	/**
+	 * Overwrite a skill's `SKILL.md` verbatim and re-discover, so an edit made in the diff
+	 * view reaches the next agent run. Same verbatim contract as {@link readSkillFile}: text
+	 * saved as the bundled body must fingerprint as that shipped version, or the skill would
+	 * immediately re-report as customized.
+	 */
+	async writeSkillFile(skillName: string, content: string): Promise<void> {
+		// Only the write itself is allowed to fail the save: once these bytes are on disk the
+		// user's edit is durable, and callers surface a rejection as "could not save".
+		await this.adapter.write(`${this.getSkillsDir()}/${skillName}/${SKILL_FILENAME}`, content);
+
+		// Re-evaluate against the shipped history rather than assuming: accepting the new
+		// default in the diff view resolves the notice, while saving a further edit keeps it.
+		const history = SHIPPED_SKILL_HISTORY.get(skillName);
+		if (history) {
+			this.recordReconcileOutcome(
+				skillName,
+				shippedVersion(content, history) === null ? "customized" : "current",
+			);
+			this.publishStaleSkills();
+		}
+
+		// Refresh THIS skill's cache entry from the bytes we just wrote, rather than
+		// rescanning the folder. The edit may have changed frontmatter the runtime depends on
+		// — `description` (advertised to the model), `allowed-tools` (which built-in tools get
+		// bound), `metadata.linkedPlugin` — so leaving the old entry in place would let the
+		// next run advertise a stale description or attach the wrong tool set.
+		//
+		// Parsing in-process needs no I/O, so unlike a rescan it cannot half-fail; and it
+		// leaves every OTHER skill's entry untouched, so one save can't disturb the rest of
+		// the cache.
+		const { frontmatter } = parseFrontmatter(content);
+		const { category, linkedPluginId, corePluginId } = this.extractSkillLinks(frontmatter.metadata);
+
+		// Apply exactly the checks discovery applies, so this path can never admit a skill a
+		// folder scan would have rejected. That covers the name/folder match — we always
+		// write to `<skillName>/SKILL.md`, so an edit changing `name:` doesn't rename the
+		// skill, it invalidates the file — and the required `description`, which is
+		// interpolated unguarded into the `<available_skills>` block: caching an entry
+		// without one would throw in `escapeXml` and take down system-prompt assembly
+		// entirely, so an invalid save must not be able to break the next agent run.
+		//
+		// Evicting matches what the next discovery pass would do (it skips invalid files),
+		// rather than leaving stale metadata that advertises a description, tool set, or
+		// plugin wiring the file on disk no longer declares. (A real rename is a folder move
+		// — `saveSkill` / `manage_skills` territory, not this path.)
+		const validation = validateFrontmatter(frontmatter, skillName);
+		if (!validation.valid) {
+			this.skillsCache.delete(skillName);
+			Log.info(
+				`Skill ${skillName} saved with invalid frontmatter (${validation.errors
+					.map((e) => e.message)
+					.join(", ")}) — dropped from the cache until corrected`,
+			);
+			return;
+		}
+
+		this.skillsCache.set(skillName, {
+			frontmatter: frontmatter as SkillFrontmatter,
+			path: `${this.getSkillsDir()}/${skillName}`,
+			linkedPluginId,
+			category,
+			corePluginId,
+		});
+	}
+
 	async loadSkill(skillName: string): Promise<Skill | null> {
 		const metadata = this.skillsCache.get(skillName);
 		if (!metadata) {
@@ -947,8 +1061,14 @@ export class SkillsService {
 
 	/**
 	 * Escape special XML characters.
+	 *
+	 * Tolerates a missing value rather than throwing: every caller interpolates into the
+	 * `<available_skills>` block, so a `.replace` on undefined would abort system-prompt
+	 * assembly and break the whole agent run over one malformed skill. Entries are validated
+	 * before they enter the cache; this is the backstop for anything that slips past.
 	 */
-	private escapeXml(text: string): string {
+	private escapeXml(text: string | undefined): string {
+		if (!text) return "";
 		return text
 			.replace(/&/g, "&amp;")
 			.replace(/</g, "&lt;")

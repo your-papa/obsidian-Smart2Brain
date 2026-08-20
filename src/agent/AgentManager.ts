@@ -46,6 +46,8 @@ import {
 import { ObsidianChatManager } from "./ObsidianChatManager";
 import type { ThreadSnapshot } from "./memory/ThreadStore";
 import { BASE_SYSTEM_PROMPT, DEFAULT_MEMORY_PROMPT, buildMemoryFolderHeader } from "./prompts";
+import { getBundledSkill } from "../skills/defaults";
+import { extractErrorMessage } from "../utils/errorMessage";
 import { LangSmithTelemetry, type Telemetry } from "./telemetry";
 import { createExecuteJavaScriptTool } from "./tools/executeJavaScript";
 import { createPluginApiExecTool } from "./tools/executePluginApi";
@@ -485,6 +487,56 @@ export class AgentManager {
 			},
 			{ title: `Memory Instructions — ${agent.name}`, showDiff: true },
 		).open();
+	}
+
+	/**
+	 * Diff a bundled skill's on-disk body against the version we currently ship, so a user
+	 * whose customization blocked the auto-update can see what moved and merge it by hand.
+	 *
+	 * The prompt surfaces get this from their factory constants; a skill's "default" is the
+	 * bundled `SKILL.md` content, which is available at runtime for exactly this reason.
+	 * Saving writes the file back and re-discovers, so the edited body reaches the next
+	 * agent run without a reload. Returns false when the skill isn't bundled (user-created
+	 * skills have no shipped default to diff against) so the caller can fall back to just
+	 * opening the note.
+	 */
+	async openSkillDiff(skillName: string): Promise<boolean> {
+		const bundled = getBundledSkill(skillName);
+		const skills = this.plugin.skillsService;
+		if (!bundled || !skills) return false;
+
+		let current: string;
+		try {
+			current = await skills.readSkillFile(skillName);
+		} catch (error) {
+			Logger.error(`Could not read skill ${skillName} for diff:`, error);
+			return false;
+		}
+
+		new SystemPromptModal(
+			this.plugin,
+			{
+				getPrompt: () => current,
+				// The modal closes synchronously after calling this, so a rejected write would
+				// otherwise read as a successful save (and leave an unhandled rejection). The
+				// edit only exists in the closed editor at that point, so say so explicitly
+				// rather than letting the user believe it landed.
+				setPrompt: (text: string) => {
+					void skills
+						.writeSkillFile(skillName, text)
+						.then(() => {
+							this.invalidateSystemPromptCaches();
+						})
+						.catch((error) => {
+							Logger.error(`Failed to save skill ${skillName}:`, error);
+							new Notice(`Could not save the "${skillName}" skill: ${extractErrorMessage(error)}`);
+						});
+				},
+				defaultPrompt: bundled.content,
+			},
+			{ title: `Skill — ${skillName}`, showDiff: true },
+		).open();
+		return true;
 	}
 
 	/**
