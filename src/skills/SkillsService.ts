@@ -789,30 +789,32 @@ export class SkillsService {
 		//
 		// Parsing in-process needs no I/O, so unlike a rescan it cannot half-fail; and it
 		// leaves every OTHER skill's entry untouched, so one save can't disturb the rest of
-		// the cache. A rename of the `name:` field is the one case that still needs a full
-		// scan (the old key would linger), so fall back to one there.
+		// the cache.
 		const { frontmatter } = parseFrontmatter(content);
-		const parsedName = frontmatter.name;
-		if (parsedName && parsedName === skillName) {
-			const { category, linkedPluginId, corePluginId } = this.extractSkillLinks(frontmatter.metadata);
-			this.skillsCache.set(skillName, {
-				frontmatter: frontmatter as SkillFrontmatter,
-				path: `${this.getSkillsDir()}/${skillName}`,
-				linkedPluginId,
-				category,
-				corePluginId,
-			});
+		const { category, linkedPluginId, corePluginId } = this.extractSkillLinks(frontmatter.metadata);
+
+		// `name:` must equal the containing folder — `validateNameMatchesDirectory`, enforced
+		// by discovery. We always write to `<skillName>/SKILL.md`, so an edit that changes or
+		// drops `name:` doesn't rename the skill: it makes the file invalid, and the next
+		// discovery would SKIP it. Mirror that here by evicting the entry, rather than
+		// leaving stale metadata that advertises a description, tool set, or plugin wiring
+		// the file on disk no longer declares. (A real rename is a folder move — `saveSkill`
+		// / `manage_skills` territory, not this path.)
+		if (frontmatter.name !== skillName) {
+			this.skillsCache.delete(skillName);
+			Log.info(
+				`Skill ${skillName} saved with name "${frontmatter.name ?? "(none)"}", which does not match its folder — dropped from the cache until corrected`,
+			);
 			return;
 		}
 
-		// Renamed (or unparseable) — the cache is keyed by name, so only a full scan can
-		// reconcile it. Still best-effort: the bytes are already durable, and reporting
-		// failure here would both mislead the user and skip the caller's cache invalidation.
-		try {
-			await this.discoverSkills();
-		} catch (error) {
-			Log.error(`Saved skill ${skillName}, but rediscovery failed:`, error);
-		}
+		this.skillsCache.set(skillName, {
+			frontmatter: frontmatter as SkillFrontmatter,
+			path: `${this.getSkillsDir()}/${skillName}`,
+			linkedPluginId,
+			category,
+			corePluginId,
+		});
 	}
 
 	async loadSkill(skillName: string): Promise<Skill | null> {

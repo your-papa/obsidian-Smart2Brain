@@ -384,6 +384,28 @@ describe("SkillsService.bootstrapDefaultSkills", () => {
 		expect([...svc.getCachedSkills().keys()].filter((n) => n !== SUBJECT.name)).toEqual(others);
 	});
 
+	/*
+	 * `name:` must equal the folder name (validateNameMatchesDirectory), and we always write
+	 * to `<skillName>/SKILL.md` — so editing `name:` doesn't rename the skill, it invalidates
+	 * the file. Discovery would skip it; the cache must agree rather than keep advertising a
+	 * description, tool set, or plugin wiring the file no longer declares.
+	 */
+	it("evicts the cache entry when a save breaks the name/folder match", async () => {
+		const adapter = makeAdapter();
+		const svc = makeService(adapter);
+		await svc.bootstrapDefaultSkills();
+		await svc.discoverSkills();
+		expect(svc.getCachedSkills().has(SUBJECT.name)).toBe(true);
+
+		const renamed = SUBJECT.content.replace(/^name: .*$/m, "name: something-else");
+		await svc.writeSkillFile(SUBJECT.name, renamed);
+
+		expect(svc.getCachedSkills().has(SUBJECT.name)).toBe(false);
+		// And it doesn't reappear under the bogus name either — the folder still says
+		// otherwise, so a real discovery pass would skip it too.
+		expect(svc.getCachedSkills().has("something-else")).toBe(false);
+	});
+
 	it("keeps the stale mark when the diff view saves a further edit", async () => {
 		const adapter = makeAdapter({ [SUBJECT_PATH]: `${SUBJECT.content}\n\nMine.` });
 		const svc = makeService(adapter);
