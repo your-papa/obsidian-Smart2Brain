@@ -184,26 +184,29 @@ export async function performSearch(
 		return [];
 	}
 
-	let results: SearchResult[];
-	switch (algorithm) {
-		case "lexical":
-			results = await getLexicalResults(app, query, filter);
-			break;
-		case "hybrid":
-			results = await hybridSearch(app, query, filter);
-			break;
-		default:
-			results = await getLexicalResults(app, query, filter);
-			break;
+	// `hybridSearch` ranks internally (it owns the two-source fusion); the
+	// single-source modes retrieve here and rank below.
+	if (algorithm === "hybrid") {
+		return hybridSearch(app, query, filter);
 	}
 
-	if (algorithm === "hybrid") {
-		return results;
+	// Semantic: embeddings only, with **no lexical leg**. Passing no
+	// `lexicalResults` is load-bearing rather than incidental — it puts
+	// `rankSearchResults` on its single-source branch, which skips RRF rank-mixing
+	// and applies `SEMANTIC_ONLY_TITLE_BOOST_MAX` instead of the hybrid title
+	// boost. That is why this is a distinct mode and not hybrid with
+	// `SEMANTIC_SOURCE_WEIGHT` turned up to 1.
+	if (algorithm === "semantic") {
+		return rankSearchResults({
+			query,
+			semanticResults: await embeddingsSearch(app, query, filter),
+			recentBoostByPath: buildRecentBoostMap(getRecentNotes(app, filter)),
+		});
 	}
 
 	return rankSearchResults({
 		query,
-		lexicalResults: results,
+		lexicalResults: await getLexicalResults(app, query, filter),
 		recentBoostByPath: buildRecentBoostMap(getRecentNotes(app, filter)),
 	});
 }

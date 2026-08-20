@@ -36,12 +36,23 @@
  *   bun run scripts/generate-search-corpus.ts [--out <vault path>] [--clean]
  */
 
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const DEFAULT_VAULT = "integration/Smart2Brain Test Vault";
 /** Corpus lives in its own folder so it is trivially separable from hand-written fixtures. */
 const CORPUS_DIR = "Corpus";
+/**
+ * The Zettelkasten layer, flat by design (see `ZETTEL_NOTES`).
+ *
+ * It is a sibling of `Corpus/` rather than a subfolder of it because the two are
+ * organised on opposite principles — `Corpus/` is topic-foldered, this is a single
+ * directory — and mixing them would give these notes a folder signal they are
+ * specifically meant to lack.
+ */
+const ZETTEL_DIR = "Zettel";
+/** Applied to every Zettel note so the layer is filterable as a unit. */
+const ZETTEL_TAG = "zettel";
 
 // ── deterministic PRNG (mulberry32) ──────────────────────────────────────────
 
@@ -79,6 +90,31 @@ interface Domain {
 	tag: string;
 	/** Subject nouns used to build note titles and prose. */
 	subjects: readonly string[];
+	/**
+	 * Alternate titles for a subject's repeat notes, keyed by subject name.
+	 *
+	 * The bulk filler has 40 unique subjects and 285 notes to produce, so each subject
+	 * recurs about seven times. That used to be rendered as `Kimchi Seasonality 2`
+	 * through `Kimchi Seasonality 7`, which is a shape no real vault has: people write
+	 * several notes that circle the same idea from different angles, under different
+	 * names, months apart — they do not number them.
+	 *
+	 * The numbered scheme also made the crowding *too easy to spot*. Sibling notes
+	 * sharing a title stem give a ranker a free grouping signal (and `getNumericSuffixPenalty`
+	 * in `lexicalScoring.ts` explicitly keys on a trailing number), where real
+	 * near-duplicates are only discoverable through their overlapping vocabulary.
+	 *
+	 * Each entry supplies distinct titles that stay recognisably about the same subject
+	 * — that topical overlap is the whole point of the filler, since two judgment cases
+	 * grade these siblings at 0 to make crowding cost score.
+	 *
+	 * **Variant 1 keeps the plain subject name.** Four judgment cases grade a base note
+	 * (`koji-cultivation`, `variable-font-axes`, `yield-curve-inversion`,
+	 * `hinting-and-rasterization`) at 1 as a genuinely-related result, so those slugs
+	 * must survive. It also mirrors a real vault: one canonical note on a topic, plus
+	 * scattered related ones.
+	 */
+	variantTitles: Readonly<Record<string, readonly string[]>>;
 	/** Domain vocabulary sprinkled into note bodies. */
 	vocabulary: readonly string[];
 	/**
@@ -108,6 +144,98 @@ const DOMAINS: readonly Domain[] = [
 			"Bioluminescence",
 			"Ocean Acidification",
 		],
+		variantTitles: {
+			"Coral Reef Bleaching": [
+				"Thermal Stress Thresholds on the Outer Reef",
+				"Zooxanthellae Expulsion Timeline",
+				"Recovery Rates After the 2024 Event",
+				"Bleaching Severity by Depth Band",
+				"Reef Mortality Follow-up Surveys",
+				"Shading Trials on Nursery Colonies",
+				"Symbiont Shuffling and Heat Tolerance",
+			],
+			"Deep Sea Hydrothermal Vents": [
+				"Chimney Formation and Mineral Deposition",
+				"Black Smoker Temperature Profiles",
+				"Vent Field Mapping Notes",
+				"Tubeworm Colony Density Counts",
+				"Plume Chemistry Sampling Runs",
+				"Vent Site Succession After Eruption",
+				"Sulfide Gradient Measurements",
+			],
+			"Cephalopod Cognition": [
+				"Maze Navigation Trials",
+				"Colour Change and Signalling",
+				"Tool Use in Captive Settings",
+				"Arm Coordination Studies",
+				"Individual Recognition Experiments",
+				"Play Behaviour Observations",
+				"Memory Retention Across Weeks",
+			],
+			"Whale Migration Routes": [
+				"Acoustic Tracking in the North Atlantic",
+				"Calving Ground Arrival Dates",
+				"Feeding Stopover Duration",
+				"Route Shifts and Water Temperature",
+				"Satellite Tag Recovery Notes",
+				"Shipping Lane Overlap Analysis",
+				"Population Segment Boundaries",
+			],
+			"Plankton Blooms": [
+				"Spring Bloom Onset Timing",
+				"Nutrient Loading and Bloom Size",
+				"Harmful Algal Event Records",
+				"Chlorophyll Satellite Estimates",
+				"Grazing Pressure on Bloom Decline",
+				"Diatom to Dinoflagellate Succession",
+				"Bloom Patchiness at Small Scales",
+			],
+			"Mangrove Nurseries": [
+				"Juvenile Fish Density in Prop Roots",
+				"Seedling Survival After Transplant",
+				"Sediment Accretion Measurements",
+				"Storm Buffering Capacity",
+				"Crab Burrow Density Surveys",
+				"Salinity Tolerance by Species",
+				"Restoration Site Selection Notes",
+			],
+			"Shark Population Decline": [
+				"Bycatch Rates in Longline Fisheries",
+				"Fin Trade Volume Estimates",
+				"Nursery Habitat Loss Assessment",
+				"Tagging Study Recapture Rates",
+				"Protected Area Effectiveness",
+				"Age at Maturity by Species",
+				"Trophic Effects of Predator Removal",
+			],
+			"Tidal Zone Ecology": [
+				"Zonation Bands on Rocky Shores",
+				"Desiccation Tolerance in Limpets",
+				"Barnacle Settlement Timing",
+				"Wave Exposure and Community Structure",
+				"Tide Pool Temperature Extremes",
+				"Grazer Exclusion Experiments",
+				"Mussel Bed Recovery After Scour",
+			],
+			Bioluminescence: [
+				"Luciferin Chemistry Across Taxa",
+				"Counter-illumination in Midwater Fish",
+				"Dinoflagellate Flash Kinetics",
+				"Bacterial Symbiont Light Organs",
+				"Depth Distribution of Luminous Species",
+				"Burglar Alarm Hypothesis Notes",
+				"Field Photometry Methods",
+			],
+			"Ocean Acidification": [
+				"Aragonite Saturation Trends",
+				"Shell Thinning in Pteropods",
+				"pH Time Series from Moorings",
+				"Larval Development Under Low pH",
+				"Coastal Upwelling and Corrosive Water",
+				"Calcification Rate Experiments",
+				"Carbonate Chemistry Sampling Protocol",
+			],
+		},
 		vocabulary: [
 			"salinity",
 			"benthic",
@@ -144,6 +272,98 @@ const DOMAINS: readonly Domain[] = [
 			"Forward Guidance",
 			"Seigniorage",
 		],
+		variantTitles: {
+			"Interest Rate Corridors": [
+				"Floor Systems Versus Corridor Systems",
+				"Standing Facility Spread Design",
+				"Overnight Rate Dispersion Within the Band",
+				"Corridor Width and Interbank Activity",
+				"Deposit Facility Take-up Patterns",
+				"Ceiling Breaches and Emergency Lending",
+				"Corridor Adjustments Across Cycles",
+			],
+			"Quantitative Tightening": [
+				"Runoff Caps and Portfolio Composition",
+				"Balance Sheet Normalisation Paths",
+				"Market Absorption of Maturing Holdings",
+				"Reserve Drainage Estimates",
+				"Duration Extraction Effects",
+				"Announcement Effects on Long Yields",
+				"Coordination With Rate Policy",
+			],
+			"Inflation Expectations": [
+				"Survey Versus Market-Implied Measures",
+				"Household Expectation Dispersion",
+				"Breakeven Rates and Liquidity Premia",
+				"Anchoring After Supply Shocks",
+				"Firm Pricing Intentions Data",
+				"Expectation Formation and Salience",
+				"Long-Horizon Stability Checks",
+			],
+			"Yield Curve Inversion": [
+				"Historical Lead Times to Recession",
+				"Spread Choice and Signal Quality",
+				"Inversion Depth Versus Duration",
+				"Cross-Country Inversion Comparisons",
+				"Term Premium Decomposition Methods",
+				"False Positives in the Record",
+				"Curve Steepening After Trough",
+			],
+			"Reserve Requirements": [
+				"Averaging Periods and Compliance",
+				"Remuneration of Required Balances",
+				"Requirement Ratios Across Jurisdictions",
+				"Abolition and Its Consequences",
+				"Vault Cash Eligibility Rules",
+				"Requirements as a Liquidity Tool",
+				"Small Bank Exemption Thresholds",
+			],
+			"Currency Pegs": [
+				"Defence Costs During Speculative Attack",
+				"Crawling Peg Mechanics",
+				"Reserve Adequacy for Fixed Regimes",
+				"Peg Abandonment Case Studies",
+				"Currency Board Arrangements",
+				"Parallel Market Premium Dynamics",
+				"Basket Weighting Choices",
+			],
+			"Open Market Operations": [
+				"Repo Versus Outright Purchase Mechanics",
+				"Auction Format and Bidder Behaviour",
+				"Collateral Eligibility Schedules",
+				"Fine-Tuning Operations Frequency",
+				"Counterparty Access Criteria",
+				"Operation Size and Rate Impact",
+				"Settlement Timing Conventions",
+			],
+			"Liquidity Traps": [
+				"Zero Lower Bound Constraints",
+				"Portfolio Rebalancing Under Satiation",
+				"Fiscal Multipliers at the Bound",
+				"Negative Rate Experiments",
+				"Expectations Management as Substitute",
+				"Cash Hoarding Thresholds",
+				"Escape Conditions From the Trap",
+			],
+			"Forward Guidance": [
+				"Calendar Versus State Contingent Forms",
+				"Credibility and Time Inconsistency",
+				"Guidance Revisions and Market Reaction",
+				"Odyssean Versus Delphic Readings",
+				"Dot Plot Communication Effects",
+				"Guidance Under Uncertainty",
+				"Exit Language Design",
+			],
+			Seigniorage: [
+				"Revenue From Currency Issuance",
+				"Inflation Tax Incidence",
+				"Note Denomination and Demand",
+				"Digital Currency Effects on Revenue",
+				"Historical Debasement Episodes",
+				"Central Bank Profit Remittance",
+				"Seigniorage Under Dollarisation",
+			],
+		},
 		vocabulary: [
 			"basis points",
 			"counterparty",
@@ -180,6 +400,98 @@ const DOMAINS: readonly Domain[] = [
 			"Counters and Apertures",
 			"Reading Cadence",
 		],
+		variantTitles: {
+			"Optical Sizing": [
+				"Display Cuts Versus Text Cuts",
+				"Stroke Compensation at Caption Sizes",
+				"Optical Size Axis Interpolation",
+				"Spacing Adjustments Across Sizes",
+				"Historical Punchcutter Practice",
+				"Automatic Optical Size Selection",
+				"Contrast Reduction in Small Optical Masters",
+			],
+			"Kerning Pairs": [
+				"Pair Coverage in Large Character Sets",
+				"Class-Based Kerning Strategies",
+				"Diagonal and Round Collisions",
+				"Kerning Versus Spacing Decisions",
+				"Numeral Pair Handling",
+				"Kern Table Size and Performance",
+				"Testing Pairs With Real Text",
+			],
+			"Variable Font Axes": [
+				"Weight Axis Interpolation Quality",
+				"Custom Axis Naming Conventions",
+				"Instance Selection and Named Styles",
+				"Axis Count and File Size",
+				"Slant Versus Italic Axis Behaviour",
+				"Designspace Master Placement",
+				"Fallback Rendering Without Variation Support",
+			],
+			"Grotesque Sans Serifs": [
+				"Terminal Shapes in Early Grotesques",
+				"Neo-Grotesque Revival Families",
+				"Aperture Closure and Texture",
+				"Capital Proportions in the Genre",
+				"Grotesque Italics as Obliques",
+				"Numeral Design Conventions",
+				"Regional Variants and Naming",
+			],
+			"Baseline Grids": [
+				"Grid Alignment Across Type Sizes",
+				"Leading Ratios and Grid Increments",
+				"Figure Placement Against the Grid",
+				"Multi-Column Grid Reconciliation",
+				"Grid Breaks for Display Elements",
+				"Screen Versus Print Grid Behaviour",
+				"Rounding Errors in Grid Implementation",
+			],
+			"Hinting and Rasterization": [
+				"Grid Fitting at Low Resolutions",
+				"Autohinting Output Quality",
+				"Subpixel Rendering Interactions",
+				"Delta Instruction Maintenance",
+				"Stem Snapping Behaviour",
+				"Rendering Across Operating Systems",
+				"Hinting Cost in Production Schedules",
+			],
+			"Ligature Design": [
+				"Standard Versus Discretionary Sets",
+				"Collision Cases Requiring Ligatures",
+				"Script Ligature Complexity",
+				"Ligature Substitution Ordering",
+				"Historical Ligature Revival",
+				"Ligatures in Monospaced Faces",
+				"Language-Specific Ligature Rules",
+			],
+			"Type Foundries": [
+				"Independent Foundry Business Models",
+				"Distribution and Retail Splits",
+				"Custom Commission Workflows",
+				"Library Curation Decisions",
+				"Foundry Naming and Identity",
+				"Archive and Reissue Programmes",
+				"Collaborative Release Structures",
+			],
+			"Counters and Apertures": [
+				"Counter Size and Perceived Weight",
+				"Aperture Openness in Text Faces",
+				"Closed Counters at Small Sizes",
+				"Counter Shape and Family Coherence",
+				"Ink Trap Placement",
+				"Counter Consistency Across Weights",
+				"Measurement Conventions for Counters",
+			],
+			"Reading Cadence": [
+				"Saccade Length and Line Width",
+				"Fixation Duration Across Faces",
+				"Rhythm in Densely Set Text",
+				"Paragraph Shape and Reading Flow",
+				"Interruption Recovery in Long Text",
+				"Cadence in Bilingual Settings",
+				"Measuring Reading Speed Reliably",
+			],
+		},
 		vocabulary: [
 			"x-height",
 			"tracking",
@@ -216,6 +528,98 @@ const DOMAINS: readonly Domain[] = [
 			"Kimchi Seasonality",
 			"Temperature Control in Fermentation",
 		],
+		variantTitles: {
+			"Sourdough Starter Maintenance": [
+				"Refresh Ratios for Daily Baking",
+				"Reviving a Neglected Culture",
+				"Fridge Storage Between Bakes",
+				"Discard Volume and Waste Reduction",
+				"Flour Switches and Culture Response",
+				"Off Smells and What They Indicate",
+				"Travel and Long Dormancy Handling",
+			],
+			"Lactic Acid Bacteria": [
+				"Homofermentative Versus Heterofermentative Strains",
+				"Strain Succession in Mixed Cultures",
+				"Acid Production Rates by Temperature",
+				"Bacteriocin Activity Against Spoilage",
+				"Salt Tolerance Across Species",
+				"Starter Culture Selection Criteria",
+				"Population Counts Through Fermentation",
+			],
+			"Koji Cultivation": [
+				"Incubation Humidity Control",
+				"Mycelium Coverage Assessment",
+				"Tray Versus Bed Cultivation",
+				"Spore Inoculation Rates",
+				"Heat Generation During Growth",
+				"Harvest Timing and Enzyme Activity",
+				"Contamination Prevention Practices",
+			],
+			"Kombucha Scoby Health": [
+				"Pellicle Thickness and Vigour",
+				"Acetic Versus Lactic Balance",
+				"Mould Identification and Response",
+				"Hotel Storage Between Batches",
+				"Tea Type Effects on Culture",
+				"Yeast Sediment Interpretation",
+				"Culture Sharing and Transport",
+			],
+			"Brine Concentration": [
+				"Percentage Calculations by Weight",
+				"Vegetable Water Content Adjustments",
+				"Dry Salting Versus Wet Brine",
+				"Brine Cloudiness Causes",
+				"Salt Type and Mineral Content",
+				"Concentration Drift Over Time",
+				"Low Salt Ferments and Risk",
+			],
+			"Wild Yeast Capture": [
+				"Fruit Versus Flour Starters",
+				"First Rise Timing Expectations",
+				"Regional Variation in Captured Strains",
+				"Failed Capture Troubleshooting",
+				"Water Chemistry and Establishment",
+				"Capture Season and Success Rate",
+				"Stabilising a New Culture",
+			],
+			"Miso Aging": [
+				"Salt Percentage and Aging Duration",
+				"Tamari Formation on the Surface",
+				"Vessel Choice and Oxygen Exposure",
+				"Colour Development Over Months",
+				"Weight and Pressing Methods",
+				"Seasonal Temperature Cycling",
+				"Batch Records and Tasting Notes",
+			],
+			"Vinegar Mother Care": [
+				"Acetification Rate and Surface Area",
+				"Alcohol Content Before Souring",
+				"Mother Splitting and Propagation",
+				"Vinegar Eel Identification",
+				"Sealing Versus Breathable Covers",
+				"Acidity Titration Methods",
+				"Restarting a Stalled Vinegar",
+			],
+			"Kimchi Seasonality": [
+				"Winter Kimjang Batch Notes",
+				"Summer Quick Kimchi Methods",
+				"Napa Availability Through the Year",
+				"Radish Varieties by Season",
+				"Fermentation Speed and Ambient Heat",
+				"Seasoning Ratios Across Regions",
+				"Storage Depth and Sourness Control",
+			],
+			"Temperature Control in Fermentation": [
+				"Proofing Box Construction Notes",
+				"Ambient Swings and Batch Consistency",
+				"Cold Retard Effects on Flavour",
+				"Thermal Mass in Large Vessels",
+				"Heat Mat Placement and Overshoot",
+				"Logging Temperature Through a Ferment",
+				"Seasonal Adjustment Schedules",
+			],
+		},
 		vocabulary: [
 			"anaerobic",
 			"inoculation",
@@ -675,6 +1079,595 @@ const DISTRACTORS: readonly Distractor[] = [
 	},
 ];
 
+// ── Zettelkasten layer ───────────────────────────────────────────────────────
+
+/**
+ * A flat, single-directory note layer modelling how a real Obsidian user works.
+ *
+ * Everything above this point is organised the way a *benchmark* is organised: four
+ * hermetic topic folders whose vocabularies never collide, so telling them apart is
+ * trivial. Real vaults are the opposite — one person's notes, in which `review`,
+ * `feedback`, `block` and `pipeline` each carry several unrelated senses, and the
+ * only thing separating them is meaning.
+ *
+ * Three properties make this layer different from `DISTRACTORS`, and each one exists
+ * because the existing corpus cannot express the failure it targets:
+ *
+ *  1. **Flat.** No subfolders. Hierarchy lives in frontmatter and `[[wikilinks]]`,
+ *     Zettelkasten-style. Neither is a ranking signal today — nothing in `src/search/`
+ *     reads link structure, and `LexicalSearchService` reads only `aliases`/`tags` from
+ *     frontmatter — so these notes are ranked on title, tags, body and embedding alone.
+ *     That is precisely the condition under which real-vault search fails, and the
+ *     folder-shaped corpus above never reproduces it.
+ *
+ *  2. **No self-declaring decoys.** Every `decoy` in `DISTRACTORS` ends by announcing
+ *     its own irrelevance ("not animal behaviour, learning, or any container-opening
+ *     problem solving"). An embedder reads that and correctly pushes the note away,
+ *     which is why those cases saturate. Nothing here contains such a sentence: the
+ *     wrong answer is *honestly, fully about* the query's topic, in a different sense.
+ *
+ *  3. **Shared vocabulary by construction.** These notes deliberately reuse each
+ *     other's words across senses, so the discrimination has to come from the
+ *     relational frame rather than from topic separation.
+ */
+interface ZettelNote {
+	/** Filename slug; the layer is flat, so this is the whole path under `Zettel/`. */
+	slug: string;
+	title: string;
+	/** Arbitrary frontmatter fields. Inert for ranking today — realism, plus a before/after if that changes. */
+	fields?: Record<string, string>;
+	tags?: string[];
+	aliases?: string[];
+	/**
+	 * The note body, written verbatim rather than generated.
+	 *
+	 * Generated filler would defeat the point: the whole difficulty of this layer is
+	 * that the prose reads like something a person actually wrote, with the query's
+	 * sense carried implicitly. That cannot be produced from a vocabulary list.
+	 */
+	body: string;
+	/** Wikilinks appended as a "Links" section, mirroring how a Zettelkasten note connects. */
+	links?: string[];
+}
+
+/**
+ * Notes chosen so that each query has two *plausible* answers, separated only by sense
+ * or relational frame.
+ *
+ * The `feedback` pair is the reported real-vault failure, reproduced: `1-1-priya-2026-03`
+ * records feedback a person was given, `feedback-scoring-service` documents an LLM
+ * feedback component in an automation pipeline. Both are genuinely about feedback. The
+ * 1:1 note deliberately does **not** use the word "received" — a real 1:1 note says
+ * "Priya said", not "feedback I received" — so there is no lexical bridge from the query
+ * and the entire burden falls on the semantic half.
+ */
+const ZETTEL_NOTES: readonly ZettelNote[] = [
+	// ── polysemy + intent-frame: "feedback" ─────────────────────────────────
+	{
+		slug: "1-1-priya-2026-03",
+		title: "1:1 with Priya — March",
+		fields: { type: "meeting", people: "Priya Raman", date: "2026-03-11" },
+		tags: ["1-1"],
+		body: `Priya said my scoping is still too broad — I take on the whole problem when the team only needed the first slice. She wants me to cut work into pieces someone else could pick up halfway through.
+
+She was direct about the design review two weeks ago: I presented three options without a recommendation, and the room stalled for forty minutes. Her words were "you did the analysis, now do the judgement".
+
+The part that stung, fairly: I have been treating written updates as overhead. Two people told her they did not know what my team shipped last quarter. That is on me.
+
+Good news as well — she thinks the migration went better than anyone expected and said so to her skip. She wants me to write it up before the detail fades.
+
+Next time: bring the scoping doc, and one recommendation rather than three options.`,
+		links: ["Weekly Review 2026-03-14", "Migration Retro"],
+	},
+	{
+		slug: "feedback-scoring-service",
+		title: "Feedback Scoring Service",
+		fields: { type: "project", status: "active" },
+		tags: ["platform"],
+		body: `The feedback scoring service grades model outputs against a rubric and returns a score with a short justification. It runs as the third stage of the evaluation pipeline, after generation and deduplication.
+
+Each request carries the candidate output, the rubric version, and an optional reference answer. The scorer receives feedback from two judges and reconciles disagreement by taking the lower score, which we found reduces false positives on the safety rubric.
+
+Latency is dominated by the judge call. We batch twenty items per request and cache on a hash of the rubric plus the candidate. Cache hit rate sits around sixty percent in steady state.
+
+Open problem: the judges drift when the rubric is revised, and we have no automated way to detect it. Right now someone re-scores a fixed sample by hand each month and compares.
+
+The service also emits per-criterion feedback that the training pipeline consumes directly.`,
+		links: ["Evaluation Pipeline", "Rubric Versioning"],
+	},
+	{
+		slug: "feedback-i-gave-2026-q1",
+		title: "Notes Before Review Season",
+		fields: { type: "note", date: "2026-03-20" },
+		tags: ["management"],
+		body: `Writing these down before I forget the specifics, since vague praise helps nobody.
+
+For Tomas: he unblocked the ingest work by rewriting the retry logic nobody wanted to touch. I told him it was the single highest-leverage thing anyone did that month. The thing he needs to hear, and I said it: he ships without telling anyone, so the work is invisible until it lands.
+
+For Wen: excellent instincts on the schema, and she pushed back on my proposal in a way that turned out to be right. I said that plainly in front of the team, which I think mattered more than saying it privately.
+
+For Danilo: I have been putting this off. He is doing fine work on a project that is going to be cancelled, and pretending otherwise would be unkind. I told him this week and offered to help him move onto the platform team.
+
+I am consistently better at the encouraging half of this than the corrective half.`,
+		links: ["1:1 with Priya — March"],
+	},
+
+	// ── polysemy: "review" ──────────────────────────────────────────────────
+	{
+		slug: "pr-review-backlog",
+		title: "PR Review Backlog",
+		fields: { type: "note", date: "2026-03-09" },
+		tags: ["platform"],
+		body: `Four changes have been sitting in review for more than a week, and two of them block the release branch.
+
+The retry-logic change is the one holding everything up. It touches the shared client, so it needs a second reviewer, and the only two people who know that code are both on the migration.
+
+I have started reviewing in the morning before anything else. The queue is shorter but I am slower on the ones that need real thought, which is the wrong trade.
+
+Proposal for the team: anything under fifty lines gets a single reviewer and a four-hour target. Anything touching the shared client keeps two.`,
+		links: ["Migration Retro"],
+	},
+	{
+		slug: "lit-noise-kahneman",
+		title: "Noise — Kahneman, Sibony, Sunstein",
+		fields: { type: "literature", source: "book", author: "Kahneman et al." },
+		tags: ["reading"],
+		body: `Central claim: organisations obsess over bias and ignore noise, which is the unwanted variability between judgements that should agree. Two underwriters given the same file quote premiums differing by more than half.
+
+The review of the forecasting literature in the middle third is the most useful part — a survey of where structured judgement beats expert intuition, and the narrow conditions under which it does not.
+
+Their proposed fix is the decision hygiene checklist: break a judgement into independent components, score each separately, and only then form a holistic view. Aggregating independent estimates cancels noise in a way that arguing to consensus does not.
+
+The chapter on performance evaluation is uncomfortable reading for anyone who runs a review cycle. Rating scales without behavioural anchors mostly measure the rater.`,
+		links: ["Notes Before Review Season"],
+	},
+
+	// ── polysemy: "pipeline" ────────────────────────────────────────────────
+	{
+		slug: "evaluation-pipeline",
+		title: "Evaluation Pipeline",
+		fields: { type: "project", status: "active" },
+		tags: ["platform"],
+		body: `The pipeline runs nightly over the held-out set: generation, deduplication, scoring, then aggregation into the dashboard.
+
+Stage boundaries are queues, so a slow stage backs up rather than dropping work. The scoring stage is the bottleneck and the only one that scales horizontally.
+
+Failure handling is per-item rather than per-batch. An item that fails three times lands in a dead-letter queue that someone reviews weekly, though in practice that has slipped to monthly.
+
+What is genuinely in flight right now: rubric versioning, a faster deduplication pass, and moving aggregation off the box it shares with the dashboard.`,
+		links: ["Feedback Scoring Service"],
+	},
+	{
+		slug: "hiring-pipeline-platform-2026",
+		title: "Platform Hiring — Spring",
+		fields: { type: "note", date: "2026-03-02" },
+		tags: ["management", "hiring"],
+		body: `Two open roles, both senior. The pipeline is thinner than it looks: nine candidates in play, but four are early-stage and one is almost certainly going elsewhere.
+
+Stage conversion is worst between phone screen and onsite. We are losing people at the take-home, which takes four hours and asks them to build something we would never build that way.
+
+In flight: two onsites next week, one offer out with a deadline of Friday, and a referral I have not chased.
+
+The thing I keep not doing is closing the loop with candidates we rejected. It costs twenty minutes and it is the difference between someone reapplying and not.`,
+		links: ["Weekly Review 2026-03-14"],
+	},
+
+	// ── provenance / supporting notes ───────────────────────────────────────
+	{
+		slug: "weekly-review-2026-03-14",
+		title: "Weekly Review 2026-03-14",
+		fields: { type: "daily", date: "2026-03-14" },
+		tags: ["review"],
+		body: `Shipped: the retry-logic change finally landed, and the ingest backlog drained overnight.
+
+Did not ship: the write-up Priya asked for, the dead-letter queue cleanup, and closing the loop with the two candidates we passed on.
+
+The week was mostly reactive. Three days had no block longer than forty minutes, which is why nothing that needed real thought moved.
+
+Next week: protect two mornings, write the migration piece, and clear the review queue before it becomes someone else's problem.`,
+		links: ["1:1 with Priya — March", "PR Review Backlog", "Platform Hiring — Spring"],
+	},
+	{
+		slug: "migration-retro",
+		title: "Migration Retro",
+		fields: { type: "meeting", date: "2026-02-27" },
+		tags: ["platform", "retro"],
+		body: `What went well: the cutover took eleven minutes against a ninety-minute budget, and the rollback path was exercised in staging the week before rather than being theoretical.
+
+What did not: we discovered the shared client had three callers nobody had inventoried, two days before cutover. That was luck, not process.
+
+The dry run was the whole reason this worked. It cost a week and everyone resented it at the time.
+
+Action items: inventory callers of anything shared before planning a change, and keep the dry-run step in the template even when the change looks small.`,
+		links: ["PR Review Backlog"],
+	},
+	{
+		slug: "vendor-call-observability",
+		title: "Vendor Call — Observability Tooling",
+		fields: { type: "meeting", source: "vendor call", date: "2026-03-05" },
+		tags: ["vendor"],
+		body: `They walked through tracing, log aggregation, and the alerting layer. Pricing is per-host with a separate ingest charge, which is the part that will bite us given how chatty the scoring stage is.
+
+Their retention default is thirty days and going longer roughly doubles the line item.
+
+The integration story for our stack is better than I expected — the collector is standard and we would not need to rewrite instrumentation.
+
+Open questions I did not get answered: what happens to data on contract termination, and whether the ingest charge applies to dropped spans.`,
+		links: ["Evaluation Pipeline"],
+	},
+
+	// ════════════════════════════════════════════════════════════════════════
+	// COLLISION CLUSTERS
+	//
+	// The ten notes above proved the layer works: at 2.9% of the vault they took
+	// ~11% of every lexical top-25 (16% on one query), because their vocabulary
+	// cuts across the topic corpus instead of sitting inside one silo.
+	//
+	// What they could not do is provide *coverage*. The reported failure needed a
+	// colliding pair to exist before the benchmark could see it, so a ten-note layer
+	// only catches collisions someone thought to write down. These clusters widen
+	// that: each group seeds a word used in two or more legitimate senses across
+	// contexts a single person genuinely has.
+	//
+	// Organising principle is the collision, not the topic. `block`, `context`,
+	// `run`, `sync`, `draft`, `ship`, `scale`, `charge`, `bank`, `pitch` and
+	// `capacity` each appear below in at least two unrelated senses, none of them
+	// signposted. As everywhere in this layer: no note declares its own
+	// irrelevance, and no target repeats its query's phrasing.
+	// ════════════════════════════════════════════════════════════════════════
+
+	// ── "block" — calendar / building / obstruction ─────────────────────────
+	{
+		slug: "focus-blocks-experiment",
+		title: "Protecting Focus Blocks",
+		fields: { type: "note", date: "2026-03-16" },
+		tags: ["habits"],
+		body: `Third attempt at this. Two ninety-minute blocks a day, morning only, calendar marked busy so nobody can book over them.
+
+What killed the previous two attempts was treating the block as optional the moment something urgent appeared. Everything looks urgent at eleven in the morning.
+
+The rule this time: if something displaces a block it gets rescheduled the same day, not dropped. Writing it down because I know I will argue with myself about it.
+
+One week in and it is holding, though the week had no incidents, so this proves nothing yet.`,
+		links: ["Weekly Review 2026-03-14"],
+	},
+	{
+		slug: "storage-block-layout",
+		title: "Block Layout in the Storage Engine",
+		fields: { type: "note" },
+		tags: ["platform"],
+		body: `Pages are fixed at eight kilobytes and a block is sixteen pages, which is the unit the allocator hands out and the unit we checksum.
+
+Splitting a block on overflow is the expensive path — it rewrites the parent index entry and invalidates any cached pointer into the old extent.
+
+The free list tracks blocks, not pages, so a workload that frees a single page inside a block reclaims nothing until the whole block empties. That is the fragmentation everyone complains about.
+
+Considering a smaller block for the write-heavy tables, though it costs index depth.`,
+	},
+	{
+		slug: "blocked-on-legal",
+		title: "Blocked on Legal Review",
+		fields: { type: "note", date: "2026-03-18" },
+		tags: ["platform"],
+		body: `The vendor contract has been with legal for eleven days. Nothing moves until it clears, and I have stopped asking daily because it was not helping.
+
+What is actually blocked: the observability migration, the on-call rotation change that depends on it, and one hire who wants to know what tooling they will be using.
+
+I could unblock two of the three by decoupling them, which I should have done a week ago rather than treating the dependency as real.`,
+		links: ["Vendor Call — Observability Tooling"],
+	},
+
+	// ── "context" — LLM window / social situation / switching cost ──────────
+	{
+		slug: "context-window-budget",
+		title: "Context Window Budget",
+		fields: { type: "note" },
+		tags: ["platform"],
+		body: `We are spending most of the window on retrieved passages and almost none on instructions, which is backwards for the scoring task.
+
+Measured on a sample of two hundred requests: system prompt eight percent, retrieved context seventy-one percent, candidate output nine percent, everything else overhead.
+
+Trimming retrieval to the top four passages instead of ten cost almost nothing on accuracy and freed enough room to include the full rubric rather than a summary of it.
+
+The remaining waste is duplicated boilerplate across passages from the same source document.`,
+		links: ["Evaluation Pipeline"],
+	},
+	{
+		slug: "context-switching-cost",
+		title: "The Cost of Switching",
+		fields: { type: "note", date: "2026-03-10" },
+		tags: ["habits"],
+		body: `Counted interruptions for a week: nineteen, of which four genuinely needed me that hour.
+
+The expensive part is not the interruption itself, it is the twenty minutes afterwards spent rebuilding the context I had loaded before it. Four real interruptions cost most of a day once you count the reload.
+
+Batching is the obvious answer and I keep not doing it, because answering immediately feels helpful and deferring feels rude.
+
+Trying: one pass at eleven, one at four, nothing in between unless someone is actually stuck.`,
+		links: ["Protecting Focus Blocks", "Weekly Review 2026-03-14"],
+	},
+
+	// ── "run" / "running" — execution / management / exercise ───────────────
+	{
+		slug: "nightly-run-failures",
+		title: "Nightly Run Failures",
+		fields: { type: "note", date: "2026-03-13" },
+		tags: ["platform"],
+		body: `Three failures this week, all in the same stage, all at roughly the same wall-clock time.
+
+The pattern points at the shared box: aggregation runs while the dashboard is rebuilding its materialised views, and the box runs out of memory rather than either process being wrong.
+
+Short-term fix is staggering the schedule by twenty minutes. Real fix is moving aggregation off that host, which is already on the list and keeps losing to whatever is on fire.
+
+Worth noting the run itself is not slow — it is contended.`,
+		links: ["Evaluation Pipeline"],
+	},
+	{
+		slug: "running-a-team-notes",
+		title: "What Running a Team Actually Involves",
+		fields: { type: "note", date: "2026-02-20" },
+		tags: ["management"],
+		body: `Nobody told me the job would be mostly writing. Not code — documents, updates, summaries, and the same explanation four times to four audiences.
+
+The technical part shrank faster than I expected. I am now the person who knows least about the codebase in every meeting, which took some getting used to and is probably correct.
+
+The part I underestimated: pace. Deciding how hard the team should push, and noticing when the answer has quietly become "harder than is sustainable".
+
+The part I overestimated: hiring. It matters enormously but occupies far less time than the calendar suggests.`,
+		links: ["Notes Before Review Season", "Platform Hiring — Spring"],
+	},
+
+	// ── "sync" — meeting / data replication ─────────────────────────────────
+	{
+		slug: "weekly-sync-is-too-long",
+		title: "The Weekly Sync Is Too Long",
+		fields: { type: "note", date: "2026-03-06" },
+		tags: ["management"],
+		body: `An hour with nine people is nine hours of attention for maybe fifteen minutes of content that needed everyone.
+
+Most of it is status that could be written. The genuinely useful part is the five minutes where someone says a thing that surprises someone else, and that part is unpredictable, which is the argument for keeping the meeting at all.
+
+Trying thirty minutes with a written update posted beforehand. If the surprising part still happens we lost nothing.`,
+		links: ["Weekly Review 2026-03-14"],
+	},
+	{
+		slug: "replica-sync-lag",
+		title: "Replica Sync Lag",
+		fields: { type: "note" },
+		tags: ["platform"],
+		body: `Read replicas trail the primary by two to four seconds under normal load and by well over a minute during the nightly aggregation.
+
+Anything reading its own write has to be pinned to the primary, and we have at least three places doing that implicitly without saying so.
+
+The lag itself is not the problem — the problem is that nothing surfaces it, so a stale read looks like a bug in whatever code happened to observe it.
+
+Adding lag to the health endpoint and to the dashboard, which is ten minutes of work we should have done a year ago.`,
+		links: ["Nightly Run Failures"],
+	},
+
+	// ── "draft" / "ship" — writing / releasing ──────────────────────────────
+	{
+		slug: "migration-writeup-draft",
+		title: "Migration Write-up — Draft",
+		fields: { type: "note", status: "draft", date: "2026-03-17" },
+		tags: ["writing"],
+		body: `Priya asked for this and I have been avoiding it for a week, which is its own kind of signal.
+
+The shape I want: what we were afraid of, what actually went wrong, and the one practice that made the difference. Not a timeline — nobody reads timelines.
+
+The honest version includes that we found three uninventoried callers two days out, and that catching them was luck. Leaving that out would make the piece useless to anyone planning their own.
+
+Still missing: the numbers. Eleven minutes against ninety budgeted, and I want the staging dry-run cost alongside it so the tradeoff is visible.`,
+		links: ["Migration Retro", "1:1 with Priya — March"],
+	},
+	{
+		slug: "ship-it-culture",
+		title: "On Shipping Before It's Ready",
+		fields: { type: "note", date: "2026-01-30" },
+		tags: ["writing"],
+		body: `The advice to ship early is right and is routinely misapplied. It means put it in front of someone, not skip the parts that make it work.
+
+Where I have seen it go wrong: shipping something whose failure mode is silent. A visibly rough thing gets feedback; a quietly wrong thing gets trusted and then discovered months later.
+
+My rule now is that a rough edge is fine if it is loud. Missing feature, ugly interface, obvious gap — all fine. Wrong answer returned confidently is not.
+
+The same applies to a design draft: circulating a rough one invites correction, while circulating a polished one invites approval, and those are different things.
+
+The retry logic sat unreviewed for a week because nobody wanted to touch it, which is the same failure wearing different clothes.`,
+		links: ["PR Review Backlog"],
+	},
+
+	// ── "scale" / "capacity" — systems / people ─────────────────────────────
+	{
+		slug: "scaling-the-scoring-stage",
+		title: "Scaling the Scoring Stage",
+		fields: { type: "note" },
+		tags: ["platform"],
+		body: `It is the only stage that scales horizontally and the only one that needs to, so the shape of the fix is not in question.
+
+Throughput is roughly linear to about twelve workers and then flattens, which is where the judge provider starts rate-limiting us rather than anything on our side.
+
+Options: negotiate a higher limit, batch harder, or cache more aggressively. Batching is free and we are already at twenty per request; going higher hurts latency on the interactive path.
+
+The cache is the underused lever — sixty percent hit rate should be higher given how much of the corpus is unchanged between runs.`,
+		links: ["Feedback Scoring Service", "Evaluation Pipeline"],
+	},
+	{
+		slug: "team-capacity-reality",
+		title: "Team Capacity, Honestly",
+		fields: { type: "note", date: "2026-03-19" },
+		tags: ["management"],
+		body: `Six people, and I have been planning as though that means six people of capacity, which it has never once meant.
+
+One is onboarding and will be net negative for another month. One is half-allocated to the migration. One is on call this rotation, which in practice is sixty percent of a person.
+
+Real capacity is closer to three and a half, and every plan I have written this quarter assumed five.
+
+This is not a morale problem or an effort problem. It is an arithmetic problem I keep declining to do.`,
+		links: ["Platform Hiring — Spring", "What Running a Team Actually Involves"],
+	},
+
+	// ── "charge" / "bank" — money / energy / institutions ───────────────────
+	{
+		slug: "ingest-charges-surprise",
+		title: "The Ingest Charge Nobody Modelled",
+		fields: { type: "note", date: "2026-03-12" },
+		tags: ["vendor"],
+		body: `Per-host pricing was the number everyone looked at. The ingest charge is the one that will actually decide whether this is affordable.
+
+Our scoring stage emits far more than a typical service because every judge call is traced end to end. At current volume the ingest line is roughly double the host line.
+
+Sampling would fix it and would also remove the traces we most want when something goes wrong, which is the whole tension.
+
+Asked whether dropped spans are charged. No answer yet.`,
+		links: ["Vendor Call — Observability Tooling"],
+	},
+
+	// ── "pitch" / "deck" — sales / sound / slope ────────────────────────────
+	{
+		slug: "platform-pitch-internal",
+		title: "Internal Pitch for the Platform Work",
+		fields: { type: "note", date: "2026-02-14" },
+		tags: ["writing"],
+		body: `Fifteen minutes to argue that the platform work deserves headcount, to an audience that has heard four of these this quarter.
+
+What works with this group: a number they did not know, then the consequence, then the ask. What does not work: architecture diagrams.
+
+The number is that three engineers spend a combined day a week on toil the platform work removes. Annualised that is most of a person.
+
+The ask is two engineers, not four. Asking for four reads as unserious and invites a negotiation I would rather not have.`,
+		links: ["Team Capacity, Honestly"],
+	},
+
+	{
+		slug: "vendor-pitch-notes",
+		title: "How the Vendor Pitched It",
+		fields: { type: "meeting", source: "vendor call", date: "2026-03-05" },
+		tags: ["vendor"],
+		body: `Worth separating what they demonstrated from how they pitched it, because the two did not entirely agree.
+
+The pitch was about unified visibility — one pane, every signal, no correlation work. The demo showed three consoles and a fair amount of correlation work.
+
+That is not dishonesty so much as the usual gap between the deck and the product, and the product was still better than what we run now.
+
+The part of the pitch I did believe: the collector really is standard, and the migration really would not require reinstrumenting anything.`,
+		links: ["Vendor Call — Observability Tooling", "The Ingest Charge Nobody Modelled"],
+	},
+
+	// ── literature notes — the other big real-vault category ────────────────
+	{
+		slug: "lit-thinking-in-systems",
+		title: "Thinking in Systems — Meadows",
+		fields: { type: "literature", source: "book", author: "Donella Meadows" },
+		tags: ["reading"],
+		body: `The idea that stuck: a system's behaviour comes from its structure, so blaming the people inside it is usually a category error.
+
+Stocks and flows as the basic vocabulary. A stock changes slowly even when flows change fast, which is why fixes appear not to work long after they have started working.
+
+Leverage points ranked from weak to strong — parameters near the bottom, goals and paradigms near the top. Most of what organisations argue about sits in the weakest third.
+
+Her warning about delays is the practical part: a delayed feedback signal produces oscillation, and adding more control makes it worse rather than better.`,
+		links: ["Noise — Kahneman, Sibony, Sunstein"],
+	},
+	{
+		slug: "lit-shape-of-design",
+		title: "The Shape of Design — Chimero",
+		fields: { type: "literature", source: "book", author: "Frank Chimero" },
+		tags: ["reading"],
+		body: `Short, and more useful than its length suggests.
+
+The argument I keep returning to: the gap between craft and intent. Skill lets you make the thing; taste tells you whether it was worth making, and the two arrive years apart.
+
+On improvisation — that a form has to be learned well enough to be abandoned deliberately rather than by accident.
+
+The chapter on audience is the one I disagreed with most and thought about longest.`,
+	},
+
+	// ── daily notes — bulk, and the source of most incidental collisions ────
+	{
+		slug: "daily-2026-03-16",
+		title: "2026-03-16",
+		fields: { type: "daily", date: "2026-03-16" },
+		tags: ["daily"],
+		body: `Blocked out the morning and actually kept it, first time in three weeks.
+
+Reviewed two changes, one of which I approved without really reading, which I should go back to.
+
+Started the migration write-up. Got as far as the outline before the sync, then lost the thread.
+
+Danilo asked about the platform team move. Said I would find out this week, so I need to actually ask.`,
+		links: ["Protecting Focus Blocks", "Migration Write-up — Draft"],
+	},
+	{
+		slug: "daily-2026-03-17",
+		title: "2026-03-17",
+		fields: { type: "daily", date: "2026-03-17" },
+		tags: ["daily"],
+		body: `Nightly run failed again. Same stage, same time, so it is the contention theory rather than anything new.
+
+Staggered the schedule as a stopgap. It will hold until aggregation moves.
+
+Wrote most of the migration piece. The numbers section is still empty because I need the staging costs and never wrote them down.
+
+Legal still has the contract. Eleven days.`,
+		links: ["Nightly Run Failures", "Blocked on Legal Review"],
+	},
+	{
+		slug: "daily-2026-03-18",
+		title: "2026-03-18",
+		fields: { type: "daily", date: "2026-03-18" },
+		tags: ["daily"],
+		body: `Decoupled the on-call rotation change from the vendor contract, which unblocks it immediately and should have happened last week.
+
+Long conversation with Wen about the schema. She is right and I said so.
+
+Capacity arithmetic finally done properly. Three and a half, not five. Need to redo the quarter plan on that basis and tell Priya before she hears it from the plan slipping.`,
+		links: ["Blocked on Legal Review", "Team Capacity, Honestly"],
+	},
+];
+
+/**
+ * Turn a note title into its filename. Used by every region of the corpus.
+ *
+ * In Obsidian the filename *is* the title, and that is not cosmetic here —
+ * `file.basename` is indexed as MiniSearch's title field, and
+ * `SEARCH_TERM_SPLIT_REGEX` (`searchTermUtils.ts`) treats `-` as a word character.
+ * So `context-switching-cost` is ONE token while `Context Switching Cost` is three,
+ * and only the latter can partially match a query through `calculateTitleBoost`.
+ *
+ * That asymmetry cuts both ways, which is why every region uses this now. A
+ * slugified *distractor* loses the title signal that makes it a competitor, so the
+ * benchmark gets quietly easier; a slugified *target* loses the signal that would
+ * surface it, so the benchmark gets harder for the wrong reason. Neither is a
+ * property anyone chose — both were artifacts of the filename convention.
+ *
+ * Dashes that belong to the title are kept — dates (`2026-03-16`, `Weekly Review
+ * 2026-03-14`) and `1-1` read correctly with them. Only characters that are illegal
+ * or awkward in a filename are replaced.
+ *
+ * `slug` is retained on the note types as the stable identifier for the generator's
+ * own guards (pair balance, size-bias shape checks, `--clean`), which must not depend
+ * on display text.
+ */
+function titleToFilename(title: string): string {
+	return (
+		title
+			.replace(/\s*—\s*/g, " - ")
+			// A colon between digits is a separator, not punctuation to delete: naively
+			// stripping it turned "1:1 with Priya" into "11 with Priya", which reads as
+			// eleven. Obsidian users write this as "1-1" in filenames for the same reason.
+			.replace(/(\d):(\d)/g, "$1-$2")
+			.replace(/[:/\\?*"<>|]/g, "")
+			.replace(/\s+/g, " ")
+			.trim()
+	);
+}
+
+/** Convenience wrapper for the Zettel layer, which passes whole notes around. */
+function zettelFilename(note: ZettelNote): string {
+	return titleToFilename(note.title);
+}
+
 // ── prose generation ─────────────────────────────────────────────────────────
 
 const SECTION_TITLES = [
@@ -847,7 +1840,24 @@ function main(): void {
 	const corpusRoot = join(vaultPath, CORPUS_DIR);
 
 	if (args.includes("--clean")) {
+		// `Corpus/` is entirely generated, so wiping it is safe and is how stale notes
+		// from a renamed subject get removed.
 		rmSync(corpusRoot, { recursive: true, force: true });
+
+		// `Zettel/` is NOT safe to wipe. It is *mixed*: this script writes the 31 notes
+		// in `ZETTEL_NOTES`, but the other 28 are hand-written files that were
+		// consolidated in from the old `Topics/`, `Large Notes/` and vault root, and
+		// nothing here can regenerate them. An earlier version of this block deleted the
+		// whole directory and took all 28 with it — recovered from git, but only because
+		// they happened to be committed.
+		//
+		// So remove exactly the generated set, by name, and leave everything else alone.
+		for (const note of ZETTEL_NOTES) {
+			rmSync(join(vaultPath, ZETTEL_DIR, `${zettelFilename(note)}.md`), { force: true });
+			// Also clear the pre-rename kebab filename, so a vault generated by an older
+			// revision does not keep a stale duplicate of every persona note.
+			rmSync(join(vaultPath, ZETTEL_DIR, `${note.slug}.md`), { force: true });
+		}
 	}
 
 	const written: Array<{ path: string; words: number }> = [];
@@ -865,7 +1875,7 @@ function main(): void {
 		const domain = domainByName(probe.domain);
 		const body = buildBody(domain, probe.words, probe.answer, probe.repeatAnswerLate ? probe.answer : undefined);
 		const content = `${frontmatter([domain.tag, ...(probe.tags ?? [])], probe.aliases)}# ${probe.title}\n\n${body}\n`;
-		write(domain, probe.slug, content);
+		write(domain, titleToFilename(probe.title), content);
 	}
 
 	// 2. Hard probe notes — the model-discrimination tier. Each axis needs a
@@ -929,7 +1939,7 @@ function main(): void {
 		}
 
 		const content = `${frontmatter([domain.tag, "hard", probe.axis], probe.aliases)}# ${probe.title}\n\n${body}\n`;
-		write(domain, probe.slug, content);
+		write(domain, titleToFilename(probe.title), content);
 	}
 
 	// 3. Distractor notes — lexically tempting, semantically wrong.
@@ -977,7 +1987,7 @@ function main(): void {
 		}
 
 		const content = `${frontmatter(tags)}# ${distractor.title}\n\n${body}\n`;
-		write(domain, distractor.slug, content);
+		write(domain, titleToFilename(distractor.title), content);
 	}
 
 	// 4. Bulk filler — gives the corpus realistic scale so rank-sensitive behaviour
@@ -994,7 +2004,22 @@ function main(): void {
 		const domain = DOMAINS[i % DOMAINS.length];
 		const subject = domain.subjects[Math.floor(i / DOMAINS.length) % domain.subjects.length];
 		const variant = Math.floor(i / (DOMAINS.length * domain.subjects.length)) + 1;
-		const title = variant > 1 ? `${subject} ${variant}` : subject;
+		// Variant 1 keeps the plain subject name — four judgment cases grade a base
+		// note at 1 as a genuinely-related result, and a real vault does have one
+		// canonical note per topic. Later variants get distinct hand-written titles
+		// rather than `Subject 2`, `Subject 3` (see `variantTitles`).
+		const alternates = domain.variantTitles[subject];
+		if (!alternates) {
+			throw new Error(
+				`No variantTitles entry for subject "${subject}" in domain "${domain.name}".\nEvery subject needs one, or its repeat notes fall back to numbered titles — the shape this field exists to remove.`,
+			);
+		}
+		if (variant > 1 && alternates.length < variant - 1) {
+			throw new Error(
+				`Subject "${subject}" (${domain.name}) needs ${variant - 1} alternate titles but has ${alternates.length}.\nBULK_TARGET (${BULK_TARGET}) drives how many variants each subject gets; raise the title list or lower the target.`,
+			);
+		}
+		const title = variant > 1 ? alternates[variant - 2] : subject;
 
 		// Long tail: mostly short/medium notes, a few genuinely long ones.
 		const roll = rng();
@@ -1007,12 +2032,182 @@ function main(): void {
 
 		const lead = `${title} is a recurring topic in ${domain.name.toLowerCase()}. ${fillerSentence(domain)}`;
 		const body = buildBody(domain, words, lead);
-		const slug = title
-			.toLowerCase()
-			.replace(/[^a-z0-9]+/g, "-")
-			.replace(/^-|-$/g, "");
+		// Filename = title, spaces and all. This is not cosmetic:
+		//
+		// `file.basename` is indexed as MiniSearch's title field
+		// (`LexicalSearchService.addDocument`), and `SEARCH_TERM_SPLIT_REGEX` in
+		// `searchTermUtils.ts` is `/[^\p{L}\p{N}#@_-]+/u` — it keeps `-` as a word
+		// character. So `refresh-ratios-for-daily-baking` tokenizes to ONE opaque
+		// token, while `Refresh Ratios for Daily Baking` tokenizes to five. A
+		// kebab-case filename can therefore never partially match a query, and
+		// `calculateTitleBoost` gets nothing from it.
+		//
+		// That matters most for exactly these notes: the filler exists to *crowd* the
+		// correct answer, and slugifying it silently switched off the title signal that
+		// makes it a competitor. Spaces also match how Obsidian itself names notes —
+		// the hand-written fixtures in this vault have always used them.
 		const content = `${frontmatter([domain.tag])}# ${title}\n\n${body}\n`;
-		write(domain, slug, content);
+		write(domain, titleToFilename(title), content);
+	}
+
+	// 5. Zettelkasten layer — flat, hand-written, deliberately ambiguous.
+	//
+	//    Written *after* the bulk loop and consuming **no draws from the shared `rng`**
+	//    (every body is verbatim). Both properties are load-bearing: the shared stream
+	//    means anything drawing from it here would rewrite all 285 filler notes above,
+	//    and judgment cases name `sourdough-starter-maintenance-3/4/8` by slug. Keeping
+	//    this section draw-free is what makes it a genuinely additive change — the
+	//    existing corpus stays byte-identical, so existing baselines remain comparable.
+	const zettelRoot = join(vaultPath, ZETTEL_DIR);
+	mkdirSync(zettelRoot, { recursive: true });
+	const zettelWritten: Array<{ slug: string; words: number }> = [];
+	for (const note of ZETTEL_NOTES) {
+		const lines = ["---"];
+		if (note.aliases?.length) {
+			lines.push("aliases:");
+			for (const alias of note.aliases) lines.push(`  - ${alias}`);
+		}
+		for (const [key, value] of Object.entries(note.fields ?? {})) {
+			lines.push(`${key}: ${value}`);
+		}
+		lines.push("tags:");
+		lines.push(`  - ${ZETTEL_TAG}`);
+		for (const tag of note.tags ?? []) lines.push(`  - ${tag}`);
+		lines.push("---", "");
+
+		// Link targets are written as display titles, but the *filename* is the title
+		// with illegal characters stripped — so an em dash in a title would leave every
+		// link to it dangling. Normalising the target through the same function keeps
+		// links and filenames from drifting apart by construction rather than by
+		// discipline; the guard below then only has to catch genuine typos.
+		const linkSection = note.links?.length
+			? `\n\n## Links\n\n${note.links
+					.map((l) => {
+						const [target, alias] = l.split("|");
+						const resolved = zettelFilename({ title: target.trim() } as ZettelNote);
+						return `- [[${resolved}${alias ? `|${alias}` : ""}]]`;
+					})
+					.join("\n")}`
+			: "";
+		const content = `${lines.join("\n")}# ${note.title}\n\n${note.body}${linkSection}\n`;
+		writeFileSync(join(zettelRoot, `${zettelFilename(note)}.md`), content, "utf8");
+		zettelWritten.push({ slug: note.slug, words: content.split(/\s+/).length });
+	}
+
+	// Guard: the polysemy and intent-frame axes measure *sense* discrimination, so their
+	// competing notes must stay comparable in size. If one side grew much longer than the
+	// other, the case would quietly turn into a size-bias test — the many-chunk note would
+	// win or lose on surface area and the axis would report a number that means something
+	// else entirely. Assert the shape rather than trusting it to stay put.
+	const COMPARABLE_PAIRS: ReadonlyArray<readonly [string, string]> = [
+		["1-1-priya-2026-03", "feedback-scoring-service"],
+		["1-1-priya-2026-03", "feedback-i-gave-2026-q1"],
+		["pr-review-backlog", "lit-noise-kahneman"],
+		["evaluation-pipeline", "hiring-pipeline-platform-2026"],
+		["focus-blocks-experiment", "storage-block-layout"],
+		["context-window-budget", "context-switching-cost"],
+		["nightly-run-failures", "running-a-team-notes"],
+		["weekly-sync-is-too-long", "replica-sync-lag"],
+		["scaling-the-scoring-stage", "team-capacity-reality"],
+	];
+	for (const [left, right] of COMPARABLE_PAIRS) {
+		const a = zettelWritten.find((z) => z.slug === left);
+		const b = zettelWritten.find((z) => z.slug === right);
+		if (!a || !b) throw new Error(`Zettel pair not generated: ${left} / ${right}`);
+		const ratio = Math.max(a.words, b.words) / Math.min(a.words, b.words);
+		if (ratio > 1.6) {
+			throw new Error(
+				`Zettel pair ${left} (${a.words}w) / ${right} (${b.words}w) differs by ${ratio.toFixed(2)}x.\nThese notes compete for the same query and must be separated by *sense*, not size — beyond ~1.6x the case starts measuring length bias instead of polysemy. Rebalance the bodies.`,
+			);
+		}
+	}
+
+	// Guard: every `[[wikilink]]` must resolve to a note that exists.
+	//
+	// `links` entries are written as display titles, and the filenames are now derived
+	// from titles too — so a link breaks the moment a title is edited without its
+	// referrers being updated, or when `zettelFilename` strips a character the link
+	// still contains. Obsidian renders those as dead links, and since the whole point of
+	// this layer is that hierarchy lives in links and frontmatter, a silently broken
+	// graph would misrepresent the fixture. Checked against both the Zettel filenames
+	// and the hand-written notes already in the directory.
+	const zettelFilenames = new Set(ZETTEL_NOTES.map((n) => zettelFilename(n)));
+	const handWritten = readdirSync(zettelRoot)
+		.filter((f) => f.endsWith(".md"))
+		.map((f) => f.slice(0, -3));
+	for (const name of handWritten) zettelFilenames.add(name);
+
+	/**
+	 * Link targets that intentionally have no note behind them.
+	 *
+	 * Real Zettelkasten vaults are full of these — you link an idea before you write it
+	 * up, and Obsidian renders it as an unresolved link. Keeping one here is realistic.
+	 *
+	 * It has to be declared rather than tolerated, though: a guard that silently allowed
+	 * dangling links could not tell a deliberate stub from a typo, which is exactly what
+	 * it exists to catch.
+	 */
+	const INTENTIONAL_STUBS = new Set(["Rubric Versioning"]);
+
+	const brokenLinks: string[] = [];
+	for (const note of ZETTEL_NOTES) {
+		for (const link of note.links ?? []) {
+			if (INTENTIONAL_STUBS.has(link.split("|")[0].trim())) continue;
+			// Strip any `|alias` suffix, then normalise exactly as the writer does — the
+			// check is for a target that names no note at all, not for punctuation the
+			// writer already reconciles.
+			const target = zettelFilename({ title: link.split("|")[0].trim() } as ZettelNote);
+			if (!zettelFilenames.has(target)) {
+				brokenLinks.push(`${zettelFilename(note)} → [[${target}]]`);
+			}
+		}
+	}
+	if (brokenLinks.length > 0) {
+		throw new Error(
+			`Broken wikilink(s) in ZETTEL_NOTES:\n  ${brokenLinks.join("\n  ")}\n\nEach [[target]] must match a note filename exactly. Filenames come from \`title\` via \`zettelFilename()\`, so a link has to use the title as written (minus characters that are illegal in filenames).`,
+		);
+	}
+
+	// Guard: a collision cluster with only one member tests nothing.
+	//
+	// This is not hypothetical. `context-switching-cost` was written for the `context`
+	// cluster and its first draft never used the word — it said "state I had in my
+	// head" — so the cluster silently had one member and the polysemy it claimed to
+	// create did not exist. The note read fine; only counting caught it. The same
+	// happened to `pitch`, which had a single member until a second sense was added.
+	//
+	// Checked against the rendered files rather than the source strings, so a word that
+	// appears only in a title or frontmatter still counts the way the indexer sees it.
+	const COLLISION_TERMS = [
+		"block",
+		"context",
+		"run",
+		"sync",
+		"draft",
+		"ship",
+		"scale",
+		"capacity",
+		"charge",
+		"pitch",
+		"review",
+		"feedback",
+		"pipeline",
+	];
+	const zettelBodies = ZETTEL_NOTES.map((n) =>
+		`${n.title} ${n.body} ${Object.values(n.fields ?? {}).join(" ")}`.toLowerCase(),
+	);
+	const thinClusters = COLLISION_TERMS.map((term) => ({
+		term,
+		count: zettelBodies.filter((b) => new RegExp(`\\b${term}`, "u").test(b)).length,
+	})).filter(({ count }) => count < 2);
+	if (thinClusters.length > 0) {
+		throw new Error(
+			`Zettel collision cluster(s) with fewer than two notes: ${thinClusters
+				.map(({ term, count }) => `${term} (${count})`)
+				.join(
+					", ",
+				)}.\nEach term must appear in at least two notes in *different senses* — that collision is the whole point of the layer, and a single-member cluster silently tests nothing. Add a second sense or drop the term from COLLISION_TERMS.`,
+		);
 	}
 
 	// Guard: judgment cases reference specific filler notes by name (the recency and
@@ -1020,10 +2215,25 @@ function main(): void {
 	// series). A change that shortens the filler run would otherwise degrade those
 	// cases silently — the note simply stops existing and quietly scores as absent.
 	// Fail loudly here instead.
+	// These are the `Sourdough Starter Maintenance` variants 3, 4 and 8 — renamed from
+	// `sourdough-starter-maintenance-{3,4,8}` when the filler gained real titles. They
+	// still crowd the starter queries by vocabulary, which is what the cases need; they
+	// simply no longer announce their kinship through a shared title stem.
 	const REQUIRED_FILLER = [
-		"Fermentation/sourdough-starter-maintenance-8.md",
-		"Fermentation/sourdough-starter-maintenance-4.md",
-		"Fermentation/sourdough-starter-maintenance-3.md",
+		"Fermentation/Sourdough Starter Maintenance.md",
+		"Fermentation/Fridge Storage Between Bakes.md",
+		"Fermentation/Discard Volume and Waste Reduction.md",
+		"Fermentation/Travel and Long Dormancy Handling.md",
+		"Fermentation/Refresh Ratios for Daily Baking.md",
+		"Fermentation/Reviving a Neglected Culture.md",
+		// Graded 0 by the `griechischer salat` cross-lingual case. German `salat`
+		// prefix-matches English `salt`, and these three own "Salt" in their *titles*,
+		// so they collect a title boost and beat the actual Greek-salad recipe. The
+		// case only measures that if the word stays in the title — rename them and it
+		// silently starts passing for the wrong reason.
+		"Fermentation/Salt Tolerance Across Species.md",
+		"Fermentation/Salt Type and Mineral Content.md",
+		"Fermentation/Salt Percentage and Aging Duration.md",
 	];
 	const writtenRelative = new Set(written.map((w) => w.path.slice(corpusRoot.length + 1)));
 	const missing = REQUIRED_FILLER.filter((p) => !writtenRelative.has(p));
@@ -1043,7 +2253,7 @@ function main(): void {
 	for (const distractor of DISTRACTORS) {
 		if (!distractor.padTopics) continue;
 		const domain = domainByName(distractor.domain);
-		const rel = `${domain.name}/${distractor.slug}.md`;
+		const rel = `${domain.name}/${titleToFilename(distractor.title)}.md`;
 		const entry = written.find((w) => w.path.slice(corpusRoot.length + 1) === rel);
 		if (!entry) {
 			throw new Error(`Size-bias distractor was not generated: ${rel}`);
@@ -1065,6 +2275,7 @@ function main(): void {
 	const median = lengths[Math.floor(lengths.length / 2)];
 	console.log(`Wrote ${written.length} notes to ${corpusRoot}`);
 	console.log(`  probes: ${PROBES.length}, hard probes: ${HARD_PROBES.length}, distractors: ${DISTRACTORS.length}`);
+	console.log(`Wrote ${ZETTEL_NOTES.length} flat Zettelkasten notes to ${join(vaultPath, ZETTEL_DIR)}`);
 	console.log(
 		`  words: total ${totalWords}, median ${median}, min ${lengths[0]}, max ${lengths[lengths.length - 1]}`,
 	);

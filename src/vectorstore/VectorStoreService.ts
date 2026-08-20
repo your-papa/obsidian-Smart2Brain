@@ -790,6 +790,10 @@ export class VectorStoreService {
 					}
 				};
 
+				// Consecutive transport-level failures. Reset on any success, so a
+				// flaky connection that recovers does not accumulate toward the limit.
+				let consecutiveUnreachable = 0;
+
 				for (let i = 0; i < validChunks.length; i += batchSize) {
 					if (inst.abortController?.signal.aborted) {
 						Logger.log(`[VectorStore] Validation indexing cancelled for ${inst.indexId}`);
@@ -807,11 +811,13 @@ export class VectorStoreService {
 
 					try {
 						const texts = batch.map((entry) => entry.embedText);
-						const vectors = await embeddings.embedDocuments(texts);
+						const vectors = await this.embedWithCancellation(inst, embeddings.embedDocuments(texts));
 						// The run may have been aborted (e.g. index deleted) while the
 						// embedding call was in flight; bail before writing to a store
 						// that could now be closed.
 						if (inst.abortController?.signal.aborted) break;
+						// The connection answered, so any earlier failure was transient.
+						consecutiveUnreachable = 0;
 						if (!vectors || vectors.length === 0) {
 							Logger.error(`[VectorStore] embedDocuments returned empty result for ${inst.indexId}`);
 							for (const entry of batch) noteSkipped(entry.file.path);
@@ -838,11 +844,31 @@ export class VectorStoreService {
 						indexed += batch.length;
 						if (notice) this.updateNotice(notice, inst.progress);
 					} catch (error) {
+						// A cancelled batch must not fall through to the per-entry retry
+						// below: that would re-issue every request in the batch against a
+						// provider the user just asked us to stop talking to.
+						if (this.isUserCancellation(error)) break;
 						Logger.error("[VectorStore] Batch validation indexing failed:", error);
+						// A transport failure will hit every remaining chunk the same way,
+						// so retrying this batch entry-by-entry is pure waste. Give the
+						// connection one more chance, then stop the whole run.
+						if (this.isProviderUnreachable(error)) {
+							consecutiveUnreachable++;
+							if (this.abortForUnreachableProvider(inst, error, consecutiveUnreachable)) break;
+							// Account for the batch before skipping the per-entry retry.
+							// Without this the notes silently vanish from the index while
+							// the run still reports success.
+							for (const entry of batch) noteSkipped(entry.file.path);
+							continue;
+						}
+						consecutiveUnreachable = 0;
 						for (const entry of batch) {
 							if (inst.abortController?.signal.aborted) break;
 							try {
-								const vector = await embeddings.embedQuery(entry.embedText);
+								const vector = await this.embedWithCancellation(
+									inst,
+									embeddings.embedQuery(entry.embedText),
+								);
 								if (!vector || vector.length === 0) {
 									Logger.error(
 										`[VectorStore] embedQuery returned empty result for ${entry.file.path}`,
@@ -863,6 +889,10 @@ export class VectorStoreService {
 								indexed++;
 								if (entry.chunkIndex === entry.chunkCount - 1) noteValidated(entry.file.path);
 							} catch (entryError) {
+								// Cancellation is not a per-file failure. Without this guard,
+								// aborting mid-batch fires one error Notice per remaining
+								// file and buries the "cancelled" message under them.
+								if (this.isUserCancellation(entryError)) throw entryError;
 								Logger.error(`[VectorStore] Failed to index ${entry.file.path}:`, entryError);
 								const reason = entryError instanceof Error ? entryError.message : String(entryError);
 								new Notice(`Failed to embed ${entry.file.basename}: ${reason}`);
@@ -1124,6 +1154,118 @@ export class VectorStoreService {
 	}
 
 	/**
+	 * Race an embedding call against the instance's abort signal.
+	 *
+	 * Every abort check in the indexing loops runs *after* an awaited embedding
+	 * call, so they only fire if that call returns. When a provider endpoint is
+	 * unreachable the request can hang far longer than any user will wait (and,
+	 * before `REQUEST_TIMEOUT_MS` existed in `obsidianFetch`, indefinitely) — so
+	 * Cancel appeared to do nothing and the progress notice froze at its last count.
+	 *
+	 * Racing makes Cancel take effect immediately. The underlying request is left
+	 * running; it is bounded by the fetch-level timeout and its result is discarded,
+	 * which is the right trade against pinning the UI on a dead endpoint.
+	 *
+	 * Throws `AbortError` when cancelled, so callers can distinguish "user stopped
+	 * this" from a genuine provider failure.
+	 */
+	private async embedWithCancellation<T>(inst: IndexInstance, work: Promise<T>): Promise<T> {
+		const signal = inst.abortController?.signal;
+		if (!signal) return work;
+
+		return Promise.race([
+			work,
+			new Promise<never>((_, reject) => {
+				if (signal.aborted) {
+					reject(new DOMException("Indexing cancelled", "AbortError"));
+					return;
+				}
+				signal.addEventListener("abort", () => reject(new DOMException("Indexing cancelled", "AbortError")), {
+					once: true,
+				});
+			}),
+		]);
+	}
+
+	/**
+	 * True when an error means "the provider is not reachable" rather than "this
+	 * particular document could not be embedded".
+	 *
+	 * The distinction decides whether retrying can possibly help. A malformed
+	 * document, a token-limit rejection or a content filter is specific to one
+	 * input, so the per-entry fallback is worth running. A transport failure is a
+	 * property of the *connection*, and will hit every remaining chunk identically.
+	 */
+	/**
+	 * True only when the *user* cancelled — never for a transport failure.
+	 *
+	 * The distinction is load-bearing: a bare `error.name === "AbortError"` check
+	 * also caught request timeouts (which reject with `TimeoutError`, but used to be
+	 * flattened to `AbortError` in `obsidianFetch`), so a dead provider short-circuited
+	 * the loop as if the user had pressed Cancel — skipping the unreachable-provider
+	 * notice entirely.
+	 */
+	private isUserCancellation(error: unknown): boolean {
+		return this.errorName(error) === "AbortError";
+	}
+
+	/**
+	 * Read `.name` without an `instanceof Error` check.
+	 *
+	 * `DOMException` — which is what an aborted fetch rejects with — is not an
+	 * `Error` subclass in every environment, so `instanceof` silently misses it and
+	 * a timeout gets misread as an ordinary failure.
+	 */
+	private errorName(error: unknown): string | undefined {
+		if (typeof error !== "object" || error === null) return undefined;
+		const name = (error as { name?: unknown }).name;
+		return typeof name === "string" ? name : undefined;
+	}
+
+	private isProviderUnreachable(error: unknown): boolean {
+		// `AbortError` is deliberately NOT here: it means the *user* cancelled, which
+		// callers handle separately (and treating it as a provider fault would show a
+		// spurious "provider unreachable" notice on every cancel). `TimeoutError` is a
+		// provider fault and must survive `isUserCancellation` above it.
+		if (this.errorName(error) === "TimeoutError") return true;
+		const message = error instanceof Error ? error.message : String(error);
+		return /network error|you are offline|connection may have changed|fetch failed|failed to fetch|timed out|ECONNREFUSED|ENOTFOUND|ETIMEDOUT|socket hang up|502|503|504/i.test(
+			message,
+		);
+	}
+
+	/**
+	 * Abort the run when the provider has failed repeatedly, rather than grinding
+	 * through every remaining chunk against a host that is plainly not answering.
+	 *
+	 * Without this, an unreachable endpoint produces one failed batch, then a
+	 * per-entry retry of every chunk in it, then the next batch, and so on —
+	 * hundreds of doomed requests (each with the SDK's own internal retries) while
+	 * the progress notice sits frozen. Measured against a disconnected provider:
+	 * still "Embedding batch 1" and unchanged at 310/370 after 107 s.
+	 *
+	 * The threshold is >1 so a single blip (one flaky request, a transient 502
+	 * under load) still gets the existing per-entry retry path. Two consecutive
+	 * transport failures is no longer a blip.
+	 */
+	private readonly UNREACHABLE_FAILURE_LIMIT = 2;
+
+	private abortForUnreachableProvider(inst: IndexInstance, error: unknown, consecutiveFailures: number): boolean {
+		if (!this.isProviderUnreachable(error) || consecutiveFailures < this.UNREACHABLE_FAILURE_LIMIT) return false;
+
+		const reason = error instanceof Error ? error.message : String(error);
+		Logger.error(
+			`[VectorStore] Stopping indexing for ${inst.indexId}: provider unreachable after ${consecutiveFailures} consecutive failures — ${reason}`,
+		);
+		new Notice(
+			"Indexing stopped — the embedding provider is not reachable.\nCheck the connection, then resume from settings.",
+			10_000,
+		);
+		inst.abortController?.abort();
+		return true;
+	}
+
+	/**
 	 * Get the configured batch size for an index, falling back to provider defaults.
 	 */
 	private getBatchSize(indexId: string, providerId: string): number {
@@ -1239,6 +1381,9 @@ export class VectorStoreService {
 				}
 			};
 
+			// Consecutive transport-level failures; see the validation loop.
+			let consecutiveUnreachable = 0;
+
 			for (let i = 0; i < validChunks.length; i += batchSize) {
 				if (inst.abortController?.signal.aborted) {
 					Logger.log(`[VectorStore] Indexing cancelled for ${inst.indexId}`);
@@ -1255,11 +1400,13 @@ export class VectorStoreService {
 
 				try {
 					const texts = batch.map((entry) => entry.embedText);
-					const vectors = await embeddings.embedDocuments(texts);
+					const vectors = await this.embedWithCancellation(inst, embeddings.embedDocuments(texts));
 					// The run may have been aborted (e.g. index deleted) while the
 					// embedding call was in flight; bail before writing to a store
 					// that could now be closed.
 					if (inst.abortController?.signal.aborted) break;
+					// The connection answered, so any earlier failure was transient.
+					consecutiveUnreachable = 0;
 					if (!vectors || vectors.length === 0) {
 						Logger.error(`[VectorStore] embedDocuments returned empty result for ${inst.indexId}`);
 						for (const entry of batch) noteSkipped(entry.file.path, "embed-error");
@@ -1288,15 +1435,33 @@ export class VectorStoreService {
 
 					this.updateNotice(notice, inst.progress);
 				} catch (error) {
+					// See the matching guard in the validation loop: a cancelled batch
+					// must not fall through to the sequential retry.
+					if (this.isUserCancellation(error)) break;
 					Logger.warn(
 						`[VectorStore] Batch ${Math.floor(i / batchSize) + 1} failed, falling back to sequential:`,
 						error,
 					);
+					// Transport failure: the sequential retry below would hit the same
+					// dead connection once per chunk. Allow one retry, then stop.
+					if (this.isProviderUnreachable(error)) {
+						consecutiveUnreachable++;
+						if (this.abortForUnreachableProvider(inst, error, consecutiveUnreachable)) break;
+						// Account for the batch before skipping the per-entry retry, so
+						// the notes are reported as skipped rather than silently dropped
+						// from a run that still claims success.
+						for (const entry of batch) noteSkipped(entry.file.path, "embed-error");
+						continue;
+					}
+					consecutiveUnreachable = 0;
 
 					for (const entry of batch) {
 						if (inst.abortController?.signal.aborted) break;
 						try {
-							const vector = await embeddings.embedQuery(entry.embedText);
+							const vector = await this.embedWithCancellation(
+								inst,
+								embeddings.embedQuery(entry.embedText),
+							);
 							if (!vector || vector.length === 0) {
 								Logger.error(`[VectorStore] embedQuery returned empty result for ${entry.file.path}`);
 								noteSkipped(entry.file.path, "embed-error");
@@ -1313,6 +1478,9 @@ export class VectorStoreService {
 							await inst.store.upsert(doc);
 							noteIndexed(entry.file.path);
 						} catch (entryError) {
+							// See the matching guard in the validation loop: cancellation
+							// must not be reported as a per-file embedding failure.
+							if (this.isUserCancellation(entryError)) throw entryError;
 							Logger.error(`[VectorStore] Failed to index ${entry.file.path}:`, entryError);
 							const reason = entryError instanceof Error ? entryError.message : String(entryError);
 							new Notice(`Failed to embed ${entry.file.basename}: ${reason}`);
@@ -1592,8 +1760,37 @@ export class VectorStoreService {
 			return filteredResults;
 		} catch (error) {
 			Logger.error("[VectorStore] Search failed:", error);
+			// Returning [] alone makes a dead provider indistinguishable from "no
+			// matching notes": the user sees an empty result list and concludes their
+			// vault has no answer, when in fact the embedding endpoint never replied.
+			// Surface it once, cheaply — the caller still gets [] so hybrid search can
+			// fall back to its lexical leg rather than failing outright.
+			this.noticeSearchFailureOnce(error);
 			return [];
 		}
+	}
+
+	/**
+	 * Timestamp of the last search-failure Notice, for rate limiting.
+	 *
+	 * Search runs on every keystroke in the modal (debounced), so an unreachable
+	 * provider would otherwise stack a Notice per query and bury the UI.
+	 */
+	private lastSearchFailureNoticeAt = 0;
+
+	private noticeSearchFailureOnce(error: unknown): void {
+		const now = Date.now();
+		if (now - this.lastSearchFailureNoticeAt < 30_000) return;
+		this.lastSearchFailureNoticeAt = now;
+
+		const reason = error instanceof Error ? error.message : String(error);
+		const offline = /network|offline|fetch failed|timed out|ECONNREFUSED|ENOTFOUND/i.test(reason);
+		new Notice(
+			offline
+				? "Semantic search unavailable — the embedding provider is not reachable. Showing no semantic results."
+				: `Semantic search failed: ${reason.slice(0, 120)}`,
+			8000,
+		);
 	}
 
 	/**
@@ -1868,7 +2065,10 @@ export class VectorStoreService {
 		const inst = this.instances.get(indexId);
 		if (inst?.abortController) {
 			inst.abortController.abort();
-			new Notice("Cancelling indexing… will stop after the current embedding finishes.");
+			// The in-flight embedding call is raced against this signal rather than
+			// awaited (`embedWithCancellation`), so cancelling takes effect at once —
+			// it no longer waits out a request that may never return.
+			new Notice("Cancelling indexing…");
 		}
 	}
 

@@ -38,7 +38,15 @@
 export type JudgmentTier = "core" | "hard" | "recency";
 
 /** The difficulty axis a `hard` case probes; used to group benchmark output. */
-export type HardAxis = "multi-hop" | "cross-lingual" | "long-context" | "dilution" | "size-bias";
+export type HardAxis =
+	| "multi-hop"
+	| "cross-lingual"
+	| "long-context"
+	| "dilution"
+	| "size-bias"
+	| "polysemy"
+	| "intent-frame"
+	| "provenance";
 
 export interface RelevanceJudgment {
 	/** The query as a user would type it. */
@@ -81,65 +89,85 @@ export const RELEVANCE_JUDGMENTS: readonly RelevanceJudgment[] = [
 		query: "how much output do solar panels lose to wear at sea",
 		probes: "near-synonym bridging (query 'solar panel' vs note 'photovoltaic array') against two lexical distractors that own the words 'solar'/'panel'/'photovoltaic' without answering the wear/output-loss question",
 		grades: {
-			[`${C}/Marine Biology/photovoltaic-array-degradation.md`]: 2,
-			[`${C}/Typography/solar-panel-metaphors-in-design.md`]: 0,
+			[`${C}/Marine Biology/Photovoltaic Array Degradation Offshore.md`]: 2,
+			[`${C}/Typography/Solar Panel Metaphors in Signage Design.md`]: 0,
 			// General PV overview; contains "solar" and "photovoltaic" but never
 			// discusses degradation, wear, or output loss over time -- graded 0
 			// explicitly so a lexical-title match on this note is scored as the
 			// distractor it is, not an unrewarded correct answer.
-			"Topics/Renewable Energy/Solar Photovoltaics.md": 0,
+			"Zettel/Solar Photovoltaics.md": 0,
 		},
 	},
 	{
 		query: "can an octopus learn to open a sealed jar",
 		probes: "distractor with identical query-term overlap ('octopus', 'open'); only meaning separates them",
 		grades: {
-			[`${C}/Marine Biology/cephalopod-problem-solving.md`]: 2,
-			[`${C}/Fermentation/octopus-recipes.md`]: 0,
+			[`${C}/Marine Biology/Cephalopod Problem Solving.md`]: 2,
+			[`${C}/Fermentation/Fermented Octopus Preparations.md`]: 0,
 		},
 	},
 	{
 		query: "how long before a rate change reaches borrowers",
 		probes: "long multi-chunk target (~2400 words) vs a distractor using 'rate' and 'interest' in a non-monetary sense",
 		grades: {
-			[`${C}/Monetary Policy/policy-rate-transmission-lag.md`]: 2,
-			[`${C}/Typography/interest-in-typography-history.md`]: 0,
+			[`${C}/Monetary Policy/Policy Rate Transmission Lag.md`]: 2,
+			[`${C}/Typography/Interest and Rates of Change in Type History.md`]: 0,
 		},
 	},
 	{
 		query: "what makes very small text readable",
 		probes: "zero lexical overlap with the target — semantic-only retrieval; distractor shares the phrase 'small sizes'",
 		grades: {
-			[`${C}/Typography/legibility-at-small-sizes.md`]: 2,
-			[`${C}/Fermentation/small-sizes-of-fermentation-vessels.md`]: 0,
+			[`${C}/Typography/Legibility at Small Sizes.md`]: 2,
+			[`${C}/Fermentation/Small Sizes of Fermentation Vessels.md`]: 0,
 		},
 	},
 	{
 		query: "when do prices rise so fast people stop using the local currency",
-		probes: "very short note (~45 words) as the correct answer — length normalization must not bury it under long notes",
+		probes: "very short note (~45 words) as the correct answer — length normalization must not bury it under long notes. Had the worst Hole@10 in the suite (10/10 ungraded) before the pooled grading pass; the additions are same-domain filler that names the topic without answering it.",
 		grades: {
-			[`${C}/Monetary Policy/hyperinflation-episodes.md`]: 2,
+			[`${C}/Monetary Policy/Hyperinflation Episodes.md`]: 2,
+			// Currency-adjacent bulk filler. Each opens "<Title> is a recurring topic
+			// in monetary policy" and never states a threshold or a switching
+			// behaviour, so they are plausible neighbours rather than answers.
+			[`${C}/Monetary Policy/Revenue From Currency Issuance.md`]: 1,
+			[`${C}/Monetary Policy/Currency Pegs.md`]: 1,
+			[`${C}/Monetary Policy/Peg Abandonment Case Studies.md`]: 1,
+			[`${C}/Monetary Policy/Currency Board Arrangements.md`]: 1,
+			// Off-topic within the same domain: repo-market plumbing has nothing to
+			// do with currency abandonment, so a high rank here is a real error.
+			[`${C}/Monetary Policy/Reserve Scarcity and Repo Spikes.md`]: 0,
 		},
 	},
 	{
 		query: "how long does a wet sourdough starter take to double",
-		probes: "multi-chunk target where the answer is repeated late in the note — aggregate vs best-chunk scoring",
+		probes: "multi-chunk target where the answer is repeated late in the note — aggregate vs best-chunk scoring. Distractors graded from a pooled top-10 across all three algorithms (see 'Filling judgment holes' in the README): the equipment log is a declared size-bias distractor that explicitly disclaims the answer, yet currently ranks hybrid-2 / lexical-1.",
 		grades: {
-			[`${C}/Fermentation/starter-hydration-and-rise.md`]: 2,
+			[`${C}/Fermentation/Starter Hydration and Rise Time.md`]: 2,
+			// Declared size-bias distractor. Its own body says "Nothing here
+			// measures how long any starter takes to rise, double, or respond to
+			// hydration" — so a high rank for it is unambiguously wrong.
+			[`${C}/Fermentation/Bakery Equipment Maintenance Log.md`]: 0,
+			// Bulk filler: names the topic in template prose ("is a recurring topic
+			// in fermentation") without stating any timing. Topically adjacent, so
+			// reasonable to surface, but it answers nothing — grade 1, not 2.
+			[`${C}/Fermentation/Sourdough Starter Maintenance.md`]: 1,
+			[`${C}/Fermentation/Refresh Ratios for Daily Baking.md`]: 1,
+			[`${C}/Fermentation/First Rise Timing Expectations.md`]: 1,
 		},
 	},
 	{
 		query: "Octopus Intelligence",
 		probes: "alias match: the title does not contain these words, only the frontmatter alias does",
 		grades: {
-			[`${C}/Marine Biology/cephalopod-problem-solving.md`]: 2,
+			[`${C}/Marine Biology/Cephalopod Problem Solving.md`]: 2,
 		},
 	},
 	{
 		query: "Levain Timing",
 		probes: "alias match on a long note, competing against its own domain's filler",
 		grades: {
-			[`${C}/Fermentation/starter-hydration-and-rise.md`]: 2,
+			[`${C}/Fermentation/Starter Hydration and Rise Time.md`]: 2,
 		},
 	},
 
@@ -159,20 +187,20 @@ export const RELEVANCE_JUDGMENTS: readonly RelevanceJudgment[] = [
 		query: "can an octopus learn to open a sealed jar",
 		tier: "recency",
 		probes: "recency vs relevance: the WRONG note (a recipe) is the most recently opened. It must not overtake the correct answer — the failure that motivated capping the recency lift.",
-		recentNotes: [`${C}/Fermentation/octopus-recipes.md`],
+		recentNotes: [`${C}/Fermentation/Fermented Octopus Preparations.md`],
 		grades: {
-			[`${C}/Marine Biology/cephalopod-problem-solving.md`]: 2,
-			[`${C}/Fermentation/octopus-recipes.md`]: 0,
+			[`${C}/Marine Biology/Cephalopod Problem Solving.md`]: 2,
+			[`${C}/Fermentation/Fermented Octopus Preparations.md`]: 0,
 		},
 	},
 	{
 		query: "what makes very small text readable",
 		tier: "recency",
 		probes: "the same conflict with a distractor that is a much weaker match, so the relative-relevance gate suppresses its recency lift entirely",
-		recentNotes: [`${C}/Fermentation/small-sizes-of-fermentation-vessels.md`],
+		recentNotes: [`${C}/Fermentation/Small Sizes of Fermentation Vessels.md`],
 		grades: {
-			[`${C}/Typography/legibility-at-small-sizes.md`]: 2,
-			[`${C}/Fermentation/small-sizes-of-fermentation-vessels.md`]: 0,
+			[`${C}/Typography/Legibility at Small Sizes.md`]: 2,
+			[`${C}/Fermentation/Small Sizes of Fermentation Vessels.md`]: 0,
 		},
 	},
 	{
@@ -180,27 +208,27 @@ export const RELEVANCE_JUDGMENTS: readonly RelevanceJudgment[] = [
 		tier: "recency",
 		probes: "recency piled onto near-duplicates: three sibling filler notes that already crowd this query are marked recent, testing whether the true answer survives a coordinated lift",
 		recentNotes: [
-			`${C}/Fermentation/sourdough-starter-maintenance-4.md`,
-			`${C}/Fermentation/sourdough-starter-maintenance-3.md`,
-			`${C}/Fermentation/sourdough-starter-maintenance-8.md`,
+			`${C}/Fermentation/Fridge Storage Between Bakes.md`,
+			`${C}/Fermentation/Reviving a Neglected Culture.md`,
+			`${C}/Fermentation/Travel and Long Dormancy Handling.md`,
 		],
 		grades: {
-			[`${C}/Fermentation/starter-hydration-and-rise.md`]: 2,
+			[`${C}/Fermentation/Starter Hydration and Rise Time.md`]: 2,
 			// Graded explicitly so the recency lift they receive is actually scored:
 			// these are generic maintenance notes, not the hydration/timing answer.
-			[`${C}/Fermentation/sourdough-starter-maintenance-4.md`]: 0,
-			[`${C}/Fermentation/sourdough-starter-maintenance-3.md`]: 0,
-			[`${C}/Fermentation/sourdough-starter-maintenance-8.md`]: 0,
+			[`${C}/Fermentation/Fridge Storage Between Bakes.md`]: 0,
+			[`${C}/Fermentation/Reviving a Neglected Culture.md`]: 0,
+			[`${C}/Fermentation/Travel and Long Dormancy Handling.md`]: 0,
 		},
 	},
 	{
 		query: "Octopus Intelligence",
 		tier: "recency",
 		probes: "recency must not override an exact alias match — the strongest possible identity signal",
-		recentNotes: [`${C}/Fermentation/octopus-recipes.md`],
+		recentNotes: [`${C}/Fermentation/Fermented Octopus Preparations.md`],
 		grades: {
-			[`${C}/Marine Biology/cephalopod-problem-solving.md`]: 2,
-			[`${C}/Fermentation/octopus-recipes.md`]: 0,
+			[`${C}/Marine Biology/Cephalopod Problem Solving.md`]: 2,
+			[`${C}/Fermentation/Fermented Octopus Preparations.md`]: 0,
 		},
 	},
 
@@ -213,21 +241,21 @@ export const RELEVANCE_JUDGMENTS: readonly RelevanceJudgment[] = [
 		query: "smart city sensors and data platforms",
 		probes: "multi-target: two notes are directly on point, several siblings are related. Measures the ordering of the whole set, not just rank 1.",
 		grades: {
-			"Topics/Smart Cities/IoT Sensors.md": 2,
-			"Topics/Smart Cities/Urban Data Platforms.md": 2,
-			"Topics/Smart Cities/Digital Twins.md": 1,
-			"Topics/Smart Cities/Smart City Overview.md": 1,
-			"Topics/Smart Cities/Smart Street Lighting.md": 1,
+			"Zettel/IoT Sensors.md": 2,
+			"Zettel/Urban Data Platforms.md": 2,
+			"Zettel/Digital Twins.md": 1,
+			"Zettel/Smart City Overview.md": 1,
+			"Zettel/Smart Street Lighting.md": 1,
 		},
 	},
 	{
 		query: "how do cities cut energy use in buildings and street lighting",
 		probes: "multi-target spanning two folders (Smart Cities + Renewable Energy) — a query no single note fully answers",
 		grades: {
-			"Topics/Smart Cities/Smart Buildings.md": 2,
-			"Topics/Smart Cities/Smart Street Lighting.md": 2,
-			"Topics/Renewable Energy/Energy Storage.md": 1,
-			"Topics/Smart Cities/Smart City Overview.md": 1,
+			"Zettel/Smart Buildings.md": 2,
+			"Zettel/Smart Street Lighting.md": 2,
+			"Zettel/Energy Storage.md": 1,
+			"Zettel/Smart City Overview.md": 1,
 		},
 	},
 
@@ -239,13 +267,13 @@ export const RELEVANCE_JUDGMENTS: readonly RelevanceJudgment[] = [
 
 	{
 		query: "what hydration level makes a starter rise fastest",
-		probes: "the answer must beat ~8 sibling 'sourdough starter maintenance' notes that share nearly all vocabulary; siblings graded 0 so crowding costs score",
+		probes: "the answer must beat ~8 starter-maintenance sibling notes that share nearly all vocabulary; siblings graded 0 so crowding costs score. Since the filler gained real titles ('Refresh Ratios for Daily Baking', 'Reviving a Neglected Culture'), the siblings no longer share a title stem — the crowding is now purely lexical overlap, which is the harder and more realistic version.",
 		grades: {
-			[`${C}/Fermentation/starter-hydration-and-rise.md`]: 2,
-			[`${C}/Fermentation/sourdough-starter-maintenance.md`]: 0,
-			[`${C}/Fermentation/sourdough-starter-maintenance-2.md`]: 0,
-			[`${C}/Fermentation/sourdough-starter-maintenance-3.md`]: 0,
-			[`${C}/Fermentation/sourdough-starter-maintenance-4.md`]: 0,
+			[`${C}/Fermentation/Starter Hydration and Rise Time.md`]: 2,
+			[`${C}/Fermentation/Sourdough Starter Maintenance.md`]: 0,
+			[`${C}/Fermentation/Refresh Ratios for Daily Baking.md`]: 0,
+			[`${C}/Fermentation/Reviving a Neglected Culture.md`]: 0,
+			[`${C}/Fermentation/Fridge Storage Between Bakes.md`]: 0,
 		},
 	},
 	// ── length bias ─────────────────────────────────────────────────────────
@@ -260,24 +288,32 @@ export const RELEVANCE_JUDGMENTS: readonly RelevanceJudgment[] = [
 		query: "at what monthly inflation rate do people switch to foreign currency",
 		probes: "short single-chunk note (513 bytes) as the answer, against 66KB many-chunk notes that share economic vocabulary — pure length-bias probe",
 		grades: {
-			[`${C}/Monetary Policy/hyperinflation-episodes.md`]: 2,
-			"Large Notes/Distributed Systems Deep Dive.md": 0,
-			"Large Notes/Storage Engines and Indexing.md": 0,
+			[`${C}/Monetary Policy/Hyperinflation Episodes.md`]: 2,
+			"Zettel/Distributed Systems Deep Dive.md": 0,
+			"Zettel/Storage Engines and Indexing.md": 0,
 		},
 	},
 	{
 		query: "which borrowers feel a policy rate change first",
-		probes: "the many-chunk note (17KB, ~20 chunks) is genuinely correct here — guards against over-correcting the length-bias fix into a penalty on long notes",
+		probes: "the many-chunk note (17KB, ~20 chunks) is genuinely correct here — guards against over-correcting the length-bias fix into a penalty on long notes. The pooled grading pass found the size-bias distractor taking rank 1 in BOTH legs while ungraded, so the case was scoring 0.631 for a defect it could not attribute.",
 		grades: {
-			[`${C}/Monetary Policy/policy-rate-transmission-lag.md`]: 2,
+			[`${C}/Monetary Policy/Policy Rate Transmission Lag.md`]: 2,
+			// The archive is a declared size-bias distractor and disclaims this exact
+			// query in its own body: "not of how long transmission takes or which
+			// borrowers feel a change first". It nonetheless ranks hybrid-1 /
+			// lexical-1. Grading it 0 is what makes that legible as an error.
+			[`${C}/Monetary Policy/Central Bank Communications Archive.md`]: 0,
+			// Same-domain filler: transmission vocabulary in template prose, no
+			// statement about which borrowers reprice first.
+			[`${C}/Monetary Policy/Interest Rate Corridors.md`]: 1,
 		},
 	},
 	{
 		query: "why do offshore panels lose efficiency over the years",
 		probes: "restates the solar case with no shared content words at all ('offshore panels' vs 'photovoltaic arrays', 'lose efficiency' vs 'lose rated output')",
 		grades: {
-			[`${C}/Marine Biology/photovoltaic-array-degradation.md`]: 2,
-			[`${C}/Typography/solar-panel-metaphors-in-design.md`]: 0,
+			[`${C}/Marine Biology/Photovoltaic Array Degradation Offshore.md`]: 2,
+			[`${C}/Typography/Solar Panel Metaphors in Signage Design.md`]: 0,
 		},
 	},
 
@@ -306,9 +342,9 @@ export const RELEVANCE_JUDGMENTS: readonly RelevanceJudgment[] = [
 		axis: "multi-hop",
 		probes: "two-fact join: energy source (sulfide, not surface fall) + flow reroute drops sulfide. Neither section alone answers it; sibling vent notes discuss vents generally.",
 		grades: {
-			[`${C}/Marine Biology/vent-chemosynthesis-energy-budget.md`]: 2,
-			[`${C}/Marine Biology/deep-sea-hydrothermal-vents.md`]: 0,
-			[`${C}/Marine Biology/deep-sea-hydrothermal-vents-2.md`]: 0,
+			[`${C}/Marine Biology/Vent Chemosynthesis Energy Budget.md`]: 2,
+			[`${C}/Marine Biology/Deep Sea Hydrothermal Vents.md`]: 0,
+			[`${C}/Marine Biology/Chimney Formation and Mineral Deposition.md`]: 0,
 		},
 	},
 	{
@@ -317,9 +353,9 @@ export const RELEVANCE_JUDGMENTS: readonly RelevanceJudgment[] = [
 		axis: "multi-hop",
 		probes: "two-fact join: reserves below intraday need + settlement clustering in the last hour. 'repo market' filler siblings share the vocabulary without the causal chain.",
 		grades: {
-			[`${C}/Monetary Policy/reserve-scarcity-and-repo-spikes.md`]: 2,
-			[`${C}/Monetary Policy/reserve-requirements.md`]: 0,
-			[`${C}/Monetary Policy/open-market-operations.md`]: 0,
+			[`${C}/Monetary Policy/Reserve Scarcity and Repo Spikes.md`]: 2,
+			[`${C}/Monetary Policy/Reserve Requirements.md`]: 0,
+			[`${C}/Monetary Policy/Open Market Operations.md`]: 0,
 		},
 	},
 
@@ -334,7 +370,7 @@ export const RELEVANCE_JUDGMENTS: readonly RelevanceJudgment[] = [
 		axis: "cross-lingual",
 		probes: "English query → monolingual German note. An English-only encoder has nothing to match; a multilingual one should place this at rank 1.",
 		grades: {
-			[`${C}/Marine Biology/salzgehalt-und-larvenwanderung.md`]: 2,
+			[`${C}/Marine Biology/Salzgehalt und Larvenwanderung.md`]: 2,
 		},
 	},
 	{
@@ -343,9 +379,9 @@ export const RELEVANCE_JUDGMENTS: readonly RelevanceJudgment[] = [
 		axis: "cross-lingual",
 		probes: "English query → German note, competing against ~8 English sourdough-maintenance siblings that are lexically closer to the query.",
 		grades: {
-			[`${C}/Fermentation/sauerteig-fuehrung-im-winter.md`]: 2,
-			[`${C}/Fermentation/sourdough-starter-maintenance.md`]: 0,
-			[`${C}/Fermentation/sourdough-starter-maintenance-2.md`]: 0,
+			[`${C}/Fermentation/Sauerteigführung im Winter.md`]: 2,
+			[`${C}/Fermentation/Sourdough Starter Maintenance.md`]: 0,
+			[`${C}/Fermentation/Refresh Ratios for Daily Baking.md`]: 0,
 		},
 	},
 	{
@@ -354,8 +390,45 @@ export const RELEVANCE_JUDGMENTS: readonly RelevanceJudgment[] = [
 		axis: "cross-lingual",
 		probes: "reverse direction: German query → English note. Catches a model that handles German input but cannot align it to English content.",
 		grades: {
-			[`${C}/Typography/variable-font-axis-registration.md`]: 2,
-			[`${C}/Typography/variable-font-axes.md`]: 1,
+			[`${C}/Typography/Variable Font Axis Registration.md`]: 2,
+			[`${C}/Typography/Variable Font Axes.md`]: 1,
+		},
+	},
+	{
+		query: "griechischer salat",
+		tier: "hard",
+		axis: "cross-lingual",
+		// `knownFailure` removed 2026-08-18. Partial improvement, not a fix:
+		// 0.431 → **0.500** (rank 4 → rank 3) after `SEMANTIC_SOURCE_WEIGHT`
+		// 0.78 → 0.86 in `finalSearchRanking.ts`.
+		//
+		// **A 1.000 was briefly recorded for this case and is wrong — do not trust it.**
+		// It was measured while the working tree was stashed onto `dev`, where the vault
+		// still had `Topics/` (20 notes), `Large Notes/` (2) and 7 loose root notes
+		// alongside `Zettel/`. Those 29 extra notes change the result-set normalization
+		// in `rankSearchResults`, which is what produced the better ranking — not the
+		// ranker. Re-measured on this branch's consolidated layout against the *same*
+		// index build (harrier, built 14:02): 0.500, reproduced exactly across two runs.
+		//
+		// The annotation stays off regardless: 0.500 is a genuine improvement over the
+		// 0.431 that justified the annotation, and labelling a partially-working case as
+		// a known failure is its own kind of wrong. But the mechanism is still live —
+		// German `salat` prefix-matches English `salt`, and two "Salt …" filler notes
+		// still take ranks 1-2 on `calculateTitleBoost`. The semantic leg ranks the
+		// correct note 3rd (0.5593) behind two German notes, so it does not fully
+		// recover a query the lexical half misdirects.
+		//
+		// Kept as a live case: it remains a real guard against the lexical leg being
+		// re-weighted upward. The "Salt" notes are pinned in `REQUIRED_FILLER` so a
+		// rename cannot make it pass for the wrong reason.
+		probes: "false-cognate prefix match: a two-word German query whose second token is a prefix of an unrelated English word that several filler notes own in their titles. Prefix matching is deliberate here (`prefix: shouldContentPrefixMatch`, `weights.prefix = 0.3`), so this is not a switch to flip — it measures whether the semantic half can recover a query the lexical half actively misdirects. Was a knownFailure at 0.431; 0.500 at SEMANTIC_SOURCE_WEIGHT 0.86 — improved, not fixed.",
+		grades: {
+			"Zettel/Cooking Mediterranean Recipes.md": 2,
+			// Honest fermentation notes about salt concentration. Nothing about salad,
+			// and nothing in them declares that — the collision is purely orthographic.
+			[`${C}/Fermentation/Salt Tolerance Across Species.md`]: 0,
+			[`${C}/Fermentation/Salt Type and Mineral Content.md`]: 0,
+			[`${C}/Fermentation/Salt Percentage and Aging Duration.md`]: 0,
 		},
 	},
 
@@ -371,8 +444,8 @@ export const RELEVANCE_JUDGMENTS: readonly RelevanceJudgment[] = [
 		axis: "long-context",
 		probes: "answer buried ~918 words into one unbroken section — past a 512-token window. Directly probes truncation on small encoders.",
 		grades: {
-			[`${C}/Fermentation/koji-substrate-preparation.md`]: 2,
-			[`${C}/Fermentation/koji-cultivation.md`]: 1,
+			[`${C}/Fermentation/Koji Substrate Preparation.md`]: 2,
+			[`${C}/Fermentation/Koji Cultivation.md`]: 1,
 		},
 	},
 	{
@@ -381,23 +454,48 @@ export const RELEVANCE_JUDGMENTS: readonly RelevanceJudgment[] = [
 		axis: "long-context",
 		probes: "answer buried ~1107 words deep; sibling 'Yield Curve Inversion' notes are on-topic but do not contain the qualifier about negative term premia.",
 		grades: {
-			[`${C}/Monetary Policy/yield-curve-signal-decay.md`]: 2,
-			[`${C}/Monetary Policy/yield-curve-inversion.md`]: 1,
+			[`${C}/Monetary Policy/Yield Curve Signal Decay.md`]: 2,
+			[`${C}/Monetary Policy/Yield Curve Inversion.md`]: 1,
 		},
 	},
 
 	// ── dilution ────────────────────────────────────────────────────────────
-	// Reproduces the measured multi-topic signal collapse: the note-level
-	// embedding averages over six unrelated admin topics plus one real answer,
-	// so the answer's contribution to the note vector is heavily attenuated.
+	// Originally written to reproduce a measured multi-topic signal collapse: a
+	// note-level embedding averaging six unrelated admin topics plus one real
+	// answer, so the answer's contribution to the note vector was attenuated.
+	//
+	// **That mechanism is solved, and these cases no longer test it (2026-08-18).**
+	// Retrieval is chunk-level and `chunkAggregation.ts` scores a note as
+	// `best_chunk * (1 + support)`, so the answering chunk is found on its own
+	// merits and the other five topics cannot average it away by construction.
+	// A low score here is therefore NOT evidence of a chunking regression — do not
+	// go looking in `chunkAggregation.ts` for it.
+	//
+	// What the cases measure now is **topical proximity vs. answerhood**: the
+	// target is a note that answers the question while a sibling that is *more
+	// obviously about the topic* does not (see the `Hinting and Rasterization`
+	// grade-1 below). That is closer in shape to `multi-hop` than to the original
+	// dilution premise.
+	//
+	// Kept rather than deleted, for two measured reasons:
+	//  1. It discriminates between models again. It looked saturated while only
+	//     harrier and Qwen3 had been measured (both 1.0000), but
+	//     `text-embedding-3-small` scores 0.7754 — the weakest of the three on this
+	//     axis while being the strongest overall, which is exactly the kind of
+	//     disagreement with the aggregate that an axis exists to surface.
+	//  2. The hinting case is one of two that fall 1.000 → 0.689 at
+	//     `SEMANTIC_SOURCE_WEIGHT = 1.0`, so it actively constrains that constant.
+	//
+	// The axis name is left alone deliberately: renaming it would break comparison
+	// with every figure already recorded in `integration/README.md`.
 
 	{
 		query: "does survey timing change the herbivore counts",
 		tier: "hard",
 		axis: "dilution",
-		probes: "answer is one section inside a six-topic logistics note (permits, boats, cameras, training...). Note-level similarity is diluted; only chunk-level retrieval recovers it.",
+		probes: "answer is one section inside a six-topic logistics note (permits, boats, cameras, training...). Chunk-level retrieval makes the note-level dilution a non-issue by construction, so what this now measures is whether the answering section wins against siblings that are more obviously on-topic.",
 		grades: {
-			[`${C}/Marine Biology/reef-survey-field-notes.md`]: 2,
+			[`${C}/Marine Biology/Reef Survey Field Notes.md`]: 2,
 		},
 	},
 	{
@@ -406,8 +504,8 @@ export const RELEVANCE_JUDGMENTS: readonly RelevanceJudgment[] = [
 		axis: "dilution",
 		probes: "same shape in another domain, competing against dedicated 'Hinting and Rasterization' notes that are topically closer but do not answer the reuse question.",
 		grades: {
-			[`${C}/Typography/foundry-operations-log.md`]: 2,
-			[`${C}/Typography/hinting-and-rasterization.md`]: 1,
+			[`${C}/Typography/Foundry Operations Log.md`]: 2,
+			[`${C}/Typography/Hinting and Rasterization.md`]: 1,
 		},
 	},
 
@@ -434,8 +532,8 @@ export const RELEVANCE_JUDGMENTS: readonly RelevanceJudgment[] = [
 		axis: "size-bias",
 		probes: "3-section answer note vs an 8-section husbandry log repeating 'octopus', 'sealed', 'jar', and 'lid' across every section. The distractor has ~2.7x the chunks and none of the answer.",
 		grades: {
-			[`${C}/Marine Biology/cephalopod-problem-solving.md`]: 2,
-			[`${C}/Marine Biology/octopus-husbandry-program-notes.md`]: 0,
+			[`${C}/Marine Biology/Cephalopod Problem Solving.md`]: 2,
+			[`${C}/Marine Biology/Octopus Husbandry Program Notes.md`]: 0,
 		},
 	},
 	{
@@ -444,8 +542,8 @@ export const RELEVANCE_JUDGMENTS: readonly RelevanceJudgment[] = [
 		axis: "size-bias",
 		probes: "9-section answer note vs an 18-section print-production handbook saturated with 'small', 'text', 'readable', 'size'. Twice the chunks, no finding about legibility.",
 		grades: {
-			[`${C}/Typography/legibility-at-small-sizes.md`]: 2,
-			[`${C}/Typography/type-specimen-production-handbook.md`]: 0,
+			[`${C}/Typography/Legibility at Small Sizes.md`]: 2,
+			[`${C}/Typography/Type Specimen Production Handbook.md`]: 0,
 		},
 	},
 	{
@@ -454,8 +552,234 @@ export const RELEVANCE_JUDGMENTS: readonly RelevanceJudgment[] = [
 		axis: "size-bias",
 		probes: "the hardest of the three: a 28-section press-office archive out-chunks the 25-section answer note while repeating 'rate', 'change', and 'borrowers' throughout. Length alone must not decide it.",
 		grades: {
-			[`${C}/Monetary Policy/policy-rate-transmission-lag.md`]: 2,
-			[`${C}/Monetary Policy/central-bank-communications-archive.md`]: 0,
+			[`${C}/Monetary Policy/Policy Rate Transmission Lag.md`]: 2,
+			[`${C}/Monetary Policy/Central Bank Communications Archive.md`]: 0,
+		},
+	},
+
+	// ════════════════════════════════════════════════════════════════════════
+	// REALISTIC-USE TIER — polysemy, intent-frame, provenance.
+	//
+	// Added after a reported real-vault failure the whole suite above could not
+	// reproduce: the query "feedback i received" returned notes about an LLM
+	// feedback-scoring component in an automation pipeline instead of notes
+	// recording feedback the user was given.
+	//
+	// Three properties of the `Corpus/` cases made that unreproducible:
+	//
+	//  1. Every distractor there *declares its own irrelevance* — `octopus-recipes`
+	//     literally contains "not animal behaviour, learning, or any container-opening
+	//     problem solving". An embedder reads that and correctly pushes the note away,
+	//     which is why those cases saturate at ~1.0. Real polysemy has no such tell.
+	//  2. The four domains are hermetic — no shared vocabulary, so confusion between
+	//     them is trivially avoidable. Real vaults are one person's notes, where the
+	//     colliding senses live side by side.
+	//  3. Every query is a third-person factual lookup. None is *about the user*.
+	//
+	// These cases grade against `Zettel/` — a flat, single-directory layer with no
+	// folder signal, hierarchy expressed only through frontmatter and wikilinks, both
+	// of which are inert for ranking today (nothing in `src/search/` reads link
+	// structure; `LexicalSearchService` reads only aliases and tags from frontmatter).
+	//
+	// Sub-1.0 is expected here, as everywhere in the hard tier.
+	// ════════════════════════════════════════════════════════════════════════
+
+	// ── polysemy ────────────────────────────────────────────────────────────
+	// One word, two legitimate senses. Neither note is off-topic, and neither
+	// declares itself wrong — the discrimination is purely semantic.
+
+	{
+		query: "feedback i received",
+		tier: "hard",
+		axis: "polysemy",
+		probes: "the reported real-vault failure, reproduced. `i` is dropped at tokenization (single char, `isSignificantSearchTerm`), and the 1:1 note never says 'received' — it says 'Priya said' / 'told her' — so lexical is reduced to the single term 'feedback', which BOTH notes contain. The whole burden falls on the semantic half against a note that is honestly, fully about feedback in the LLM-scoring sense.",
+		grades: {
+			"Zettel/1-1 with Priya - March.md": 2,
+			"Zettel/Feedback Scoring Service.md": 0,
+			// Feedback the user *gave*, not received — the intent-frame sibling. Related
+			// enough to be reasonable at rank 2, never the right answer.
+			"Zettel/Notes Before Review Season.md": 1,
+		},
+	},
+	{
+		query: "the review is blocking me",
+		tier: "hard",
+		axis: "polysemy",
+		probes: "'review' spans code review, performance review, and literature review inside one vault. Only the PR-backlog note is about something blocking the user; the Kahneman note reviews the forecasting literature and discusses review cycles, and 'blocking' appears in the PR note as ordinary prose.",
+		grades: {
+			"Zettel/PR Review Backlog.md": 2,
+			"Zettel/Noise - Kahneman, Sibony, Sunstein.md": 0,
+			"Zettel/Weekly Review 2026-03-14.md": 1,
+		},
+	},
+	{
+		query: "what's in the pipeline",
+		tier: "hard",
+		axis: "polysemy",
+		probes: "'pipeline' as data-processing vs hiring funnel. Genuinely ambiguous without more context, so BOTH are graded 2 — this measures whether the ranker surfaces the sense pair at all rather than burying one. A ranker locked onto the engineering sense scores ~0.6.",
+		grades: {
+			"Zettel/Evaluation Pipeline.md": 2,
+			"Zettel/Platform Hiring - Spring.md": 2,
+			"Zettel/Feedback Scoring Service.md": 1,
+		},
+	},
+
+	// ── intent-frame ────────────────────────────────────────────────────────
+	// Same topic words, opposite relational role. This is the axis the reported
+	// failure really sits on: not "which topic" but "which direction".
+	//
+	// The pair below is the strongest case in the file — two queries over the same
+	// two notes with *opposite* correct answers. A ranker keying on topic alone
+	// returns the same note for both, so at most one can be right. Neither target
+	// repeats its query's verb, so a lexical shortcut cannot carry either one.
+
+	{
+		query: "feedback i gave someone",
+		tier: "hard",
+		axis: "intent-frame",
+		probes: "the mirror of 'feedback i received' over the same two notes, with the answers swapped. The review-season note never uses the word 'gave' — it says 'I told him' / 'I said that plainly' — so the frame must be inferred, not matched. Compare this case's result against its sibling: identical rankings for both queries means the ranker is keying on topic and ignoring direction entirely.",
+		grades: {
+			"Zettel/Notes Before Review Season.md": 2,
+			"Zettel/1-1 with Priya - March.md": 0,
+			"Zettel/Feedback Scoring Service.md": 0,
+		},
+	},
+	{
+		query: "what did my manager say i should work on",
+		tier: "hard",
+		axis: "intent-frame",
+		probes: "first-person + relational + possessive. 'my' is a stopword and 'manager' appears nowhere in the target — the note names Priya and never states her role — so every discriminating word is either dropped, down-weighted, or absent. Pure semantic inference of the reporting relationship.",
+		grades: {
+			"Zettel/1-1 with Priya - March.md": 2,
+			"Zettel/Notes Before Review Season.md": 0,
+			"Zettel/Weekly Review 2026-03-14.md": 1,
+		},
+	},
+	{
+		query: "things i said i would do and didn't",
+		tier: "hard",
+		axis: "intent-frame",
+		probes: "the query describes a *relation between* commitments and outcomes, with no content word shared with the target's phrasing ('Did not ship:'). 'said' is a stopword; 'things', 'would', 'didn' carry nothing. Tests whether a first-person retrospective frame is recoverable at all.",
+		grades: {
+			"Zettel/Weekly Review 2026-03-14.md": 2,
+			"Zettel/Migration Retro.md": 1,
+		},
+	},
+
+	// ── provenance ──────────────────────────────────────────────────────────
+	// Scoped by where a note came from rather than what it is about.
+	//
+	// Deliberately ONE case, not an axis. When this case was written, both
+	// `calculatePathBoost` and `calculateTagBoost` matched the *whole query string*
+	// against a path segment or tag, so a conversational query returned 0 from both
+	// and every provenance case would have scored near zero on every model — no
+	// resolving power, and a case every model fails cannot discriminate any better
+	// than one they all ace.
+	//
+	// **Updated 2026-08-18:** `calculatePathBoost` is now token-wise, so it *can*
+	// fire on a conversational query. `calculateTagBoost` deliberately is not —
+	// token-wise tag matching was measured and regressed `polysemy` 0.7560 → 0.7154,
+	// because the note tagged `#review` is the wrong answer for "the review is
+	// blocking me". See the docblock on `calculateTagBoost` for the full measurement.
+	// Neither changed this case's score: it does not sit under a folder whose name
+	// shares terms with the query.
+	//
+	// **The prediction was half wrong, and the case is kept as the record of that.**
+	// Path and tag boosts really do return 0 here — that part held. But the case does
+	// not fail: measured 0.9871 on `harrier-oss-v1-0.6b-MLX-8bit`, returning both
+	// grade-2 notes at ranks 1-2 and the grade-1 note at rank 4. The semantic half
+	// recovers the notes from title and body text without needing the provenance
+	// signal at all, because "vendor" and "call" happen to appear in them.
+	//
+	// So the `knownFailure` annotation was removed: labelling a passing case as broken
+	// is worse than having no case. What the case now measures is narrower but honest —
+	// that provenance-scoped queries are answerable *when the source words also appear
+	// in the text*. A query whose provenance exists ONLY in frontmatter (`type: meeting`
+	// with no "meeting" in the body) would be the real test of the gap, and this corpus
+	// does not have one yet.
+
+	{
+		query: "notes from the vendor call",
+		tier: "hard",
+		axis: "provenance",
+		probes: "provenance scoping: 'from the vendor call' is a source, not a subject. Tag boosts cannot fire (whole-query only, deliberately) and arbitrary frontmatter fields are not indexed; the path boost is token-wise but these notes sit in a flat folder that shares no term with the query. So this passes only because 'vendor' and 'call' also appear in the notes' title and body — not because provenance is understood.",
+		grades: {
+			"Zettel/Vendor Call - Observability Tooling.md": 2,
+			// Same `source: vendor call` frontmatter, so a ranker that *could* read
+			// provenance fields should surface both. Graded 2 as well rather than 0:
+			// the query asks for notes from that call, and this is one.
+			"Zettel/How the Vendor Pitched It.md": 2,
+			// Downstream of the call but not from it — reasonable, not the answer.
+			"Zettel/The Ingest Charge Nobody Modelled.md": 1,
+		},
+	},
+
+	// ── collision-cluster cases ─────────────────────────────────────────────
+	// Added when the Zettel layer grew from 10 to 31 notes (2026-08-18).
+	//
+	// Every case below was **measured before it was written**: each query was run
+	// against the live lexical ranker, and only those where the correct answer did
+	// NOT already win were kept. Queries whose target simply matched by title —
+	// "the nightly run keeps failing" → `nightly-run-failures.md` at rank 1, "our
+	// sync is too long" → `weekly-sync-is-too-long.md` at rank 1 — were discarded
+	// rather than banked as easy wins. A case with no headroom cannot discriminate
+	// between models, which is the whole contract of this tier.
+
+	{
+		query: "why do i lose so much time to interruptions",
+		tier: "hard",
+		axis: "intent-frame",
+		probes: "measured worst case in the layer: the target does not appear in the lexical top 4 at all — a solar-panel note and a smart-grid note beat it, because 'lose' and 'time' are generic and the note's own vocabulary is 'switching', 'reload', 'batching'. Same shape as the feedback failure: the note is about the thing without naming it.",
+		grades: {
+			"Zettel/The Cost of Switching.md": 2,
+			"Zettel/Protecting Focus Blocks.md": 1,
+			// Shares 'context' in the LLM-window sense — the collision this cluster exists for.
+			"Zettel/Context Window Budget.md": 0,
+		},
+	},
+	{
+		query: "how much context can we fit",
+		tier: "hard",
+		axis: "polysemy",
+		probes: "the other side of the same collision. Measured at rank 4 lexically, behind three unrelated notes, because 'context' alone is weak and 'fit' matches nothing. The competing sense (interruption cost) is graded 0 so choosing the wrong sense is scored.",
+		grades: {
+			"Zettel/Context Window Budget.md": 2,
+			"Zettel/The Cost of Switching.md": 0,
+			"Zettel/Scaling the Scoring Stage.md": 1,
+		},
+	},
+	{
+		query: "i need to block out time to focus",
+		tier: "hard",
+		axis: "polysemy",
+		probes: "'block' as calendar-reservation vs storage-allocation unit. Measured: a daily note beats the dedicated note lexically, because the daily mentions blocking the morning in passing while the real note discusses the practice. The storage note is graded 0 — it owns the word in the wrong sense.",
+		grades: {
+			"Zettel/Protecting Focus Blocks.md": 2,
+			"Zettel/Block Layout in the Storage Engine.md": 0,
+			"Zettel/2026-03-16.md": 1,
+			"Zettel/The Cost of Switching.md": 1,
+		},
+	},
+	{
+		query: "how many people do i actually have",
+		tier: "hard",
+		axis: "intent-frame",
+		probes: "first-person capacity question with no shared content word — the note says 'capacity', 'allocated', 'arithmetic', never 'how many people'. The hiring note is the plausible wrong answer: it is genuinely about headcount, in the future rather than the present.",
+		grades: {
+			"Zettel/Team Capacity, Honestly.md": 2,
+			"Zettel/Platform Hiring - Spring.md": 0,
+			"Zettel/What Running a Team Actually Involves.md": 1,
+		},
+	},
+	{
+		query: "what's holding up the observability work",
+		tier: "hard",
+		axis: "intent-frame",
+		probes: "the answer ('legal has had the contract eleven days') sits in a note whose title says 'Blocked on Legal Review' and never contains 'observability' in the blocking sentence. Requires joining the blocker to the thing blocked across notes — and 'review' here is the legal sense, colliding with the PR and performance senses elsewhere in the layer.",
+		grades: {
+			"Zettel/Blocked on Legal Review.md": 2,
+			"Zettel/Vendor Call - Observability Tooling.md": 1,
+			"Zettel/PR Review Backlog.md": 0,
 		},
 	},
 ];
@@ -487,4 +811,126 @@ export function reciprocalRank(rankedPaths: string[], grades: Record<string, num
 		if ((grades[path] ?? 0) === 2) return 1 / (i + 1);
 	}
 	return 0;
+}
+
+// ── significance ─────────────────────────────────────────────────────────────
+//
+// Every comparison in this suite is two means over the *same* queries, and the
+// per-query scores are strongly bimodal — mostly 0.000 or 1.000, so a couple of
+// queries flipping moves a tier mean by several points. Reporting a bare delta
+// invites reading noise as signal: the `polysemy` axis moved -0.0072 during the
+// tag-boost work and that was one case changing rank, not a trend.
+//
+// Paired bootstrap is the standard IR answer (resample queries, not documents,
+// keeping each query's pair of scores together). **Read our intervals narrowly.**
+// The textbook interpretation assumes queries are an i.i.d. draw from a query
+// population; ours are not, on two counts:
+//
+//   - hard-tier cases were *selected* for being hard ("kept only if the correct
+//     answer did not already win"), which is deliberate non-random sampling;
+//   - several are near-duplicates by construction — three `size-bias` cases
+//     restate `core`/`recency` queries verbatim — so they are not independent.
+//
+// So a CI here bounds resampling noise **on these queries**. It does not
+// generalise to queries a user might type.
+
+/** Deterministic PRNG (mulberry32), so a CI reproduces exactly across runs. */
+function makeRng(seed: number): () => number {
+	let a = seed >>> 0;
+	return () => {
+		a = (a + 0x6d2b79f5) >>> 0;
+		let t = Math.imul(a ^ (a >>> 15), 1 | a);
+		t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+		return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+	};
+}
+
+export interface BootstrapResult {
+	/** mean(a) - mean(b). */
+	delta: number;
+	/** Lower bound of the 95% CI on `delta`. */
+	ciLow: number;
+	/** Upper bound of the 95% CI on `delta`. */
+	ciHigh: number;
+	/** True when the CI excludes 0 — i.e. the sign of `delta` is stable. */
+	significant: boolean;
+	/** Number of paired observations. */
+	n: number;
+}
+
+/**
+ * Paired bootstrap confidence interval on the difference of two systems' mean
+ * per-query scores.
+ *
+ * `a[i]` and `b[i]` must be the *same query* under two configurations; the pair
+ * is resampled together, which is what makes this paired and therefore far more
+ * powerful than treating the two arrays as independent samples.
+ *
+ * Seeded, so repeated runs give byte-identical bounds — everything else in this
+ * suite reproduces exactly and a wobbling CI would be indistinguishable from a
+ * real change.
+ */
+export function pairedBootstrapCI(a: number[], b: number[], iterations = 10_000, seed = 0x5eed_1234): BootstrapResult {
+	if (a.length !== b.length) {
+		throw new Error(`paired bootstrap needs equal-length inputs, got ${a.length} and ${b.length}`);
+	}
+
+	const n = a.length;
+	const mean = (xs: number[]) => (xs.length ? xs.reduce((s, x) => s + x, 0) / xs.length : 0);
+	const delta = mean(a) - mean(b);
+	if (n === 0) {
+		return { delta: 0, ciLow: 0, ciHigh: 0, significant: false, n: 0 };
+	}
+
+	const rng = makeRng(seed);
+	const deltas: number[] = [];
+	for (let iteration = 0; iteration < iterations; iteration++) {
+		let sumA = 0;
+		let sumB = 0;
+		for (let draw = 0; draw < n; draw++) {
+			// One index per draw, used for BOTH systems — the pairing.
+			const index = Math.floor(rng() * n);
+			sumA += a[index];
+			sumB += b[index];
+		}
+		deltas.push((sumA - sumB) / n);
+	}
+
+	deltas.sort((x, y) => x - y);
+	const ciLow = deltas[Math.floor(iterations * 0.025)];
+	const ciHigh = deltas[Math.min(iterations - 1, Math.floor(iterations * 0.975))];
+
+	return { delta, ciLow, ciHigh, significant: ciLow > 0 || ciHigh < 0, n };
+}
+
+export interface SignTestResult {
+	aWins: number;
+	bWins: number;
+	ties: number;
+}
+
+/**
+ * Distribution-free companion to the bootstrap: how many queries each side wins.
+ *
+ * Worth printing alongside the CI because our per-query scores are bimodal, and
+ * "hybrid won 7, semantic won 3, 15 tied" is often easier to reason about than an
+ * interval — it shows immediately when a tier mean is being carried by two or
+ * three queries rather than a broad trend.
+ */
+export function signTest(a: number[], b: number[], epsilon = 1e-9): SignTestResult {
+	if (a.length !== b.length) {
+		throw new Error(`sign test needs equal-length inputs, got ${a.length} and ${b.length}`);
+	}
+
+	let aWins = 0;
+	let bWins = 0;
+	let ties = 0;
+	for (const [index, left] of a.entries()) {
+		const diff = left - b[index];
+		if (Math.abs(diff) <= epsilon) ties++;
+		else if (diff > 0) aWins++;
+		else bWins++;
+	}
+
+	return { aWins, bWins, ties };
 }

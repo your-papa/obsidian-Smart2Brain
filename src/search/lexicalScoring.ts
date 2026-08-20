@@ -129,8 +129,10 @@ export function scoreLexicalCandidate(
 ): LexicalRankingFeatures {
 	const titleBoost = calculateTitleBoost(queryPlan, title, config.titleScale);
 	const aliasBoost = calculateAliasBoost(queryPlan, aliases, config.aliasMax);
-	const tagBoost = calculateTagBoost(rawQuery, tags, config.tagMax);
-	const pathBoost = calculatePathBoost(rawQuery, pathSegments, config.pathMax);
+	// Pass the plan, not `rawQuery`: these two now match token-wise as well as
+	// whole-query, and the plan already holds the tokenization they need.
+	const tagBoost = calculateTagBoost(queryPlan, tags, config.tagMax);
+	const pathBoost = calculatePathBoost(queryPlan, pathSegments, config.pathMax);
 	const numericSuffixPenalty = getNumericSuffixPenalty(queryPlan, title, config.numericSuffixBasePenalty);
 	const baseScore = Math.max(evidence.identityScore, evidence.contentScore, evidence.priorityScore);
 	const titleMatchKind = getTitleMatchKind(queryPlan, title);

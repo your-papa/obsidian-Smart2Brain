@@ -436,7 +436,24 @@ export async function waitForStandaloneMiniSearch({ timeoutMs = 30_000, interval
  * Returns the string result of the expression.
  */
 export function obsidianEval(code: string): string {
-	return obsidian(`eval code='${code}'`, { ignoreError: true });
+	return obsidian(`eval code=${shellSingleQuote(code)}`, { ignoreError: true });
+}
+
+/**
+ * Wrap a string in shell single quotes, escaping any single quotes it contains.
+ *
+ * Naive `'${code}'` interpolation breaks the moment the JS contains an apostrophe —
+ * the quote closes the shell string early and the rest is parsed as shell syntax. It
+ * surfaced as `/bin/sh: unexpected EOF while looking for matching '"'` and a
+ * `JSON.parse("(no output)")` failure two layers up, which reads like a search bug
+ * rather than a quoting one.
+ *
+ * A benchmark query is ordinary user text, so apostrophes are entirely expected
+ * ("what's in the pipeline"). The standard POSIX idiom closes the quote, emits an
+ * escaped literal quote, and reopens: `'` → `'\''`.
+ */
+function shellSingleQuote(value: string): string {
+	return `'${value.replaceAll("'", `'\\''`)}'`;
 }
 
 /**

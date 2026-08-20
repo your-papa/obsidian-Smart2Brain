@@ -413,8 +413,23 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		void pickerOptions.onAddPaths(uniquePaths);
 	}
 
+	/**
+	 * `semantic`, not `hybrid`, when the toggle is on.
+	 *
+	 * `semanticEnabled` starts false and resets on every open, so pressing Tab
+	 * always means "I have looked at the lexical results and they are not what I
+	 * wanted". Fusing lexical back in at that point re-injects the ordering the
+	 * user just rejected — measured on the graded benchmark, the lexical leg's
+	 * only genuine rescue in the whole suite is a note that was already *rank 1*
+	 * in the lexical search they dismissed, while it actively misdirects cases
+	 * like `griechischer salat` (0.431 hybrid vs 1.000 without it).
+	 *
+	 * The agent's `search_notes` tool is unaffected and still defaults to hybrid:
+	 * it gets one shot with no prior view to reject, so the two legs genuinely
+	 * complement each other there.
+	 */
 	private get activeAlgorithm(): SearchAlgorithm {
-		return this.semanticEnabled ? "hybrid" : "lexical";
+		return this.semanticEnabled ? "semantic" : "lexical";
 	}
 
 	private hasSearchEmbeddingIndex(): boolean {

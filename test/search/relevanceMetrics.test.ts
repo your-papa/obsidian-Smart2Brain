@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { RELEVANCE_JUDGMENTS, ndcgAt, reciprocalRank } from "../../integration/helpers/relevanceJudgments";
+import {
+	RELEVANCE_JUDGMENTS,
+	ndcgAt,
+	pairedBootstrapCI,
+	reciprocalRank,
+	signTest,
+} from "../../integration/helpers/relevanceJudgments";
 
 /*
  * The benchmark decides whether the ranking rework ships, so the metrics
@@ -109,5 +115,83 @@ describe("judgment set", () => {
 	it("covers recency-vs-relevance conflicts", () => {
 		const withRecency = RELEVANCE_JUDGMENTS.filter((j) => (j.recentNotes ?? []).length > 0);
 		expect(withRecency.length).toBeGreaterThan(0);
+	});
+});
+
+/*
+ * Significance helpers. These decide whether a measured tier difference gets
+ * acted on, so a wrong CI is worse than no CI — it launders noise as evidence.
+ */
+
+describe("pairedBootstrapCI", () => {
+	it("is deterministic across runs", () => {
+		const a = [1, 0, 1, 1, 0, 1, 0, 1];
+		const b = [0, 0, 1, 0, 0, 1, 0, 0];
+		expect(pairedBootstrapCI(a, b, 2000)).toEqual(pairedBootstrapCI(a, b, 2000));
+	});
+
+	it("reports no difference when both systems are identical", () => {
+		const a = [1, 0.5, 0, 1, 0.25];
+		const result = pairedBootstrapCI(a, [...a], 2000);
+		expect(result.delta).toBe(0);
+		expect(result.ciLow).toBe(0);
+		expect(result.ciHigh).toBe(0);
+		expect(result.significant).toBe(false);
+	});
+
+	it("detects a large consistent difference as significant", () => {
+		// A wins every query by a wide margin — no resample can flip the sign.
+		const a = Array.from({ length: 30 }, () => 1);
+		const b = Array.from({ length: 30 }, () => 0);
+		const result = pairedBootstrapCI(a, b, 2000);
+		expect(result.delta).toBe(1);
+		expect(result.significant).toBe(true);
+		expect(result.ciLow).toBeGreaterThan(0);
+	});
+
+	it("does not call a one-query difference significant", () => {
+		// The failure mode this exists to catch: a tier mean moving because a
+		// single case flipped, which is what `polysemy` -0.0072 turned out to be.
+		const a = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1];
+		const b = [1, 1, 1, 1, 1, 1, 1, 1, 1, 0];
+		const result = pairedBootstrapCI(a, b, 2000);
+		expect(result.delta).toBeCloseTo(0.1, 10);
+		expect(result.significant).toBe(false);
+	});
+
+	it("brackets the observed delta with its interval", () => {
+		const a = [1, 0.8, 0.6, 1, 0.4, 0.9];
+		const b = [0.5, 0.4, 0.6, 0.2, 0.4, 0.1];
+		const result = pairedBootstrapCI(a, b, 2000);
+		expect(result.ciLow).toBeLessThanOrEqual(result.delta);
+		expect(result.ciHigh).toBeGreaterThanOrEqual(result.delta);
+	});
+
+	it("handles an empty input without dividing by zero", () => {
+		expect(pairedBootstrapCI([], [], 100)).toEqual({
+			delta: 0,
+			ciLow: 0,
+			ciHigh: 0,
+			significant: false,
+			n: 0,
+		});
+	});
+
+	it("refuses mismatched lengths rather than silently truncating", () => {
+		expect(() => pairedBootstrapCI([1, 0], [1], 100)).toThrow(/equal-length/);
+	});
+});
+
+describe("signTest", () => {
+	it("counts wins, losses and ties", () => {
+		expect(signTest([1, 0, 0.5, 1], [0, 1, 0.5, 1])).toEqual({ aWins: 1, bWins: 1, ties: 2 });
+	});
+
+	it("treats float noise as a tie rather than a win", () => {
+		expect(signTest([0.1 + 0.2], [0.3])).toEqual({ aWins: 0, bWins: 0, ties: 1 });
+	});
+
+	it("refuses mismatched lengths", () => {
+		expect(() => signTest([1], [1, 0])).toThrow(/equal-length/);
 	});
 });
