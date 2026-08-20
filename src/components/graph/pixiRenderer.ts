@@ -7,7 +7,7 @@
  * (d3-force / UMAP) and reactive state.
  */
 
-import { Application, Container, Graphics, Text, TextStyle, type PointData } from "pixi.js";
+import { Application, Container, Graphics, Text, TextStyle, Ticker, type PointData } from "pixi.js";
 import { Viewport } from "pixi-viewport";
 
 // ── Helpers ──────────────────────────────────────────────────
@@ -41,10 +41,22 @@ function drawDashedLine(g: Graphics, x1: number, y1: number, x2: number, y2: num
  * to let the browser resolve the value.
  */
 let _colorCtx: CanvasRenderingContext2D | null = null;
+// Memo for resolved colors: cluster palettes are hsl() strings and node fills
+// resolve on the per-frame hot path, so each unique value should hit the canvas
+// context exactly once. Only successful resolutions are cached — a failure's
+// result depends on the caller's fallback.
+const _resolvedColorCache = new Map<string, string>();
+function rememberResolvedColor(raw: string, hex: string): string {
+	if (_resolvedColorCache.size > 1024) _resolvedColorCache.clear();
+	_resolvedColorCache.set(raw, hex);
+	return hex;
+}
 function resolveColor(raw: string, fallback: string): string {
 	if (!raw || raw === "none" || raw === "transparent") return fallback;
 	// Already a hex color — fast path
 	if (raw.startsWith("#")) return raw;
+	const cached = _resolvedColorCache.get(raw);
+	if (cached !== undefined) return cached;
 
 	try {
 		if (!_colorCtx) {
@@ -57,14 +69,14 @@ function resolveColor(raw: string, fallback: string): string {
 		_colorCtx.fillStyle = raw;
 		const resolved = _colorCtx.fillStyle; // browser-resolved hex or rgb()
 		// fillStyle returns a hex string like "#rrggbb" or "rgba(r,g,b,a)"
-		if (resolved.startsWith("#")) return resolved;
+		if (resolved.startsWith("#")) return rememberResolvedColor(raw, resolved);
 		// Parse rgb/rgba → hex
 		const m = resolved.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
 		if (m) {
 			const r = Number(m[1]).toString(16).padStart(2, "0");
 			const g = Number(m[2]).toString(16).padStart(2, "0");
 			const b = Number(m[3]).toString(16).padStart(2, "0");
-			return `#${r}${g}${b}`;
+			return rememberResolvedColor(raw, `#${r}${g}${b}`);
 		}
 		return fallback;
 	} catch {
@@ -97,6 +109,28 @@ function blendColor(fg: string, bg: string, alpha: number): string {
 	const g = Math.round(bg_ + (pg - bg_) * safeAlpha);
 	const b = Math.round(bb + (pb - bb) * safeAlpha);
 	return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
+}
+
+// Parsed-channel memo backing the per-node-per-frame tint path.
+const _channelCache = new Map<string, [number, number, number]>();
+function hexChannels(color: string): [number, number, number] {
+	let channels = _channelCache.get(color);
+	if (!channels) {
+		channels = parseHexColorChannels(color, [255, 255, 255]);
+		if (_channelCache.size > 1024) _channelCache.clear();
+		_channelCache.set(color, channels);
+	}
+	return channels;
+}
+
+/** Same blend as {@link blendColor}, returned as a Pixi tint number — no string building. */
+function blendTint(fg: string, bg: [number, number, number], alpha: number): number {
+	const safeAlpha = clampUnitInterval(alpha, 1);
+	const [pr, pg, pb] = hexChannels(fg);
+	const r = Math.round(bg[0] + (pr - bg[0]) * safeAlpha);
+	const g = Math.round(bg[1] + (pg - bg[1]) * safeAlpha);
+	const b = Math.round(bg[2] + (pb - bg[2]) * safeAlpha);
+	return (r << 16) | (g << 8) | b;
 }
 
 function clampUnitInterval(value: number, fallback: number): number {
@@ -171,15 +205,16 @@ export class PixiRenderer {
 	private lassoGraphics!: Graphics;
 	private nodeGraphicsMap: Map<string, Graphics> = new Map();
 
-	// Cached visual state per node — skip geometry rebuild when unchanged
+	// Cached visual state per node — skip geometry rebuild when unchanged.
+	// Unstroked nodes keep constant white geometry and recolor via tint, so
+	// only radius changes and stroke transitions ever rebuild them.
 	private nodeVisualCache: Map<
 		string,
 		{
 			radius: number;
+			stroked: boolean;
 			fillColor: string;
-			fillAlpha: number;
 			strokeColor: string | null;
-			strokeAlpha: number;
 			strokeWidth: number;
 		}
 	> = new Map();
@@ -214,6 +249,8 @@ export class PixiRenderer {
 
 	// Callback fired whenever the viewport moves (pan/zoom/pinch)
 	private _onViewportMoved: (() => void) | null = null;
+	// Shared-ticker callback that polls viewport.dirty (removed on destroy)
+	private _viewportDirtyFn: (() => void) | null = null;
 
 	// Public accessors
 	get theme(): ThemeColors {
@@ -255,6 +292,9 @@ export class PixiRenderer {
 			resolution: window.devicePixelRatio || 1,
 			autoDensity: true,
 			preference: "webgl",
+			// Rendering is on demand: the owner calls renderFrame() when something
+			// actually changed, so a settled graph costs no GPU work at idle.
+			autoStart: false,
 		});
 
 		// Style the canvas
@@ -289,10 +329,19 @@ export class PixiRenderer {
 				maxScale: 10,
 			});
 
-		// Fire callback when viewport moves (pan/zoom/pinch/decelerate)
-		this.viewport.on("moved", () => {
-			this._onViewportMoved?.();
-		});
+		// The viewport updates its plugins (wheel smoothing, decelerate, animate)
+		// on the shared ticker, so the camera can move without any pointer event
+		// firing. Its `dirty` flag is set by that update loop for every movement
+		// source — polling it here is the one signal that catches them all. The
+		// viewport's own update runs first on the same ticker (it registered
+		// earlier), so a movement is observed the tick it happens.
+		this._viewportDirtyFn = () => {
+			if (this.viewport.dirty) {
+				this.viewport.dirty = false;
+				this._onViewportMoved?.();
+			}
+		};
+		Ticker.shared.add(this._viewportDirtyFn);
 
 		// World-space layers (inside viewport). Hulls sit at the bottom so topic
 		// regions read as background, never over edges or nodes.
@@ -374,7 +423,21 @@ export class PixiRenderer {
 		if (this._destroyed) return;
 		this._destroyed = true;
 		this._ready = false;
+		if (this._viewportDirtyFn) {
+			Ticker.shared.remove(this._viewportDirtyFn);
+			this._viewportDirtyFn = null;
+		}
 		this.app.destroy(true, { children: true });
+	}
+
+	/**
+	 * Render one frame to the canvas. The application ticker is disabled
+	 * (`autoStart: false`), so nothing draws unless the owner asks for it —
+	 * GraphCanvas calls this once at the end of each coalesced render pass.
+	 */
+	renderFrame(): void {
+		if (this._destroyed || !this._ready) return;
+		this.app.renderer.render(this.app.stage);
 	}
 
 	// ── Canvas access ──────────────────────────────────────
@@ -517,23 +580,26 @@ export class PixiRenderer {
 			}
 		}
 
+		const bgChannels = hexChannels(c.bgPrimary);
+
 		// Create or update nodes
 		for (const node of nodes) {
 			let gfx = this.nodeGraphicsMap.get(node.id);
 			let isNew = false;
 			if (!gfx) {
 				gfx = new Graphics();
-				gfx.eventMode = "static";
-				gfx.cursor = "pointer";
+				// Hit-testing happens in GraphCanvas (findNodeAt), not in Pixi's
+				// event system — keeping nodes out of it avoids making every node
+				// a hit candidate on every pointer event the viewport processes.
+				gfx.eventMode = "none";
 				this.nodeLayer.addChild(gfx);
 				this.nodeGraphicsMap.set(node.id, gfx);
 				isNew = true;
 			}
 
-			// Always update position + alpha (cheap)
+			// Always update position (cheap)
 			gfx.position.set(node.x, node.y);
 			const alpha = opts.hoverAlphas.get(node.id) ?? 0.85;
-			gfx.alpha = 1;
 
 			// Compute visual state
 			const base = Math.max(1, nodeSize);
@@ -542,7 +608,6 @@ export class PixiRenderer {
 			const rawFill = node.highlighted ? c.accent : (node.color ?? c.graphNode);
 			// Resolve hsl()/calc() colors to hex so Pixi.js can parse them
 			const resolvedFillColor = rawFill.startsWith("#") ? rawFill : resolveColor(rawFill, c.graphNode);
-			const fillColor = alpha < 1 ? blendColor(resolvedFillColor, c.bgPrimary, alpha) : resolvedFillColor;
 
 			const isSelected = opts.selectedNodes.has(node.id);
 			const isHovered = opts.hoveredNodeId === node.id;
@@ -555,9 +620,19 @@ export class PixiRenderer {
 				strokeColor = isHovered ? c.textNormal : c.accent;
 				strokeWidth = 2 / scale;
 			}
-			const strokeAlpha = strokeColor ? alpha : 1;
+			const stroked = strokeColor !== null;
+
+			// Unstroked nodes (the vast majority) draw a constant white circle and
+			// recolor via tint, so the per-frame hover fade never rebuilds their
+			// geometry — tint is a cheap uniform, clear()+fill() is tessellation.
+			// Stroked nodes (hover / selection / highlight — a handful) bake the
+			// blended colors into the geometry instead, since tint would multiply
+			// fill and stroke by the same color. Blending toward the background
+			// rather than using real alpha keeps nodes opaque, so overlapping
+			// nodes and edges underneath don't show through.
+			const fillColor = stroked ? blendColor(resolvedFillColor, c.bgPrimary, alpha) : "#ffffff";
 			const blendedStrokeColor =
-				strokeColor && strokeAlpha < 1 ? blendColor(strokeColor, c.bgPrimary, strokeAlpha) : strokeColor;
+				strokeColor !== null && alpha < 1 ? blendColor(strokeColor, c.bgPrimary, alpha) : strokeColor;
 
 			// Check cache — skip geometry rebuild if nothing visual changed
 			const cached = this.nodeVisualCache.get(node.id);
@@ -565,10 +640,9 @@ export class PixiRenderer {
 				isNew ||
 				!cached ||
 				cached.radius !== radius ||
+				cached.stroked !== stroked ||
 				cached.fillColor !== fillColor ||
-				cached.fillAlpha !== alpha ||
 				cached.strokeColor !== blendedStrokeColor ||
-				cached.strokeAlpha !== strokeAlpha ||
 				cached.strokeWidth !== strokeWidth;
 
 			if (geometryDirty) {
@@ -580,25 +654,17 @@ export class PixiRenderer {
 					gfx.circle(0, 0, radius).stroke({ color: blendedStrokeColor, width: strokeWidth });
 				}
 
-				gfx.hitArea = {
-					contains: (px: number, py: number) => px * px + py * py <= (radius + 4 / scale) ** 2,
-				};
-
 				this.nodeVisualCache.set(node.id, {
 					radius,
+					stroked,
 					fillColor,
-					fillAlpha: alpha,
 					strokeColor: blendedStrokeColor,
-					strokeAlpha,
 					strokeWidth,
 				});
 			}
-		}
-	}
 
-	/** Get the Graphics object for a node ID. */
-	getNodeGfx(id: string): Graphics | undefined {
-		return this.nodeGraphicsMap.get(id);
+			gfx.tint = stroked ? 0xffffff : blendTint(resolvedFillColor, bgChannels, alpha);
+		}
 	}
 
 	// ── Hull rendering ─────────────────────────────────────
