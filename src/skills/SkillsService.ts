@@ -423,6 +423,20 @@ export class SkillsService {
 		const bundled = getBundledIntegrationSkillForPlugin(pluginId);
 
 		if (bundled) {
+			// The user may already have a skill for this plugin under a DIFFERENT name — the
+			// generated template is named from the plugin's display name, which needn't match
+			// our bundled folder name (e.g. "Tasks" → `tasks` vs our `tasks` for plugin id
+			// `obsidian-tasks-plugin`). Seeding regardless would leave two skills describing
+			// the same plugin, both advertised to the model. Their own skill wins: it's
+			// theirs, and it may already be specialized to how they use the plugin.
+			const existing = this.findSkillForPlugin(pluginId, bundled.name);
+			if (existing) {
+				Log.info(
+					`Skill "${existing}" already covers plugin ${pluginId}; not seeding bundled "${bundled.name}"`,
+				);
+				return existing;
+			}
+
 			// Same three-way reconcile as startup bootstrap, so a community integration skill
 			// that improves upstream reaches vaults that already have it — the on-demand path
 			// had the identical skip-if-exists gap. Fold the outcome into the stale set too:
@@ -441,6 +455,22 @@ export class SkillsService {
 		}
 		const result = await this.saveSkill(generated);
 		return result.valid ? generated.frontmatter.name : null;
+	}
+
+	/**
+	 * An already-discovered skill covering `pluginId` under some name other than `exceptName`,
+	 * or undefined. Matches on `metadata.linkedPlugin` — the field that actually wires a skill
+	 * to its `exec_<plugin>` tool — rather than on the folder name, because a user's generated
+	 * skill is named from the plugin's *display* name and needn't match our bundled name.
+	 *
+	 * Relies on the discovery cache; if discovery hasn't run there is nothing to collide with
+	 * from this service's point of view, and the pre-write existence check still applies.
+	 */
+	private findSkillForPlugin(pluginId: string, exceptName: string): string | undefined {
+		for (const [name, metadata] of this.skillsCache) {
+			if (name !== exceptName && metadata.linkedPluginId === pluginId) return name;
+		}
+		return undefined;
 	}
 
 	/**
@@ -711,6 +741,36 @@ export class SkillsService {
 	 * @param skillName - Name of the skill to load
 	 * @returns Full Skill object or null if not found
 	 */
+	/**
+	 * A skill's raw `SKILL.md` bytes, unparsed. The diff view compares against the bundled
+	 * body verbatim, so it must not round-trip through parse/serialize — that would normalize
+	 * the text and show spurious differences (and, if saved, change the file's fingerprint).
+	 */
+	async readSkillFile(skillName: string): Promise<string> {
+		return this.adapter.read(`${this.getSkillsDir()}/${skillName}/${SKILL_FILENAME}`);
+	}
+
+	/**
+	 * Overwrite a skill's `SKILL.md` verbatim and re-discover, so an edit made in the diff
+	 * view reaches the next agent run. Same verbatim contract as {@link readSkillFile}: text
+	 * saved as the bundled body must fingerprint as that shipped version, or the skill would
+	 * immediately re-report as customized.
+	 */
+	async writeSkillFile(skillName: string, content: string): Promise<void> {
+		await this.adapter.write(`${this.getSkillsDir()}/${skillName}/${SKILL_FILENAME}`, content);
+		// Re-evaluate against the shipped history rather than assuming: accepting the new
+		// default in the diff view resolves the notice, while saving a further edit keeps it.
+		const history = SHIPPED_SKILL_HISTORY.get(skillName);
+		if (history) {
+			this.recordReconcileOutcome(
+				skillName,
+				shippedVersion(content, history) === null ? "customized" : "current",
+			);
+			this.publishStaleSkills();
+		}
+		await this.discoverSkills();
+	}
+
 	async loadSkill(skillName: string): Promise<Skill | null> {
 		const metadata = this.skillsCache.get(skillName);
 		if (!metadata) {

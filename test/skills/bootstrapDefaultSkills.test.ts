@@ -226,6 +226,80 @@ describe("SkillsService.bootstrapDefaultSkills", () => {
 		expect(adapter.files.has(`${SKILLS}/${subject.name}/SKILL.md`)).toBe(false);
 	});
 
+	/*
+	 * A user can already have a skill for a plugin before we ship a bundled one — the
+	 * on-demand template names itself from the plugin's DISPLAY name, which needn't match our
+	 * bundled folder name (bundled `tasks` covers plugin id `obsidian-tasks-plugin`). Seeding
+	 * anyway would leave two skills describing the same plugin, both advertised to the model
+	 * with partly contradictory guidance. Their skill wins — it may already be specialized to
+	 * how they use the plugin.
+	 */
+	it("does not seed a bundled integration skill when the user already has one for that plugin", async () => {
+		const bundled = BUNDLED_SKILLS.find((s) => s.linkedPluginId === "obsidian-tasks-plugin");
+		expect(bundled).toBeDefined();
+		const subject = bundled as (typeof BUNDLED_SKILLS)[number];
+
+		// The user's own skill for the same plugin, under a different name.
+		const theirs = [
+			"---",
+			"name: my-tasks",
+			"description: How I use Tasks",
+			"metadata:",
+			'  linkedPlugin: "obsidian-tasks-plugin"',
+			"---",
+			"",
+			"My own guidance.",
+		].join("\n");
+		const adapter = makeAdapter({ [`${SKILLS}/my-tasks/SKILL.md`]: theirs });
+		const svc = makeService(adapter);
+		await svc.discoverSkills();
+
+		const seeded = await svc.seedIntegrationSkill("obsidian-tasks-plugin", "Tasks");
+
+		expect(seeded).toBe("my-tasks");
+		expect(adapter.files.has(`${SKILLS}/${subject.name}/SKILL.md`)).toBe(false);
+		expect(adapter.files.get(`${SKILLS}/my-tasks/SKILL.md`)).toBe(theirs);
+	});
+
+	it("still seeds the bundled skill when nothing else covers that plugin", async () => {
+		const subject = BUNDLED_SKILLS.find((s) => s.linkedPluginId === "obsidian-tasks-plugin") as (typeof BUNDLED_SKILLS)[number];
+		const adapter = makeAdapter();
+		const svc = makeService(adapter);
+		await svc.discoverSkills();
+
+		const seeded = await svc.seedIntegrationSkill("obsidian-tasks-plugin", "Tasks");
+
+		expect(seeded).toBe(subject.name);
+		expect(adapter.files.get(`${SKILLS}/${subject.name}/SKILL.md`)).toBe(subject.content);
+	});
+
+	/*
+	 * The skill diff view saves through writeSkillFile. Accepting the shipped body there must
+	 * clear the stale notice, or the user would fix the drift and still be nagged about it.
+	 */
+	it("clears a skill's stale mark when the diff view saves the shipped body", async () => {
+		const edited = `${SUBJECT.content}\n\nMy own section.`;
+		const adapter = makeAdapter({ [SUBJECT_PATH]: edited });
+		const svc = makeService(adapter);
+		await svc.bootstrapDefaultSkills();
+		expect(state.staleSkills).toEqual([SUBJECT.name]);
+
+		await svc.writeSkillFile(SUBJECT.name, SUBJECT.content);
+
+		expect(adapter.files.get(SUBJECT_PATH)).toBe(SUBJECT.content);
+		expect(state.staleSkills).toEqual([]);
+	});
+
+	it("keeps the stale mark when the diff view saves a further edit", async () => {
+		const adapter = makeAdapter({ [SUBJECT_PATH]: `${SUBJECT.content}\n\nMine.` });
+		const svc = makeService(adapter);
+		await svc.bootstrapDefaultSkills();
+
+		await svc.writeSkillFile(SUBJECT.name, `${SUBJECT.content}\n\nStill mine, revised.`);
+
+		expect(state.staleSkills).toEqual([SUBJECT.name]);
+	});
+
 	it("re-checks every skill on subsequent runs", async () => {
 		// The removed fast path returned early once all seed folders existed, which is what
 		// made a version bump unreachable — a second run must still inspect each file.
