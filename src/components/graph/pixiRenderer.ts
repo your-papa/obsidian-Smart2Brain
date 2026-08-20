@@ -7,7 +7,17 @@
  * (d3-force / UMAP) and reactive state.
  */
 
-import { Application, Container, Graphics, Text, TextStyle, Ticker, type PointData } from "pixi.js";
+import {
+	Application,
+	Container,
+	Graphics,
+	Sprite,
+	Text,
+	TextStyle,
+	Ticker,
+	type PointData,
+	type Texture,
+} from "pixi.js";
 import { Viewport } from "pixi-viewport";
 
 // ── Helpers ──────────────────────────────────────────────────
@@ -170,6 +180,9 @@ export function readThemeColors(el: HTMLElement): ThemeColors {
 
 // ── Types ────────────────────────────────────────────────────
 
+/** World-space radius of the shared node disc texture (see init). */
+const NODE_TEXTURE_RADIUS = 64;
+
 /** Hit area info for screen-space cluster pills (stored for click/hover). */
 export interface ClusterPillHit {
 	x: number;
@@ -203,21 +216,19 @@ export class PixiRenderer {
 	private hullGraphics!: Graphics;
 	private edgeGraphics!: Graphics;
 	private lassoGraphics!: Graphics;
-	private nodeGraphicsMap: Map<string, Graphics> = new Map();
 
-	// Cached visual state per node — skip geometry rebuild when unchanged.
-	// Unstroked nodes keep constant white geometry and recolor via tint, so
-	// only radius changes and stroke transitions ever rebuild them.
-	private nodeVisualCache: Map<
-		string,
-		{
-			radius: number;
-			stroked: boolean;
-			fillColor: string;
-			strokeColor: string | null;
-			strokeWidth: number;
-		}
-	> = new Map();
+	// Nodes are Sprites sharing one white circle texture, recolored via tint —
+	// position, scale, and tint are all uniform updates, so per-frame node sync
+	// never tessellates geometry and the whole layer batches into one draw call.
+	private nodeTexture!: Texture;
+	private nodeSpriteMap: Map<string, Sprite> = new Map();
+
+	// Stroke rings (hover / selection / highlight — a handful of nodes) stay
+	// vector Graphics in their own layer above the sprites, so they render
+	// crisply at any zoom. Cached per ring to skip rebuilds when unchanged.
+	private nodeStrokeLayer!: Container;
+	private strokeRingMap: Map<string, Graphics> = new Map();
+	private strokeRingCache: Map<string, { radius: number; color: string; width: number }> = new Map();
 
 	// Label pool
 	private labelPool: Text[] = [];
@@ -239,6 +250,11 @@ export class PixiRenderer {
 	private tooltipContainer!: Container;
 	private tooltipGraphics!: Graphics;
 	private tooltipTexts: Text[] = [];
+	// Tooltip layout cache — text rasterization and box measurement rerun only
+	// when the content changes; per-frame calls just move the container.
+	private _tooltipLayoutKey = "";
+	private _tooltipBoxW = 0;
+	private _tooltipBoxH = 0;
 
 	// State
 	private _theme!: ThemeColors;
@@ -348,13 +364,24 @@ export class PixiRenderer {
 		this.hullLayer = new Container();
 		this.edgeLayer = new Container();
 		this.nodeLayer = new Container();
+		this.nodeStrokeLayer = new Container();
 		this.labelLayer = new Container();
 		this.lassoLayer = new Container();
 		this.viewport.addChild(this.hullLayer);
 		this.viewport.addChild(this.edgeLayer);
 		this.viewport.addChild(this.nodeLayer);
+		this.viewport.addChild(this.nodeStrokeLayer);
 		this.viewport.addChild(this.labelLayer);
 		this.viewport.addChild(this.lassoLayer);
+
+		// Shared node texture: one antialiased white disc every node sprite
+		// scales and tints. Sized so typical screen radii are a downscale
+		// (crisp); only extreme zoom-ins upscale past it, where the vector
+		// stroke ring on the hovered node carries the sharp edge anyway.
+		const disc = new Graphics();
+		disc.circle(NODE_TEXTURE_RADIUS, NODE_TEXTURE_RADIUS, NODE_TEXTURE_RADIUS).fill({ color: 0xffffff });
+		this.nodeTexture = this.app.renderer.generateTexture({ target: disc, antialias: true, resolution: 2 });
+		disc.destroy();
 
 		// Hull graphics (single batched)
 		this.hullGraphics = new Graphics();
@@ -427,6 +454,9 @@ export class PixiRenderer {
 			Ticker.shared.remove(this._viewportDirtyFn);
 			this._viewportDirtyFn = null;
 		}
+		// Sprites share this render texture, so it isn't covered by the
+		// children-destroy below.
+		this.nodeTexture?.destroy(true);
 		this.app.destroy(true, { children: true });
 	}
 
@@ -461,6 +491,8 @@ export class PixiRenderer {
 		this._theme = theme;
 		// Invalidate label cache so font/color changes are picked up on the next draw
 		this.labelPoolCache.fill(null);
+		// Tooltip box and text colors are baked into its cached layout
+		this._tooltipLayoutKey = "";
 		// Update tooltip text styles
 		for (let i = 0; i < this.tooltipTexts.length; i++) {
 			this.tooltipTexts[i].style.fontFamily = theme.font;
@@ -570,13 +602,20 @@ export class PixiRenderer {
 		const c = this._theme;
 		const scale = this.viewport.scaled || 1;
 
-		// Remove stale nodes
-		for (const [id, gfx] of this.nodeGraphicsMap) {
+		// Remove stale nodes and rings
+		for (const [id, sprite] of this.nodeSpriteMap) {
 			if (!nodeIds.has(id)) {
-				this.nodeLayer.removeChild(gfx);
-				gfx.destroy();
-				this.nodeGraphicsMap.delete(id);
-				this.nodeVisualCache.delete(id);
+				this.nodeLayer.removeChild(sprite);
+				sprite.destroy();
+				this.nodeSpriteMap.delete(id);
+			}
+		}
+		for (const [id, ring] of this.strokeRingMap) {
+			if (!nodeIds.has(id)) {
+				this.nodeStrokeLayer.removeChild(ring);
+				ring.destroy();
+				this.strokeRingMap.delete(id);
+				this.strokeRingCache.delete(id);
 			}
 		}
 
@@ -584,30 +623,33 @@ export class PixiRenderer {
 
 		// Create or update nodes
 		for (const node of nodes) {
-			let gfx = this.nodeGraphicsMap.get(node.id);
-			let isNew = false;
-			if (!gfx) {
-				gfx = new Graphics();
+			let sprite = this.nodeSpriteMap.get(node.id);
+			if (!sprite) {
+				sprite = new Sprite(this.nodeTexture);
+				sprite.anchor.set(0.5);
 				// Hit-testing happens in GraphCanvas (findNodeAt), not in Pixi's
 				// event system — keeping nodes out of it avoids making every node
 				// a hit candidate on every pointer event the viewport processes.
-				gfx.eventMode = "none";
-				this.nodeLayer.addChild(gfx);
-				this.nodeGraphicsMap.set(node.id, gfx);
-				isNew = true;
+				sprite.eventMode = "none";
+				this.nodeLayer.addChild(sprite);
+				this.nodeSpriteMap.set(node.id, sprite);
 			}
 
-			// Always update position (cheap)
-			gfx.position.set(node.x, node.y);
 			const alpha = opts.hoverAlphas.get(node.id) ?? 0.85;
-
-			// Compute visual state
 			const base = Math.max(1, nodeSize);
 			const degree = node.degree ?? 0;
 			const radius = base + Math.min(Math.log1p(degree) * 2.5, base * 5);
 			const rawFill = node.highlighted ? c.accent : (node.color ?? c.graphNode);
 			// Resolve hsl()/calc() colors to hex so Pixi.js can parse them
 			const resolvedFillColor = rawFill.startsWith("#") ? rawFill : resolveColor(rawFill, c.graphNode);
+
+			// Position, size and color are all uniform updates on the sprite.
+			// Blending the tint toward the background rather than using real
+			// alpha keeps nodes opaque, so overlapping nodes and the edges
+			// underneath don't show through during hover fades.
+			sprite.position.set(node.x, node.y);
+			sprite.scale.set(radius / NODE_TEXTURE_RADIUS);
+			sprite.tint = blendTint(resolvedFillColor, bgChannels, alpha);
 
 			const isSelected = opts.selectedNodes.has(node.id);
 			const isHovered = opts.hoveredNodeId === node.id;
@@ -620,50 +662,38 @@ export class PixiRenderer {
 				strokeColor = isHovered ? c.textNormal : c.accent;
 				strokeWidth = 2 / scale;
 			}
-			const stroked = strokeColor !== null;
 
-			// Unstroked nodes (the vast majority) draw a constant white circle and
-			// recolor via tint, so the per-frame hover fade never rebuilds their
-			// geometry — tint is a cheap uniform, clear()+fill() is tessellation.
-			// Stroked nodes (hover / selection / highlight — a handful) bake the
-			// blended colors into the geometry instead, since tint would multiply
-			// fill and stroke by the same color. Blending toward the background
-			// rather than using real alpha keeps nodes opaque, so overlapping
-			// nodes and edges underneath don't show through.
-			const fillColor = stroked ? blendColor(resolvedFillColor, c.bgPrimary, alpha) : "#ffffff";
-			const blendedStrokeColor =
-				strokeColor !== null && alpha < 1 ? blendColor(strokeColor, c.bgPrimary, alpha) : strokeColor;
-
-			// Check cache — skip geometry rebuild if nothing visual changed
-			const cached = this.nodeVisualCache.get(node.id);
-			const geometryDirty =
-				isNew ||
-				!cached ||
-				cached.radius !== radius ||
-				cached.stroked !== stroked ||
-				cached.fillColor !== fillColor ||
-				cached.strokeColor !== blendedStrokeColor ||
-				cached.strokeWidth !== strokeWidth;
-
-			if (geometryDirty) {
-				gfx.clear();
-
-				gfx.circle(0, 0, radius).fill({ color: fillColor });
-
-				if (blendedStrokeColor) {
-					gfx.circle(0, 0, radius).stroke({ color: blendedStrokeColor, width: strokeWidth });
+			let ring = this.strokeRingMap.get(node.id);
+			if (strokeColor === null) {
+				if (ring) {
+					this.nodeStrokeLayer.removeChild(ring);
+					ring.destroy();
+					this.strokeRingMap.delete(node.id);
+					this.strokeRingCache.delete(node.id);
 				}
-
-				this.nodeVisualCache.set(node.id, {
-					radius,
-					stroked,
-					fillColor,
-					strokeColor: blendedStrokeColor,
-					strokeWidth,
-				});
+				continue;
 			}
 
-			gfx.tint = stroked ? 0xffffff : blendTint(resolvedFillColor, bgChannels, alpha);
+			const blendedStrokeColor = alpha < 1 ? blendColor(strokeColor, c.bgPrimary, alpha) : strokeColor;
+			if (!ring) {
+				ring = new Graphics();
+				ring.eventMode = "none";
+				this.nodeStrokeLayer.addChild(ring);
+				this.strokeRingMap.set(node.id, ring);
+			}
+			ring.position.set(node.x, node.y);
+
+			const cached = this.strokeRingCache.get(node.id);
+			if (
+				!cached ||
+				cached.radius !== radius ||
+				cached.color !== blendedStrokeColor ||
+				cached.width !== strokeWidth
+			) {
+				ring.clear();
+				ring.circle(0, 0, radius).stroke({ color: blendedStrokeColor, width: strokeWidth });
+				this.strokeRingCache.set(node.id, { radius, color: blendedStrokeColor, width: strokeWidth });
+			}
 		}
 	}
 
@@ -761,6 +791,14 @@ export class PixiRenderer {
 			edgeFadeAlpha: number;
 			baseEdgeAlpha: number;
 			nodeClusterMap: Map<string, number | undefined>;
+			/**
+			 * World-space rect (view + margin) outside which edges are skipped.
+			 * Tessellation is the priciest CPU step of a frame, and when zoomed
+			 * into a corner of a large graph most edges land nowhere near the
+			 * screen. The caller re-triggers a draw when panning leaves the
+			 * margin, so culled edges reappear before scrolling into view.
+			 */
+			cullRect?: { minX: number; minY: number; maxX: number; maxY: number } | null;
 		},
 	): void {
 		const g = this.edgeGraphics;
@@ -806,6 +844,20 @@ export class PixiRenderer {
 			const tx = edge.target.x;
 			const ty = edge.target.y;
 			if (sx == null || sy == null || tx == null || ty == null) continue;
+
+			// Conservative AABB rejection: only skip when the whole segment is
+			// on one far side of the rect, so nothing that could touch the view
+			// is ever dropped.
+			const cull = opts.cullRect;
+			if (
+				cull &&
+				((sx < cull.minX && tx < cull.minX) ||
+					(sx > cull.maxX && tx > cull.maxX) ||
+					(sy < cull.minY && ty < cull.minY) ||
+					(sy > cull.maxY && ty > cull.maxY))
+			) {
+				continue;
+			}
 
 			const sourceCluster = opts.nodeClusterMap.get(edge.source.id);
 			const targetCluster = opts.nodeClusterMap.get(edge.target.id);
@@ -1170,8 +1222,7 @@ export class PixiRenderer {
 		isForceMode: boolean,
 	): void {
 		const c = this._theme;
-		const sx = this.viewport.toScreen(node.x, node.y).x;
-		const sy = this.viewport.toScreen(node.x, node.y).y;
+		const screen = this.viewport.toScreen(node.x, node.y);
 
 		const lines: string[] = [node.label];
 		if (node.cluster != null) {
@@ -1189,39 +1240,43 @@ export class PixiRenderer {
 		const padX = 10;
 		const padY = 8;
 
-		// Measure widths
-		let maxW = 0;
-		for (let i = 0; i < lines.length && i < this.tooltipTexts.length; i++) {
-			this.tooltipTexts[i].text = lines[i];
-			this.tooltipTexts[i].style.fontSize = fontSize;
-			this.tooltipTexts[i].style.fontWeight = i === 0 ? "bold" : "normal";
-			this.tooltipTexts[i].style.fill = i === 0 ? c.textNormal : c.textMuted;
-			this.tooltipTexts[i].visible = true;
-			const w = this.tooltipTexts[i].width;
-			if (w > maxW) maxW = w;
-		}
-		// Hide unused lines
-		for (let i = lines.length; i < this.tooltipTexts.length; i++) {
-			this.tooltipTexts[i].visible = false;
-		}
+		// Re-rasterize text and remeasure the box only when the content changed.
+		// While hovering, this runs every frame with identical lines, so the
+		// steady-state cost is just moving the container. Contents are drawn at
+		// the container's origin so position updates never touch the layout.
+		const layoutKey = lines.join("\n");
+		if (layoutKey !== this._tooltipLayoutKey) {
+			this._tooltipLayoutKey = layoutKey;
 
-		const boxW = maxW + padX * 2;
-		const boxH = lines.length * lineH + padY * 2;
+			let maxW = 0;
+			for (let i = 0; i < lines.length && i < this.tooltipTexts.length; i++) {
+				this.tooltipTexts[i].text = lines[i];
+				this.tooltipTexts[i].style.fontSize = fontSize;
+				this.tooltipTexts[i].style.fontWeight = i === 0 ? "bold" : "normal";
+				this.tooltipTexts[i].style.fill = i === 0 ? c.textNormal : c.textMuted;
+				this.tooltipTexts[i].visible = true;
+				this.tooltipTexts[i].position.set(padX, padY + i * lineH);
+				const w = this.tooltipTexts[i].width;
+				if (w > maxW) maxW = w;
+			}
+			// Hide unused lines
+			for (let i = lines.length; i < this.tooltipTexts.length; i++) {
+				this.tooltipTexts[i].visible = false;
+			}
+
+			this._tooltipBoxW = maxW + padX * 2;
+			this._tooltipBoxH = lines.length * lineH + padY * 2;
+
+			this.tooltipGraphics.clear();
+			this.tooltipGraphics.roundRect(0, 0, this._tooltipBoxW, this._tooltipBoxH, 6);
+			this.tooltipGraphics.fill({ color: c.bgPrimary, alpha: 0.92 });
+			this.tooltipGraphics.stroke({ color: c.textFaint, width: 0.5 });
+		}
 
 		// Position: right of node, flip if near edge
-		let bx = sx + 14;
-		if (bx + boxW > this._width - 8) bx = sx - boxW - 14;
-		const by = sy - boxH / 2;
-
-		this.tooltipGraphics.clear();
-		this.tooltipGraphics.roundRect(bx, by, boxW, boxH, 6);
-		this.tooltipGraphics.fill({ color: c.bgPrimary, alpha: 0.92 });
-		this.tooltipGraphics.stroke({ color: c.textFaint, width: 0.5 });
-
-		for (let i = 0; i < lines.length && i < this.tooltipTexts.length; i++) {
-			this.tooltipTexts[i].position.set(bx + padX, by + padY + i * lineH);
-		}
-
+		let bx = screen.x + 14;
+		if (bx + this._tooltipBoxW > this._width - 8) bx = screen.x - this._tooltipBoxW - 14;
+		this.tooltipContainer.position.set(bx, screen.y - this._tooltipBoxH / 2);
 		this.tooltipContainer.visible = true;
 	}
 
