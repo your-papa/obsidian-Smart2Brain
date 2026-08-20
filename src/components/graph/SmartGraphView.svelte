@@ -1,3 +1,46 @@
+<script module lang="ts">
+import type { GraphEdge as CachedGraphEdge } from "../../types/graph";
+
+// ── Topic-derivation caches ─────────────────────────────────
+//
+// Module-scoped so they survive closing and reopening the graph view — the
+// expensive derivations (Leiden partitions, granularity probing, semantic
+// edges, AI topic labels) are pure over the graph plus the keys embedded in
+// each entry, so staleness is handled by keying, not by component lifecycle.
+// Shared by every graph leaf (they all describe the same vault); dropped only
+// when the plugin reloads.
+
+/**
+ * Leiden partitions keyed by `${seed}:${resolution}:${edge mode}`, valid for
+ * the graph whose topology signature is {@link leidenGraphSignature}.
+ */
+let leidenCache = new Map<string, Record<string, number>>();
+
+/**
+ * Signature of the graph the Leiden cache and granularity ladder were derived
+ * from. A rebuild that produces an identical graph — reopening the view, a
+ * Refresh over an unchanged vault, a filter round-trip — keeps them all, so
+ * topics reappear from cache instead of re-spending seconds of worker time.
+ */
+let leidenGraphSignature = "";
+
+/** The derived granularity ladder for that same graph, restored on reopen. */
+let savedGranularityLadder: number[] | null = null;
+
+/**
+ * The last semantic edge set, keyed by wiki-graph signature + semantic
+ * settings + the embedding index's `lastUpdated` stamp — so a reopen skips
+ * the HNSW neighbour search entirely unless notes or embeddings changed.
+ */
+let cachedSemanticEdges: { key: string; edges: CachedGraphEdge[] } | null = null;
+
+/**
+ * Cache of membership-signature → generated topic label, so re-running Leiden
+ * at the same grouping (or reopening the view) doesn't re-spend API calls.
+ */
+let topicLabelCache = new Map<string, string>();
+</script>
+
 <script lang="ts">
 import { untrack, tick, onDestroy } from "svelte";
 import { getAllTags, Notice, type WorkspaceLeaf } from "obsidian";
@@ -39,7 +82,7 @@ import {
 	granularityToResolution,
 	type TopicHierarchy,
 } from "../../utils/topicHierarchy";
-import { edgeKey } from "../../utils/graphUtils";
+import { edgeKey, graphTopologySignature } from "../../utils/graphUtils";
 import { buildCollapsedGraph, UNSORTED_CLUSTER } from "../../utils/mergeNodes";
 import { leidenAsync } from "../../utils/computeWorkerManager";
 import { VIEW_TYPE_CHAT } from "../../views/chat/Chat";
@@ -105,11 +148,8 @@ let refitAfterTopicsSettle = false;
 // Leiden community state — computed async in worker, cleared on graph rebuild
 let leidenCommunities: Record<string, number> = $state({});
 
-/**
- * Cache of Leiden partitions keyed by `${seed}:${resolution}`. Leiden is expensive (seconds on
- * large graphs) but pure over (seed, resolution, graph). We invalidate on every graph rebuild.
- */
-let leidenCache = new Map<string, Record<string, number>>();
+// (The Leiden cache, graph signature, semantic edge cache and topic label
+// cache live in the module script above, so they survive view reopen.)
 
 // Filter state
 let selectedFolders: string[] = $state([]);
@@ -197,11 +237,6 @@ let focusedSegmentIds: Set<string> = $state(new Set());
 let generatedClusterLabels: Record<number, string> = $state({});
 /** True while topic labels are being generated. */
 let isLabeling = $state(false);
-/**
- * Cache of membership-signature → generated label, so re-running Leiden at the
- * same grouping (or toggling outline back and forth) doesn't re-spend API calls.
- */
-let topicLabelCache = new Map<string, string>();
 /** Aborts an in-flight labeling pass when the graph changes underneath it. */
 let labelingAbort: AbortController | null = null;
 
@@ -397,6 +432,24 @@ async function loadSemanticEdges(wikiData: GraphData, localBuildVersion: number)
 	const indexReady = await waitForVectorStoreIndex(data.graphEmbedIndex);
 	if (!indexReady || localBuildVersion !== buildVersion) return [];
 
+	// The search is pure over (wiki graph, semantic settings, embeddings). The
+	// index's lastUpdated stamp bumps on every vector write, so together these
+	// fully key the result — a reopen or no-change Refresh skips loading every
+	// vector and re-running the HNSW neighbour search.
+	const metadata = await getVectorStoreService()
+		.getOrCreateInstance(data.graphEmbedIndex)
+		.then((inst) => inst.store.getMetadata())
+		.catch(() => null);
+	if (localBuildVersion !== buildVersion) return [];
+	const cacheKey = [
+		graphTopologySignature(wikiData),
+		data.graphEmbedIndex,
+		metadata?.lastUpdated ?? "no-metadata",
+		settings.semanticNeighborCount,
+		settings.semanticThreshold,
+	].join("|");
+	if (cachedSemanticEdges?.key === cacheKey) return cachedSemanticEdges.edges;
+
 	const documents = await getVectorStoreService().getAllDocumentVectors();
 	if (localBuildVersion !== buildVersion || documents.length === 0) return [];
 
@@ -405,11 +458,13 @@ async function loadSemanticEdges(wikiData: GraphData, localBuildVersion: number)
 	const includePaths = new Set(wikiData.nodes.map((node) => node.path));
 	const wikiEdgeKeys = new Set(wikiData.edges.map((edge) => edgeKey(edge.source, edge.target)));
 
-	return buildSemanticEdges(documents, includePaths, {
+	const edges = await buildSemanticEdges(documents, includePaths, {
 		neighborCount: settings.semanticNeighborCount,
 		threshold: settings.semanticThreshold,
 		excludeEdgeKeys: wikiEdgeKeys,
 	});
+	cachedSemanticEdges = { key: cacheKey, edges };
+	return edges;
 }
 
 /**
@@ -436,13 +491,8 @@ async function buildGraph() {
 		graphData = wikiData;
 		isLoading = false;
 
-		// Graph structure changed — previous Leiden runs are no longer valid.
-		leidenCache.clear();
-		topicHierarchy = null;
-		granularityLadder = [...GRANULARITY_LEVEL_RESOLUTIONS];
-		// The ladder describes the old graph; hide the slider until it's re-derived.
-		hasDerivedGranularityLadder = false;
-		// A pending refit belongs to the build being replaced.
+		// A pending refit belongs to the build being replaced. (Topic-state
+		// invalidation waits until the fused graph is known — see below.)
 		refitAfterTopicsSettle = false;
 
 		// Paint the authored graph right away so the view isn't blank while
@@ -472,6 +522,28 @@ async function buildGraph() {
 				nodes: fused.nodes.map((node) => ({ ...node, degree: degreeMap.get(node.path) ?? 0 })),
 			};
 			resolveAndApplySegments(graphData);
+		}
+
+		// Invalidate derived topic state only when the graph actually changed.
+		// Leiden, the hierarchy and the ladder are pure over (graph, seed, γ) —
+		// a rebuild that lands on an identical graph (Refresh with no vault
+		// changes, a filter round-trip) keeps them all, so the topics reappear
+		// from cache instantly instead of re-spending seconds of worker time.
+		const signature = graphTopologySignature(graphData);
+		if (signature !== leidenGraphSignature) {
+			leidenGraphSignature = signature;
+			leidenCache.clear();
+			topicHierarchy = null;
+			granularityLadder = [...GRANULARITY_LEVEL_RESOLUTIONS];
+			// The ladder describes the old graph; hide the slider until it's re-derived.
+			hasDerivedGranularityLadder = false;
+			savedGranularityLadder = null;
+		} else if (savedGranularityLadder) {
+			// A fresh view instance starts on the fallback ladder even though this
+			// graph has already been probed — restore the derived ladder so the
+			// slider appears immediately instead of hiding through a re-probe.
+			granularityLadder = savedGranularityLadder;
+			hasDerivedGranularityLadder = true;
 		}
 
 		void runLeidenSegmentation();
@@ -620,7 +692,9 @@ function handleFitToView() {
 
 function handleRefresh() {
 	loadFilterOptions();
-	leidenCommunities = {};
+	// Keep the current communities while the rebuild runs: they repaint the
+	// interim graph, and if the vault is unchanged the cache confirms them
+	// instantly — clearing here would just flash the topics away and back.
 	void buildGraph();
 }
 
@@ -991,6 +1065,9 @@ async function deriveGranularityLevels(topicEdges: GraphEdge[]) {
 			Logger.info("[SmartGraph] Granularity ladder: too few distinct groupings, keeping the default");
 		}
 		hasDerivedGranularityLadder = true;
+		// Remember the outcome for this graph, so reopening the view restores the
+		// ladder instead of re-probing.
+		savedGranularityLadder = granularityLadder;
 	} finally {
 		isDerivingGranularityLadder = false;
 	}
