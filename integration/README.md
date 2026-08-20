@@ -836,6 +836,60 @@ measured.
 Still outstanding: `when do prices rise so fast…` (10/10 ungraded lexically) and the
 `multi-hop` / `cross-lingual` cases at 9/10.
 
+##### The reformulation tier — the fix for `intent-frame` is upstream of ranking
+
+`intent-frame` is the weakest axis (0.6618) and **cannot be fixed in the ranker**: on
+`what did my manager say i should work on` the wrong note is rank 1 in the lexical *and*
+semantic legs at once, so no monotone reweighting of the two can promote the right one.
+That was recorded as a dead end. It is not — it is a dead end *for the ranker*.
+
+The `reformulation` tier tests the alternative: keep the information need and the grades
+fixed, change only the phrasing. Measured on `omlx:harrier-oss-v1-0.6b-MLX-8bit`
+(build `1787061734704`), hybrid:
+
+| case | original | best reformulation | Δ |
+|---|---|---|---|
+| `things i said i would do and didn't` | 0.129 (rank 13) | **0.496** — `what did not ship this week` (rank 3) | +0.3670 |
+| `what did my manager say i should work on` | 0.521 (rank 2) | **0.964** — `1-1 with Priya` (rank 1) | +0.4426 |
+| **mean** | **0.3253** | **0.7301** | **+0.4048** |
+
+Both reformulations follow a rule now written into the `explore-vault` skill. The first
+uses the note's own vocabulary — its literal line is `Did not ship:`, which shares no
+content word with the user's phrasing. The second names the participant instead of the
+relation, because `my` is a stopword and `manager` appears nowhere in the target (the
+note names Priya and never states her role).
+
+**Reported, never ratcheted.** The reformulations are hand-authored, so gating on them
+would reward writing easier rephrasings over improving retrieval — the same reasoning as
+`HARD_FLOOR_MEAN_NDCG`. Candidates were measured with `scripts/pool-candidates.mjs`
+before being written, and ones that did not move the target were discarded rather than
+banked (`Priya scoping recommendation design review` leaves it absent from all three
+legs).
+
+###### Read this as a ceiling, not an expectation
+
+The tier measures whether the corpus is **reachable**, not whether an agent will reach
+it, and the gap between those is wide. These reformulations were written by someone who
+had already read the target and knew its wording. An agent has not read it — that is why
+it is searching — so it is guessing at vocabulary it cannot see.
+
+How wide is visible in the cases themselves. Of four kept reformulations, **one scores
+0.073, worse than its 0.129 original**; others were discarded for missing the target
+entirely. A given rephrasing is closer to a coin flip than the `+0.4048` mean suggests.
+
+That does not make retrying wrong — the downside is one wasted tool call and the upside
+is a case going 0.129 → 0.496, so several varied attempts remain the right strategy, and
+that is what the `explore-vault` guidance says. But two things follow:
+
+- **Do not quote `0.3253 → 0.7301` as an expected improvement.** It is the score of a
+  well-aimed rephrasing, selected with hindsight.
+- **Measuring real reformulation needs a different instrument** — running the actual
+  agent against these queries and scoring what it produces, rather than what a human
+  who knew the answer produced. Worth building; not what this is.
+
+This is nonetheless what motivated making `algorithm` a per-call `search_notes`
+parameter: the agent can reformulate and re-run at all, and the ranker cannot.
+
 ##### Hole@10 — most of what the ranker returns is unjudged
 
 Figures below are the **pre-second-pass** state that motivated this analysis; the current

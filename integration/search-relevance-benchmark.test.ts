@@ -8,6 +8,7 @@ import {
 	waitForStandaloneMiniSearch,
 } from "./helpers/cli.ts";
 import {
+	REFORMULATION_JUDGMENTS,
 	RELEVANCE_JUDGMENTS,
 	ndcgAt,
 	pairedBootstrapCI,
@@ -288,6 +289,24 @@ async function applyRecentNotes(paths: readonly string[]): Promise<void> {
 	}
 }
 
+/**
+ * Encode a query list as a base64 blob the eval decodes back to an array.
+ *
+ * `obsidian eval` takes `code=<js>` as one argv element, and an apostrophe inside a
+ * query survives `JSON.stringify` but not the shell round-trip — the code string is
+ * truncated at the quote. That failure is *silent and misleading*: the search comes back
+ * with zero results, which reads exactly like a broken ranker rather than a quoting bug.
+ * (Hit twice: once in `scripts/pool-candidates.mjs`, then here, when the reformulation
+ * tier added the suite's first query containing "didn't".)
+ *
+ * `atob` alone yields latin1, which would corrupt the German queries in the
+ * `cross-lingual` axis, so the bytes are decoded as UTF-8 explicitly.
+ */
+function encodeQueries(queries: string[]): string {
+	const b64 = Buffer.from(JSON.stringify(queries), "utf8").toString("base64");
+	return `JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(${JSON.stringify(b64)}), function(c){ return c.charCodeAt(0); })))`;
+}
+
 /** Score one query's returned ordering against its graded expectations. */
 function scoreOutcome(judgment: (typeof RELEVANCE_JUDGMENTS)[number], paths: string[]): QueryOutcome {
 	// Multi-target cases have several grade-2 notes; report the best-placed one so
@@ -339,7 +358,12 @@ async function scoreQueries(
 	// Vitest retries a failed test in the same page, so a fixed key would let the
 	// retry read the previous attempt's value before the new run overwrites it —
 	// which surfaced as a hybrid tier reporting the lexical tier's score.
-	const globalKey = `${keyPrefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+	// The prefix ends up in a `window.<key>` identifier, so anything that is not
+	// identifier-safe (a hyphen from an axis name, say) would make the evaluated code a
+	// syntax error — and the only symptom is unparseable output, which reads like a
+	// search failure rather than a naming bug. Sanitize rather than trusting callers.
+	const safePrefix = keyPrefix.replace(/[^A-Za-z0-9_$]/g, "_");
+	const globalKey = `${safePrefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
 	if (!parallel) {
 		const outcomes: QueryOutcome[] = [];
@@ -372,7 +396,7 @@ async function scoreQueries(
 
 	const queries = judgments.map((j) => j.query);
 	const raw = await pollEval(
-		`(function(){ window.${globalKey} = "pending"; Promise.all(${JSON.stringify(queries)}.map(function(q){ return ${PLUGIN}.searchNotesForBenchmark(q, ${JSON.stringify(algorithm)}, ${RESULT_LIMIT}).then(function(r){ return r.map(function(d){ return d.path; }); }); })).then(function(all){ window.${globalKey} = JSON.stringify(all); }).catch(function(e){ window.${globalKey} = JSON.stringify({error: String(e && e.message || e)}); }); return "started"; })()`,
+		`(function(){ window.${globalKey} = "pending"; Promise.all(${encodeQueries(queries)}.map(function(q){ return ${PLUGIN}.searchNotesForBenchmark(q, ${JSON.stringify(algorithm)}, ${RESULT_LIMIT}).then(function(r){ return r.map(function(d){ return d.path; }); }); })).then(function(all){ window.${globalKey} = JSON.stringify(all); }).catch(function(e){ window.${globalKey} = JSON.stringify({error: String(e && e.message || e)}); }); return "started"; })()`,
 		globalKey,
 		{ timeoutMs: 120_000 },
 	);
@@ -388,7 +412,8 @@ async function scoreQueries(
 
 /** Fire-and-forget expression for a single query, used by the sequential path. */
 function fireOne(globalKey: string, algorithm: "hybrid" | "lexical" | "semantic", query: string): string {
-	return `(function(){ window.${globalKey} = "pending"; ${PLUGIN}.searchNotesForBenchmark(${JSON.stringify(query)}, ${JSON.stringify(algorithm)}, ${RESULT_LIMIT}).then(function(r){ window.${globalKey} = JSON.stringify(r.map(function(d){ return d.path; })); }).catch(function(e){ window.${globalKey} = JSON.stringify({error: String(e && e.message || e)}); }); return "started"; })()`;
+	// Same base64 smuggling as the batched path — see `encodeQueries`.
+	return `(function(){ window.${globalKey} = "pending"; ${PLUGIN}.searchNotesForBenchmark(${encodeQueries([query])}[0], ${JSON.stringify(algorithm)}, ${RESULT_LIMIT}).then(function(r){ window.${globalKey} = JSON.stringify(r.map(function(d){ return d.path; })); }).catch(function(e){ window.${globalKey} = JSON.stringify({error: String(e && e.message || e)}); }); return "started"; })()`;
 }
 
 const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
@@ -851,6 +876,86 @@ describe("search relevance benchmark", () => {
 			// docblock for why, and for when to turn it back into an assertion.
 			expect(received.length, "'feedback i received' returned nothing").toBeGreaterThan(0);
 			expect(gave.length, "'feedback i gave someone' returned nothing").toBeGreaterThan(0);
+		});
+
+		/**
+		 * The reformulation tier — can rephrasing reach what ranking cannot?
+		 *
+		 * `intent-frame` is the weakest axis and is **unfixable in the ranker**: on
+		 * `what did my manager say i should work on` the wrong note is rank 1 in the
+		 * lexical AND semantic legs simultaneously, so no monotone reweighting of the
+		 * two can promote the right one. The fix has to happen before retrieval, by
+		 * changing the query — which the agent can do (`explore-vault` skill) and the
+		 * ranker cannot.
+		 *
+		 * This runs each case's original phrasing and its authored reformulations
+		 * against the *same* grades, and reports the delta. A large positive delta says
+		 * the corpus is reachable and the skill guidance is worth having; a flat one
+		 * says the note cannot be found however the question is asked, which would make
+		 * the guidance pointless and is the more important thing to learn.
+		 *
+		 * **Reported, never ratcheted.** The reformulations are hand-authored, so
+		 * gating on them would reward writing easier rephrasings over improving
+		 * retrieval — the same reason `HARD_FLOOR_MEAN_NDCG` is only a collapse guard.
+		 */
+		it("reports whether reformulation reaches what the original phrasing misses", async () => {
+			if (REFORMULATION_JUDGMENTS.length === 0) return;
+
+			const lines: string[] = ["", "──────── REFORMULATION (reported, not gated) ────────"];
+			const originalScores: number[] = [];
+			const bestScores: number[] = [];
+
+			for (const [caseIndex, judgment] of REFORMULATION_JUDGMENTS.entries()) {
+				const algorithm = judgment.algorithm ?? "hybrid";
+				const phrasings = [judgment.query, ...judgment.reformulations];
+				// `keyPrefix` becomes part of a `window.<key>` identifier, so it must be
+				// identifier-safe — an axis name like "intent-frame" produces a syntax
+				// error inside the eval, which surfaces only as unparseable output.
+				const outcomes = await scoreQueries(
+					`reform${caseIndex}`,
+					algorithm,
+					phrasings.map((query) => ({ ...judgment, query })),
+				);
+
+				const [original, ...rephrased] = outcomes;
+				const best = rephrased.reduce((a, b) => (b.ndcg > a.ndcg ? b : a), rephrased[0]);
+				originalScores.push(original.ndcg);
+				bestScores.push(best.ndcg);
+
+				lines.push(
+					`  ${judgment.axis}  (${algorithm})`,
+					`    ${original.ndcg.toFixed(3)}  rank ${original.targetRank ?? "—"}   ORIGINAL   "${judgment.query}"`,
+				);
+				for (const outcome of rephrased) {
+					const marker = outcome === best ? "*" : " ";
+					lines.push(
+						`   ${marker}${outcome.ndcg.toFixed(3)}  rank ${outcome.targetRank ?? "—"}   rephrased  "${outcome.query}"`,
+					);
+				}
+				lines.push(
+					`    Δ best-vs-original = ${best.ndcg - original.ndcg >= 0 ? "+" : ""}${(best.ndcg - original.ndcg).toFixed(4)}`,
+					"",
+				);
+			}
+
+			lines.push(
+				`  ORIGINAL phrasings  mean nDCG@${NDCG_K}=${mean(originalScores).toFixed(4)} (n=${originalScores.length})`,
+				`  BEST reformulation  mean nDCG@${NDCG_K}=${mean(bestScores).toFixed(4)} (n=${bestScores.length})`,
+				"",
+				"  ⚠ This is a CEILING, not an expectation. The reformulations were written",
+				"    by someone who had already read the target note; a real agent is guessing",
+				"    at vocabulary it cannot see. One kept rephrasing scores WORSE than its",
+				"    original, and others were discarded for missing entirely — so a given",
+				"    attempt is closer to a coin flip than these means suggest.",
+				"    Measuring real agent reformulation needs a different instrument.",
+				"",
+			);
+			console.log(lines.join("\n"));
+
+			// The only assertion: the harness ran. Scores here are reported, and the
+			// premise of the tier is that the originals fail — asserting on them would
+			// gate the thing being measured.
+			expect(bestScores.length).toBe(REFORMULATION_JUDGMENTS.length);
 		});
 
 		/**
