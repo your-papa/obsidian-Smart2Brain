@@ -2512,6 +2512,23 @@ export function panToClusters(clusters: Set<number>) {
     outline: none;
     cursor: grab;
     touch-action: none; /* Required for pointer capture to work */
+    /* The container is a <button> only so it can take keyboard focus for the
+       graph's shortcuts — it is a canvas surface, not a control. Suppress the
+       tap feedback a real button gets: WebKit's grey flash on touch, and the
+       box-shadow Obsidian's mobile theme puts on :active/:focus buttons. */
+    -webkit-tap-highlight-color: transparent;
+    box-shadow: none;
+  }
+
+  /* Obsidian's button rules set a background on these states; the canvas must
+     stay transparent so the graph shows through unchanged when tapped. */
+  .graph-canvas-container:active,
+  .graph-canvas-container:hover,
+  .graph-canvas-container:focus,
+  .graph-canvas-container:focus-visible {
+    background: transparent;
+    box-shadow: none;
+    outline: none;
   }
 
   .graph-canvas-container:active {
