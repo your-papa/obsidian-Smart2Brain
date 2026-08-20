@@ -158,16 +158,46 @@ export const RELEVANCE_JUDGMENTS: readonly RelevanceJudgment[] = [
 	},
 	{
 		query: "Octopus Intelligence",
-		probes: "alias match: the title does not contain these words, only the frontmatter alias does",
+		probes: "alias match: the title does not contain these words, only the frontmatter alias does. Distractors graded in the 2026-08-20 pooling pass — the alias wins rank 1 in all three legs, so these do not change the score, but they make the runner-up field scored rather than free.",
 		grades: {
 			[`${C}/Marine Biology/Cephalopod Problem Solving.md`]: 2,
+			// Declared size-bias distractor (tagged `distractor` + `size-bias`), and it
+			// takes SEMANTIC RANK 2 here. Its own body disclaims cognition entirely:
+			// "It does not describe what any animal learns". Ungraded until now, so the
+			// one place this note out-ranks real content went unscored.
+			[`${C}/Marine Biology/Octopus Husbandry Program Notes.md`]: 0,
+			// Graded 0 in this query's own `recency` twin but not here — the same note,
+			// the same query, two different verdicts. A recipe, not cognition.
+			[`${C}/Fermentation/Fermented Octopus Preparations.md`]: 0,
+			// Template bulk filler ("is a recurring topic in marine biology") that
+			// names the exact topic without stating anything. Topically the closest
+			// thing in the corpus to the query, which is precisely why it is a 1.
+			[`${C}/Marine Biology/Cephalopod Cognition.md`]: 1,
 		},
 	},
 	{
 		query: "Levain Timing",
-		probes: "alias match on a long note, competing against its own domain's filler",
+		probes: "alias match on a long note, competing against its own domain's filler. The pooling pass found the more interesting competition is CROSS-DOMAIN: marine-biology notes take lexical ranks 2-4 on the bare word 'Timing' — see the grades.",
 		grades: {
 			[`${C}/Fermentation/Starter Hydration and Rise Time.md`]: 2,
+			// Cross-domain title collisions on a single generic word. Nothing to do
+			// with sourdough, levain, or baking; they win lexical ranks 2-4 purely
+			// because "Timing" is in their titles. Grading them 0 is what turns that
+			// from an invisible quirk into a measured error.
+			[`${C}/Marine Biology/Barnacle Settlement Timing.md`]: 0,
+			[`${C}/Marine Biology/Spring Bloom Onset Timing.md`]: 0,
+			// Same-domain filler that names timing in template prose without stating
+			// any. Reasonable neighbours, never the answer.
+			//
+			// Note `Refresh Ratios` is graded **0** under "what hydration level makes a
+			// starter rise fastest" and **1** here, deliberately. That case asks a
+			// specific factual question, where filler crowding out the answer is the
+			// error being measured; this one is a broad alias lookup, where a
+			// same-topic neighbour is a reasonable thing to see at rank 4. Grade is a
+			// property of the (query, note) pair, not of the note.
+			[`${C}/Fermentation/First Rise Timing Expectations.md`]: 1,
+			[`${C}/Fermentation/Refresh Ratios for Daily Baking.md`]: 1,
+			[`${C}/Fermentation/Harvest Timing and Enzyme Activity.md`]: 1,
 		},
 	},
 
@@ -605,11 +635,29 @@ export const RELEVANCE_JUDGMENTS: readonly RelevanceJudgment[] = [
 		query: "the review is blocking me",
 		tier: "hard",
 		axis: "polysemy",
-		probes: "'review' spans code review, performance review, and literature review inside one vault. Only the PR-backlog note is about something blocking the user; the Kahneman note reviews the forecasting literature and discusses review cycles, and 'blocking' appears in the PR note as ordinary prose.",
+		probes: "'review' spans code review, performance review, literature review AND legal review inside one vault. The Kahneman note reviews the forecasting literature and discusses review cycles; 'blocking' appears in the PR note as ordinary prose. The 2026-08-20 pooling pass found a FOURTH sense the case had not accounted for — see the `Blocked on Legal Review` grade.",
 		grades: {
 			"Zettel/PR Review Backlog.md": 2,
 			"Zettel/Noise - Kahneman, Sibony, Sunstein.md": 0,
 			"Zettel/Weekly Review 2026-03-14.md": 1,
+			// Graded 2, not 0 — the case as written was incomplete, not the ranker.
+			//
+			// This note took SEMANTIC RANK 1 while ungraded, so the semantic leg was
+			// being scored 0 for an answer that is at least as good as the declared
+			// one: a legal review that has held a contract eleven days and is blocking
+			// three workstreams. "The review is blocking me" describes it exactly, and
+			// unlike the Kahneman note it does not merely own the word.
+			//
+			// Grading it 0 to protect the case's original premise would have been
+			// exactly the "weaken the benchmark to make it pass" move in reverse —
+			// punishing a correct result to keep a tidy story about polysemy. The
+			// query is genuinely ambiguous between the PR and legal senses, so both
+			// are graded 2, as `what's in the pipeline` already does for its sense pair.
+			"Zettel/Blocked on Legal Review.md": 2,
+			// The follow-up daily ("Decoupled the on-call rotation change from the
+			// vendor contract, which unblocks it"). About resolving the block rather
+			// than being blocked — reasonable at rank 3-5, never the answer.
+			"Zettel/2026-03-18.md": 1,
 		},
 	},
 	{
@@ -621,6 +669,16 @@ export const RELEVANCE_JUDGMENTS: readonly RelevanceJudgment[] = [
 			"Zettel/Evaluation Pipeline.md": 2,
 			"Zettel/Platform Hiring - Spring.md": 2,
 			"Zettel/Feedback Scoring Service.md": 1,
+			// Both about the pipeline's operation rather than its contents. The query
+			// asks what is *in* it; these describe how it fails and how it scales.
+			// Adjacent and reasonable, not answers — and grading them keeps the
+			// engineering sense from collecting free unjudged slots while the hiring
+			// sense has only one graded note to find.
+			"Zettel/Nightly Run Failures.md": 1,
+			"Zettel/Scaling the Scoring Stage.md": 1,
+			// The user's pitch for headcount. Sits at semantic rank 2 and is neither
+			// sense of "pipeline" — a pure topic-drift error worth scoring.
+			"Zettel/Internal Pitch for the Platform Work.md": 0,
 		},
 	},
 
@@ -642,27 +700,67 @@ export const RELEVANCE_JUDGMENTS: readonly RelevanceJudgment[] = [
 			"Zettel/Notes Before Review Season.md": 2,
 			"Zettel/1-1 with Priya - March.md": 0,
 			"Zettel/Feedback Scoring Service.md": 0,
+			// The rest of the LLM-scoring cluster. `Feedback Scoring Service` was
+			// already graded 0 as the polysemy trap, but its two siblings sit at
+			// ranks 2-3 ungraded and are wrong for exactly the same reason — the
+			// engineering sense of "feedback"/"scoring", nothing interpersonal.
+			// Grading only the one note the case was written around let the ranker
+			// take most of its top slots from that cluster for free.
+			"Zettel/Evaluation Pipeline.md": 0,
+			"Zettel/Scaling the Scoring Stage.md": 0,
 		},
 	},
 	{
 		query: "what did my manager say i should work on",
 		tier: "hard",
 		axis: "intent-frame",
-		probes: "first-person + relational + possessive. 'my' is a stopword and 'manager' appears nowhere in the target — the note names Priya and never states her role — so every discriminating word is either dropped, down-weighted, or absent. Pure semantic inference of the reporting relationship.",
+		probes: "first-person + relational + possessive. 'my' is a stopword and 'manager' appears nowhere in the target — the note names Priya and never states her role — so every discriminating word is either dropped, down-weighted, or absent. Pure semantic inference of the reporting relationship. Second-worst coverage in the suite before the 2026-08-20 pass (10/10 ungraded lexically) — the pool found the same rank-1 distractor the axis was written about, sitting unpenalised.",
 		grades: {
 			"Zettel/1-1 with Priya - March.md": 2,
 			"Zettel/Notes Before Review Season.md": 0,
 			"Zettel/Weekly Review 2026-03-14.md": 1,
+			// The intent-frame distractor this axis exists to catch, finally graded.
+			// It takes lexical rank 1 AND hybrid rank 1 purely because its title
+			// contains "Work" — the note is the user's OWN pitch for headcount, with
+			// nothing a manager said in it. It was ungraded, so the case was scoring
+			// well while the exact failure it probes went unmeasured.
+			"Zettel/Internal Pitch for the Platform Work.md": 0,
+			// Reflections on the management job itself, not direction received from a
+			// manager. Semantic rank 2 / hybrid rank 3 — the "topic without the frame"
+			// error in its purest form.
+			"Zettel/What Running a Team Actually Involves.md": 0,
 		},
 	},
 	{
 		query: "things i said i would do and didn't",
 		tier: "hard",
 		axis: "intent-frame",
-		probes: "the query describes a *relation between* commitments and outcomes, with no content word shared with the target's phrasing ('Did not ship:'). 'said' is a stopword; 'things', 'would', 'didn' carry nothing. Tests whether a first-person retrospective frame is recoverable at all.",
+		probes: "the query describes a *relation between* commitments and outcomes, with no content word shared with the target's phrasing ('Did not ship:'). 'said' is a stopword; 'things', 'would', 'didn' carry nothing. Tests whether a first-person retrospective frame is recoverable at all. The hardest case in the file: pooled across all three algorithms (17 distinct candidates), neither grade-2 note appears anywhere. It scored 0.0000 before the 2026-08-20 grading pass and 0.129 after, entirely from a grade-1 note at rank 13 — the right answer is still never returned.",
 		grades: {
 			"Zettel/Weekly Review 2026-03-14.md": 2,
 			"Zettel/Migration Retro.md": 1,
+			// Graded in the second hole-filling pass (2026-08-20). This query had the
+			// worst coverage in the suite — 10/10 ungraded in all three legs — and the
+			// pool showed why: the ranker returns a stable set of management notes,
+			// none of which was judged, so the 0.0000 was unattributable. It is a real
+			// 0.0000 either way; what these grades add is the ability to tell *which
+			// kind* of wrong it is.
+			//
+			// A genuine unmet commitment: "Priya asked for this and I have been
+			// avoiding it for a week". Not the retrospective the query asks for — it
+			// records one slipped item rather than the week's — so 1, not 2.
+			"Zettel/Migration Write-up - Draft.md": 1,
+			// "Said I would find out this week, so I need to actually ask" — the same
+			// commitment-then-slip shape, in passing rather than as the note's subject.
+			"Zettel/2026-03-16.md": 1,
+			// Topically adjacent management notes with no commitment/outcome relation
+			// at all. Graded 0 rather than left ungraded so that the ranker filling its
+			// top slots with them is scored as the error it is. `On Shipping` takes
+			// rank 1 in ALL THREE legs on the strength of "shipping"/"ready" — a topic
+			// match against a query about broken commitments.
+			"Zettel/On Shipping Before It's Ready.md": 0,
+			"Zettel/What Running a Team Actually Involves.md": 0,
+			"Zettel/The Weekly Sync Is Too Long.md": 0,
 		},
 	},
 
