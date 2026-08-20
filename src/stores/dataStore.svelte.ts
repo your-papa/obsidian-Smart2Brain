@@ -29,6 +29,7 @@ import type {
 	PluginData,
 	PrivacyMode,
 	PromptFileReader,
+	PromptKindId,
 	RecentNoteEntry,
 	SearchAlgorithm,
 	StaleGuidance,
@@ -2317,18 +2318,22 @@ let _pluginDataStore: PluginDataStore | null = null;
  */
 const PROMPT_SURFACES = [
 	{
+		id: "base",
 		kind: "system-prompt",
 		label: "system prompt",
 		history: SHIPPED_BASE_PROMPTS,
 		read: (reader: PromptFileReader, agentId: string) => reader.getBasePrompt(agentId),
 	},
 	{
+		id: "memory",
 		kind: "memory-prompt",
 		label: "memory instructions",
 		history: SHIPPED_MEMORY_PROMPTS,
 		read: (reader: PromptFileReader, agentId: string) => reader.getMemoryPrompt(agentId),
 	},
 ] as const satisfies readonly {
+	/** Key into `AgentConfig.promptBaseVersions` for this surface. */
+	id: PromptKindId;
 	kind: StaleGuidance["kind"];
 	label: string;
 	history: ShippedHistory;
@@ -2354,19 +2359,38 @@ function detectStaleGuidance(agent: AgentConfig, reader: PromptFileReader | null
 	for (const surface of PROMPT_SURFACES) {
 		const content = surface.read(reader, agent.id);
 		if (content === null) continue;
+		const current = currentShippedVersion(surface.history);
 		const version = shippedVersion(content, surface.history);
-		// null ⇒ user's own text; the newest key ⇒ already current. Only an older shipped
-		// version means "the default moved out from under an untouched copy" — which
-		// PromptFilesService.seedDefaults rewrites silently at startup, so reaching here
-		// means that rewrite failed (or hasn't run against this file yet). Surface it.
-		if (version === null || version === currentShippedVersion(surface.history)) continue;
+
+		if (version === null) {
+			// The user's own text. It matches no shipped fingerprint, so the content alone
+			// can't say whether the default has moved since they wrote it — that's what the
+			// stamp recorded. Only flag when we have a baseline AND it has been superseded;
+			// an absent stamp stays silent rather than asserting drift we can't substantiate.
+			const stamp = agent.promptBaseVersions?.[surface.id];
+			if (stamp === undefined || stamp === current) continue;
+			stale.push({
+				agentId: agent.id,
+				agentName: agent.name,
+				kind: surface.kind,
+				label: surface.label,
+				currentVersion: current,
+				// Their edit is intact — we never touch a customized file.
+				customized: true,
+			});
+			continue;
+		}
+
+		// An OLD shipped default, verbatim: PromptFilesService.seedDefaults rewrites these
+		// silently at startup, so reaching here means that rewrite failed (or hasn't run
+		// against this file yet). Surface it — but not as a "customization".
+		if (version === current) continue;
 		stale.push({
 			agentId: agent.id,
 			agentName: agent.name,
 			kind: surface.kind,
 			label: surface.label,
-			currentVersion: currentShippedVersion(surface.history),
-			// The file IS an old shipped default, verbatim — the user never customized it.
+			currentVersion: current,
 			customized: false,
 		});
 	}

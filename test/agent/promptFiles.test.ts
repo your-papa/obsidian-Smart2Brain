@@ -16,6 +16,11 @@ vi.mock("../../src/stores/dataStore.svelte", () => ({
 		get agents() {
 			return state.agents;
 		},
+		// Used by the promptBaseVersions stamp on every write; see promptFilesReconcile.test.ts
+		// for the tests that assert the stamping behaviour itself.
+		updateAgent: (agentId: string, updates: Record<string, unknown>) => {
+			state.agents[agentId] = { ...state.agents[agentId], ...updates };
+		},
 	}),
 }));
 

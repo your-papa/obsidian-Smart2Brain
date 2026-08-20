@@ -2,7 +2,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("obsidian", () => import("../__mocks__/obsidian"));
 
-const state: { agentFolder: string; agents: Record<string, { id: string; name?: string }> } = {
+type TestAgent = {
+	id: string;
+	name?: string;
+	promptBaseVersions?: Partial<Record<"base" | "memory", number | string>>;
+};
+const state: { agentFolder: string; agents: Record<string, TestAgent> } = {
 	agentFolder: "Agents",
 	agents: { "default-agent": { id: "default-agent", name: "Default Agent" } },
 };
@@ -13,6 +18,9 @@ vi.mock("../../src/stores/dataStore.svelte", () => ({
 		},
 		get agents() {
 			return state.agents;
+		},
+		updateAgent: (agentId: string, updates: Partial<TestAgent>) => {
+			state.agents[agentId] = { ...state.agents[agentId], ...updates };
 		},
 	}),
 }));
@@ -141,5 +149,59 @@ describe("PromptFilesService.seedDefaults — reconciling existing files against
 
 		expect(adapter.files.get(BASE_PATH)).toBe(CURRENT_BASE);
 		expect(adapter.files.get(MEMORY_PATH)).toBe(CURRENT_MEMORY);
+	});
+});
+
+/*
+ * A customized file matches no shipped fingerprint, so its content alone can't say whether
+ * the default moved since the user wrote it. The stamp records the baseline their edit
+ * started from — without it, flagging every no-match would fire a false "the default
+ * changed" notice at everyone who has ever customized a prompt.
+ */
+describe("PromptFilesService — promptBaseVersions stamp", () => {
+	beforeEach(() => {
+		state.agentFolder = "Agents";
+		state.agents = { "default-agent": { id: "default-agent", name: "Default Agent" } };
+	});
+
+	it("stamps the current version when seeding a fresh file", async () => {
+		await makeService(makeAdapter()).seedDefaults(AGENTS);
+
+		expect(state.agents["default-agent"].promptBaseVersions).toEqual({ base: 2, memory: 2 });
+	});
+
+	it("stamps after the silent update of an old default", async () => {
+		const adapter = makeAdapter({ [BASE_PATH]: OLD_BASE });
+		await makeService(adapter).seedDefaults(AGENTS);
+
+		expect(state.agents["default-agent"].promptBaseVersions?.base).toBe(2);
+	});
+
+	it("stamps the user's save, so their edit is baselined at today's default", async () => {
+		const svc = makeService(makeAdapter());
+		await svc.writeBasePrompt("default-agent", "my own prompt");
+
+		// Their text is theirs, but it was written against v2 — a later v3 is what should
+		// raise the drift notice, not this save.
+		expect(state.agents["default-agent"].promptBaseVersions?.base).toBe(2);
+	});
+
+	it("back-fills a baseline for a customized file that predates the field", async () => {
+		const adapter = makeAdapter({ [BASE_PATH]: "customized before stamps existed" });
+		await makeService(adapter).seedDefaults(AGENTS);
+
+		// Seeded at the current version, not backdated: backdating would claim their edit
+		// predates a change it may already incorporate.
+		expect(state.agents["default-agent"].promptBaseVersions?.base).toBe(2);
+		expect(adapter.files.get(BASE_PATH)).toBe("customized before stamps existed");
+	});
+
+	it("never overwrites an existing older stamp", async () => {
+		state.agents["default-agent"].promptBaseVersions = { base: 1 };
+		const adapter = makeAdapter({ [BASE_PATH]: "my customization, written against v1" });
+		await makeService(adapter).seedDefaults(AGENTS);
+
+		// Overwriting with 2 here would erase exactly the drift the stamp exists to detect.
+		expect(state.agents["default-agent"].promptBaseVersions?.base).toBe(1);
 	});
 });

@@ -1,7 +1,8 @@
 import type { App, DataAdapter } from "obsidian";
-import type { AgentsConfig, PromptFileReader } from "../types/plugin";
+import type { AgentsConfig, PromptFileReader, PromptKindId } from "../types/plugin";
 import { agentPromptDir, agentRootDir, basePromptPath, memoryPromptPath, systemPromptsDir } from "../utils/agentPaths";
 import { Logger as Log } from "../utils/logging";
+import { getData } from "../stores/dataStore.svelte";
 import { type ShippedHistory, currentShippedVersion, shippedVersion } from "../utils/shippedDefaults";
 import { BASE_SYSTEM_PROMPT, DEFAULT_MEMORY_PROMPT, SHIPPED_BASE_PROMPTS, SHIPPED_MEMORY_PROMPTS } from "./prompts";
 
@@ -12,6 +13,8 @@ import { BASE_SYSTEM_PROMPT, DEFAULT_MEMORY_PROMPT, SHIPPED_BASE_PROMPTS, SHIPPE
  * and differ only in their filename within the shared subfolder, and their factory default.
  */
 interface PromptKind {
+	/** Stable key for this kind in `AgentConfig.promptBaseVersions`. */
+	id: PromptKindId;
 	/** Human-readable label, used only in log messages. */
 	label: string;
 	/** Resolve the note path for an agent (name-derived; see `agentPaths`). */
@@ -25,6 +28,7 @@ interface PromptKind {
 }
 
 const BASE_PROMPT: PromptKind = {
+	id: "base",
 	label: "base prompt",
 	path: basePromptPath,
 	fallback: BASE_SYSTEM_PROMPT,
@@ -33,6 +37,7 @@ const BASE_PROMPT: PromptKind = {
 };
 
 const MEMORY_PROMPT: PromptKind = {
+	id: "memory",
 	label: "memory prompt",
 	path: memoryPromptPath,
 	fallback: DEFAULT_MEMORY_PROMPT,
@@ -119,14 +124,27 @@ export class PromptFilesService {
 						this.clearMigrated(kind, agent);
 						const content = await this.adapter.read(path);
 						const version = shippedVersion(content, kind.history);
-						if (version !== null && version !== currentShippedVersion(kind.history)) {
+						if (version === null) {
+							// The user's own text. Leave it, but if this agent predates the
+							// stamp there is no baseline to compare a future bump against —
+							// seed it at the current version so drift is detectable from now
+							// on. (Backdating to the oldest version instead would fire a
+							// notice about a change the edit may already incorporate.)
+							this.stampBaseVersionIfAbsent(kind, agentId);
+						} else if (version !== currentShippedVersion(kind.history)) {
 							await this.adapter.write(path, kind.fallback);
+							this.stampBaseVersion(kind, agentId);
 							Log.info(`Updated ${kind.label} for ${agentId} from shipped v${version} to current`);
+						} else {
+							this.stampBaseVersion(kind, agentId);
 						}
 						continue;
 					}
 					await this.ensureParent(path);
 					await this.adapter.write(path, migrated ?? kind.fallback);
+					// A migrated pre-file customization is the user's text, but it was written
+					// against the defaults current at migration time — stamp either way.
+					this.stampBaseVersion(kind, agentId);
 					// Only clear AFTER a successful write — the customized prompt is now durable in
 					// the file. On a write failure we deliberately keep the transient so a later
 					// seedDefaults (e.g. next startup / folder change) can retry, rather than
@@ -252,6 +270,49 @@ export class PromptFilesService {
 		await this.ensureParent(path);
 		await this.adapter.write(path, text);
 		this.cache(kind).set(agentId, text);
+		this.stampBaseVersion(kind, agentId);
+	}
+
+	/**
+	 * Record which shipped version this agent's prompt is now based on. Called after every
+	 * write — seeding, the silent old-default update, a reset, and the user saving their own
+	 * text all funnel through here.
+	 *
+	 * The stamp is always the CURRENT shipped version, including when the user saves a
+	 * customization: at that moment their edit is, by definition, based on today's default.
+	 * A later bump then makes `stamp !== current` true and the drift notice fires exactly
+	 * once — which is the whole point of the field.
+	 */
+	/**
+	 * Stamp only when no baseline exists yet — for agents whose customized prompt predates
+	 * the field. Never overwrites an existing stamp, which would erase the very drift the
+	 * stamp is there to detect.
+	 */
+	private stampBaseVersionIfAbsent(kind: PromptKind, agentId: string): void {
+		try {
+			if (getData().agents[agentId]?.promptBaseVersions?.[kind.id] !== undefined) return;
+		} catch {
+			return;
+		}
+		this.stampBaseVersion(kind, agentId);
+	}
+
+	private stampBaseVersion(kind: PromptKind, agentId: string): void {
+		// Bookkeeping, never load-bearing for the prompt itself: a failure here must not
+		// abort the surrounding write, or a store hiccup would leave the user without the
+		// prompt file entirely. Worst case a stamp is missed and drift stays silent.
+		try {
+			const agent = getData().agents[agentId];
+			if (!agent) return;
+			const current = currentShippedVersion(kind.history);
+			if (current === undefined) return;
+			const existing = agent.promptBaseVersions ?? {};
+			if (existing[kind.id] === current) return;
+			// Reassign rather than mutate in place so $state reactivity fires.
+			getData().updateAgent(agentId, { promptBaseVersions: { ...existing, [kind.id]: current } });
+		} catch (error) {
+			Log.debug(`Could not stamp ${kind.label} base version for ${agentId}:`, error);
+		}
 	}
 
 	private async ensure(kind: PromptKind, agentId: string): Promise<void> {

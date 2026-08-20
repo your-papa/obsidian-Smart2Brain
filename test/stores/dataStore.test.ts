@@ -652,17 +652,51 @@ describe("PluginDataStore – staleGuidance", () => {
 		expect(store.staleGuidance).toEqual([]);
 	});
 
-	it("does NOT flag unrecognized customizations of either prompt", () => {
-		const { store } = makeStore(agentData() as never);
+	it("does NOT flag a customization whose baseline is still the current default", () => {
+		const data = agentData();
+		// Stamped at the current version: they customized it, but the default hasn't moved
+		// since — there is nothing to tell them about.
+		data.agents[DEFAULT_AGENT_ID].promptBaseVersions = { base: 1, memory: 1 };
+		const { store } = makeStore(data as never);
 		store.setPromptFileReader(
 			makeReader({
 				basePrompt: { [DEFAULT_AGENT_ID]: "my own custom prompt" },
 				memoryPrompt: { [DEFAULT_AGENT_ID]: "my own memory instructions" },
 			}),
 		);
-		// The user wrote these on purpose — leaving them alone is the point, and nagging
-		// about text we never shipped would be noise.
 		expect(store.staleGuidance).toEqual([]);
+	});
+
+	it("does NOT flag a customization with no recorded baseline", () => {
+		const { store } = makeStore(agentData() as never);
+		store.setPromptFileReader(
+			makeReader({ basePrompt: { [DEFAULT_AGENT_ID]: "my own custom prompt" } }),
+		);
+		// No stamp ⇒ we cannot substantiate that the default moved under this edit. Staying
+		// silent beats asserting drift we can't prove.
+		expect(store.staleGuidance).toEqual([]);
+	});
+
+	/*
+	 * The case this stamp exists for: the user customized a prompt, and a LATER release
+	 * changed the shipped default. Their edit is untouched (correct), but they'd otherwise
+	 * never learn the default moved — the improvement would be invisible to exactly the
+	 * users who engaged with the prompt enough to edit it.
+	 */
+	it("flags a customization whose baseline has been superseded", () => {
+		const data = agentData();
+		data.agents[DEFAULT_AGENT_ID].promptBaseVersions = { base: 0 };
+		const { store } = makeStore(data as never);
+		store.setPromptFileReader(
+			makeReader({ basePrompt: { [DEFAULT_AGENT_ID]: "my own custom prompt" } }),
+		);
+
+		const stale = store.staleGuidance;
+		expect(stale.map((s) => s.kind)).toEqual(["system-prompt"]);
+		// `customized: true` drives the "your customized version was kept" wording and the
+		// Review action's diff — distinct from the untouched-old-default case.
+		expect(stale[0].customized).toBe(true);
+		expect(stale[0].agentId).toBe(DEFAULT_AGENT_ID);
 	});
 
 	it("does NOT flag a prompt whose only difference is line endings or a trailing newline", () => {
