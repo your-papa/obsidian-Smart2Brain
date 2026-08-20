@@ -445,7 +445,24 @@ export interface AgentConfig {
 	 * eagerly to read/record is agent behavior.
 	 */
 	memoryEnabled?: boolean;
+	/**
+	 * Which shipped version each prompt file was last written from, keyed by prompt kind
+	 * ("base" / "memory"). Stamped whenever we write the file from a shipped default (seed,
+	 * silent update, reset) and refreshed when the user saves their own text.
+	 *
+	 * This is what makes "the default moved out from under YOUR edit" detectable. A
+	 * customized file matches no shipped fingerprint, so on its own it cannot distinguish
+	 * "you edited it and the default has since changed" (worth a notice) from "you edited it
+	 * and nothing changed" (silence) — the stamp records the baseline the edit started from.
+	 *
+	 * Absent for agents predating this field: treated as "unknown baseline", which stays
+	 * silent rather than firing a notice we can't substantiate.
+	 */
+	promptBaseVersions?: Partial<Record<PromptKindId, number | string>>;
 }
+
+/** The two file-backed prompt surfaces, as stable keys for {@link AgentConfig.promptBaseVersions}. */
+export type PromptKindId = "base" | "memory";
 
 /**
  * Record of agent configurations keyed by agent ID
