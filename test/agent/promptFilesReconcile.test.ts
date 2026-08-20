@@ -196,6 +196,35 @@ describe("PromptFilesService — promptBaseVersions stamp", () => {
 		expect(adapter.files.get(BASE_PATH)).toBe("customized before stamps existed");
 	});
 
+	/*
+	 * A duplicated agent starts with its source's prompt text verbatim, so it inherits the
+	 * source's baseline too. Stamping the copy at the current version instead would silently
+	 * clear a drift notice the copied customization is owed — the same invariant as "never
+	 * overwrite an older stamp", one level removed.
+	 */
+	it("carries the source's older baseline to a duplicated agent", async () => {
+		state.agents["default-agent"].promptBaseVersions = { base: 1, memory: 1 };
+		state.agents.copy = { id: "copy", name: "Copy" };
+		const adapter = makeAdapter({ [BASE_PATH]: "customization based on v1" });
+		const svc = makeService(adapter);
+		await svc.refresh(AGENTS);
+
+		await svc.copyAgentPrompts("default-agent", "copy");
+
+		expect(state.agents.copy.promptBaseVersions?.base).toBe(1);
+	});
+
+	it("leaves a duplicate unstamped when the source has no baseline", async () => {
+		state.agents.copy = { id: "copy", name: "Copy" };
+		const svc = makeService(makeAdapter());
+
+		await svc.copyAgentPrompts("default-agent", "copy");
+
+		// "Unknown baseline" is the honest answer for text with no provenance, and it stays
+		// silent — better than claiming the copy is current.
+		expect(state.agents.copy.promptBaseVersions?.base).toBeUndefined();
+	});
+
 	it("never overwrites an existing older stamp", async () => {
 		state.agents["default-agent"].promptBaseVersions = { base: 1 };
 		const adapter = makeAdapter({ [BASE_PATH]: "my customization, written against v1" });

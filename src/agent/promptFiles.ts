@@ -246,7 +246,14 @@ export class PromptFilesService {
 	 * inherits the source's edited prompts rather than starting from the bare defaults.
 	 */
 	async copyAgentPrompts(fromId: string, toId: string): Promise<void> {
-		for (const kind of ALL_KINDS) await this.write(kind, toId, this.get(kind, fromId));
+		for (const kind of ALL_KINDS) {
+			await this.write(kind, toId, this.get(kind, fromId));
+			// The copy is the source's text verbatim, so it inherits the source's baseline —
+			// NOT the current version that `write` just stamped. Duplicating an agent whose
+			// customization was based on an older default must not silently clear the drift
+			// notice that customization is owed.
+			this.inheritBaseVersion(kind, fromId, toId);
+		}
 	}
 
 	// --- shared per-kind implementations -------------------------------------------------
@@ -295,6 +302,30 @@ export class PromptFilesService {
 			return;
 		}
 		this.stampBaseVersion(kind, agentId);
+	}
+
+	/**
+	 * Carry one agent's baseline for a kind over to another, used when duplicating an agent.
+	 * Overwrites whatever `write` stamped, because the copied text's real baseline is the
+	 * source's. A source with no stamp clears the target's too — "unknown baseline" is the
+	 * honest answer for copied text we have no provenance for, and it stays silent rather
+	 * than claiming the copy is current.
+	 */
+	private inheritBaseVersion(kind: PromptKind, fromId: string, toId: string): void {
+		try {
+			const data = getData();
+			const source = data.agents[fromId]?.promptBaseVersions?.[kind.id];
+			const target = data.agents[toId];
+			if (!target) return;
+			const existing = target.promptBaseVersions ?? {};
+			if (existing[kind.id] === source) return;
+			const next = { ...existing };
+			if (source === undefined) delete next[kind.id];
+			else next[kind.id] = source;
+			data.updateAgent(toId, { promptBaseVersions: next });
+		} catch (error) {
+			Log.debug(`Could not inherit ${kind.label} base version for ${toId}:`, error);
+		}
 	}
 
 	private stampBaseVersion(kind: PromptKind, agentId: string): void {
