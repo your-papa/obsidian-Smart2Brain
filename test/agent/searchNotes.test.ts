@@ -1102,16 +1102,27 @@ describe("search_notes algorithm parameter", () => {
 		expect(parsed.results.length).toBeGreaterThan(0);
 	});
 
-	it("downgrades when the index is configured but empty", async () => {
-		semanticStore([], { documentCount: 0 });
+	/*
+	 * An empty index must NOT downgrade.
+	 *
+	 * `ensureIndex` builds on demand — `if (count === 0 …) await this.buildFullIndex(...)`
+	 * — so a configured-but-empty index is a first search that populates it and then
+	 * answers normally. An availability check that rejects on `documentCount === 0`
+	 * preempts that build and reports a permanent-sounding failure for a state that
+	 * resolves itself.
+	 */
+	it("does not downgrade an empty index — the search builds it on demand", async () => {
+		const semanticSearch = semanticStore([{ path: "Notes/sem.md", name: "sem", score: 0.9 }], {
+			documentCount: 0,
+		});
 
 		const tool = createSearchNotesTool({} as App);
 		const parsed = JSON.parse(String(await tool.invoke({ query: "alpha", algorithm: "hybrid" })));
 
-		expect(parsed.algorithm).toBe("lexical");
-		expect(parsed.requestedAlgorithm).toBe("hybrid");
-		expect(parsed.message).toMatch(/empty or still building/i);
-		expect(parsed.message).not.toMatch(/do not retry/i);
+		expect(semanticSearch).toHaveBeenCalled();
+		expect(parsed.algorithm).toBe("hybrid");
+		expect(parsed.requestedAlgorithm).toBeUndefined();
+		expect(parsed.message).toBeUndefined();
 	});
 
 	it("downgrades rather than throwing when availability cannot be determined", async () => {
@@ -1141,9 +1152,22 @@ describe("search_notes algorithm parameter", () => {
 		const tool = createSearchNotesTool({} as App);
 		const parsed = JSON.parse(String(await tool.invoke({ recentOnly: true, algorithm: "semantic" })));
 
-		// The point of the fix: no downgrade metadata for a path that never searched.
+		// The point of the fix: no downgrade metadata for a path that never searched,
+		// and no `algorithm` either — labelling plain history as lexical/semantic/hybrid
+		// retrieval output is false, and `algorithm` is a field consumers trust.
+		expect(parsed.algorithm).toBeUndefined();
 		expect(parsed.requestedAlgorithm).toBeUndefined();
 		expect(parsed.message).not.toMatch(/semantic search is unavailable/i);
+	});
+
+	it("reports no algorithm for recentOnly even when the index is healthy", async () => {
+		semanticStore([{ path: "Notes/sem.md", name: "sem", score: 0.9 }]);
+
+		const tool = createSearchNotesTool({} as App);
+		const parsed = JSON.parse(String(await tool.invoke({ recentOnly: true, algorithm: "semantic" })));
+
+		expect(parsed.algorithm).toBeUndefined();
+		expect(parsed.recentOnly).toBe(true);
 	});
 
 	it("explains an empty recentOnly result as history, not a failed search", async () => {

@@ -28,13 +28,20 @@ interface SearchToolResultItem {
 interface SearchToolResultPayload {
 	query: string;
 	recentOnly: boolean;
-	/** The algorithm that actually ran — may differ from `requestedAlgorithm`. */
-	algorithm: SearchAlgorithm;
+	/**
+	 * The algorithm that actually ran — may differ from `requestedAlgorithm`.
+	 *
+	 * **Absent when `recentOnly` is true**, because that path reads the recent-note
+	 * list and performs no retrieval at all. Reporting one there would label plain
+	 * history as lexical/semantic/hybrid search output, which is simply false — and
+	 * an `algorithm` field is the kind of thing a consumer reasonably trusts.
+	 */
+	algorithm?: SearchAlgorithm;
 	/**
 	 * What the caller asked for, present only when it differs from what ran.
 	 *
-	 * Set when a semantic or hybrid request was downgraded because no embedding
-	 * index is configured. Without this the agent cannot distinguish "your query
+	 * Set when a semantic or hybrid request was downgraded because the embedding index
+	 * is missing or unusable. Without this the agent cannot distinguish "your query
 	 * matched nothing" from "the capability you asked for does not exist here",
 	 * and will reformulate against a leg that was never going to run.
 	 */
@@ -83,13 +90,13 @@ function hasSearchEmbeddingIndex(): boolean {
 }
 
 /** Why a semantic request could not run as asked. */
-type SemanticUnavailableReason = "not-configured" | "not-ready" | "empty";
+type SemanticUnavailableReason = "not-configured" | "not-ready";
 
 /**
  * Can the semantic leg actually return anything right now?
  *
  * A configured index id is necessary but **not sufficient**, which is the trap here.
- * `VectorStoreService.semanticSearch` returns a bare `[]` for at least six distinct
+ * `VectorStoreService.semanticSearch` returns a bare `[]` for several distinct
  * conditions — index not initialized, no instance, no model, no embeddings, query too
  * large, and a caught provider error — and `[]` is indistinguishable from "this query
  * genuinely has no matches". Reporting the latter for the former makes the agent treat
@@ -99,9 +106,13 @@ type SemanticUnavailableReason = "not-configured" | "not-ready" | "empty";
  * This is the same class of defect as the indexing hang fixed earlier (a dead provider
  * reported as progress); it just surfaces on the read path instead of the write path.
  *
- * `getStats()` is the cheapest honest signal: it resolves the instance, counts notes,
- * and reports `isReady` (initialized AND a resolvable model), so it separates
- * "misconfigured or unreachable" from "configured and populated".
+ * **An empty index is deliberately NOT treated as unavailable.** `ensureIndex` builds on
+ * demand — `if (count === 0 …) await this.buildFullIndex(...)` — so a configured-but-empty
+ * index is a first search that will populate it and then answer normally. Downgrading
+ * here would preempt that build and report a permanent-sounding failure for a state that
+ * resolves itself. `isReady` is the signal that matters: it means initialized with a
+ * resolvable model, which is what distinguishes "will work" from "misconfigured or
+ * unreachable".
  */
 async function semanticAvailability(): Promise<{ available: boolean; reason?: SemanticUnavailableReason }> {
 	if (!hasSearchEmbeddingIndex()) return { available: false, reason: "not-configured" };
@@ -111,7 +122,6 @@ async function semanticAvailability(): Promise<{ available: boolean; reason?: Se
 
 		const stats = await getVectorStoreService().getStats();
 		if (!stats.isReady) return { available: false, reason: "not-ready" };
-		if (stats.documentCount === 0) return { available: false, reason: "empty" };
 		return { available: true };
 	} catch (error) {
 		// getOrCreateInstance throws when an index fails to initialize. Treat any
@@ -160,8 +170,6 @@ function downgradeMessage(reason: SemanticUnavailableReason | undefined): string
 	const suffix = "Ran a lexical search instead, so results may miss synonym or cross-language matches.";
 
 	switch (reason) {
-		case "empty":
-			return `Semantic search is unavailable because the embedding index is empty or still building. ${suffix} It may become available later; prefer varying your search terms for now.`;
 		case "not-ready":
 			return `Semantic search is unavailable because the embedding index could not be initialized — the model or its provider may be unreachable. ${suffix} Do not treat this as evidence about the vault's contents.`;
 		default:
@@ -391,12 +399,12 @@ export function createSearchNotesTool(app: App) {
 		// a NaN slipping through, which would otherwise clamp to NaN and slice to empty.
 		const requestedLimit = Number.isFinite(maxResults) ? Math.trunc(maxResults as number) : DEFAULT_MAX_RESULTS;
 		const limit = Math.min(Math.max(requestedLimit, 1), MAX_RESULTS_CEILING);
-		// `recentOnly` reads the recent-notes list and never searches, so no algorithm
-		// applies to it. Resolving one anyway would label the returned history as lexical
-		// output and — on an empty history — claim a search found nothing, for a search
-		// that never ran.
+		// `recentOnly` reads the recent-notes list and never searches, so NO algorithm
+		// applies — not the requested one either. Reporting one would label plain history
+		// as retrieval output, and resolving one would additionally claim a downgrade for
+		// a search that never ran.
 		const { algorithm, downgradedFrom, reason } = recentOnly
-			? { algorithm: requestedAlgorithm, downgradedFrom: undefined, reason: undefined }
+			? { algorithm: undefined, downgradedFrom: undefined, reason: undefined }
 			: await resolveAlgorithm(requestedAlgorithm);
 
 		// Build filter from parameters
@@ -418,7 +426,12 @@ export function createSearchNotesTool(app: App) {
 			recentOnly,
 		});
 
-		const results = recentOnly ? getRecentNotes(app, filter) : await performSearch(app, query, algorithm, filter);
+		// `algorithm` is undefined exactly when `recentOnly` is set (see above), so the
+		// fallback below is unreachable — it exists only because the two are resolved in
+		// separate statements and TypeScript cannot see the correlation.
+		const results = recentOnly
+			? getRecentNotes(app, filter)
+			: await performSearch(app, query, algorithm ?? "lexical", filter);
 		const currentProvider = pluginData.getSelectedAgent().chatModel?.provider;
 		const store = getPendingChangesStore();
 
