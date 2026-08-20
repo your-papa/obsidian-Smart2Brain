@@ -11,10 +11,8 @@ import { kMeans, suggestK, hdbscan, type KMeansResult, type HDBSCANResult } from
 import { project2D, reduceDimensions } from "./projection";
 import type { ProjectionMethod } from "../types/graph";
 import type { ComputeWorkerRequest, ComputeWorkerResponse, SerializedVectorBatch } from "./computeWorker";
-import { scanSemanticPairs, type SemanticPair } from "./semanticEdges";
+import { computeSemanticPairs, type SemanticPair } from "./semanticEdges";
 import ComputeWorkerConstructor from "./computeWorker?worker&inline";
-import Graph from "graphology";
-import betweennessCentrality from "graphology-metrics/centrality/betweenness";
 import { Graph as LeidenGraph, leiden } from "leiden-ts";
 
 let worker: Worker | null = null;
@@ -241,21 +239,10 @@ function runOnMainThread(request: ComputeWorkerRequest): ComputeWorkerResponse |
 					communities[path] = assignments[idx];
 				}
 			}
-
-			let centrality: Record<string, number> | undefined;
-			if (request.withCentrality && Object.keys(communities).length > 0) {
-				const gGraph = new Graph({ type: "undirected", multi: false });
-				for (let i = 0; i < request.sources.length; i++) {
-					if (request.sources[i] !== request.targets[i]) {
-						gGraph.mergeEdge(request.sources[i], request.targets[i], { weight: request.weights[i] });
-					}
-				}
-				centrality = betweennessCentrality(gGraph, { normalized: true, getEdgeWeight: "weight" });
-			}
-			return { id: request.id, type: "leiden" as const, result: { communities, centrality } };
+			return { id: request.id, type: "leiden" as const, result: { communities } };
 		}
 		case "semanticEdges": {
-			const result = scanSemanticPairs(
+			return computeSemanticPairs(
 				request.vectors.data,
 				request.vectors.count,
 				request.vectors.dim,
@@ -266,8 +253,7 @@ function runOnMainThread(request: ComputeWorkerRequest): ComputeWorkerResponse |
 					threshold: request.threshold,
 					excludePairs: request.excludePairs ? new Set(request.excludePairs) : undefined,
 				},
-			);
-			return { id: request.id, type: "semanticEdges" as const, result };
+			).then((result) => ({ id: request.id, type: "semanticEdges" as const, result }));
 		}
 	}
 }
@@ -377,10 +363,9 @@ export async function leidenAsync(
 	sources: string[],
 	targets: string[],
 	weights: number[],
-	withCentrality = false,
 	seed = 42,
 	resolution = 1.0,
-): Promise<{ communities: Record<string, number>; centrality: Record<string, number> }> {
+): Promise<Record<string, number>> {
 	const id = ++requestId;
 	const resp = await postRequest<Extract<ComputeWorkerResponse, { type: "leiden" }>>({
 		id,
@@ -388,14 +373,10 @@ export async function leidenAsync(
 		sources,
 		targets,
 		weights,
-		withCentrality,
 		seed,
 		resolution,
 	});
-	return {
-		communities: resp.result.communities,
-		centrality: resp.result.centrality ?? {},
-	};
+	return resp.result.communities;
 }
 
 /**

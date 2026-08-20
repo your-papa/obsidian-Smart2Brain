@@ -37,7 +37,6 @@ interface Props {
 	clusterLabels?: Record<number, string>;
 	/** When false, the cluster/topic label pills are not drawn over the graph. */
 	showClusterLabels?: boolean;
-	isLabeling?: boolean;
 	/**
 	 * Strength of the cluster cohesion force (0 = off, default 0.15).
 	 * Pulls nodes toward their cluster centroid each simulation tick.
@@ -56,7 +55,8 @@ interface Props {
 	onSelectionChange?: (paths: string[]) => void;
 	onClearFocusedClusters?: () => void;
 	onHoverPreview?: (event: MouseEvent, path: string, targetEl: HTMLElement) => void;
-	onSkeletonToggle?: () => void;
+	/** Collapse or expand all topics at once (the atom button / S shortcut). */
+	onToggleCollapseAll?: () => void;
 	immersed?: boolean;
 	onExitImmerse?: () => void;
 	// Selection-bar verbs, mirrored as keyboard shortcuts so a selection made on
@@ -87,7 +87,6 @@ let {
 	focusedClusters = new Set<number>(),
 	clusterLabels = {},
 	showClusterLabels = true,
-	isLabeling = false,
 	clusterCohesionStrength = 0.15,
 	onNodeClick,
 	onSetTopicCollapsed,
@@ -97,7 +96,7 @@ let {
 	onSelectionChange,
 	onClearFocusedClusters,
 	onHoverPreview,
-	onSkeletonToggle,
+	onToggleCollapseAll,
 	immersed = false,
 	onExitImmerse,
 	onCollapseSelectedTopics,
@@ -205,6 +204,11 @@ let isReclustering = false;
 let baseAlphaDecay = 0.02;
 let baseVelocityDecay = 0.3;
 
+/** False while the graph's leaf is hidden (background tab, collapsed sidebar). */
+let leafVisible = true;
+/** True when the simulation was stopped mid-settle because the leaf went hidden. */
+let simPausedWhileHidden = false;
+
 // D3-compatible node/link types
 type SimNode = GraphNode & SimulationNodeDatum;
 type SimLink = SimulationLinkDatum<SimNode> & { weight: number; type: EdgeType };
@@ -291,7 +295,6 @@ const HULL_OUTLIER_FACTOR = 2.2;
 // Smooth hover highlighting: per-node alpha lerps toward target on each frame.
 // 0 = fully dimmed, 1 = fully visible. Drives node, edge, and label opacity.
 let hoverAlphas: Map<string, number> = new Map();
-let hoverAnimFrameId: number | null = null;
 
 /**
  * Hull cross-fade state.
@@ -303,7 +306,6 @@ let hoverAnimFrameId: number | null = null;
  */
 let outgoingHulls: Array<{ cluster: number; color: string; path: Array<{ x: number; y: number }> }> = [];
 let hullFadeProgress = 1;
-let hullAnimFrameId: number | null = null;
 /** Releases the sustained alpha after a collapse/expand transition. */
 let retargetTimer: ReturnType<typeof setTimeout> | null = null;
 /** Fires the corrective fit once post-settle drift has stopped. */
@@ -323,6 +325,21 @@ let adjacency: Map<string, Set<string>> = new Map();
 let hoverAlphasSettled = false;
 let lastHoverFingerprint = "";
 
+// Identity ids for the selection sets in the hover fingerprint. Both sets are
+// replaced wholesale on change, so instance identity is the reliable signal —
+// their *size* is not: swapping one same-sized set for another would read as
+// unchanged and leave the fade stale.
+const objectIdentityIds = new WeakMap<object, number>();
+let nextObjectIdentityId = 1;
+function identityOf(value: object): number {
+	let id = objectIdentityIds.get(value);
+	if (id === undefined) {
+		id = nextObjectIdentityId++;
+		objectIdentityIds.set(value, id);
+	}
+	return id;
+}
+
 // Cluster legend hit areas for click detection (screen space)
 let clusterAnchorHitAreas: ClusterPillHit[] = [];
 
@@ -337,30 +354,78 @@ function isOverClusterPill(x: number, y: number): boolean {
 	return clusterPillAt(x, y) !== undefined;
 }
 
-// Labeling animation loop
-let labelAnimFrameId: number | null = null;
+// ── On-demand render scheduling ─────────────────────────────
+//
+// Every render trigger funnels through requestRender, which coalesces any
+// number of same-frame requests (sim tick + camera animation + hover fade…)
+// into one render pass per animation frame. The Pixi application ticker is
+// disabled, so the GPU draws exactly once per pass and a settled, untouched
+// graph costs nothing at idle.
+//
+// The mode bounds how much of the scene is rebuilt:
+//   world   — content changed (positions, data, hover/fade state): rebuild
+//             everything.
+//   zoom    — only the camera scale changed: counter-scaled strokes and label
+//             visibility need refreshing, but edge tessellation waits until
+//             the scale drifts past EDGE_REDRAW_SCALE_STEP.
+//   overlay — the camera panned: world-space layers move with the viewport
+//             transform for free; only screen-space content (labels, pills,
+//             tooltip) refreshes.
+type RenderMode = "overlay" | "zoom" | "world";
+const RENDER_MODE_RANK: Record<RenderMode, number> = { overlay: 0, zoom: 1, world: 2 };
+let renderRafId: number | null = null;
+let pendingRenderMode: RenderMode | null = null;
 
-function stopLabelAnimation() {
-	if (labelAnimFrameId != null) {
-		cancelAnimationFrame(labelAnimFrameId);
-		labelAnimFrameId = null;
+function requestRender(mode: RenderMode) {
+	if (pendingRenderMode === null || RENDER_MODE_RANK[mode] > RENDER_MODE_RANK[pendingRenderMode]) {
+		pendingRenderMode = mode;
 	}
+	if (renderRafId != null) return;
+	renderRafId = requestAnimationFrame(() => {
+		renderRafId = null;
+		const nextMode = pendingRenderMode ?? "world";
+		pendingRenderMode = null;
+		render(nextMode);
+	});
 }
 
-$effect(() => {
-	if (isLabeling) {
-		function tick() {
-			render();
-			labelAnimFrameId = requestAnimationFrame(tick);
-		}
-		labelAnimFrameId = requestAnimationFrame(tick);
-		return () => {
-			stopLabelAnimation();
-			// One final render to clear the animated border
-			render();
-		};
-	}
-});
+/**
+ * Scale drift (as a fraction) a zoom must accumulate before edges are
+ * re-tessellated. Edge widths counter-scale with the camera (`1.2 / scale`),
+ * so skipping a rebuild leaves them up to this much too thick or thin —
+ * invisible at 5%, while smooth-wheel zooming stops paying the full O(E)
+ * tessellation on every frame.
+ */
+const EDGE_REDRAW_SCALE_STEP = 0.05;
+/** Camera scale at which edges were last tessellated. */
+let lastEdgeDrawScale = 1;
+/** Camera scale at the last viewport-move callback — distinguishes zoom from pan. */
+let lastViewportScale = 1;
+
+/**
+ * Margin (fraction of the view size per side) kept tessellated around the view
+ * when culling offscreen edges. Wide enough that ordinary panning stays inside
+ * it; a pan past it forces a re-tessellation before the gap scrolls into view.
+ */
+const EDGE_CULL_MARGIN = 0.35;
+type WorldRect = { minX: number; minY: number; maxX: number; maxY: number };
+/** Cull rect used at the last edge tessellation — null when nothing was culled. */
+let lastEdgeCullRect: WorldRect | null = null;
+/** Set when a pan left the culled margin; forces an edge redraw next render. */
+let edgesViewportStale = false;
+
+/** The camera's visible world rect, padded by `marginFactor` of its size per side. */
+function viewWorldRect(renderer: PixiRenderer, marginFactor: number): WorldRect {
+	const tl = renderer.screenToWorld(0, 0);
+	const br = renderer.screenToWorld(renderer.width, renderer.height);
+	const mx = (br.x - tl.x) * marginFactor;
+	const my = (br.y - tl.y) * marginFactor;
+	return { minX: tl.x - mx, minY: tl.y - my, maxX: br.x + mx, maxY: br.y + my };
+}
+
+function rectContains(outer: WorldRect, inner: WorldRect): boolean {
+	return inner.minX >= outer.minX && inner.maxX <= outer.maxX && inner.minY >= outer.minY && inner.maxY <= outer.maxY;
+}
 
 function handleKeyDown(e: KeyboardEvent) {
 	const tag = (e.target as HTMLElement | null)?.tagName;
@@ -389,7 +454,7 @@ function handleKeyDown(e: KeyboardEvent) {
 				isLassoing = false;
 				lassoPoints = [];
 				pixi?.resumeViewport();
-				render();
+				requestRender("world");
 			} else if (selectedNodes.size > 0) {
 				clearSelection();
 			} else if (immersed) {
@@ -406,7 +471,7 @@ function handleKeyDown(e: KeyboardEvent) {
 			}
 			break;
 		case "s":
-			onSkeletonToggle?.();
+			onToggleCollapseAll?.();
 			break;
 		// Selection-bar verbs. All no-op without a selection, so they stay inert
 		// while panning an unselected graph.
@@ -534,7 +599,7 @@ function pointInPolygon(px: number, py: number, poly: Array<{ x: number; y: numb
 export function clearSelection() {
 	selectedNodes = new Set();
 	onSelectionChange?.([]);
-	render();
+	requestRender("world");
 }
 
 /**
@@ -554,7 +619,7 @@ export function selectNodesByPaths(paths: string[]) {
 	// Match collapsed topics too: a topic node is selected when any note it
 	// stands for is in the set, so a selection survives folding and unfolding.
 	selectedNodes = new Set(simNodes.filter((n) => resolveNodePaths(n).some((p) => pathSet.has(p))).map((n) => n.id));
-	render();
+	requestRender("world");
 }
 
 /**
@@ -565,22 +630,55 @@ function screenToGraph(screenX: number, screenY: number): { x: number; y: number
 	return pixi.screenToWorld(screenX, screenY);
 }
 
-/**
- * Find the node at the given screen coordinates.
- */
-function findNodeAt(screenX: number, screenY: number): GraphNode | null {
-	const { x, y } = screenToGraph(screenX, screenY);
-	const scale = pixi?.scale ?? 1;
-	const hitRadius = (Math.max(1, nodeSize) + 4) / scale;
+// ── Spatial hit grid ────────────────────────────────────────
+// findNodeAt runs on every mousemove, and a linear scan over a large vault's
+// nodes is measurable input-latency work. A uniform hash grid answers the same
+// query from a few cells instead. Positions move every tick while the layout
+// settles, so the grid is only (re)built once the simulation is near rest —
+// while it's moving, the plain scan runs, since rebuilding per query would
+// cost more than the scan it replaces.
+let hitGrid: Map<number, Array<{ node: SimNode; order: number }>> | null = null;
+let hitGridCellSize = 1;
+let hitGridDirty = true;
+let hitGridMaxRadius = 0;
 
+/** Cell coordinates support ±32k cells from the origin. */
+const HIT_GRID_KEY_OFFSET = 32768;
+function hitGridKey(cx: number, cy: number): number {
+	return (cx + HIT_GRID_KEY_OFFSET) * 65536 + (cy + HIT_GRID_KEY_OFFSET);
+}
+
+function buildHitGrid() {
+	hitGridMaxRadius = 0;
+	for (const node of simNodes) {
+		const radius = getNodeRadius(node);
+		if (radius > hitGridMaxRadius) hitGridMaxRadius = radius;
+	}
+	hitGridCellSize = Math.max(64, hitGridMaxRadius * 2);
+	hitGrid = new Map();
+	for (let i = 0; i < simNodes.length; i++) {
+		const node = simNodes[i];
+		if (node.x == null || node.y == null) continue;
+		const key = hitGridKey(Math.floor(node.x / hitGridCellSize), Math.floor(node.y / hitGridCellSize));
+		let cell = hitGrid.get(key);
+		if (!cell) {
+			cell = [];
+			hitGrid.set(key, cell);
+		}
+		cell.push({ node, order: i });
+	}
+	hitGridDirty = false;
+}
+
+/** The original linear scan — still used while the layout is in motion. */
+function findNodeLinear(x: number, y: number, hitRadius: number): GraphNode | null {
 	// Search in reverse order (top-most nodes first)
 	for (let i = simNodes.length - 1; i >= 0; i--) {
 		const node = simNodes[i];
 		const dx = (node.x ?? 0) - x;
 		const dy = (node.y ?? 0) - y;
-		const dist = Math.sqrt(dx * dx + dy * dy);
-		const radius = getNodeRadius(node);
-		if (dist <= radius + hitRadius) {
+		const reach = getNodeRadius(node) + hitRadius;
+		if (dx * dx + dy * dy <= reach * reach) {
 			return node;
 		}
 	}
@@ -588,18 +686,48 @@ function findNodeAt(screenX: number, screenY: number): GraphNode | null {
 }
 
 /**
- * Ask for another frame while the hull cross-fade is still running.
+ * Find the node at the given screen coordinates.
  *
- * The force simulation drives most redraws, but it can already be at rest when a
- * grouping changes (e.g. changing granularity with a settled layout), so the fade needs its
- * own frame source to finish.
+ * Picks the top-most match (highest index in `simNodes`), matching the
+ * original reverse-scan semantics in both paths.
  */
-function scheduleFrame() {
-	if (hullAnimFrameId != null) return;
-	hullAnimFrameId = requestAnimationFrame(() => {
-		hullAnimFrameId = null;
-		render();
-	});
+function findNodeAt(screenX: number, screenY: number): GraphNode | null {
+	const { x, y } = screenToGraph(screenX, screenY);
+	const scale = pixi?.scale ?? 1;
+	const hitRadius = (Math.max(1, nodeSize) + 4) / scale;
+
+	// While ticking, positions change under the grid every frame — scan instead.
+	if (hitGridDirty && simulation && simulation.alpha() > 0.03) {
+		return findNodeLinear(x, y, hitRadius);
+	}
+	if (hitGridDirty || !hitGrid) buildHitGrid();
+
+	// The zoomed-out hit slack can exceed one cell, so widen the neighbourhood
+	// to however many cells the search radius spans.
+	const searchRadius = hitGridMaxRadius + hitRadius;
+	const span = Math.ceil(searchRadius / hitGridCellSize);
+	const cx = Math.floor(x / hitGridCellSize);
+	const cy = Math.floor(y / hitGridCellSize);
+
+	let best: SimNode | null = null;
+	let bestOrder = -1;
+	for (let gx = cx - span; gx <= cx + span; gx++) {
+		for (let gy = cy - span; gy <= cy + span; gy++) {
+			const cell = hitGrid?.get(hitGridKey(gx, gy));
+			if (!cell) continue;
+			for (const { node, order } of cell) {
+				if (order <= bestOrder) continue;
+				const dx = (node.x ?? 0) - x;
+				const dy = (node.y ?? 0) - y;
+				const reach = getNodeRadius(node) + hitRadius;
+				if (dx * dx + dy * dy <= reach * reach) {
+					best = node;
+					bestOrder = order;
+				}
+			}
+		}
+	}
+	return best;
 }
 
 /**
@@ -730,30 +858,28 @@ function weightedLinkDistance(link: SimLink): number {
 }
 
 /**
- * Get the draw radius for a node based on its degree, centrality, and the user-configurable nodeSize.
+ * Get the draw radius for a node from its degree and the auto-tuned nodeSize.
  *
- * When betweenness centrality is available (Leiden mode), it is blended with degree:
- * - degree gives a +log bonus for highly-connected hubs
- * - centrality gives a larger bonus for bridge nodes whose removal would fragment the graph
- * The two signals are additive so a hub that is also a bridge gets the largest radius.
+ * Size encodes exactly one thing — connectedness — so it stays unambiguous.
+ * Bridge nodes are surfaced by the highlight toggle's color, not by size.
+ * Must match the renderer's sprite radius (`syncNodes`), since this value
+ * also drives hit-testing, collision spacing, and label offsets.
  */
 function getNodeRadius(node: GraphNode): number {
 	const base = Math.max(1, nodeSize);
 	const degree = node.degree ?? 0;
-	const degreeBonus = Math.min(Math.log1p(degree) * 2.5, base * 5);
-	if (node.centrality != null && node.centrality > 0) {
-		// centrality is 0–1; scale it to the same ceiling as the degree bonus
-		const centralityBonus = Math.min(node.centrality * base * 8, base * 8);
-		return base + Math.max(degreeBonus, centralityBonus * 0.6 + degreeBonus * 0.4);
-	}
-	return base + degreeBonus;
+	return base + Math.min(Math.log1p(degree) * 2.5, base * 5);
 }
 
 /**
- * Update the Pixi renderer with current state.
- * Replaces the old Canvas 2D render() function.
+ * Update the Pixi renderer with current state and draw one frame.
+ *
+ * See {@link requestRender} for how calls are scheduled and what each mode
+ * skips. Everything after the world-space section runs in every mode: labels,
+ * pills and the tooltip are placed in screen space, so a camera move changes
+ * their layout even when no node moved.
  */
-function render() {
+function render(mode: RenderMode) {
 	if (!pixi || !pixi.ready) return;
 	// Narrowed once here so the nested helpers below (which close over it) don't
 	// each have to re-check a field the early return already guaranteed.
@@ -763,23 +889,28 @@ function render() {
 	const height = renderer.height;
 	const scale = renderer.scale;
 	const c = renderer.theme;
-	const nodeClusterMap = getNodeClusterMap();
+	const isWorld = mode === "world";
 
-	// Advance edge fade-in (smooth crossfade on mode / data changes)
-	if (edgeFadeAlpha < 1) {
+	// Advance edge fade-in (smooth crossfade on mode / data changes).
+	// Fades advance only on world frames, and an unfinished fade requests the
+	// next world frame below — so a concurrent zoom or pan can't stall it, and
+	// it needs no frame source of its own once the simulation is at rest.
+	if (isWorld && edgeFadeAlpha < 1) {
 		edgeFadeAlpha = Math.min(1, edgeFadeAlpha + EDGE_FADE_RATE);
+		if (edgeFadeAlpha < 1) requestRender("world");
 	}
 
 	// ── Smooth hover alpha interpolation ──────────────────────
 	// Build a fingerprint of everything that determines alpha targets.
 	// If it matches the previous frame and alphas have fully settled, skip the
 	// O(n) lerp loop — nothing would change anyway (e.g. during viewport pan).
-	const hoverFingerprint = `${hoveredNode?.id ?? ""}|${draggedNode?.id ?? ""}|${selectedNodes.size}|${focusedClusters.size}|${simNodesVersion}`;
-	const skipHoverLoop = hoverAlphasSettled && hoverFingerprint === lastHoverFingerprint;
-	lastHoverFingerprint = hoverFingerprint;
+	const hoverFingerprint = `${hoveredNode?.id ?? ""}|${draggedNode?.id ?? ""}|${identityOf(selectedNodes)}|${identityOf(focusedClusters)}|${simNodesVersion}`;
+	const skipHoverLoop = !isWorld || (hoverAlphasSettled && hoverFingerprint === lastHoverFingerprint);
+	if (isWorld) lastHoverFingerprint = hoverFingerprint;
 
-	let hoverSettled = true;
+	let hoverSettled = hoverAlphasSettled;
 	if (!skipHoverLoop) {
+		hoverSettled = true;
 		const hasSelection = selectedNodes.size > 0;
 		for (const node of simNodes) {
 			let target: number;
@@ -809,73 +940,94 @@ function render() {
 	}
 	hoverAlphasSettled = hoverSettled;
 
-	// Schedule another frame if alphas haven't settled yet
-	if (!hoverSettled && hoverAnimFrameId == null) {
-		hoverAnimFrameId = requestAnimationFrame(() => {
-			hoverAnimFrameId = null;
-			render();
-		});
-	}
+	// Ask for another world frame while alphas are still converging.
+	if (isWorld && !hoverSettled) requestRender("world");
 
-	// ── Topic regions ──────────────────────────────────────────
-	if (showTopicHulls) {
-		const hulls = computeTopicHulls();
-		// Advance the cross-fade toward the new grouping. Eased so the dissolve
-		// starts quickly and settles gently, matching the camera animations.
-		if (hullFadeProgress < 1) {
-			hullFadeProgress = Math.min(1, hullFadeProgress + HULL_FADE_RATE);
-			if (hullFadeProgress >= 1) outgoingHulls = [];
-			scheduleFrame();
+	// ── World-space layers ─────────────────────────────────────
+	// Skipped entirely on pure pans: hulls, edges and nodes live inside the
+	// viewport container, so the camera transform moves them for free.
+	if (mode !== "overlay") {
+		const nodeClusterMap = getNodeClusterMap();
+
+		// ── Topic regions ──────────────────────────────────────
+		if (showTopicHulls) {
+			const hulls = computeTopicHulls();
+			// Advance the cross-fade toward the new grouping. Eased so the dissolve
+			// starts quickly and settles gently, matching the camera animations.
+			// World frames only, and an unfinished fade requests the next one — the
+			// force simulation can already be at rest when a grouping changes (e.g.
+			// changing granularity on a settled layout), so the fade sustains itself.
+			if (isWorld && hullFadeProgress < 1) {
+				hullFadeProgress = Math.min(1, hullFadeProgress + HULL_FADE_RATE);
+				if (hullFadeProgress >= 1) outgoingHulls = [];
+				else requestRender("world");
+			}
+			renderer.drawHulls(hulls, {
+				focusedClusters,
+				fadeAlpha: edgeFadeAlpha,
+				outgoing: outgoingHulls,
+				outgoingAlpha: outgoingHulls.length > 0 ? 1 - easeOutCubic(hullFadeProgress) : 0,
+			});
+		} else {
+			// Regions are hidden — drop any in-flight fade so re-enabling them starts
+			// clean rather than dissolving from a grouping that's since gone stale.
+			outgoingHulls = [];
+			lastHullPaths = [];
+			lastHullSignature = "";
+			hullFadeProgress = 1;
+			renderer.drawHulls([], { focusedClusters, fadeAlpha: edgeFadeAlpha });
 		}
-		renderer.drawHulls(hulls, {
-			focusedClusters,
-			fadeAlpha: edgeFadeAlpha,
-			outgoing: outgoingHulls,
-			outgoingAlpha: outgoingHulls.length > 0 ? 1 - easeOutCubic(hullFadeProgress) : 0,
-		});
-	} else {
-		// Regions are hidden — drop any in-flight fade so re-enabling them starts
-		// clean rather than dissolving from a grouping that's since gone stale.
-		outgoingHulls = [];
-		lastHullPaths = [];
-		lastHullSignature = "";
-		hullFadeProgress = 1;
-		renderer.drawHulls([], { focusedClusters, fadeAlpha: edgeFadeAlpha });
-	}
 
-	// ── Edges ──────────────────────────────────────────────────
-	renderer.drawEdges(
-		renderableSimLinks as unknown as Array<{
-			source: { id: string; x: number; y: number; kind?: string };
-			target: { id: string; x: number; y: number; kind?: string };
-			type: string;
-			weight?: number;
-		}>,
-		{
-			showWikiLinks,
-			showSemanticLinks,
-			directedWikiEdges,
-			hoveredNodeId: hoveredNode?.id ?? null,
-			adjacency,
-			focusedClusters,
+		// ── Edges ──────────────────────────────────────────────
+		// Re-tessellating every edge is the priciest CPU step of a frame, so
+		// zoom-only frames skip it until the scale has drifted enough for the
+		// counter-scaled widths to be visibly off (see EDGE_REDRAW_SCALE_STEP),
+		// and edges outside the margined view are culled entirely.
+		const scaleDrift = Math.abs(scale - lastEdgeDrawScale) / (lastEdgeDrawScale || 1);
+		if (isWorld || scaleDrift > EDGE_REDRAW_SCALE_STEP || edgesViewportStale) {
+			const cullRect = viewWorldRect(renderer, EDGE_CULL_MARGIN);
+			renderer.drawEdges(
+				renderableSimLinks as unknown as Array<{
+					source: { id: string; x: number; y: number; kind?: string };
+					target: { id: string; x: number; y: number; kind?: string };
+					type: string;
+					weight?: number;
+				}>,
+				{
+					showWikiLinks,
+					showSemanticLinks,
+					directedWikiEdges,
+					hoveredNodeId: hoveredNode?.id ?? null,
+					adjacency,
+					focusedClusters,
+					selectedNodes,
+					hoverAlphas,
+					edgeFadeAlpha,
+					baseEdgeAlpha,
+					nodeClusterMap,
+					cullRect,
+				},
+			);
+			lastEdgeDrawScale = scale;
+			edgesViewportStale = false;
+			// Pan-staleness tracking only matters if the rect actually excluded
+			// part of the graph — when everything fit inside it, no pan can
+			// reveal a missing edge, so the moved handler can skip the check.
+			const bounds = computeNodeBounds(simNodes);
+			lastEdgeCullRect = bounds && rectContains(cullRect, bounds) ? null : cullRect;
+		}
+
+		// ── Nodes ──────────────────────────────────────────────
+		renderer.syncNodes(simNodes, nodeSize, {
 			selectedNodes,
+			hoveredNodeId: hoveredNode?.id ?? null,
+			draggedNodeId: draggedNode?.id ?? null,
+			focusedClusters,
+			isForceMode: true,
 			hoverAlphas,
-			edgeFadeAlpha,
-			baseEdgeAlpha,
 			nodeClusterMap,
-		},
-	);
-
-	// ── Nodes ──────────────────────────────────────────────────
-	renderer.syncNodes(simNodes, nodeSize, {
-		selectedNodes,
-		hoveredNodeId: hoveredNode?.id ?? null,
-		draggedNodeId: draggedNode?.id ?? null,
-		focusedClusters,
-		isForceMode: true,
-		hoverAlphas,
-		nodeClusterMap,
-	});
+		});
+	}
 
 	// ── Labels ─────────────────────────────────────────────────
 	// Labels appear automatically when a node's screen-space radius reaches a
@@ -1178,6 +1330,9 @@ function render() {
 	} else {
 		renderer.hideTooltip();
 	}
+
+	// One GPU draw per pass — the application ticker is disabled.
+	renderer.renderFrame();
 }
 
 // ============================================================================
@@ -1222,7 +1377,7 @@ function handleMouseDown(e: PointerEvent) {
 			selectedNodes = next;
 			onSelectionChange?.(simNodes.filter((n) => next.has(n.id)).flatMap(resolveNodePaths));
 			lassoJustFinished = true;
-			render();
+			requestRender("world");
 			return;
 		}
 		isLassoing = true;
@@ -1244,7 +1399,7 @@ function handleMouseDown(e: PointerEvent) {
 		if (e.pointerType === "touch" || e.pointerType === "pen") {
 			if (hoveredNode !== node) {
 				hoveredNode = node;
-				render();
+				requestRender("world");
 			}
 			longPressFired = false;
 			cancelLongPress();
@@ -1294,7 +1449,7 @@ function handleMouseMove(e: PointerEvent) {
 			if (dist < 3) return;
 		}
 		lassoPoints = [...lassoPoints, graphPos];
-		render();
+		requestRender("world");
 		return;
 	}
 
@@ -1305,14 +1460,14 @@ function handleMouseMove(e: PointerEvent) {
 		const graphPos = screenToGraph(x, y);
 		dragSimNode.fx = graphPos.x;
 		dragSimNode.fy = graphPos.y;
-		render();
+		requestRender("world");
 	} else {
 		// Hover detection: check cluster legend first, then nodes
 		if (isOverClusterPill(x, y)) {
 			canvas.style.cursor = "pointer";
 			if (hoveredNode) {
 				hoveredNode = null;
-				render();
+				requestRender("world");
 			}
 			return;
 		}
@@ -1322,7 +1477,7 @@ function handleMouseMove(e: PointerEvent) {
 			hoveredNode = node;
 			previewTriggeredForNode = null;
 			canvas.style.cursor = node ? "pointer" : lassoMode ? "crosshair" : "grab";
-			render();
+			requestRender("world");
 		}
 		// Cmd/Ctrl+hover triggers note preview (fire once per node)
 		if (node && (e.metaKey || e.ctrlKey) && onHoverPreview && previewTriggeredForNode !== node.id) {
@@ -1351,7 +1506,7 @@ function handleMouseUp(_e: PointerEvent) {
 			}
 		}
 		lassoPoints = [];
-		render();
+		requestRender("world");
 		return;
 	}
 	if (dragSimNode) {
@@ -1399,7 +1554,7 @@ function handleClick(e: MouseEvent) {
 		// the noun the selection bar's verbs (Immerse, Open all, Collapse…) act on,
 		// so the label stays one consistent gesture and collapsing moves there.
 		onFocusCluster?.(pill.cluster, false, e.shiftKey || e.metaKey || e.ctrlKey);
-		render();
+		requestRender("world");
 		return;
 	}
 	const node = findNodeAt(x, y);
@@ -1463,7 +1618,7 @@ function handleMouseLeave() {
 	cancelLongPress();
 	hoveredNode = null;
 	previewTriggeredForNode = null;
-	render();
+	requestRender("world");
 }
 
 function handleContextMenu(e: MouseEvent) {
@@ -1728,6 +1883,7 @@ function buildInternalData(data: GraphData): {
 	const isFreshLayout = oldPositions.size === 0 && persistentPositionCache.size === 0;
 	simNodesVersion++;
 	hoverAlphasSettled = false;
+	hitGridDirty = true;
 	const hasAnyKnown = oldPositions.size > 0 || persistentPositionCache.size > 0;
 	const unknownCount = data.nodes.filter((n) => !oldPositions.has(n.id) && !persistentPositionCache.has(n.id)).length;
 	// Spread radius for circle pre-layout: scale with node count so the graph fills
@@ -1831,6 +1987,8 @@ function setupForceSimulation(
 			forceCollide<SimNode>().radius((d) => getNodeRadius(d) + 2),
 		)
 		.on("tick", () => {
+			// Positions moved — the spatial hit grid no longer matches them.
+			hitGridDirty = true;
 			// A finished re-cluster transition hands its slower decay back, so the
 			// next drag or retarget feels normal instead of inheriting the drift.
 			if (isReclustering && simulation && simulation.alpha() < 0.02) {
@@ -1876,7 +2034,7 @@ function setupForceSimulation(
 					}, SETTLE_FIT_DELAY_MS);
 				}
 			}
-			render();
+			requestRender("world");
 		})
 		.alphaDecay(isFreshLayout ? 0.04 : 0.02)
 		.velocityDecay(isFreshLayout ? 0.5 : 0.3);
@@ -1917,6 +2075,14 @@ function setupForceSimulation(
 		simulation.alpha(0.15).alphaDecay(0.008).velocityDecay(0.4);
 		needsInitialFit = true;
 		forceTickCount = 0;
+	}
+
+	// A graph rebuilt while its leaf is hidden (e.g. data arriving into a
+	// background tab) shouldn't burn CPU settling a layout nobody can see —
+	// the visibility observer resumes it on reveal.
+	if (!leafVisible) {
+		simPausedWhileHidden = true;
+		simulation.stop();
 	}
 }
 
@@ -1964,7 +2130,6 @@ function setupGraph(data: GraphData) {
 				sn.color = node.color;
 				sn.cluster = node.cluster;
 				sn.highlighted = node.highlighted;
-				sn.centrality = node.centrality;
 			}
 		}
 		// Sync the cohesion force strength to the current prop value.
@@ -1990,7 +2155,7 @@ function setupGraph(data: GraphData) {
 			forceTickCount = 0;
 		}
 
-		if (pixi) render();
+		if (pixi) requestRender("world");
 		return;
 	}
 
@@ -2012,7 +2177,10 @@ $effect(() => {
 	untrack(() => setupGraph(graphData));
 });
 
-// Re-render when appearance settings change (nodeSize, showWikiLinks, …)
+// Re-render when appearance settings or prop-driven overlay content change
+// (nodeSize, link toggles, topic names arriving from the AI labeling pass, a
+// focus selection made in the Topics panel, …). Nothing else re-renders on
+// prop changes, so every prop render() reads belongs in this list.
 $effect(() => {
 	void nodeSize;
 	void showWikiLinks;
@@ -2021,7 +2189,11 @@ $effect(() => {
 	void alwaysRefitOnDataChange;
 	void directedWikiEdges;
 	void showClusterLabels;
-	if (pixi) render();
+	void clusterLabels;
+	void focusedClusters;
+	// nodeSize feeds node radii, which the hit grid bakes in at build time.
+	hitGridDirty = true;
+	if (pixi) requestRender("world");
 });
 
 // Hot-update force parameters without full rebuild.
@@ -2079,15 +2251,51 @@ $effect(() => {
 });
 
 onMount(() => {
+	// Stop the simulation while this leaf is hidden — a background tab or a
+	// collapsed sidebar hides via display:none, which IntersectionObserver
+	// reports as non-intersecting. A layout nobody can see shouldn't tick
+	// d3-force at 60fps; it resumes from its current alpha on reveal.
+	const visibilityObserver = new IntersectionObserver((entries) => {
+		const visible = entries[entries.length - 1]?.isIntersecting ?? true;
+		if (visible === leafVisible) return;
+		leafVisible = visible;
+		if (!visible) {
+			if (simulation && simulation.alpha() > 0.02) simPausedWhileHidden = true;
+			simulation?.stop();
+		} else {
+			if (simPausedWhileHidden) {
+				simPausedWhileHidden = false;
+				simulation?.restart();
+			}
+			requestRender("world");
+		}
+	});
+	visibilityObserver.observe(containerEl);
+
 	// Initialize Pixi renderer
 	const theme = readThemeColors(containerEl);
 	const renderer = new PixiRenderer();
 	pixi = renderer;
 
 	renderer.init(containerEl, theme).then(() => {
-		// Re-render overlays (cluster pills, legends, labels) when viewport moves
+		lastViewportScale = renderer.scale;
+		// Re-render when the viewport moves. A zoom must refresh counter-scaled
+		// strokes and label visibility; a pure pan only needs the screen-space
+		// overlay (labels, pills, tooltip) re-laid-out.
 		renderer.onViewportMoved(() => {
-			render();
+			const scale = renderer.scale;
+			if (scale !== lastViewportScale) {
+				lastViewportScale = scale;
+				requestRender("zoom");
+			} else {
+				requestRender("overlay");
+			}
+			// A pan can carry the view outside the margin edges were culled to —
+			// re-tessellate before the missing region scrolls fully into view.
+			if (lastEdgeCullRect && !rectContains(lastEdgeCullRect, viewWorldRect(renderer, 0))) {
+				edgesViewportStale = true;
+				requestRender("zoom");
+			}
 			if (pendingUserViewportMove || pendingUserViewportZoom) {
 				pendingUserViewportMove = false;
 				pendingUserViewportZoom = false;
@@ -2120,13 +2328,13 @@ onMount(() => {
 				needsInitialFit = true;
 				forceTickCount = 0;
 			}
-			render();
+			requestRender("world");
 		}
 
 		const resizeObserver = new ResizeObserver(() => {
 			const rect = containerEl.getBoundingClientRect();
 			renderer.resize(rect.width, rect.height);
-			render();
+			requestRender("world");
 		});
 		resizeObserver.observe(containerEl);
 
@@ -2135,7 +2343,7 @@ onMount(() => {
 		const handleCssChange = () => {
 			const newTheme = readThemeColors(containerEl);
 			renderer.updateTheme(newTheme);
-			render();
+			requestRender("world");
 		};
 		document.body.addEventListener("css-change", handleCssChange);
 
@@ -2162,8 +2370,11 @@ onMount(() => {
 
 	return () => {
 		(containerEl as any).__graphCleanup?.();
-		if (hoverAnimFrameId != null) cancelAnimationFrame(hoverAnimFrameId);
-		if (hullAnimFrameId != null) cancelAnimationFrame(hullAnimFrameId);
+		visibilityObserver.disconnect();
+		if (renderRafId != null) {
+			cancelAnimationFrame(renderRafId);
+			renderRafId = null;
+		}
 		if (retargetTimer != null) clearTimeout(retargetTimer);
 		if (settleFitTimer != null) clearTimeout(settleFitTimer);
 		if (canvasRevealTimer != null) clearTimeout(canvasRevealTimer);
@@ -2171,7 +2382,6 @@ onMount(() => {
 			simulation.stop();
 			simulation = null;
 		}
-		stopLabelAnimation();
 		renderer.destroy();
 		pixi = null;
 	};
@@ -2243,7 +2453,7 @@ function zoomByFactor(factor: number) {
 	const center = renderer.screenToWorld(renderer.width / 2, renderer.height / 2);
 	renderer.moveCenter(center.x, center.y, newScale);
 	onUserViewportChange?.();
-	render();
+	requestRender("zoom");
 }
 
 /**
@@ -2302,6 +2512,23 @@ export function panToClusters(clusters: Set<number>) {
     outline: none;
     cursor: grab;
     touch-action: none; /* Required for pointer capture to work */
+    /* The container is a <button> only so it can take keyboard focus for the
+       graph's shortcuts — it is a canvas surface, not a control. Suppress the
+       tap feedback a real button gets: WebKit's grey flash on touch, and the
+       box-shadow Obsidian's mobile theme puts on :active/:focus buttons. */
+    -webkit-tap-highlight-color: transparent;
+    box-shadow: none;
+  }
+
+  /* Obsidian's button rules set a background on these states; the canvas must
+     stay transparent so the graph shows through unchanged when tapped. */
+  .graph-canvas-container:active,
+  .graph-canvas-container:hover,
+  .graph-canvas-container:focus,
+  .graph-canvas-container:focus-visible {
+    background: transparent;
+    box-shadow: none;
+    outline: none;
   }
 
   .graph-canvas-container:active {

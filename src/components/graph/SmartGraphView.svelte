@@ -1,3 +1,46 @@
+<script module lang="ts">
+import type { GraphEdge as CachedGraphEdge } from "../../types/graph";
+
+// ── Topic-derivation caches ─────────────────────────────────
+//
+// Module-scoped so they survive closing and reopening the graph view — the
+// expensive derivations (Leiden partitions, granularity probing, semantic
+// edges, AI topic labels) are pure over the graph plus the keys embedded in
+// each entry, so staleness is handled by keying, not by component lifecycle.
+// Shared by every graph leaf (they all describe the same vault); dropped only
+// when the plugin reloads.
+
+/**
+ * Leiden partitions keyed by `${seed}:${resolution}:${edge mode}`, valid for
+ * the graph whose topology signature is {@link leidenGraphSignature}.
+ */
+let leidenCache = new Map<string, Record<string, number>>();
+
+/**
+ * Signature of the graph the Leiden cache and granularity ladder were derived
+ * from. A rebuild that produces an identical graph — reopening the view, a
+ * Refresh over an unchanged vault, a filter round-trip — keeps them all, so
+ * topics reappear from cache instead of re-spending seconds of worker time.
+ */
+let leidenGraphSignature = "";
+
+/** The derived granularity ladder for that same graph, restored on reopen. */
+let savedGranularityLadder: number[] | null = null;
+
+/**
+ * The last semantic edge set, keyed by wiki-graph signature + semantic
+ * settings + the embedding index's `lastUpdated` stamp — so a reopen skips
+ * the HNSW neighbour search entirely unless notes or embeddings changed.
+ */
+let cachedSemanticEdges: { key: string; edges: CachedGraphEdge[] } | null = null;
+
+/**
+ * Cache of membership-signature → generated topic label, so re-running Leiden
+ * at the same grouping (or reopening the view) doesn't re-spend API calls.
+ */
+let topicLabelCache = new Map<string, string>();
+</script>
+
 <script lang="ts">
 import { untrack, tick, onDestroy } from "svelte";
 import { getAllTags, Notice, type WorkspaceLeaf } from "obsidian";
@@ -39,7 +82,7 @@ import {
 	granularityToResolution,
 	type TopicHierarchy,
 } from "../../utils/topicHierarchy";
-import { edgeKey } from "../../utils/graphUtils";
+import { edgeKey, graphTopologySignature } from "../../utils/graphUtils";
 import { buildCollapsedGraph, UNSORTED_CLUSTER } from "../../utils/mergeNodes";
 import { leidenAsync } from "../../utils/computeWorkerManager";
 import { VIEW_TYPE_CHAT } from "../../views/chat/Chat";
@@ -104,14 +147,9 @@ let refitAfterTopicsSettle = false;
 
 // Leiden community state — computed async in worker, cleared on graph rebuild
 let leidenCommunities: Record<string, number> = $state({});
-// Betweenness centrality per node — computed alongside Leiden, cleared on rebuild
-let leidenCentrality: Record<string, number> = $state({});
 
-/**
- * Cache of Leiden results keyed by `${seed}:${resolution}`. Leiden is expensive (seconds on
- * large graphs) but pure over (seed, resolution, graph). We invalidate on every graph rebuild.
- */
-let leidenCache = new Map<string, { communities: Record<string, number>; centrality: Record<string, number> }>();
+// (The Leiden cache, graph signature, semantic edge cache and topic label
+// cache live in the module script above, so they survive view reopen.)
 
 // Filter state
 let selectedFolders: string[] = $state([]);
@@ -169,13 +207,14 @@ onDestroy(() => {
 /**
  * Upper bound on notes for semantic edge building.
  *
- * The scan runs in the compute worker, so the UI stays responsive regardless —
- * but the work is still O(n²) in notes. Measured at 1024 dimensions it costs
- * ~0.5s at 1k notes, ~2s at 2k, and ~8s at 4k; past this the wait stops being
- * worth it and the graph stays wiki-only. Raising this is safe for
- * responsiveness, only for patience.
+ * Neighbour search is HNSW-accelerated past ~2k chunks (see
+ * `computeSemanticPairs`), so the old O(n²) time wall is gone. What remains is
+ * memory: every chunk vector is copied into the compute worker, roughly
+ * notes × chunks-per-note × dim × 4 bytes — on the order of 150 MB at this cap
+ * with dim 1024. Past it the transfer itself becomes the problem and the graph
+ * stays wiki-only.
  */
-const SEMANTIC_EDGE_MAX_NOTES = 5000;
+const SEMANTIC_EDGE_MAX_NOTES = 20000;
 
 /**
  * Scales cosine similarity into the same range as authored-link weights for
@@ -190,9 +229,6 @@ const SEMANTIC_LEIDEN_WEIGHT = 0.7;
  */
 const UNSORTED_NODE_COLOR = "hsl(0, 0%, 55%)";
 
-// Detail level 0–100: 100 = full graph, <100 = skeleton backbone (fewer nodes per topic)
-let skeletonDetail = $state(100);
-
 // Topics are always segmented by Leiden community; there is no other mode.
 let segments: SpaceSegment[] = $state([]);
 let focusedSegmentIds: Set<string> = $state(new Set());
@@ -201,11 +237,6 @@ let focusedSegmentIds: Set<string> = $state(new Set());
 let generatedClusterLabels: Record<number, string> = $state({});
 /** True while topic labels are being generated. */
 let isLabeling = $state(false);
-/**
- * Cache of membership-signature → generated label, so re-running Leiden at the
- * same grouping (or toggling outline back and forth) doesn't re-spend API calls.
- */
-let topicLabelCache = new Map<string, string>();
 /** Aborts an in-flight labeling pass when the graph changes underneath it. */
 let labelingAbort: AbortController | null = null;
 
@@ -294,67 +325,10 @@ let selectedTopicsCollapseAction: "collapse" | "expand" | null = $derived.by(() 
 	return allCollapsed ? "expand" : "collapse";
 });
 
-/**
- * Detail view: shows only the top hubs and bridges per cluster, parameterised by skeletonDetail (0–100).
- *
- * detail=0   → 1 hub per cluster + only bridges above the skeletonBridgeCentralityThreshold
- * detail=100 → full graph (all nodes)
- *
- * All clusters are always shown; detail only controls how many nodes represent each one.
- * The bridge centrality threshold is a dev setting — a lower value keeps more bridges visible at low detail.
- * Edges: only wiki edges whose both endpoints survived the node filter.
- */
-let skeletonGraphData: GraphData = $derived.by(() => {
-	if (skeletonDetail >= 100 || graphData.nodes.length === 0) return graphData;
-
-	const t = skeletonDetail / 100; // 0–1
-
-	// Hubs per cluster: lerp from 1 at t=0 to 10 at t=1
-	const hubsPerCluster = Math.max(1, Math.round(1 + t * 9));
-
-	// Bridge centrality cutoff: at t=0 only nodes above the configured threshold qualify;
-	// at t=1 any non-zero centrality qualifies (i.e. all bridges)
-	const centralityThreshold = (settings.skeletonBridgeCentralityThreshold ?? 0.05) * (1 - t);
-
-	// For each cluster, collect nodes sorted by degree descending
-	const clusterNodes = new Map<number, typeof graphData.nodes>();
-	for (const node of graphData.nodes) {
-		if (node.cluster == null) continue;
-		const list = clusterNodes.get(node.cluster) ?? [];
-		list.push(node);
-		clusterNodes.set(node.cluster, list);
-	}
-	for (const list of clusterNodes.values()) {
-		list.sort((a, b) => (b.degree ?? 0) - (a.degree ?? 0));
-	}
-
-	const keptPaths = new Set<string>();
-	for (const nodes of clusterNodes.values()) {
-		for (let i = 0; i < Math.min(hubsPerCluster, nodes.length); i++) {
-			keptPaths.add(nodes[i].path);
-		}
-		for (const node of nodes) {
-			if ((node.centrality ?? 0) > centralityThreshold) keptPaths.add(node.path);
-		}
-	}
-
-	const nodes = graphData.nodes.filter((n) => keptPaths.has(n.path));
-	const edges = graphData.edges.filter((e) => keptPaths.has(e.source) && keptPaths.has(e.target));
-	return { nodes, edges };
-});
-
-/** The graph actually rendered: rolled up, thinned by Detail, or as-is. */
-/**
- * The graph as rendered: topics collapsed to single nodes, thinned by Detail, or
- * as-is.
- *
- * Collapse is applied *after* the Detail filter so the two remain independent —
- * collapsing is about altitude, thinning is about density.
- */
+/** The graph as rendered: topics collapsed to single nodes, or as-is. */
 let displayGraphData: GraphData = $derived.by(() => {
-	const base = skeletonDetail < 100 ? skeletonGraphData : graphData;
-	if (effectiveCollapsedTopics.size === 0) return base;
-	return buildCollapsedGraph(base, {
+	if (effectiveCollapsedTopics.size === 0) return graphData;
+	return buildCollapsedGraph(graphData, {
 		collapsedTopics: effectiveCollapsedTopics,
 		topicLabels: effectiveClusterLabels,
 		collapseUnsorted: true,
@@ -458,6 +432,24 @@ async function loadSemanticEdges(wikiData: GraphData, localBuildVersion: number)
 	const indexReady = await waitForVectorStoreIndex(data.graphEmbedIndex);
 	if (!indexReady || localBuildVersion !== buildVersion) return [];
 
+	// The search is pure over (wiki graph, semantic settings, embeddings). The
+	// index's lastUpdated stamp bumps on every vector write, so together these
+	// fully key the result — a reopen or no-change Refresh skips loading every
+	// vector and re-running the HNSW neighbour search.
+	const metadata = await getVectorStoreService()
+		.getOrCreateInstance(data.graphEmbedIndex)
+		.then((inst) => inst.store.getMetadata())
+		.catch(() => null);
+	if (localBuildVersion !== buildVersion) return [];
+	const cacheKey = [
+		graphTopologySignature(wikiData),
+		data.graphEmbedIndex,
+		metadata?.lastUpdated ?? "no-metadata",
+		settings.semanticNeighborCount,
+		settings.semanticThreshold,
+	].join("|");
+	if (cachedSemanticEdges?.key === cacheKey) return cachedSemanticEdges.edges;
+
 	const documents = await getVectorStoreService().getAllDocumentVectors();
 	if (localBuildVersion !== buildVersion || documents.length === 0) return [];
 
@@ -466,11 +458,13 @@ async function loadSemanticEdges(wikiData: GraphData, localBuildVersion: number)
 	const includePaths = new Set(wikiData.nodes.map((node) => node.path));
 	const wikiEdgeKeys = new Set(wikiData.edges.map((edge) => edgeKey(edge.source, edge.target)));
 
-	return buildSemanticEdges(documents, includePaths, {
+	const edges = await buildSemanticEdges(documents, includePaths, {
 		neighborCount: settings.semanticNeighborCount,
 		threshold: settings.semanticThreshold,
 		excludeEdgeKeys: wikiEdgeKeys,
 	});
+	cachedSemanticEdges = { key: cacheKey, edges };
+	return edges;
 }
 
 /**
@@ -497,13 +491,8 @@ async function buildGraph() {
 		graphData = wikiData;
 		isLoading = false;
 
-		// Graph structure changed — previous Leiden runs are no longer valid.
-		leidenCache.clear();
-		topicHierarchy = null;
-		granularityLadder = [...GRANULARITY_LEVEL_RESOLUTIONS];
-		// The ladder describes the old graph; hide the slider until it's re-derived.
-		hasDerivedGranularityLadder = false;
-		// A pending refit belongs to the build being replaced.
+		// A pending refit belongs to the build being replaced. (Topic-state
+		// invalidation waits until the fused graph is known — see below.)
 		refitAfterTopicsSettle = false;
 
 		// Paint the authored graph right away so the view isn't blank while
@@ -533,6 +522,28 @@ async function buildGraph() {
 				nodes: fused.nodes.map((node) => ({ ...node, degree: degreeMap.get(node.path) ?? 0 })),
 			};
 			resolveAndApplySegments(graphData);
+		}
+
+		// Invalidate derived topic state only when the graph actually changed.
+		// Leiden, the hierarchy and the ladder are pure over (graph, seed, γ) —
+		// a rebuild that lands on an identical graph (Refresh with no vault
+		// changes, a filter round-trip) keeps them all, so the topics reappear
+		// from cache instantly instead of re-spending seconds of worker time.
+		const signature = graphTopologySignature(graphData);
+		if (signature !== leidenGraphSignature) {
+			leidenGraphSignature = signature;
+			leidenCache.clear();
+			topicHierarchy = null;
+			granularityLadder = [...GRANULARITY_LEVEL_RESOLUTIONS];
+			// The ladder describes the old graph; hide the slider until it's re-derived.
+			hasDerivedGranularityLadder = false;
+			savedGranularityLadder = null;
+		} else if (savedGranularityLadder) {
+			// A fresh view instance starts on the fallback ladder even though this
+			// graph has already been probed — restore the derived ladder so the
+			// slider appears immediately instead of hiding through a re-probe.
+			granularityLadder = savedGranularityLadder;
+			hasDerivedGranularityLadder = true;
 		}
 
 		void runLeidenSegmentation();
@@ -681,8 +692,9 @@ function handleFitToView() {
 
 function handleRefresh() {
 	loadFilterOptions();
-	leidenCommunities = {};
-	leidenCentrality = {};
+	// Keep the current communities while the rebuild runs: they repaint the
+	// interim graph, and if the vault is unchanged the cache confirms them
+	// instantly — clearing here would just flash the topics away and back.
 	void buildGraph();
 }
 
@@ -917,7 +929,6 @@ async function runLeidenSegmentation() {
 		// the graph honestly shows "nothing is linked" instead of the fused result.
 		if (settings.linkOnlyTopics) {
 			leidenCommunities = {};
-			leidenCentrality = {};
 			resolveAndApplySegments(graphData);
 		}
 		return;
@@ -927,8 +938,7 @@ async function runLeidenSegmentation() {
 	const cached = leidenCache.get(cacheKey);
 	if (cached) {
 		Logger.info(`[SmartGraph] Leiden cache hit (γ=${settings.leidenResolution.toFixed(2)})`);
-		leidenCommunities = cached.communities;
-		leidenCentrality = cached.centrality;
+		leidenCommunities = cached;
 		resolveAndApplySegments(graphData);
 		// The hierarchy and the granularity ladder describe the *graph*, not the current γ,
 		// so they're computed once per build. Re-running them here would fire on
@@ -945,7 +955,7 @@ async function runLeidenSegmentation() {
 	isLeidenRunning = true;
 	let result: Awaited<ReturnType<typeof leidenAsync>>;
 	try {
-		result = await leidenAsync(sources, targets, weights, true, settings.leidenSeed, settings.leidenResolution);
+		result = await leidenAsync(sources, targets, weights, settings.leidenSeed, settings.leidenResolution);
 	} finally {
 		isLeidenRunning = false;
 	}
@@ -958,7 +968,7 @@ async function runLeidenSegmentation() {
 	);
 	// Always worth caching — the result is correct for the settings it ran under,
 	// even if those are no longer the ones on screen.
-	leidenCache.set(cacheKey, { communities: result.communities, centrality: result.centrality });
+	leidenCache.set(cacheKey, result);
 	// …but only *apply* it if those settings are still current. `buildVersion`
 	// alone can't tell: it tracks graph rebuilds, while γ, seed and link-mode all
 	// change the partition without touching the graph. A slow run started at one γ
@@ -969,8 +979,7 @@ async function runLeidenSegmentation() {
 		Logger.info("[SmartGraph] Discarding a Leiden result the settings have moved past");
 		return;
 	}
-	leidenCommunities = result.communities;
-	leidenCentrality = result.centrality;
+	leidenCommunities = result;
 	resolveAndApplySegments(graphData);
 	void computeTopicHierarchy(topicEdges);
 	void deriveGranularityLevels(topicEdges);
@@ -1010,13 +1019,13 @@ async function deriveGranularityLevels(topicEdges: GraphEdge[]) {
 			if (localBuildVersion !== buildVersion) return;
 
 			const cacheKey = partitionKey(resolution, linkOnly, seed);
-			let communities = leidenCache.get(cacheKey)?.communities;
+			let communities = leidenCache.get(cacheKey);
 			if (!communities) {
 				try {
-					const result = await leidenAsync(sources, targets, weights, false, seed, resolution);
+					const result = await leidenAsync(sources, targets, weights, seed, resolution);
 					if (localBuildVersion !== buildVersion) return;
-					leidenCache.set(cacheKey, { communities: result.communities, centrality: result.centrality });
-					communities = result.communities;
+					leidenCache.set(cacheKey, result);
+					communities = result;
 				} catch (error) {
 					// A failed probe just means one fewer candidate rung.
 					Logger.error(`[SmartGraph] Granularity probe failed at γ=${resolution}:`, error);
@@ -1056,6 +1065,9 @@ async function deriveGranularityLevels(topicEdges: GraphEdge[]) {
 			Logger.info("[SmartGraph] Granularity ladder: too few distinct groupings, keeping the default");
 		}
 		hasDerivedGranularityLadder = true;
+		// Remember the outcome for this graph, so reopening the view restores the
+		// ladder instead of re-probing.
+		savedGranularityLadder = granularityLadder;
 	} finally {
 		isDerivingGranularityLadder = false;
 	}
@@ -1084,20 +1096,19 @@ async function computeTopicHierarchy(topicEdges: GraphEdge[]) {
 	let communities: Record<string, number>;
 	const cached = leidenCache.get(cacheKey);
 	if (cached) {
-		communities = cached.communities;
+		communities = cached;
 	} else {
 		try {
 			const result = await leidenAsync(
 				topicEdges.map((e) => e.source),
 				topicEdges.map((e) => e.target),
 				topicEdges.map(leidenWeight),
-				false,
 				settings.leidenSeed,
 				coarseResolution,
 			);
 			if (localBuildVersion !== buildVersion) return;
-			leidenCache.set(cacheKey, { communities: result.communities, centrality: result.centrality });
-			communities = result.communities;
+			leidenCache.set(cacheKey, result);
+			communities = result;
 		} catch (error) {
 			Logger.error("[SmartGraph] Coarse Leiden failed; hierarchy unavailable:", error);
 			return;
@@ -1180,7 +1191,7 @@ function handleFocusSegment(segmentId: string, multi: boolean) {
 }
 
 /**
- * Resolve Leiden community segments from current graphData and apply coloring + centrality.
+ * Resolve Leiden community segments from current graphData and apply coloring + highlights.
  */
 function resolveAndApplySegments(gd: GraphData) {
 	const themeColors = resolveThemeColors();
@@ -1192,7 +1203,7 @@ function resolveAndApplySegments(gd: GraphData) {
 	});
 	segments = resolved;
 	// Build path → segment lookup once so the single node-map pass below can do everything:
-	// strip stale color/cluster/centrality, apply betweenness centrality (leiden), apply segment color.
+	// strip stale color/cluster, apply bridge/isolated highlights, apply segment color.
 	const pathInfo = new Map<string, { color: string; cluster: number }>();
 	for (let i = 0; i < resolved.length; i++) {
 		for (const path of resolved[i].paths) {
@@ -1201,7 +1212,7 @@ function resolveAndApplySegments(gd: GraphData) {
 			}
 		}
 	}
-	const isLeiden = Object.keys(leidenCentrality).length > 0;
+	const isLeiden = Object.keys(leidenCommunities).length > 0;
 	// Paths touched by at least one authored wiki link — drives the isolated highlight.
 	const linkedPaths = new Set<string>();
 	for (const edge of gd.edges) {
@@ -1256,11 +1267,7 @@ function resolveAndApplySegments(gd: GraphData) {
 			...gd,
 			nodes: gd.nodes.map((n) => {
 				const info = pathInfo.get(n.path);
-				const rawCentrality = isLeiden ? leidenCentrality[n.id] : undefined;
-				// Only record centrality on nodes that structurally span communities — these are the
-				// "bridges" surfaced by the Highlight bridges toggle and consumed by the Detail filter.
-				const centrality = rawCentrality !== undefined && bridgeNodes?.has(n.id) ? rawCentrality : undefined;
-				const isBridge = centrality !== undefined;
+				const isBridge = bridgeNodes?.has(n.id) ?? false;
 				// "Isolated" means the user never linked this note — a note pulled into a
 				// topic purely by semantic similarity is still unlinked, and that's exactly
 				// the gap worth surfacing. So this counts authored links only, not `degree`
@@ -1272,7 +1279,6 @@ function resolveAndApplySegments(gd: GraphData) {
 					...n,
 					color: info?.color ?? undefined,
 					cluster: info?.cluster ?? undefined,
-					centrality,
 					highlighted,
 				};
 			}),
@@ -1302,8 +1308,8 @@ function resolveAndApplySegments(gd: GraphData) {
 		graphData = {
 			...gd,
 			nodes: gd.nodes.map((n) =>
-				n.color !== undefined || n.cluster !== undefined || n.centrality !== undefined || n.highlighted
-					? { ...n, color: undefined, cluster: undefined, centrality: undefined, highlighted: false }
+				n.color !== undefined || n.cluster !== undefined || n.highlighted
+					? { ...n, color: undefined, cluster: undefined, highlighted: false }
 					: n,
 			),
 		};
@@ -1371,13 +1377,11 @@ function handleClearFocusedClusters() {
 }
 
 /**
- * Jump between the broadest topic level and wherever the user last was.
- *
- * This is a shortcut for dragging the Granularity slider to its left end —
- * pressing it again returns to the previous level. Every note stays on screen
- * either way; coarser grouping merges topics rather than hiding notes.
+ * Collapse every topic into a single node, or expand them all back — the atom
+ * button and the S shortcut. Every note stays represented either way; folding
+ * merges topics into stand-in nodes rather than hiding notes.
  */
-async function handleSkeletonToggle() {
+async function handleToggleCollapseAll() {
 	// Guard against re-entry while a fresh Leiden run is in flight — otherwise rapid clicks
 	// race on state writes and can leave the view stuck between modes.
 	if (isLeidenRunning) return;
@@ -1511,8 +1515,7 @@ function handleGranularityChange(level: number) {
 	if (!cached) return;
 
 	handleSettingsChange({ leidenResolution: resolution });
-	leidenCommunities = cached.communities;
-	leidenCentrality = cached.centrality;
+	leidenCommunities = cached;
 	resolveAndApplySegments(graphData);
 }
 
@@ -1559,7 +1562,7 @@ function handleHoverPreview(event: MouseEvent, path: string, targetEl: HTMLEleme
       onSelectionChange={handleSelectionChange}
       onClearFocusedClusters={handleClearFocusedClusters}
       onHoverPreview={handleHoverPreview}
-      onSkeletonToggle={handleSkeletonToggle}
+      onToggleCollapseAll={handleToggleCollapseAll}
       immersed={isImmersed}
       onExitImmerse={handleExitImmerse}
       onCollapseSelectedTopics={() => void handleCollapseSelectedTopics()}
@@ -1645,10 +1648,7 @@ function handleHoverPreview(event: MouseEvent, path: string, targetEl: HTMLEleme
     {isTopicsCollapsed}
     focusedSegmentIds={focusedSegmentIds}
     onFocusSegment={handleFocusSegment}
-    {skeletonDetail}
-    onSkeletonDetailChange={(v) => (skeletonDetail = v)}
-    onSkeletonDetailCommit={() => canvasComponent?.fitToView()}
-    onSkeletonToggle={handleSkeletonToggle}
+    onToggleCollapseAll={handleToggleCollapseAll}
   />
 </div>
 

@@ -190,9 +190,10 @@ function flattenChunksByNote(
  * link is the stronger statement and rendering both would double-count the pair
  * in community detection.
  *
- * The O(n²) scan itself runs in the compute worker (falling back to the main
+ * The search itself runs in the compute worker (falling back to the main
  * thread only when workers are unavailable), so a large vault doesn't stall the
- * UI while the graph builds.
+ * UI while the graph builds. Small batches take an exact pairwise scan; large
+ * ones an approximate HNSW index — see `computeSemanticPairs`.
  */
 export async function buildSemanticEdges(
 	documents: DocumentVector[],

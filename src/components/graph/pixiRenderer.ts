@@ -7,7 +7,18 @@
  * (d3-force / UMAP) and reactive state.
  */
 
-import { Application, Container, Graphics, Text, TextStyle, type PointData } from "pixi.js";
+import {
+	Application,
+	CanvasSource,
+	Container,
+	Graphics,
+	Sprite,
+	Text,
+	TextStyle,
+	Texture,
+	Ticker,
+	type PointData,
+} from "pixi.js";
 import { Viewport } from "pixi-viewport";
 
 // ── Helpers ──────────────────────────────────────────────────
@@ -41,10 +52,22 @@ function drawDashedLine(g: Graphics, x1: number, y1: number, x2: number, y2: num
  * to let the browser resolve the value.
  */
 let _colorCtx: CanvasRenderingContext2D | null = null;
+// Memo for resolved colors: cluster palettes are hsl() strings and node fills
+// resolve on the per-frame hot path, so each unique value should hit the canvas
+// context exactly once. Only successful resolutions are cached — a failure's
+// result depends on the caller's fallback.
+const _resolvedColorCache = new Map<string, string>();
+function rememberResolvedColor(raw: string, hex: string): string {
+	if (_resolvedColorCache.size > 1024) _resolvedColorCache.clear();
+	_resolvedColorCache.set(raw, hex);
+	return hex;
+}
 function resolveColor(raw: string, fallback: string): string {
 	if (!raw || raw === "none" || raw === "transparent") return fallback;
 	// Already a hex color — fast path
 	if (raw.startsWith("#")) return raw;
+	const cached = _resolvedColorCache.get(raw);
+	if (cached !== undefined) return cached;
 
 	try {
 		if (!_colorCtx) {
@@ -57,14 +80,14 @@ function resolveColor(raw: string, fallback: string): string {
 		_colorCtx.fillStyle = raw;
 		const resolved = _colorCtx.fillStyle; // browser-resolved hex or rgb()
 		// fillStyle returns a hex string like "#rrggbb" or "rgba(r,g,b,a)"
-		if (resolved.startsWith("#")) return resolved;
+		if (resolved.startsWith("#")) return rememberResolvedColor(raw, resolved);
 		// Parse rgb/rgba → hex
 		const m = resolved.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
 		if (m) {
 			const r = Number(m[1]).toString(16).padStart(2, "0");
 			const g = Number(m[2]).toString(16).padStart(2, "0");
 			const b = Number(m[3]).toString(16).padStart(2, "0");
-			return `#${r}${g}${b}`;
+			return rememberResolvedColor(raw, `#${r}${g}${b}`);
 		}
 		return fallback;
 	} catch {
@@ -97,6 +120,28 @@ function blendColor(fg: string, bg: string, alpha: number): string {
 	const g = Math.round(bg_ + (pg - bg_) * safeAlpha);
 	const b = Math.round(bb + (pb - bb) * safeAlpha);
 	return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
+}
+
+// Parsed-channel memo backing the per-node-per-frame tint path.
+const _channelCache = new Map<string, [number, number, number]>();
+function hexChannels(color: string): [number, number, number] {
+	let channels = _channelCache.get(color);
+	if (!channels) {
+		channels = parseHexColorChannels(color, [255, 255, 255]);
+		if (_channelCache.size > 1024) _channelCache.clear();
+		_channelCache.set(color, channels);
+	}
+	return channels;
+}
+
+/** Same blend as {@link blendColor}, returned as a Pixi tint number — no string building. */
+function blendTint(fg: string, bg: [number, number, number], alpha: number): number {
+	const safeAlpha = clampUnitInterval(alpha, 1);
+	const [pr, pg, pb] = hexChannels(fg);
+	const r = Math.round(bg[0] + (pr - bg[0]) * safeAlpha);
+	const g = Math.round(bg[1] + (pg - bg[1]) * safeAlpha);
+	const b = Math.round(bg[2] + (pb - bg[2]) * safeAlpha);
+	return (r << 16) | (g << 8) | b;
 }
 
 function clampUnitInterval(value: number, fallback: number): number {
@@ -136,6 +181,33 @@ export function readThemeColors(el: HTMLElement): ThemeColors {
 
 // ── Types ────────────────────────────────────────────────────
 
+/**
+ * Backing size of the shared node disc texture. A power of two, so mipmap
+ * generation works on every WebGL context — without mipmaps, a 128px disc
+ * sampled down to a handful of screen pixels aliases into visibly rough edges
+ * on every zoomed-out node.
+ */
+const NODE_TEXTURE_SIZE = 128;
+/**
+ * Radius of the disc drawn into that texture. The margin to the texture edge
+ * keeps the clamped border pixels transparent, so downsampled mip levels don't
+ * pick up edge bleed.
+ */
+const NODE_TEXTURE_RADIUS = 60;
+
+/**
+ * Above this many visible semantic edges, dashes fall back to solid strokes.
+ *
+ * A dashed edge costs path segments proportional to its screen length (~one
+ * per 9px), so a dense zoomed-out graph turns the dash pass into the largest
+ * remaining tessellation cost — at exactly the density where the pattern
+ * reads as shimmer rather than as dashes. Alpha is reduced to match the ink
+ * of the ~55% dash duty cycle, so the fallback carries the same visual
+ * weight.
+ */
+const SEMANTIC_DASH_EDGE_LIMIT = 500;
+const SEMANTIC_SOLID_ALPHA_SCALE = 0.6;
+
 /** Hit area info for screen-space cluster pills (stored for click/hover). */
 export interface ClusterPillHit {
 	x: number;
@@ -169,20 +241,19 @@ export class PixiRenderer {
 	private hullGraphics!: Graphics;
 	private edgeGraphics!: Graphics;
 	private lassoGraphics!: Graphics;
-	private nodeGraphicsMap: Map<string, Graphics> = new Map();
 
-	// Cached visual state per node — skip geometry rebuild when unchanged
-	private nodeVisualCache: Map<
-		string,
-		{
-			radius: number;
-			fillColor: string;
-			fillAlpha: number;
-			strokeColor: string | null;
-			strokeAlpha: number;
-			strokeWidth: number;
-		}
-	> = new Map();
+	// Nodes are Sprites sharing one white circle texture, recolored via tint —
+	// position, scale, and tint are all uniform updates, so per-frame node sync
+	// never tessellates geometry and the whole layer batches into one draw call.
+	private nodeTexture!: Texture;
+	private nodeSpriteMap: Map<string, Sprite> = new Map();
+
+	// Stroke rings (hover / selection / highlight — a handful of nodes) stay
+	// vector Graphics in their own layer above the sprites, so they render
+	// crisply at any zoom. Cached per ring to skip rebuilds when unchanged.
+	private nodeStrokeLayer!: Container;
+	private strokeRingMap: Map<string, Graphics> = new Map();
+	private strokeRingCache: Map<string, { radius: number; color: string; width: number }> = new Map();
 
 	// Label pool
 	private labelPool: Text[] = [];
@@ -204,6 +275,11 @@ export class PixiRenderer {
 	private tooltipContainer!: Container;
 	private tooltipGraphics!: Graphics;
 	private tooltipTexts: Text[] = [];
+	// Tooltip layout cache — text rasterization and box measurement rerun only
+	// when the content changes; per-frame calls just move the container.
+	private _tooltipLayoutKey = "";
+	private _tooltipBoxW = 0;
+	private _tooltipBoxH = 0;
 
 	// State
 	private _theme!: ThemeColors;
@@ -214,6 +290,8 @@ export class PixiRenderer {
 
 	// Callback fired whenever the viewport moves (pan/zoom/pinch)
 	private _onViewportMoved: (() => void) | null = null;
+	// Shared-ticker callback that polls viewport.dirty (removed on destroy)
+	private _viewportDirtyFn: (() => void) | null = null;
 
 	// Public accessors
 	get theme(): ThemeColors {
@@ -255,6 +333,9 @@ export class PixiRenderer {
 			resolution: window.devicePixelRatio || 1,
 			autoDensity: true,
 			preference: "webgl",
+			// Rendering is on demand: the owner calls renderFrame() when something
+			// actually changed, so a settled graph costs no GPU work at idle.
+			autoStart: false,
 		});
 
 		// Style the canvas
@@ -289,23 +370,55 @@ export class PixiRenderer {
 				maxScale: 10,
 			});
 
-		// Fire callback when viewport moves (pan/zoom/pinch/decelerate)
-		this.viewport.on("moved", () => {
-			this._onViewportMoved?.();
-		});
+		// The viewport updates its plugins (wheel smoothing, decelerate, animate)
+		// on the shared ticker, so the camera can move without any pointer event
+		// firing. Its `dirty` flag is set by that update loop for every movement
+		// source — polling it here is the one signal that catches them all. The
+		// viewport's own update runs first on the same ticker (it registered
+		// earlier), so a movement is observed the tick it happens.
+		this._viewportDirtyFn = () => {
+			if (this.viewport.dirty) {
+				this.viewport.dirty = false;
+				this._onViewportMoved?.();
+			}
+		};
+		Ticker.shared.add(this._viewportDirtyFn);
 
 		// World-space layers (inside viewport). Hulls sit at the bottom so topic
 		// regions read as background, never over edges or nodes.
 		this.hullLayer = new Container();
 		this.edgeLayer = new Container();
 		this.nodeLayer = new Container();
+		this.nodeStrokeLayer = new Container();
 		this.labelLayer = new Container();
 		this.lassoLayer = new Container();
 		this.viewport.addChild(this.hullLayer);
 		this.viewport.addChild(this.edgeLayer);
 		this.viewport.addChild(this.nodeLayer);
+		this.viewport.addChild(this.nodeStrokeLayer);
 		this.viewport.addChild(this.labelLayer);
 		this.viewport.addChild(this.lassoLayer);
+
+		// Shared node texture: one antialiased white disc every node sprite
+		// scales and tints. Drawn on a 2D canvas rather than via generateTexture:
+		// the canvas upload path generates mipmaps (autoGenerateMipmaps), which
+		// is what keeps far-zoomed-out nodes reading as smooth circles instead
+		// of aliased blobs — render textures only mipmap on explicit request.
+		// Extreme zoom-ins upscale past the texture, where the vector stroke
+		// ring on the hovered node carries the sharp edge anyway.
+		const disc = document.createElement("canvas");
+		disc.width = NODE_TEXTURE_SIZE;
+		disc.height = NODE_TEXTURE_SIZE;
+		const discCtx = disc.getContext("2d");
+		if (discCtx) {
+			discCtx.fillStyle = "#ffffff";
+			discCtx.beginPath();
+			discCtx.arc(NODE_TEXTURE_SIZE / 2, NODE_TEXTURE_SIZE / 2, NODE_TEXTURE_RADIUS, 0, Math.PI * 2);
+			discCtx.fill();
+		}
+		this.nodeTexture = new Texture({
+			source: new CanvasSource({ resource: disc, autoGenerateMipmaps: true }),
+		});
 
 		// Hull graphics (single batched)
 		this.hullGraphics = new Graphics();
@@ -374,7 +487,24 @@ export class PixiRenderer {
 		if (this._destroyed) return;
 		this._destroyed = true;
 		this._ready = false;
+		if (this._viewportDirtyFn) {
+			Ticker.shared.remove(this._viewportDirtyFn);
+			this._viewportDirtyFn = null;
+		}
+		// Sprites share this render texture, so it isn't covered by the
+		// children-destroy below.
+		this.nodeTexture?.destroy(true);
 		this.app.destroy(true, { children: true });
+	}
+
+	/**
+	 * Render one frame to the canvas. The application ticker is disabled
+	 * (`autoStart: false`), so nothing draws unless the owner asks for it —
+	 * GraphCanvas calls this once at the end of each coalesced render pass.
+	 */
+	renderFrame(): void {
+		if (this._destroyed || !this._ready) return;
+		this.app.renderer.render(this.app.stage);
 	}
 
 	// ── Canvas access ──────────────────────────────────────
@@ -398,6 +528,8 @@ export class PixiRenderer {
 		this._theme = theme;
 		// Invalidate label cache so font/color changes are picked up on the next draw
 		this.labelPoolCache.fill(null);
+		// Tooltip box and text colors are baked into its cached layout
+		this._tooltipLayoutKey = "";
 		// Update tooltip text styles
 		for (let i = 0; i < this.tooltipTexts.length; i++) {
 			this.tooltipTexts[i].style.fontFamily = theme.font;
@@ -490,7 +622,6 @@ export class PixiRenderer {
 			color?: string;
 			degree?: number;
 			highlighted?: boolean;
-			centrality?: number;
 		}>,
 		nodeSize: number,
 		opts: {
@@ -507,42 +638,54 @@ export class PixiRenderer {
 		const c = this._theme;
 		const scale = this.viewport.scaled || 1;
 
-		// Remove stale nodes
-		for (const [id, gfx] of this.nodeGraphicsMap) {
+		// Remove stale nodes and rings
+		for (const [id, sprite] of this.nodeSpriteMap) {
 			if (!nodeIds.has(id)) {
-				this.nodeLayer.removeChild(gfx);
-				gfx.destroy();
-				this.nodeGraphicsMap.delete(id);
-				this.nodeVisualCache.delete(id);
+				this.nodeLayer.removeChild(sprite);
+				sprite.destroy();
+				this.nodeSpriteMap.delete(id);
+			}
+		}
+		for (const [id, ring] of this.strokeRingMap) {
+			if (!nodeIds.has(id)) {
+				this.nodeStrokeLayer.removeChild(ring);
+				ring.destroy();
+				this.strokeRingMap.delete(id);
+				this.strokeRingCache.delete(id);
 			}
 		}
 
+		const bgChannels = hexChannels(c.bgPrimary);
+
 		// Create or update nodes
 		for (const node of nodes) {
-			let gfx = this.nodeGraphicsMap.get(node.id);
-			let isNew = false;
-			if (!gfx) {
-				gfx = new Graphics();
-				gfx.eventMode = "static";
-				gfx.cursor = "pointer";
-				this.nodeLayer.addChild(gfx);
-				this.nodeGraphicsMap.set(node.id, gfx);
-				isNew = true;
+			let sprite = this.nodeSpriteMap.get(node.id);
+			if (!sprite) {
+				sprite = new Sprite(this.nodeTexture);
+				sprite.anchor.set(0.5);
+				// Hit-testing happens in GraphCanvas (findNodeAt), not in Pixi's
+				// event system — keeping nodes out of it avoids making every node
+				// a hit candidate on every pointer event the viewport processes.
+				sprite.eventMode = "none";
+				this.nodeLayer.addChild(sprite);
+				this.nodeSpriteMap.set(node.id, sprite);
 			}
 
-			// Always update position + alpha (cheap)
-			gfx.position.set(node.x, node.y);
 			const alpha = opts.hoverAlphas.get(node.id) ?? 0.85;
-			gfx.alpha = 1;
-
-			// Compute visual state
 			const base = Math.max(1, nodeSize);
 			const degree = node.degree ?? 0;
 			const radius = base + Math.min(Math.log1p(degree) * 2.5, base * 5);
 			const rawFill = node.highlighted ? c.accent : (node.color ?? c.graphNode);
 			// Resolve hsl()/calc() colors to hex so Pixi.js can parse them
 			const resolvedFillColor = rawFill.startsWith("#") ? rawFill : resolveColor(rawFill, c.graphNode);
-			const fillColor = alpha < 1 ? blendColor(resolvedFillColor, c.bgPrimary, alpha) : resolvedFillColor;
+
+			// Position, size and color are all uniform updates on the sprite.
+			// Blending the tint toward the background rather than using real
+			// alpha keeps nodes opaque, so overlapping nodes and the edges
+			// underneath don't show through during hover fades.
+			sprite.position.set(node.x, node.y);
+			sprite.scale.set(radius / NODE_TEXTURE_RADIUS);
+			sprite.tint = blendTint(resolvedFillColor, bgChannels, alpha);
 
 			const isSelected = opts.selectedNodes.has(node.id);
 			const isHovered = opts.hoveredNodeId === node.id;
@@ -555,50 +698,39 @@ export class PixiRenderer {
 				strokeColor = isHovered ? c.textNormal : c.accent;
 				strokeWidth = 2 / scale;
 			}
-			const strokeAlpha = strokeColor ? alpha : 1;
-			const blendedStrokeColor =
-				strokeColor && strokeAlpha < 1 ? blendColor(strokeColor, c.bgPrimary, strokeAlpha) : strokeColor;
 
-			// Check cache — skip geometry rebuild if nothing visual changed
-			const cached = this.nodeVisualCache.get(node.id);
-			const geometryDirty =
-				isNew ||
+			let ring = this.strokeRingMap.get(node.id);
+			if (strokeColor === null) {
+				if (ring) {
+					this.nodeStrokeLayer.removeChild(ring);
+					ring.destroy();
+					this.strokeRingMap.delete(node.id);
+					this.strokeRingCache.delete(node.id);
+				}
+				continue;
+			}
+
+			const blendedStrokeColor = alpha < 1 ? blendColor(strokeColor, c.bgPrimary, alpha) : strokeColor;
+			if (!ring) {
+				ring = new Graphics();
+				ring.eventMode = "none";
+				this.nodeStrokeLayer.addChild(ring);
+				this.strokeRingMap.set(node.id, ring);
+			}
+			ring.position.set(node.x, node.y);
+
+			const cached = this.strokeRingCache.get(node.id);
+			if (
 				!cached ||
 				cached.radius !== radius ||
-				cached.fillColor !== fillColor ||
-				cached.fillAlpha !== alpha ||
-				cached.strokeColor !== blendedStrokeColor ||
-				cached.strokeAlpha !== strokeAlpha ||
-				cached.strokeWidth !== strokeWidth;
-
-			if (geometryDirty) {
-				gfx.clear();
-
-				gfx.circle(0, 0, radius).fill({ color: fillColor });
-
-				if (blendedStrokeColor) {
-					gfx.circle(0, 0, radius).stroke({ color: blendedStrokeColor, width: strokeWidth });
-				}
-
-				gfx.hitArea = {
-					contains: (px: number, py: number) => px * px + py * py <= (radius + 4 / scale) ** 2,
-				};
-
-				this.nodeVisualCache.set(node.id, {
-					radius,
-					fillColor,
-					fillAlpha: alpha,
-					strokeColor: blendedStrokeColor,
-					strokeAlpha,
-					strokeWidth,
-				});
+				cached.color !== blendedStrokeColor ||
+				cached.width !== strokeWidth
+			) {
+				ring.clear();
+				ring.circle(0, 0, radius).stroke({ color: blendedStrokeColor, width: strokeWidth });
+				this.strokeRingCache.set(node.id, { radius, color: blendedStrokeColor, width: strokeWidth });
 			}
 		}
-	}
-
-	/** Get the Graphics object for a node ID. */
-	getNodeGfx(id: string): Graphics | undefined {
-		return this.nodeGraphicsMap.get(id);
 	}
 
 	// ── Hull rendering ─────────────────────────────────────
@@ -695,6 +827,14 @@ export class PixiRenderer {
 			edgeFadeAlpha: number;
 			baseEdgeAlpha: number;
 			nodeClusterMap: Map<string, number | undefined>;
+			/**
+			 * World-space rect (view + margin) outside which edges are skipped.
+			 * Tessellation is the priciest CPU step of a frame, and when zoomed
+			 * into a corner of a large graph most edges land nowhere near the
+			 * screen. The caller re-triggers a draw when panning leaves the
+			 * margin, so culled edges reappear before scrolling into view.
+			 */
+			cullRect?: { minX: number; minY: number; maxX: number; maxY: number } | null;
 		},
 	): void {
 		const g = this.edgeGraphics;
@@ -740,6 +880,20 @@ export class PixiRenderer {
 			const tx = edge.target.x;
 			const ty = edge.target.y;
 			if (sx == null || sy == null || tx == null || ty == null) continue;
+
+			// Conservative AABB rejection: only skip when the whole segment is
+			// on one far side of the rect, so nothing that could touch the view
+			// is ever dropped.
+			const cull = opts.cullRect;
+			if (
+				cull &&
+				((sx < cull.minX && tx < cull.minX) ||
+					(sx > cull.maxX && tx > cull.maxX) ||
+					(sy < cull.minY && ty < cull.minY) ||
+					(sy > cull.maxY && ty > cull.maxY))
+			) {
+				continue;
+			}
 
 			const sourceCluster = opts.nodeClusterMap.get(edge.source.id);
 			const targetCluster = opts.nodeClusterMap.get(edge.target.id);
@@ -876,10 +1030,26 @@ export class PixiRenderer {
 		};
 
 		const drawDashedBuckets = (buckets: Map<string, Array<{ sx: number; sy: number; tx: number; ty: number }>>) => {
+			// Past the limit, dashes cost more than they communicate — draw the
+			// whole inferred layer as quieter solid strokes instead (see
+			// SEMANTIC_DASH_EDGE_LIMIT).
+			let totalEdges = 0;
+			for (const segments of buckets.values()) totalEdges += segments.length;
+			const asSolid = totalEdges > SEMANTIC_DASH_EDGE_LIMIT;
+
 			for (const [key, segments] of buckets) {
 				const [color, widthStr, alphaStr] = key.split("|");
 				const width = Number(widthStr);
 				const alpha = Number(alphaStr);
+
+				if (asSolid) {
+					for (const seg of segments) {
+						g.moveTo(seg.sx, seg.sy);
+						g.lineTo(seg.tx, seg.ty);
+					}
+					g.stroke({ color, width, alpha: alpha * SEMANTIC_SOLID_ALPHA_SCALE });
+					continue;
+				}
 
 				for (const seg of segments) {
 					drawDashedLine(g, seg.sx, seg.sy, seg.tx, seg.ty, dash, dashGap);
@@ -1104,8 +1274,7 @@ export class PixiRenderer {
 		isForceMode: boolean,
 	): void {
 		const c = this._theme;
-		const sx = this.viewport.toScreen(node.x, node.y).x;
-		const sy = this.viewport.toScreen(node.x, node.y).y;
+		const screen = this.viewport.toScreen(node.x, node.y);
 
 		const lines: string[] = [node.label];
 		if (node.cluster != null) {
@@ -1123,39 +1292,43 @@ export class PixiRenderer {
 		const padX = 10;
 		const padY = 8;
 
-		// Measure widths
-		let maxW = 0;
-		for (let i = 0; i < lines.length && i < this.tooltipTexts.length; i++) {
-			this.tooltipTexts[i].text = lines[i];
-			this.tooltipTexts[i].style.fontSize = fontSize;
-			this.tooltipTexts[i].style.fontWeight = i === 0 ? "bold" : "normal";
-			this.tooltipTexts[i].style.fill = i === 0 ? c.textNormal : c.textMuted;
-			this.tooltipTexts[i].visible = true;
-			const w = this.tooltipTexts[i].width;
-			if (w > maxW) maxW = w;
-		}
-		// Hide unused lines
-		for (let i = lines.length; i < this.tooltipTexts.length; i++) {
-			this.tooltipTexts[i].visible = false;
-		}
+		// Re-rasterize text and remeasure the box only when the content changed.
+		// While hovering, this runs every frame with identical lines, so the
+		// steady-state cost is just moving the container. Contents are drawn at
+		// the container's origin so position updates never touch the layout.
+		const layoutKey = lines.join("\n");
+		if (layoutKey !== this._tooltipLayoutKey) {
+			this._tooltipLayoutKey = layoutKey;
 
-		const boxW = maxW + padX * 2;
-		const boxH = lines.length * lineH + padY * 2;
+			let maxW = 0;
+			for (let i = 0; i < lines.length && i < this.tooltipTexts.length; i++) {
+				this.tooltipTexts[i].text = lines[i];
+				this.tooltipTexts[i].style.fontSize = fontSize;
+				this.tooltipTexts[i].style.fontWeight = i === 0 ? "bold" : "normal";
+				this.tooltipTexts[i].style.fill = i === 0 ? c.textNormal : c.textMuted;
+				this.tooltipTexts[i].visible = true;
+				this.tooltipTexts[i].position.set(padX, padY + i * lineH);
+				const w = this.tooltipTexts[i].width;
+				if (w > maxW) maxW = w;
+			}
+			// Hide unused lines
+			for (let i = lines.length; i < this.tooltipTexts.length; i++) {
+				this.tooltipTexts[i].visible = false;
+			}
+
+			this._tooltipBoxW = maxW + padX * 2;
+			this._tooltipBoxH = lines.length * lineH + padY * 2;
+
+			this.tooltipGraphics.clear();
+			this.tooltipGraphics.roundRect(0, 0, this._tooltipBoxW, this._tooltipBoxH, 6);
+			this.tooltipGraphics.fill({ color: c.bgPrimary, alpha: 0.92 });
+			this.tooltipGraphics.stroke({ color: c.textFaint, width: 0.5 });
+		}
 
 		// Position: right of node, flip if near edge
-		let bx = sx + 14;
-		if (bx + boxW > this._width - 8) bx = sx - boxW - 14;
-		const by = sy - boxH / 2;
-
-		this.tooltipGraphics.clear();
-		this.tooltipGraphics.roundRect(bx, by, boxW, boxH, 6);
-		this.tooltipGraphics.fill({ color: c.bgPrimary, alpha: 0.92 });
-		this.tooltipGraphics.stroke({ color: c.textFaint, width: 0.5 });
-
-		for (let i = 0; i < lines.length && i < this.tooltipTexts.length; i++) {
-			this.tooltipTexts[i].position.set(bx + padX, by + padY + i * lineH);
-		}
-
+		let bx = screen.x + 14;
+		if (bx + this._tooltipBoxW > this._width - 8) bx = screen.x - this._tooltipBoxW - 14;
+		this.tooltipContainer.position.set(bx, screen.y - this._tooltipBoxH / 2);
 		this.tooltipContainer.visible = true;
 	}
 

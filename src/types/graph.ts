@@ -124,12 +124,6 @@ export interface GraphNode {
 	kind?: "note" | "topic";
 	/** For `kind: "topic"` — the vault paths this node stands for. */
 	memberPaths?: string[];
-	/**
-	 * Normalized betweenness centrality (0–1).
-	 * High values indicate "bridge" nodes that connect otherwise distant parts of the graph.
-	 * Set when Leiden community detection is active.
-	 */
-	centrality?: number;
 }
 
 /**
@@ -208,8 +202,6 @@ export interface SmartGraphSettings {
 	leidenResolution: number;
 	/** Bridge node threshold: fraction of foreign-community neighbors required to show the bridge ring (0–1) */
 	bridgeThreshold: number;
-	/** Skeleton bridge centrality threshold: min betweenness centrality for a node to survive in the outline view (0–1) */
-	skeletonBridgeCentralityThreshold: number;
 	/** Highlight isolated notes (degree 0) in the graph */
 	highlightIsolated: boolean;
 	/** Highlight bridge notes (nodes spanning multiple communities) in the graph */
@@ -254,7 +246,6 @@ export const DEFAULT_SMART_GRAPH_SETTINGS: SmartGraphSettings = {
 	// the slider doesn't silently shift γ the first time it's touched.
 	leidenResolution: 1.0,
 	bridgeThreshold: 0.4,
-	skeletonBridgeCentralityThreshold: 0.05,
 	highlightIsolated: false,
 	highlightBridges: false,
 	showClusterLabels: true,

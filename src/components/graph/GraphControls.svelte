@@ -49,11 +49,8 @@ interface Props {
 	onFocusSegment?: (id: string, multi: boolean) => void;
 	/** True when topics are collapsed into single nodes. */
 	isTopicsCollapsed?: boolean;
-	// Skeleton view
-	skeletonDetail?: number;
-	onSkeletonDetailChange?: (value: number) => void;
-	onSkeletonDetailCommit?: (value: number) => void;
-	onSkeletonToggle?: () => void;
+	/** Collapse or expand all topics at once (the atom button / S shortcut). */
+	onToggleCollapseAll?: () => void;
 }
 
 let {
@@ -81,10 +78,7 @@ let {
 	focusedSegmentIds = new Set<string>(),
 	onFocusSegment,
 	isTopicsCollapsed = false,
-	skeletonDetail = 100,
-	onSkeletonDetailChange,
-	onSkeletonDetailCommit,
-	onSkeletonToggle,
+	onToggleCollapseAll,
 }: Props = $props();
 
 let isCollapsed = $state(true);
@@ -194,7 +188,7 @@ const lassoTooltip = onMobile ? "Lasso selection" : "Lasso selection (or hold Sh
       : isTopicsCollapsed
         ? "Expand all topics back into notes (S)"
         : "Collapse all topics into single nodes (S) — or select topics and use Collapse"}
-    onClick={() => onSkeletonToggle?.()}
+    onClick={() => onToggleCollapseAll?.()}
     disabled={isLeidenRunning}
     styles={isTopicsCollapsed ? "is-active" : ""}
   />
@@ -410,17 +404,6 @@ const lassoTooltip = onMobile ? "Lasso selection" : "Lasso selection (or hold Sh
           <SettingContainer name="Cluster cohesion" desc="How strongly nodes are pulled toward their cluster center" compact>
             <RangeSlider value={Math.round((settings.clusterCohesionStrength ?? 0.15) * 100)} min={0} max={100} step={1} showValue={true} oncommit={handleClusterCohesionStrengthChange} />
           </SettingContainer>
-          <SettingContainer name="Detail" desc="Nodes per topic — lower keeps only the top hubs and bridges" compact>
-            <RangeSlider
-              value={skeletonDetail}
-              min={0}
-              max={100}
-              step={1}
-              showValue={true}
-              onchange={onSkeletonDetailChange}
-              oncommit={onSkeletonDetailCommit}
-            />
-          </SettingContainer>
         {/if}
 
         <button
@@ -477,9 +460,6 @@ const lassoTooltip = onMobile ? "Lasso selection" : "Lasso selection (or hold Sh
           </SettingContainer>
           <SettingContainer name="Bridge threshold" desc="Min fraction of foreign-topic neighbors to qualify as a bridge" compact>
             <RangeSlider value={Math.round((settings.bridgeThreshold ?? 0.4) * 100)} min={0} max={100} step={5} showValue={true} oncommit={(v) => { onSettingsChange({ bridgeThreshold: v / 100 }); onReapplySegments?.(); }} />
-          </SettingContainer>
-          <SettingContainer name="Detail bridge centrality" desc="Min betweenness centrality for bridges to survive at low Detail" compact>
-            <RangeSlider value={Math.round((settings.skeletonBridgeCentralityThreshold ?? 0.05) * 1000)} min={0} max={200} step={1} showValue={true} oncommit={(v) => onSettingsChange({ skeletonBridgeCentralityThreshold: v / 1000 })} />
           </SettingContainer>
         {/if}
 
