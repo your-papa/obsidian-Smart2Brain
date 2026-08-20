@@ -308,6 +308,25 @@ describe("SkillsService.bootstrapDefaultSkills", () => {
 		expect(state.staleSkills).toEqual([SUBJECT.name]);
 	});
 
+	/*
+	 * The mirror of the test above: once the bytes are on disk the edit IS saved, so a
+	 * failure in the best-effort rediscovery that follows must not reject. Rejecting would
+	 * tell the user their save failed when it didn't AND skip the caller's cache
+	 * invalidation — the step that actually gets the edit into the next agent run.
+	 */
+	it("still reports success when only the post-write rediscovery fails", async () => {
+		const adapter = makeAdapter({ [SUBJECT_PATH]: `${SUBJECT.content}\n\nMine.` });
+		const svc = makeService(adapter);
+		await svc.bootstrapDefaultSkills();
+		adapter.list.mockRejectedValueOnce(new Error("EIO"));
+
+		await expect(svc.writeSkillFile(SUBJECT.name, SUBJECT.content)).resolves.toBeUndefined();
+
+		expect(adapter.files.get(SUBJECT_PATH)).toBe(SUBJECT.content);
+		// The body matches the shipped default again, so the notice resolves regardless.
+		expect(state.staleSkills).toEqual([]);
+	});
+
 	it("keeps the stale mark when the diff view saves a further edit", async () => {
 		const adapter = makeAdapter({ [SUBJECT_PATH]: `${SUBJECT.content}\n\nMine.` });
 		const svc = makeService(adapter);

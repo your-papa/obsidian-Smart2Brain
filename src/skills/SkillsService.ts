@@ -757,7 +757,10 @@ export class SkillsService {
 	 * immediately re-report as customized.
 	 */
 	async writeSkillFile(skillName: string, content: string): Promise<void> {
+		// Only the write itself is allowed to fail the save: once these bytes are on disk the
+		// user's edit is durable, and callers surface a rejection as "could not save".
 		await this.adapter.write(`${this.getSkillsDir()}/${skillName}/${SKILL_FILENAME}`, content);
+
 		// Re-evaluate against the shipped history rather than assuming: accepting the new
 		// default in the diff view resolves the notice, while saving a further edit keeps it.
 		const history = SHIPPED_SKILL_HISTORY.get(skillName);
@@ -768,7 +771,16 @@ export class SkillsService {
 			);
 			this.publishStaleSkills();
 		}
-		await this.discoverSkills();
+
+		// Best-effort: rediscovery refreshes the metadata cache, but a failure here must not
+		// report the (already durable) save as failed. Log instead — the next discovery pass
+		// picks the file up, and reporting failure would both mislead the user and skip the
+		// caller's cache invalidation, which is what actually gets the edit into the next run.
+		try {
+			await this.discoverSkills();
+		} catch (error) {
+			Log.error(`Saved skill ${skillName}, but rediscovery failed:`, error);
+		}
 	}
 
 	async loadSkill(skillName: string): Promise<Skill | null> {
