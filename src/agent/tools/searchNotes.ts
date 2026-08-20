@@ -5,7 +5,7 @@ import type { SearchAlgorithm, SearchNotesSettings } from "../../types/plugin";
 import { getLexicalSearchService, waitForLexicalSearch } from "../../search/LexicalSearchService";
 import { rankSearchResults } from "../../search/finalSearchRanking";
 import { buildRecentBoostMap, getRecentNotes } from "../../search/recentNotes";
-import { getData } from "../../stores/dataStore.svelte";
+import { SEARCH_NOTES_DESC_DEFAULTS, getData, getSearchNotesDescription } from "../../stores/dataStore.svelte";
 import { getPendingChangesStore } from "../../stores/pendingChangesStore.svelte";
 import { normalizeVaultPath } from "../../utils/pathUtils";
 import { getVectorStoreService, type SearchFilter, type SearchResult, waitForVectorStore } from "../../vectorstore";
@@ -28,7 +28,17 @@ interface SearchToolResultItem {
 interface SearchToolResultPayload {
 	query: string;
 	recentOnly: boolean;
+	/** The algorithm that actually ran — may differ from `requestedAlgorithm`. */
 	algorithm: SearchAlgorithm;
+	/**
+	 * What the caller asked for, present only when it differs from what ran.
+	 *
+	 * Set when a semantic or hybrid request was downgraded because no embedding
+	 * index is configured. Without this the agent cannot distinguish "your query
+	 * matched nothing" from "the capability you asked for does not exist here",
+	 * and will reformulate against a leg that was never going to run.
+	 */
+	requestedAlgorithm?: SearchAlgorithm;
 	maxResults: number;
 	filter?: SearchFilter;
 	totalResults: number;
@@ -40,12 +50,46 @@ interface SearchToolResultPayload {
 
 interface ResolvedSearchToolSettings {
 	maxResults: number;
-	algorithm: SearchAlgorithm;
 	showPath: boolean;
 	showTags: boolean;
 	showMatchBadges: boolean;
 	showMatchContext: boolean;
 }
+
+/** Whether the vault has an embedding index, and so whether either semantic leg can run. */
+function hasSearchEmbeddingIndex(): boolean {
+	return Boolean(getData().searchEmbedIndex);
+}
+
+/**
+ * Resolve the algorithm actually used for a call.
+ *
+ * Checked **per call** rather than once at tool-construction time: the schema is
+ * static (all three values always offered), because an enum shaped at build time
+ * cannot express an index that exists but is empty, still building, or backed by an
+ * unreachable provider. One check covers every case.
+ *
+ * The downgrade deliberately lives here and NOT in `performSearch`. That function is
+ * shared with the search modal (which already gates on the same predicate before
+ * offering semantic) and with `searchNotesForBenchmark` — a downgrade there would make
+ * the relevance benchmark silently measure lexical while reporting semantic, which is
+ * exactly the kind of quiet substitution the benchmark exists to catch.
+ */
+function resolveAlgorithm(requested: SearchAlgorithm): {
+	algorithm: SearchAlgorithm;
+	downgradedFrom?: SearchAlgorithm;
+} {
+	if (requested === "lexical" || hasSearchEmbeddingIndex()) {
+		return { algorithm: requested };
+	}
+
+	return { algorithm: "lexical", downgradedFrom: requested };
+}
+
+const NO_EMBEDDING_INDEX_MESSAGE =
+	"Semantic search is unavailable because no embedding index is configured for this vault. " +
+	"Ran a lexical search instead, so results may miss synonym or cross-language matches. " +
+	"Do not retry with semantic or hybrid — this cannot change during the conversation.";
 
 function normalizeTags(tags: string[] | undefined): string[] | undefined {
 	if (!tags?.length) {
@@ -232,13 +276,21 @@ export function createSearchNotesTool(app: App) {
 	const pluginData = getData();
 	const getSearchNotesConfig = () => pluginData.getSelectedAgent().toolsConfig.search_notes;
 	const toolConfig = getSearchNotesConfig();
+	/**
+	 * The four display flags are hardcoded on for the agent.
+	 *
+	 * They still exist in `dataStore` and remain user-configurable, but for the search
+	 * *modal* only (`SearchSettings.svelte` → `SearchDisplaySettingsModal`), where they
+	 * control what a human sees in a results list. The agent benefits from all of them
+	 * when deciding what to open, and the token cost is bounded by `maxResults`, so
+	 * there is nothing for a user to reasonably tune here.
+	 */
 	const resolveSettings = (settings?: SearchNotesSettings): ResolvedSearchToolSettings => ({
 		maxResults: settings?.maxResults ?? 10,
-		algorithm: settings?.algorithm ?? pluginData.searchAlgorithm,
-		showPath: settings?.showPath ?? pluginData.searchShowPath,
-		showTags: settings?.showTags ?? pluginData.searchShowTags,
-		showMatchBadges: settings?.showMatchBadges ?? pluginData.searchShowMatchBadges,
-		showMatchContext: settings?.showMatchContext ?? pluginData.searchShowMatchContext,
+		showPath: true,
+		showTags: true,
+		showMatchBadges: true,
+		showMatchContext: true,
 	});
 
 	const searchFn = async ({
@@ -246,16 +298,19 @@ export function createSearchNotesTool(app: App) {
 		pathPrefix,
 		tags,
 		recentOnly = false,
+		algorithm: requestedAlgorithm = "lexical",
 	}: {
 		query?: string;
 		pathPrefix?: string;
 		tags?: string[];
 		recentOnly?: boolean;
+		algorithm?: SearchAlgorithm;
 	}): Promise<string> => {
 		// Get fresh config each call to pick up any changes
 		const currentConfig = getSearchNotesConfig();
 		const settings = resolveSettings(currentConfig?.settings as SearchNotesSettings | undefined);
-		const { algorithm, maxResults: limit, showMatchBadges, showMatchContext, showPath, showTags } = settings;
+		const { maxResults: limit, showMatchBadges, showMatchContext, showPath, showTags } = settings;
+		const { algorithm, downgradedFrom } = resolveAlgorithm(requestedAlgorithm);
 
 		// Build filter from parameters
 		const filterPathPrefixes: string[] | undefined = pathPrefix ? [normalizeVaultPath(pathPrefix)] : undefined;
@@ -306,6 +361,7 @@ export function createSearchNotesTool(app: App) {
 			query,
 			recentOnly,
 			algorithm,
+			requestedAlgorithm: downgradedFrom,
 			maxResults: limit,
 			filter,
 			totalResults: visibleResults.length,
@@ -313,6 +369,16 @@ export function createSearchNotesTool(app: App) {
 			skippedPrivateFiles,
 			results: items,
 		};
+
+		// The downgrade notice takes precedence over "no results": when semantic was
+		// asked for and could not run, an empty result set says nothing about the query.
+		if (downgradedFrom) {
+			payload.message =
+				limitedResults.length === 0
+					? `${NO_EMBEDDING_INDEX_MESSAGE} The lexical search also found no notes matching "${query}".`
+					: NO_EMBEDDING_INDEX_MESSAGE;
+			return JSON.stringify(payload);
+		}
 
 		if (limitedResults.length === 0) {
 			payload.message = `No notes found matching "${query}". Try a different search term.`;
@@ -322,11 +388,25 @@ export function createSearchNotesTool(app: App) {
 		return JSON.stringify(payload);
 	};
 
+	// Built once per runnable. `AgentManager.agentConfigRevision` includes
+	// `searchEmbedIndex`, so configuring or clearing an index changes the cache key and
+	// rebuilds the tool — without that, this description would go stale the moment a
+	// user set up embeddings mid-conversation.
+	//
+	// `normalizeAgent` merges DEFAULT_TOOLS_CONFIG into every agent, so
+	// `toolConfig.description` is always populated and `?? fallback` would never fire.
+	// Swap only when the stored value is still one of the shipped defaults; anything
+	// else is a user customization and is left exactly as written.
+	const embeddingIndexAvailable = hasSearchEmbeddingIndex();
+	const storedDescription = toolConfig?.description;
+	const description =
+		storedDescription && !SEARCH_NOTES_DESC_DEFAULTS.has(storedDescription)
+			? storedDescription
+			: getSearchNotesDescription(embeddingIndexAvailable);
+
 	return tool(searchFn, {
 		name: toolConfig?.name ?? "search_notes",
-		description:
-			toolConfig?.description ??
-			"Search through your Obsidian notes by keyword or return recently opened notes. Returns structured JSON with matching file names, paths, tags, match reasons, limited match snippets or headings, privacy flags, and metadata (properties/frontmatter). Use this to identify relevant notes before using other tools.",
+		description,
 		schema: z.object({
 			query: z
 				.string()
@@ -349,6 +429,14 @@ export function createSearchNotesTool(app: App) {
 				.optional()
 				.describe(
 					"When true, ignore query text and return recently opened notes, optionally filtered by pathPrefix and tags.",
+				),
+			algorithm: z
+				.enum(["lexical", "semantic", "hybrid"])
+				.optional()
+				.describe(
+					embeddingIndexAvailable
+						? "How to retrieve. 'lexical' (default) is fast and needs no embedding call, but matches only literal words — it cannot find synonyms, paraphrases, or notes in another language. 'semantic' is slower and matches meaning rather than wording; use it when a lexical search returned nothing useful, or when the user's phrasing is unlikely to appear in the note itself. 'hybrid' fuses both; use it when the query mixes a specific term (a name, tag, or filename) with a fuzzy concept. Start lexical and escalate rather than defaulting to hybrid."
+						: "How to retrieve. Only 'lexical' works in this vault — no embedding index is configured, so 'semantic' and 'hybrid' fall back to lexical and report that they did.",
 				),
 		}),
 	});
