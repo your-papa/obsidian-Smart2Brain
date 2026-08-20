@@ -16,6 +16,7 @@
  */
 
 import { HNSW } from "hnsw";
+import { mulberry32 } from "./seededRandom";
 
 /**
  * How many semantic neighbours each note may contribute. Kept deliberately low:
@@ -203,17 +204,6 @@ export const SEMANTIC_HNSW_MIN_CHUNKS = 2000;
 
 /** Seed for the HNSW level-selection PRNG — fixed so rebuilds of the same vault produce the same edges. */
 const HNSW_LEVEL_SEED = 42;
-
-/** Deterministic PRNG (mulberry32) for HNSW level selection. */
-function mulberry32(seed: number): () => number {
-	let a = seed >>> 0;
-	return () => {
-		a = (a + 0x6d2b79f5) | 0;
-		let t = Math.imul(a ^ (a >>> 15), 1 | a);
-		t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-		return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-	};
-}
 
 /**
  * Approximate top-K neighbour search over an in-memory HNSW index.

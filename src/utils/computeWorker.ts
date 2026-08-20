@@ -11,8 +11,6 @@ import type { HDBSCANResult } from "./clustering";
 import { computeSemanticPairs, type SemanticPair } from "./semanticEdges";
 import { project2D, reduceDimensions } from "./projection";
 import type { ProjectionMethod } from "../types/graph";
-import Graph from "graphology";
-import betweennessCentrality from "graphology-metrics/centrality/betweenness";
 import { Graph as LeidenGraph, leiden } from "leiden-ts";
 
 export interface SerializedVectorBatch {
@@ -58,8 +56,6 @@ export type ComputeWorkerRequest =
 			sources: string[];
 			targets: string[];
 			weights: number[];
-			/** If true, also compute betweenness centrality on the same graph */
-			withCentrality?: boolean;
 			/** PRNG seed for reproducibility (default 42) */
 			seed?: number;
 			/** Resolution γ — lower = fewer larger communities (default 1.0) */
@@ -93,11 +89,7 @@ export type ComputeWorkerResponse =
 	| {
 			id: number;
 			type: "leiden";
-			result: {
-				communities: Record<string, number>;
-				/** Normalized betweenness centrality per node (0–1). Only present when withCentrality was true. */
-				centrality?: Record<string, number>;
-			};
+			result: { communities: Record<string, number> };
 	  }
 	| {
 			id: number;
@@ -247,22 +239,10 @@ workerScope.onmessage = async (e: MessageEvent<ComputeWorkerRequest>) => {
 					}
 				}
 
-				// Betweenness centrality still uses graphology (leiden-ts doesn't include it)
-				let centrality: Record<string, number> | undefined;
-				if (msg.withCentrality && Object.keys(communities).length > 0) {
-					const gGraph = new Graph({ type: "undirected", multi: false });
-					for (let i = 0; i < msg.sources.length; i++) {
-						if (msg.sources[i] !== msg.targets[i]) {
-							gGraph.mergeEdge(msg.sources[i], msg.targets[i], { weight: msg.weights[i] });
-						}
-					}
-					centrality = betweennessCentrality(gGraph, { normalized: true, getEdgeWeight: "weight" });
-				}
-
 				workerScope.postMessage({
 					id: msg.id,
 					type: "leiden",
-					result: { communities, centrality },
+					result: { communities },
 				} satisfies ComputeWorkerResponse);
 				break;
 			}

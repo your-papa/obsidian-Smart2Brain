@@ -55,7 +55,8 @@ interface Props {
 	onSelectionChange?: (paths: string[]) => void;
 	onClearFocusedClusters?: () => void;
 	onHoverPreview?: (event: MouseEvent, path: string, targetEl: HTMLElement) => void;
-	onSkeletonToggle?: () => void;
+	/** Collapse or expand all topics at once (the atom button / S shortcut). */
+	onToggleCollapseAll?: () => void;
 	immersed?: boolean;
 	onExitImmerse?: () => void;
 	// Selection-bar verbs, mirrored as keyboard shortcuts so a selection made on
@@ -95,7 +96,7 @@ let {
 	onSelectionChange,
 	onClearFocusedClusters,
 	onHoverPreview,
-	onSkeletonToggle,
+	onToggleCollapseAll,
 	immersed = false,
 	onExitImmerse,
 	onCollapseSelectedTopics,
@@ -470,7 +471,7 @@ function handleKeyDown(e: KeyboardEvent) {
 			}
 			break;
 		case "s":
-			onSkeletonToggle?.();
+			onToggleCollapseAll?.();
 			break;
 		// Selection-bar verbs. All no-op without a selection, so they stay inert
 		// while panning an unselected graph.
@@ -857,23 +858,17 @@ function weightedLinkDistance(link: SimLink): number {
 }
 
 /**
- * Get the draw radius for a node based on its degree, centrality, and the user-configurable nodeSize.
+ * Get the draw radius for a node from its degree and the auto-tuned nodeSize.
  *
- * When betweenness centrality is available (Leiden mode), it is blended with degree:
- * - degree gives a +log bonus for highly-connected hubs
- * - centrality gives a larger bonus for bridge nodes whose removal would fragment the graph
- * The two signals are additive so a hub that is also a bridge gets the largest radius.
+ * Size encodes exactly one thing — connectedness — so it stays unambiguous.
+ * Bridge nodes are surfaced by the highlight toggle's color, not by size.
+ * Must match the renderer's sprite radius (`syncNodes`), since this value
+ * also drives hit-testing, collision spacing, and label offsets.
  */
 function getNodeRadius(node: GraphNode): number {
 	const base = Math.max(1, nodeSize);
 	const degree = node.degree ?? 0;
-	const degreeBonus = Math.min(Math.log1p(degree) * 2.5, base * 5);
-	if (node.centrality != null && node.centrality > 0) {
-		// centrality is 0–1; scale it to the same ceiling as the degree bonus
-		const centralityBonus = Math.min(node.centrality * base * 8, base * 8);
-		return base + Math.max(degreeBonus, centralityBonus * 0.6 + degreeBonus * 0.4);
-	}
-	return base + degreeBonus;
+	return base + Math.min(Math.log1p(degree) * 2.5, base * 5);
 }
 
 /**
@@ -2135,7 +2130,6 @@ function setupGraph(data: GraphData) {
 				sn.color = node.color;
 				sn.cluster = node.cluster;
 				sn.highlighted = node.highlighted;
-				sn.centrality = node.centrality;
 			}
 		}
 		// Sync the cohesion force strength to the current prop value.
@@ -2144,8 +2138,6 @@ function setupGraph(data: GraphData) {
 		// Re-derive cluster metadata so pills on the canvas reflect the new segmentation.
 		// (buildInternalData is not called in this path, so we update it explicitly.)
 		refreshClusterMetadata(data);
-		// Centrality feeds node radii, so hit-test geometry may have changed.
-		hitGridDirty = true;
 
 		// New topics mean new cluster centroids, so the nodes have to move there.
 		// The cohesion force alone can't do it once alpha has decayed — it would be
