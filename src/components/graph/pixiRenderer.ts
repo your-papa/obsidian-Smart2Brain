@@ -9,14 +9,15 @@
 
 import {
 	Application,
+	CanvasSource,
 	Container,
 	Graphics,
 	Sprite,
 	Text,
 	TextStyle,
+	Texture,
 	Ticker,
 	type PointData,
-	type Texture,
 } from "pixi.js";
 import { Viewport } from "pixi-viewport";
 
@@ -180,8 +181,32 @@ export function readThemeColors(el: HTMLElement): ThemeColors {
 
 // ── Types ────────────────────────────────────────────────────
 
-/** World-space radius of the shared node disc texture (see init). */
-const NODE_TEXTURE_RADIUS = 64;
+/**
+ * Backing size of the shared node disc texture. A power of two, so mipmap
+ * generation works on every WebGL context — without mipmaps, a 128px disc
+ * sampled down to a handful of screen pixels aliases into visibly rough edges
+ * on every zoomed-out node.
+ */
+const NODE_TEXTURE_SIZE = 128;
+/**
+ * Radius of the disc drawn into that texture. The margin to the texture edge
+ * keeps the clamped border pixels transparent, so downsampled mip levels don't
+ * pick up edge bleed.
+ */
+const NODE_TEXTURE_RADIUS = 60;
+
+/**
+ * Above this many visible semantic edges, dashes fall back to solid strokes.
+ *
+ * A dashed edge costs path segments proportional to its screen length (~one
+ * per 9px), so a dense zoomed-out graph turns the dash pass into the largest
+ * remaining tessellation cost — at exactly the density where the pattern
+ * reads as shimmer rather than as dashes. Alpha is reduced to match the ink
+ * of the ~55% dash duty cycle, so the fallback carries the same visual
+ * weight.
+ */
+const SEMANTIC_DASH_EDGE_LIMIT = 500;
+const SEMANTIC_SOLID_ALPHA_SCALE = 0.6;
 
 /** Hit area info for screen-space cluster pills (stored for click/hover). */
 export interface ClusterPillHit {
@@ -375,13 +400,25 @@ export class PixiRenderer {
 		this.viewport.addChild(this.lassoLayer);
 
 		// Shared node texture: one antialiased white disc every node sprite
-		// scales and tints. Sized so typical screen radii are a downscale
-		// (crisp); only extreme zoom-ins upscale past it, where the vector
-		// stroke ring on the hovered node carries the sharp edge anyway.
-		const disc = new Graphics();
-		disc.circle(NODE_TEXTURE_RADIUS, NODE_TEXTURE_RADIUS, NODE_TEXTURE_RADIUS).fill({ color: 0xffffff });
-		this.nodeTexture = this.app.renderer.generateTexture({ target: disc, antialias: true, resolution: 2 });
-		disc.destroy();
+		// scales and tints. Drawn on a 2D canvas rather than via generateTexture:
+		// the canvas upload path generates mipmaps (autoGenerateMipmaps), which
+		// is what keeps far-zoomed-out nodes reading as smooth circles instead
+		// of aliased blobs — render textures only mipmap on explicit request.
+		// Extreme zoom-ins upscale past the texture, where the vector stroke
+		// ring on the hovered node carries the sharp edge anyway.
+		const disc = document.createElement("canvas");
+		disc.width = NODE_TEXTURE_SIZE;
+		disc.height = NODE_TEXTURE_SIZE;
+		const discCtx = disc.getContext("2d");
+		if (discCtx) {
+			discCtx.fillStyle = "#ffffff";
+			discCtx.beginPath();
+			discCtx.arc(NODE_TEXTURE_SIZE / 2, NODE_TEXTURE_SIZE / 2, NODE_TEXTURE_RADIUS, 0, Math.PI * 2);
+			discCtx.fill();
+		}
+		this.nodeTexture = new Texture({
+			source: new CanvasSource({ resource: disc, autoGenerateMipmaps: true }),
+		});
 
 		// Hull graphics (single batched)
 		this.hullGraphics = new Graphics();
@@ -585,7 +622,6 @@ export class PixiRenderer {
 			color?: string;
 			degree?: number;
 			highlighted?: boolean;
-			centrality?: number;
 		}>,
 		nodeSize: number,
 		opts: {
@@ -994,10 +1030,26 @@ export class PixiRenderer {
 		};
 
 		const drawDashedBuckets = (buckets: Map<string, Array<{ sx: number; sy: number; tx: number; ty: number }>>) => {
+			// Past the limit, dashes cost more than they communicate — draw the
+			// whole inferred layer as quieter solid strokes instead (see
+			// SEMANTIC_DASH_EDGE_LIMIT).
+			let totalEdges = 0;
+			for (const segments of buckets.values()) totalEdges += segments.length;
+			const asSolid = totalEdges > SEMANTIC_DASH_EDGE_LIMIT;
+
 			for (const [key, segments] of buckets) {
 				const [color, widthStr, alphaStr] = key.split("|");
 				const width = Number(widthStr);
 				const alpha = Number(alphaStr);
+
+				if (asSolid) {
+					for (const seg of segments) {
+						g.moveTo(seg.sx, seg.sy);
+						g.lineTo(seg.tx, seg.ty);
+					}
+					g.stroke({ color, width, alpha: alpha * SEMANTIC_SOLID_ALPHA_SCALE });
+					continue;
+				}
 
 				for (const seg of segments) {
 					drawDashedLine(g, seg.sx, seg.sy, seg.tx, seg.ty, dash, dashGap);
