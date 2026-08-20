@@ -327,6 +327,26 @@ describe("SkillsService.bootstrapDefaultSkills", () => {
 		expect(state.staleSkills).toEqual([]);
 	});
 
+	/*
+	 * discoverSkills used to clear the cache before doing any I/O, so a mid-scan failure left
+	 * it EMPTY. Combined with callers treating a failed rediscovery as non-fatal, the next
+	 * agent run would assemble its prompt from no skills at all — every skill the user has,
+	 * silently gone until some later discovery happened to succeed.
+	 */
+	it("keeps the previous skill cache when a rediscovery scan fails", async () => {
+		const adapter = makeAdapter();
+		const svc = makeService(adapter);
+		await svc.bootstrapDefaultSkills();
+		await svc.discoverSkills();
+		const before = [...svc.getCachedSkills().keys()];
+		expect(before.length).toBeGreaterThan(0);
+
+		adapter.list.mockRejectedValueOnce(new Error("EIO"));
+		await svc.writeSkillFile(SUBJECT.name, SUBJECT.content);
+
+		expect([...svc.getCachedSkills().keys()]).toEqual(before);
+	});
+
 	it("keeps the stale mark when the diff view saves a further edit", async () => {
 		const adapter = makeAdapter({ [SUBJECT_PATH]: `${SUBJECT.content}\n\nMine.` });
 		const svc = makeService(adapter);

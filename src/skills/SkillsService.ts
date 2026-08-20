@@ -644,10 +644,16 @@ export class SkillsService {
 	 */
 	async discoverSkills(): Promise<Map<string, SkillMetadata>> {
 		const skillsDir = this.getSkillsDir();
-		this.skillsCache.clear();
+		// Build into a fresh map and swap it in only once the scan completes. Clearing the
+		// live cache up front would leave it EMPTY if any I/O below threw — and since callers
+		// may (correctly) treat a failed rediscovery as non-fatal, the next agent run would
+		// then assemble its prompt from no skills at all, silently dropping every skill the
+		// user has until some later discovery happened to succeed.
+		const discovered = new Map<string, SkillMetadata>();
 
 		if (!(await this.adapter.exists(skillsDir))) {
 			Log.debug("Skills directory does not exist yet");
+			this.skillsCache = discovered;
 			this.discovered = true;
 			return this.skillsCache;
 		}
@@ -699,7 +705,7 @@ export class SkillsService {
 					corePluginId,
 				};
 
-				this.skillsCache.set(skillName, metadata);
+				discovered.set(skillName, metadata);
 				Log.debug(`Discovered skill: ${skillName}`);
 			} catch (error) {
 				Log.error(`Error reading skill from ${folder}:`, error);
@@ -717,6 +723,9 @@ export class SkillsService {
 			StartupProfiler.setMeta("slowestSkillFolderMs", Math.round(slowestFolderMs));
 		}
 
+		// Scan completed: publish it. Anything that threw above skipped this line, leaving the
+		// previous cache intact rather than empty.
+		this.skillsCache = discovered;
 		this.discovered = true;
 		Log.info(`Discovered ${this.skillsCache.size} skills`);
 		return this.skillsCache;
