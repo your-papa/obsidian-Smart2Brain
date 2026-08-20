@@ -253,8 +253,9 @@ export class SkillsService {
 		// No fast path here: an "all folders present" early return is exactly what made a
 		// bumped skill version unreachable before #401 — the per-skill check never ran, so
 		// improvements to bundled skills only ever reached new vaults. Each skill below is
-		// now read and compared, which costs one read() per folder (~10) on a path already
-		// measured by StartupProfiler ("skills:bootstrap").
+		// now read and compared, which costs one read() per folder (~10; two on the rare
+		// update path, which re-verifies before overwriting) on a path already measured by
+		// StartupProfiler ("skills:bootstrap").
 		//
 		// Two groups are reconciled, and the distinction matters:
 		//  - the startup seed set (core skills + enabled core-plugin integrations), which is
@@ -271,23 +272,50 @@ export class SkillsService {
 		const alreadyInstalled = BUNDLED_SKILLS.filter((s) => !seedNames.has(s.name) && presentFolders.has(s.name));
 
 		let installed = 0;
-		const stale: string[] = [];
+		// Rebuild wholesale rather than append: this pass is the authoritative result for
+		// every bundled skill, so one the user has since re-aligned drops out instead of
+		// lingering. On-demand reconciles between bootstraps adjust the set incrementally
+		// (see recordReconcileOutcome).
+		this.staleSkillNames.clear();
 
 		for (const bundledSkill of [...seedSkills, ...alreadyInstalled]) {
 			const outcome = await this.reconcileBundledSkill(bundledSkill);
 			if (outcome === "installed" || outcome === "updated") installed++;
-			else if (outcome === "customized") stale.push(bundledSkill.name);
+			this.recordReconcileOutcome(bundledSkill.name, outcome);
 		}
 
-		// Replace wholesale rather than append: this is the authoritative result of the pass,
-		// so a skill the user has since re-aligned drops out instead of lingering.
-		getData().setStaleSkills(stale);
+		this.publishStaleSkills();
 
 		if (installed > 0) {
 			Log.info(`Bootstrapped ${installed} default skills`);
 		}
 
 		return installed;
+	}
+
+	/**
+	 * Bundled skills whose on-disk body is neither the current shipped version nor any older
+	 * one — i.e. the user edited them, so reconciliation left them alone. Owned here (not
+	 * only in the store) so both reconcile paths — the startup bootstrap and the on-demand
+	 * `seedIntegrationSkill` — maintain one consistent set: bootstrap rebuilds it, a single
+	 * reconcile flips just its own skill in or out.
+	 */
+	private staleSkillNames = new Set<string>();
+
+	/** Fold one reconcile outcome into the stale set: `customized` enters, any resolution leaves. */
+	private recordReconcileOutcome(
+		skillName: string,
+		outcome: "installed" | "updated" | "current" | "customized" | "failed",
+	): void {
+		if (outcome === "customized") this.staleSkillNames.add(skillName);
+		// `installed`/`updated`/`current` mean the file now matches a shipped body, so any
+		// earlier stale mark is resolved. `failed` keeps whatever state we last knew.
+		else if (outcome !== "failed") this.staleSkillNames.delete(skillName);
+	}
+
+	/** Push the current stale set into the store, where the reactive notice surface reads it. */
+	private publishStaleSkills(): void {
+		getData().setStaleSkills([...this.staleSkillNames]);
 	}
 
 	/**
@@ -327,6 +355,21 @@ export class SkillsService {
 		const version = shippedVersion(existing, history);
 		if (version === null) return "customized";
 		if (version === currentSkillVersion(skill.name)) return "current";
+
+		// Re-verify immediately before overwriting: the provenance check above read the file
+		// at some earlier point, and a sync client (or the user) can write to it in between —
+		// startup, when this runs, is exactly when Obsidian Sync delivers edits from other
+		// devices. The adapter has no compare-and-swap, so this cannot close the race
+		// entirely, but it shrinks the window from the whole decision path to the write call
+		// and turns the realistic case into "customized" instead of a destroyed edit.
+		try {
+			if ((await this.adapter.read(path)) !== existing) {
+				Log.info(`Skill ${skill.name} changed while reconciling; treating as customized`);
+				return "customized";
+			}
+		} catch {
+			return "customized";
+		}
 
 		if (await this.writeBundledSkill(skill, { overwrite: true })) {
 			Log.info(`Updated bundled skill ${skill.name} from v${version} to v${skill.version}`);
@@ -382,8 +425,12 @@ export class SkillsService {
 		if (bundled) {
 			// Same three-way reconcile as startup bootstrap, so a community integration skill
 			// that improves upstream reaches vaults that already have it — the on-demand path
-			// had the identical skip-if-exists gap.
+			// had the identical skip-if-exists gap. Fold the outcome into the stale set too:
+			// a `customized` result here must raise its notice NOW, not wait for the next
+			// startup's bootstrap pass to rediscover it.
 			const outcome = await this.reconcileBundledSkill(bundled);
+			this.recordReconcileOutcome(bundled.name, outcome);
+			this.publishStaleSkills();
 			return outcome === "failed" ? null : bundled.name;
 		}
 

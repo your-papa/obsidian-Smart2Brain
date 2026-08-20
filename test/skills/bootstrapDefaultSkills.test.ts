@@ -238,4 +238,79 @@ describe("SkillsService.bootstrapDefaultSkills", () => {
 
 		expect(adapter.read).toHaveBeenCalledTimes(BUNDLED_CORE_SKILLS.length);
 	});
+
+	/*
+	 * The provenance check reads the file, decides, then overwrites — and a sync client (or
+	 * the user) can write in between. Startup, when bootstrap runs, is exactly when Obsidian
+	 * Sync delivers edits from other devices, so an edit landing in that window must flip the
+	 * outcome to "customized" rather than be destroyed by the overwrite.
+	 */
+	it("does not overwrite a skill edited between the provenance check and the write", async () => {
+		const oldBody = "---\nname: old\n---\n\nthe body we shipped previously";
+		const raceEdit = `${oldBody}\n\nEdit that landed mid-reconcile.`;
+		const current = currentSkillVersion(SUBJECT.name);
+
+		vi.spyOn(SHIPPED_SKILL_HISTORY, "get").mockImplementation((name) =>
+			name === SUBJECT.name
+				? new Map([
+						["0.9", fingerprint(oldBody)],
+						[current as string, fingerprint(SUBJECT.content)],
+					])
+				: undefined,
+		);
+
+		const adapter = makeAdapter({ [SUBJECT_PATH]: oldBody });
+		// First read validates the old shipped body; the verify re-read sees the raced edit.
+		adapter.read.mockResolvedValueOnce(oldBody).mockResolvedValueOnce(raceEdit);
+		const svc = makeService(adapter);
+
+		await svc.bootstrapDefaultSkills();
+
+		expect(adapter.write).not.toHaveBeenCalledWith(SUBJECT_PATH, SUBJECT.content);
+		expect(state.staleSkills).toContain(SUBJECT.name);
+
+		vi.restoreAllMocks();
+	});
+});
+
+describe("SkillsService.seedIntegrationSkill", () => {
+	beforeEach(() => {
+		state.agentFolder = "Agents";
+		state.staleSkills = [];
+	});
+
+	const integration = BUNDLED_SKILLS.find((s) => s.linkedPluginId) as (typeof BUNDLED_SKILLS)[number];
+	const integrationPath = `${SKILLS}/${integration.name}/SKILL.md`;
+
+	/*
+	 * The on-demand path must report staleness immediately, not leave it for the next
+	 * startup's bootstrap pass: the user just actively enabled this integration, so a
+	 * "your customized copy diverged from the shipped default" notice is most useful NOW.
+	 */
+	it("reports a customized bundled skill as stale immediately", async () => {
+		const edited = `${integration.content}\n\nMy own notes.`;
+		const adapter = makeAdapter({ [integrationPath]: edited });
+		const svc = makeService(adapter);
+
+		const name = await svc.seedIntegrationSkill(integration.linkedPluginId as string, integration.name);
+
+		expect(name).toBe(integration.name);
+		expect(adapter.files.get(integrationPath)).toBe(edited);
+		expect(state.staleSkills).toContain(integration.name);
+	});
+
+	it("clears an earlier stale mark once the skill matches a shipped body again", async () => {
+		// Stale from a previous pass; the file has since been restored to the shipped body.
+		const adapter = makeAdapter({ [integrationPath]: integration.content });
+		const svc = makeService(adapter);
+		const edited = `${integration.content}\n\nDrift.`;
+		adapter.files.set(integrationPath, edited);
+		await svc.seedIntegrationSkill(integration.linkedPluginId as string, integration.name);
+		expect(state.staleSkills).toContain(integration.name);
+
+		adapter.files.set(integrationPath, integration.content);
+		await svc.seedIntegrationSkill(integration.linkedPluginId as string, integration.name);
+
+		expect(state.staleSkills).not.toContain(integration.name);
+	});
 });
