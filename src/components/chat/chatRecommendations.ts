@@ -139,7 +139,7 @@ export type UpdateNoticeKind = "system-prompt" | "memory-prompt" | "skill";
  * Sourced from the store's `staleGuidance` records.
  */
 export interface UpdateNotice {
-	/** Dismissal key, of the form `update:<agentId|global>:<kind>[:<skillName>]`. */
+	/** Dismissal key, of the form `update:<agentId|global>:<kind>[:<skillName>][@<version>]`. */
 	id: string;
 	/** Owning agent for the per-agent prompt surfaces; absent for skills (global). */
 	agentId?: string;
@@ -149,6 +149,8 @@ export interface UpdateNotice {
 	label: string;
 	/** For `kind: "skill"`, which skill — lets Review open the right note. */
 	skillName?: string;
+	/** True when the user's own edit was kept; false when an untouched old default couldn't be auto-updated. */
+	customized?: boolean;
 }
 
 /** Minimal shape of a store `StaleGuidance` record consumed by {@link toUpdateNotice}. */
@@ -158,6 +160,8 @@ export interface StaleGuidanceLike {
 	kind: UpdateNoticeKind;
 	label: string;
 	skillName?: string;
+	currentVersion?: number | string;
+	customized?: boolean;
 }
 
 /**
@@ -166,19 +170,32 @@ export interface StaleGuidanceLike {
  *
  * Skills are global but there can be several stale at once, so the skill name is appended —
  * otherwise dismissing one skill's notice would dismiss every skill's.
+ *
+ * The CURRENT shipped version is appended too. Dismissals persist forever
+ * (`dismissedRecommendations` in plugin data), so a version-less key would mean dismissing
+ * the v2 notice silently swallows the v3 notice years later — each default bump should
+ * surface exactly once.
  */
-export const updateNoticeId = (agentId: string | undefined, kind: UpdateNoticeKind, skillName?: string): string =>
-	`update:${agentId ?? "global"}:${kind}${skillName ? `:${skillName}` : ""}`;
+export const updateNoticeId = (
+	agentId: string | undefined,
+	kind: UpdateNoticeKind,
+	skillName?: string,
+	currentVersion?: number | string,
+): string =>
+	`update:${agentId ?? "global"}:${kind}${skillName ? `:${skillName}` : ""}${
+		currentVersion !== undefined ? `@${currentVersion}` : ""
+	}`;
 
 /** Maps a store stale-guidance record to a dismissable notice. */
 export function toUpdateNotice(record: StaleGuidanceLike): UpdateNotice {
 	return {
-		id: updateNoticeId(record.agentId, record.kind, record.skillName),
+		id: updateNoticeId(record.agentId, record.kind, record.skillName, record.currentVersion),
 		agentId: record.agentId,
 		agentName: record.agentName,
 		kind: record.kind,
 		label: record.label,
 		skillName: record.skillName,
+		customized: record.customized,
 	};
 }
 

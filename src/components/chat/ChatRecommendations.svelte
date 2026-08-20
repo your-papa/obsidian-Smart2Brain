@@ -299,7 +299,17 @@ function reviewNotice(notice: UpdateNotice): void {
         <div class="s2b-notice">
           <span class="s2b-notice-icon" use:icon={"refresh-cw"} style="--icon-size: 14px"></span>
           <span class="s2b-notice-text">
-            {#if notice.agentName}
+            <!-- customized === false means the file is an untouched OLD default whose silent
+                 auto-update failed — claiming "your customized version was kept" there would
+                 assert an edit the user never made. -->
+            {#if notice.customized === false}
+              {#if notice.agentName}
+                The default {notice.label} changed, but <strong>{notice.agentName}</strong>'s copy
+                couldn't be updated automatically.
+              {:else}
+                The default {notice.label} changed, but your copy couldn't be updated automatically.
+              {/if}
+            {:else if notice.agentName}
               The default {notice.label} changed. <strong>{notice.agentName}</strong>'s customized
               version was kept.
             {:else}

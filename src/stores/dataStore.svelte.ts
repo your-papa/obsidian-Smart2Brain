@@ -10,7 +10,8 @@ import {
 import { getSecret, listSecrets, removeSecret, setSecret } from "../lib/secretStorage";
 import { isAgentFilePath } from "../utils/fileFiltering";
 import { sanitizeAgentFileName } from "../utils/agentPaths";
-import { type ShippedHistory, isShippedDefault, shippedVersion } from "../utils/shippedDefaults";
+import { type ShippedHistory, currentShippedVersion, isShippedDefault, shippedVersion } from "../utils/shippedDefaults";
+import { currentSkillVersion } from "../skills/shippedSkills";
 import type SecondBrainPlugin from "../main";
 import { DEFAULT_AGENT_ICON } from "../types/plugin";
 import type {
@@ -2355,24 +2356,22 @@ function detectStaleGuidance(agent: AgentConfig, reader: PromptFileReader | null
 		if (content === null) continue;
 		const version = shippedVersion(content, surface.history);
 		// null ⇒ user's own text; the newest key ⇒ already current. Only an older shipped
-		// version means "the default moved out from under an untouched copy".
-		if (version === null || version === currentVersion(surface.history)) continue;
+		// version means "the default moved out from under an untouched copy" — which
+		// PromptFilesService.seedDefaults rewrites silently at startup, so reaching here
+		// means that rewrite failed (or hasn't run against this file yet). Surface it.
+		if (version === null || version === currentShippedVersion(surface.history)) continue;
 		stale.push({
 			agentId: agent.id,
 			agentName: agent.name,
 			kind: surface.kind,
 			label: surface.label,
+			currentVersion: currentShippedVersion(surface.history),
+			// The file IS an old shipped default, verbatim — the user never customized it.
+			customized: false,
 		});
 	}
 
 	return stale;
-}
-
-/** The newest version in a history (insertion order is oldest → newest by construction). */
-function currentVersion(history: ShippedHistory): number | string | undefined {
-	let last: number | string | undefined;
-	for (const [version] of history) last = version;
-	return last;
 }
 
 /**
@@ -2392,7 +2391,15 @@ function computeStaleGuidance(
 	const stale: StaleGuidance[] = [];
 	for (const agent of Object.values(agents)) stale.push(...detectStaleGuidance(agent, reader));
 	for (const skillName of staleSkills) {
-		stale.push({ kind: "skill", label: `${skillName} skill`, skillName });
+		stale.push({
+			kind: "skill",
+			label: `${skillName} skill`,
+			skillName,
+			currentVersion: currentSkillVersion(skillName),
+			// A skill is only reported when its body matches NO shipped version — the user
+			// edited it, and the edit was preserved.
+			customized: true,
+		});
 	}
 	return stale;
 }

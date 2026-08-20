@@ -104,3 +104,14 @@ export function shippedVersion(content: string, history: ShippedHistory): number
 	}
 	return null;
 }
+
+/**
+ * The newest version in a history. Histories are built oldest → newest by construction
+ * (append-only constants, prior entries inserted before the current one), so insertion
+ * order is the version order and the last key is the live one.
+ */
+export function currentShippedVersion(history: ShippedHistory): number | string | undefined {
+	let last: number | string | undefined;
+	for (const [version] of history) last = version;
+	return last;
+}

@@ -12,15 +12,21 @@
  */
 
 import { BUNDLED_SKILLS } from "./defaults";
-import { type ShippedHistory, fingerprint } from "../utils/shippedDefaults";
+import { type ShippedHistory, currentShippedVersion, fingerprint } from "../utils/shippedDefaults";
 
 /**
- * Bodies of bundled skills we shipped in a PREVIOUS version and no longer have on disk.
+ * Fingerprints of bundled-skill bodies we shipped in a PREVIOUS version and no longer have
+ * on disk. Fingerprints, not verbatim bodies: every consumer only ever does an equality
+ * test, and retaining old bodies as string constants would grow the bundle by the full body
+ * on every revision (`bases` alone is ~21KB) with text that is never displayed.
  *
  * ## How to add an entry (do this when you change a bundled SKILL.md)
  *
- * 1. Copy the CURRENT body of the file — byte for byte, before your edit.
- * 2. Add it here under the skill's name and its *current* version.
+ * 1. BEFORE your edit, compute the current body's fingerprint — e.g. drop
+ *    `console.log(fingerprint(skill.content))` into any test in
+ *    `test/skills/bootstrapDefaultSkills.test.ts` and run it, or call
+ *    `fingerprint()` from `src/utils/shippedDefaults` anywhere convenient.
+ * 2. Add the hex string here under the skill's name and its *current* version.
  * 3. Then make your edit and bump `metadata.version` in the SKILL.md.
  *
  * Skip step 1-2 and existing vaults will read their untouched copy as a user customization:
@@ -32,9 +38,9 @@ import { type ShippedHistory, fingerprint } from "../utils/shippedDefaults";
  * is at the single version it currently ships (`explore-vault` was reset from 1.1 to 1.0 for
  * this reason). The map exists so the first real revision has an obvious place to go.
  */
-const PRIOR_SKILL_BODIES: ReadonlyMap<string, ReadonlyMap<string, string>> = new Map([
+const PRIOR_SKILL_FINGERPRINTS: ReadonlyMap<string, ReadonlyMap<string, string>> = new Map([
 	// Example of the shape, for when the first revision lands:
-	// ["explore-vault", new Map([["1.0", "---\nname: explore-vault\n...verbatim old body..."]])],
+	// ["explore-vault", new Map([["1.0", "a1b2c3d4e5f60718"]])],
 ]);
 
 /**
@@ -55,11 +61,8 @@ function buildHistory(): Map<string, ShippedHistory> {
 		// otherwise never touch). Validation requires the field, so this is defensive.
 		if (!skill.version) continue;
 
-		const versions = new Map<string, string>();
-		for (const [version, body] of PRIOR_SKILL_BODIES.get(skill.name) ?? []) {
-			versions.set(version, fingerprint(body));
-		}
-		// Current last, so it's the newest entry even if a prior body was recorded late.
+		const versions = new Map<string, string>(PRIOR_SKILL_FINGERPRINTS.get(skill.name) ?? []);
+		// Current last, so it's the newest entry even if a prior fingerprint was recorded late.
 		versions.set(skill.version, fingerprint(skill.content));
 		history.set(skill.name, versions);
 	}
@@ -71,7 +74,5 @@ function buildHistory(): Map<string, ShippedHistory> {
 export function currentSkillVersion(skillName: string): string | undefined {
 	const versions = SHIPPED_SKILL_HISTORY.get(skillName);
 	if (!versions) return undefined;
-	let last: string | undefined;
-	for (const [version] of versions) last = version as string;
-	return last;
+	return currentShippedVersion(versions) as string | undefined;
 }

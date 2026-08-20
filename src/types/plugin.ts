@@ -174,6 +174,17 @@ export interface StaleGuidance {
 	label: string;
 	/** For `kind: "skill"`, the bundled skill's name — used to open its note on Review. */
 	skillName?: string;
+	/**
+	 * The version the shipped default is CURRENTLY at. Part of the notice's dismissal key, so
+	 * dismissing this update's notice doesn't also swallow the notice for the next one.
+	 */
+	currentVersion?: number | string;
+	/**
+	 * True when the user's own edit was preserved (the normal case for skills). False when the
+	 * file is an untouched OLD default that the silent auto-update failed to rewrite — the
+	 * wording must not then claim a customization the user never made.
+	 */
+	customized?: boolean;
 }
 
 /*
