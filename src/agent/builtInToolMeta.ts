@@ -116,7 +116,10 @@ export function getToolDescription(toolId: BuiltInToolId, configuredDescription?
  * that would otherwise open an empty config modal.
  */
 const TOOLS_WITH_SETTINGS = new Set<BuiltInToolId>([
-	"search_notes",
+	// `search_notes` is deliberately absent: its retrieval algorithm and result count
+	// are per-call tool parameters the model picks (it holds the query context; the user
+	// does not), and the result-detail flags are hardcoded on for the agent — those
+	// remain user-facing for the search *modal*, under Settings → Search → Display.
 	"grep_notes",
 	"read_content",
 	"manage_notes",

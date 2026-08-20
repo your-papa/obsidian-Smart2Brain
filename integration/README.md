@@ -715,6 +715,12 @@ Two claims have to be separated here, and the earlier write-up conflated them:
   10:2 in hybrid's favour, and the sign is the same on all three embedding models. Three
   independent models agreeing is stronger evidence than any single CI.
 
+  **Weakened by the 2026-08-20 hole-filling pass** (see below): on the same index build
+  the split is now **hybrid 10 / semantic 5 / 10 tied**, from `10 / 2 / 13`. Hybrid's
+  count is unchanged; three previously-tied queries broke semantic's way once the notes
+  it was surfacing unscored were judged. The direction still holds — hybrid wins twice as
+  many as it loses — but "10:2" should not be quoted as current.
+
 Consequence for the `polysemy` −0.0072 recorded during the tag-boost work: that was one
 case changing rank, and it is comfortably inside the noise band. It was correctly acted
 on for a *mechanistic* reason (the note tagged `#review` is the wrong answer, which is a
@@ -730,6 +736,19 @@ three algorithms** (`lexical`, `semantic`, `hybrid`, top-10 each) rather than ta
 one ranker's output, and every added note was judged by *reading it* against the query.
 Grading whatever the current ranker returns is how pooling bias gets baked in — the
 point is to be willing to grade a highly-ranked note as 0.
+
+`scripts/pool-candidates.mjs` automates the pooling half (added in the second pass):
+
+```bash
+bun scripts/pool-candidates.mjs "the review is blocking me"
+```
+
+It prints the union of the three top-10s with each note's per-algorithm rank and its
+current grade, so an ungraded note sitting at rank 1 in two legs is immediately visible.
+Run it with `bun`, not `node` — it imports the judgments from TypeScript so the grades it
+shows cannot drift from the ones the benchmark scores. Note it queries the **live**
+Obsidian instance, so the active embed index decides the semantic column; record which
+build a grading pass was pooled against.
 
 Two of the three were scoring well while a **declared size-bias distractor sat at rank 1
 in both legs, ungraded**:
@@ -757,10 +776,133 @@ as more holes are filled — a drop coinciding with new judgments is the benchma
 stricter, and should be verified against the ranking itself before being read as a
 regression.
 
-Still outstanding: `things i said i would do and didn't` (10/10 ungraded on the hard
-tier) and the alias cases (`Octopus Intelligence`, `Levain Timing`, 9/10 each).
+##### Filling judgment holes — second pass (2026-08-20)
+
+The queries the first pass left outstanding, plus two the first pass had not identified.
+Same method: candidates pooled from all three algorithms via
+`bun scripts/pool-candidates.mjs "<query>"`, every added note judged by reading it.
+**Both sides measured on the same index build** (`omlx:harrier-oss-v1-0.6b-MLX-8bit`,
+built `1787061734704`), no reindex, each figure reproduced across two runs.
+
+| tier | before | after | Hole@10 before → after |
+|---|---|---|---|
+| core (hybrid) | 0.9305 | **0.9245** | 7.4 → 6.8 |
+| core (lexical) | 0.7100 | **0.6859** | 7.1 → 6.6 |
+| hard (hybrid) | 0.7754 | **0.7836** | 8.0 → 7.4 |
+| hard (semantic) | 0.7205 | **0.7343** | — |
+| recency | 0.9077 | 0.9077 | unchanged |
+
+`BASELINE_MEAN_NDCG` stays at 0.92 — 0.9245 clears it without adjustment.
+
+**Re-measured after an Obsidian restart the same day: core 0.9237, hard 0.7809** (both
+reproduced across two runs, same index build `1787061734704`, ranker byte-identical).
+The whole delta is one query — `Octopus Intelligence` 0.945 → 0.933 — reordering its
+graded *runners-up*; MRR is unchanged at 0.9286, so rank 1 is identical everywhere. This
+is the order-dependence documented above, and it is worth knowing that it survives a
+process restart on a persisted index, not just a rebuild: **treat differences below
+~0.002 as noise unless MRR moves with them.**
+
+**The hard tier went *up*, which is the opposite of the first pass.** The reason is worth
+recording: the first pass added only distractors, so it could only subtract. This one
+found a case where the *ranker was right and the judgments were wrong*.
+
+`the review is blocking me` (polysemy) had `Blocked on Legal Review` at **semantic rank
+1, ungraded** — a legal review that has held a contract eleven days and is blocking three
+workstreams. The case had been written around three senses of "review" (code,
+performance, literature) and simply missed the fourth. Grading it 0 to protect the
+original premise would have been "weaken the benchmark to make it pass" run in reverse:
+punishing a correct result to keep a tidy story. Graded 2 alongside the PR note, as
+`what's in the pipeline` already does for its sense pair. The case moves to 1.000.
+
+Two more declared distractors were found sitting at rank 1 while ungraded — the same
+defect the first pass found twice:
+
+| query | the unpenalised note | rank |
+|---|---|---|
+| `what did my manager say i should work on` | `Internal Pitch for the Platform Work` | lexical 1, hybrid 1 |
+| `Octopus Intelligence` | `Octopus Husbandry Program Notes` | semantic 2 |
+
+The pitch note is the user's *own* pitch for headcount and wins purely because its title
+contains "Work"; the husbandry log carries `distractor` + `size-bias` tags and disclaims
+cognition in its own body. Grading them moved their cases **down** (`what did my manager
+say…` → 0.521, `feedback i gave someone` → 0.356), which is the point.
+
+`things i said i would do and didn't` was the worst case in the suite and stays the
+worst, but is now attributable. Pooled across all three algorithms it produced 17
+distinct candidates and **neither graded note appeared in any of them** — the ranker
+never returns `Weekly Review 2026-03-14`, whose "Did not ship:" line is the literal
+answer. It scored 0.0000 for a reason nothing in the file recorded. With
+`Migration Write-up - Draft` graded 1 (a genuine unmet commitment: *"Priya asked for this
+and I have been avoiding it for a week"*) it now scores **0.129** — still a failure, but
+one whose shape is legible.
+
+`Levain Timing` turned up an unrelated finding: marine-biology notes take lexical ranks
+2-4 on the bare word "Timing" (`Barnacle Settlement Timing`, `Spring Bloom Onset
+Timing`). Cross-domain title collision on a single generic token, now graded 0 so it is
+measured.
+
+Still outstanding: `when do prices rise so fast…` (10/10 ungraded lexically) and the
+`multi-hop` / `cross-lingual` cases at 9/10.
+
+##### The reformulation tier — the fix for `intent-frame` is upstream of ranking
+
+`intent-frame` is the weakest axis (0.6618) and **cannot be fixed in the ranker**: on
+`what did my manager say i should work on` the wrong note is rank 1 in the lexical *and*
+semantic legs at once, so no monotone reweighting of the two can promote the right one.
+That was recorded as a dead end. It is not — it is a dead end *for the ranker*.
+
+The `reformulation` tier tests the alternative: keep the information need and the grades
+fixed, change only the phrasing. Measured on `omlx:harrier-oss-v1-0.6b-MLX-8bit`
+(build `1787061734704`), hybrid:
+
+| case | original | best reformulation | Δ |
+|---|---|---|---|
+| `things i said i would do and didn't` | 0.129 (rank 13) | **0.496** — `what did not ship this week` (rank 3) | +0.3670 |
+| `what did my manager say i should work on` | 0.521 (rank 2) | **0.964** — `1-1 with Priya` (rank 1) | +0.4426 |
+| **mean** | **0.3253** | **0.7301** | **+0.4048** |
+
+Both reformulations follow a rule now written into the `explore-vault` skill. The first
+uses the note's own vocabulary — its literal line is `Did not ship:`, which shares no
+content word with the user's phrasing. The second names the participant instead of the
+relation, because `my` is a stopword and `manager` appears nowhere in the target (the
+note names Priya and never states her role).
+
+**Reported, never ratcheted.** The reformulations are hand-authored, so gating on them
+would reward writing easier rephrasings over improving retrieval — the same reasoning as
+`HARD_FLOOR_MEAN_NDCG`. Candidates were measured with `scripts/pool-candidates.mjs`
+before being written, and ones that did not move the target were discarded rather than
+banked (`Priya scoping recommendation design review` leaves it absent from all three
+legs).
+
+###### Read this as a ceiling, not an expectation
+
+The tier measures whether the corpus is **reachable**, not whether an agent will reach
+it, and the gap between those is wide. These reformulations were written by someone who
+had already read the target and knew its wording. An agent has not read it — that is why
+it is searching — so it is guessing at vocabulary it cannot see.
+
+How wide is visible in the cases themselves. Of four kept reformulations, **one scores
+0.073, worse than its 0.129 original**; others were discarded for missing the target
+entirely. A given rephrasing is closer to a coin flip than the `+0.4048` mean suggests.
+
+That does not make retrying wrong — the downside is one wasted tool call and the upside
+is a case going 0.129 → 0.496, so several varied attempts remain the right strategy, and
+that is what the `explore-vault` guidance says. But two things follow:
+
+- **Do not quote `0.3253 → 0.7301` as an expected improvement.** It is the score of a
+  well-aimed rephrasing, selected with hindsight.
+- **Measuring real reformulation needs a different instrument** — running the actual
+  agent against these queries and scoring what it produces, rather than what a human
+  who knew the answer produced. Worth building; not what this is.
+
+This is nonetheless what motivated making `algorithm` a per-call `search_notes`
+parameter: the agent can reformulate and re-run at all, and the ranker cannot.
 
 ##### Hole@10 — most of what the ranker returns is unjudged
+
+Figures below are the **pre-second-pass** state that motivated this analysis; the current
+numbers are in the table above (core hybrid 6.8, hard hybrid 7.4). The argument is
+unchanged — the ratio has improved from ~2-in-10 judged to ~3-in-10, not been fixed.
 
 ```
 core (hybrid)    mean 7.4/10 ungraded
@@ -789,9 +931,17 @@ partly be judgment coverage rather than retrieval quality.**
 
 That does not overturn the shipped decision — the modal choice rests on the toggle-intent
 argument, not on this number — but it does mean the hard-tier gap should not be quoted as
-a clean measurement of hybrid's superiority. Filling holes on the worst offenders
-(`when do prices rise so fast…` has 10/10 ungraded) is the highest-value next step for the
-corpus.
+a clean measurement of hybrid's superiority.
+
+**The second pass supplied direct evidence for this prediction.** Filling holes moved the
+hard tier up for *both* algorithms, and moved semantic (0.7205 → 0.7343, +0.0138) further
+than hybrid (0.7754 → 0.7836, +0.0082) — the direction BEIR reports, since semantic
+returns more unjudged results and so has more to gain from judging them. The hybrid-minus-
+semantic gap narrowed from **+0.0549 to +0.0493** on one pass over five queries
+(95% CI [-0.0240, 0.1259], still spanning 0; sign test hybrid 10 / semantic 5 / 10 tied).
+On the core tier semantic is *ahead* and widened slightly, δ=-0.0537 (sign test semantic
+5 / hybrid 2 / 7 tied). Neither is significant, and with ~7 of 10 results still unjudged
+the remaining holes plausibly cover the rest of the hard-tier gap.
 
 ##### 2026-08-18 (re-measured) — corrected matrix on the consolidated layout
 

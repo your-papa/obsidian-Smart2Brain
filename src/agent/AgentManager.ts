@@ -1281,6 +1281,13 @@ export class AgentManager {
 			pluginExecTools: agent.pluginExecTools ?? null,
 			subAgentIds: agent.subAgentIds ?? null,
 			subAgentRevisions,
+			// Not agent config, but it changes the *shape* of a built tool:
+			// `createSearchNotesTool` picks its description and its `algorithm`
+			// parameter docs based on whether an embedding index exists. Without this
+			// the agent would keep being told semantic is unavailable after the user
+			// configured an index (or offered it after they removed one) until
+			// something else happened to invalidate the runnable.
+			searchEmbedIndex: data.searchEmbedIndex ?? null,
 		});
 	}
 

@@ -267,6 +267,31 @@ export function getReadContentDescription(hasImageProcessor: boolean, hasPdfProc
 	return READ_CONTENT_DESC_NONE;
 }
 
+const SEARCH_NOTES_DESC_SHARED =
+	"Search through your Obsidian notes, or return recently opened notes. Returns structured JSON with matching file names, paths, tags, match reasons, short match snippets or headings, privacy flags, and metadata (properties/frontmatter). Use this to identify relevant notes before using other tools.";
+
+/** An embedding index exists, so all three retrieval strategies are usable. */
+export const SEARCH_NOTES_DESC_EMBEDDINGS = `${SEARCH_NOTES_DESC_SHARED} Pick the retrieval strategy with \`algorithm\`: \`lexical\` (default, fast, exact keyword matching) is usually the right first attempt — escalate to \`semantic\` or \`hybrid\` when wording rather than content is the obstacle.`;
+
+/** No embedding index — semantic and hybrid will fall back to lexical. */
+export const SEARCH_NOTES_DESC_LEXICAL_ONLY = `${SEARCH_NOTES_DESC_SHARED} This vault has no embedding index configured, so only \`algorithm: "lexical"\` is available; \`semantic\` and \`hybrid\` fall back to it and say so. Vary your search *terms* rather than the algorithm.`;
+
+/**
+ * Both default variants, for "is this still the shipped default?" matching.
+ *
+ * `normalizeAgent` merges `DEFAULT_TOOLS_CONFIG` into every agent, so
+ * `toolsConfig.search_notes.description` is *always* populated — a plain
+ * `toolConfig?.description ?? dynamicDefault` in the tool factory would therefore never
+ * fall through, and the embedding-aware description would be dead code. Same problem and
+ * same solution as `READ_CONTENT_DESC_DEFAULTS` above.
+ */
+export const SEARCH_NOTES_DESC_DEFAULTS = new Set([SEARCH_NOTES_DESC_EMBEDDINGS, SEARCH_NOTES_DESC_LEXICAL_ONLY]);
+
+/** Returns the search_notes description matching the vault's embedding-index state. */
+export function getSearchNotesDescription(hasEmbeddingIndex: boolean): string {
+	return hasEmbeddingIndex ? SEARCH_NOTES_DESC_EMBEDDINGS : SEARCH_NOTES_DESC_LEXICAL_ONLY;
+}
+
 /**
  * Default configuration for all built-in tools.
  * All tools are enabled by default with standard names and descriptions.
@@ -275,12 +300,13 @@ export const DEFAULT_TOOLS_CONFIG: ToolsConfig = {
 	search_notes: {
 		enabled: true,
 		name: "search_notes",
-		description:
-			"Search through your Obsidian notes by keyword. Returns structured JSON with matching note names plus optional paths, tags, match badges, and short match snippets depending on settings. Use this to identify relevant notes before reading them.",
-		settings: {
-			maxResults: 10,
-			algorithm: "lexical" as SearchAlgorithm,
-		},
+		// Seeded with the embeddings variant; `createSearchNotesTool` swaps it for the
+		// lexical-only text at build time when no index is configured. Any value NOT in
+		// `SEARCH_NOTES_DESC_DEFAULTS` is treated as a user customization and left alone.
+		description: SEARCH_NOTES_DESC_EMBEDDINGS,
+		// No settings: retrieval algorithm and result count are per-call tool parameters
+		// the model picks, and the result-detail flags are hardcoded on for the agent.
+		settings: {},
 	},
 	list_directory: {
 		enabled: true,
@@ -598,7 +624,6 @@ export const DEFAULT_SETTINGS: PluginData = {
 	webSearchApiKeyIds: {},
 
 	// Other
-	searchAlgorithm: "lexical",
 	searchShowPath: true,
 	searchShowTags: true,
 	searchShowMatchBadges: true,
@@ -1496,14 +1521,6 @@ export class PluginDataStore {
 	/** Brings every dismissed recommendation back. Exposed in Developer settings. */
 	restoreDismissedRecommendations() {
 		this.#data.dismissedRecommendations = [];
-		this.saveSettings();
-	}
-
-	get searchAlgorithm() {
-		return this.#data.searchAlgorithm;
-	}
-	set searchAlgorithm(val: SearchAlgorithm) {
-		this.#data.searchAlgorithm = val;
 		this.saveSettings();
 	}
 

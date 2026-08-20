@@ -36,11 +36,45 @@ vi.mock("../../src/utils/logging", () => ({
 	},
 }));
 
+/**
+ * Whether the vault has an embedding index, as the tool sees it.
+ *
+ * Mutable so a test can drive the "semantic requested but unavailable" path, which is
+ * the regression guard for a real bug: `waitForVectorStore()` returns true whenever the
+ * *service* exists, regardless of whether any index is configured, so a semantic search
+ * used to run, retrieve nothing, and report "No notes found matching …" — blaming the
+ * query for a missing capability.
+ *
+ * Read through a getter in the mock factory rather than captured by value: `vi.mock`
+ * factories are hoisted above this declaration, so a direct reference would be in the
+ * temporal dead zone at factory-evaluation time.
+ */
+let mockSearchEmbedIndex: string | null = "openai:text-embedding-3-small";
+
+/**
+ * The description persisted in `toolsConfig`, as `normalizeAgent` would leave it.
+ *
+ * Defaults to a shipped default (not a custom string) because that is the real state
+ * for every agent that has never been edited: the tool must be free to swap it for the
+ * other shipped variant when the embedding index appears or disappears.
+ */
+let mockStoredDescription = "default description (embeddings available)";
+
+// The two description strings are inlined rather than pulled from constants: the factory
+// is hoisted above any `const` declaration, so it cannot reference one.
 vi.mock("../../src/stores/dataStore.svelte", () => ({
+	SEARCH_NOTES_DESC_DEFAULTS: new Set([
+		"default description (embeddings available)",
+		"default description (lexical only)",
+	]),
+	getSearchNotesDescription: (hasIndex: boolean) =>
+		hasIndex ? "default description (embeddings available)" : "default description (lexical only)",
 	getData: () => ({
 		getSearchEmbedModel: vi.fn().mockReturnValue(null),
 		getEmbedModels: vi.fn().mockReturnValue({}),
-		searchAlgorithm: "lexical",
+		get searchEmbedIndex() {
+			return mockSearchEmbedIndex;
+		},
 		searchShowPath: true,
 		searchShowTags: true,
 		searchShowMatchBadges: true,
@@ -52,7 +86,9 @@ vi.mock("../../src/stores/dataStore.svelte", () => ({
 			toolsConfig: {
 				search_notes: {
 					name: "search_notes",
-					description: "Search notes",
+					get description() {
+						return mockStoredDescription;
+					},
 					settings: mockToolSettings,
 				},
 			},
@@ -106,6 +142,8 @@ describe("performSearch lexical startup behavior", () => {
 		mockToolSettings.showMatchBadges = undefined;
 		mockToolSettings.showMatchContext = undefined;
 		mockRecentNotes.length = 0;
+		mockSearchEmbedIndex = "openai:text-embedding-3-small";
+		mockStoredDescription = "default description (embeddings available)";
 		mockWaitForVectorStore.mockResolvedValue(false);
 		mockWaitForLexicalSearch.mockResolvedValue(true);
 		mockShouldBlockFile.mockReturnValue(false);
@@ -823,7 +861,17 @@ describe("performSearch lexical startup behavior", () => {
 		expect(parsed.results.map((entry) => entry.name)).toEqual(["visible-one", "visible-two"]);
 	});
 
-	it("honors per-tool visibility settings for optional search fields", async () => {
+	/*
+	 * Result detail is no longer per-agent configurable.
+	 *
+	 * The four flags still exist for the search *modal* (Settings → Search → Display),
+	 * but the agent always gets all of them: it needs match context to decide what to
+	 * open, and the volume is bounded by `maxResults`. Existing vaults can still have
+	 * `showPath: false` persisted from before the change — `normalizeAgent` merges rather
+	 * than replaces stored settings — so this pins that such a leftover cannot silently
+	 * strip the agent's results down.
+	 */
+	it("ignores stale per-tool visibility settings and always returns full result detail", async () => {
 		mockToolSettings.showPath = false;
 		mockToolSettings.showTags = false;
 		mockToolSettings.showMatchBadges = false;
@@ -849,16 +897,339 @@ describe("performSearch lexical startup behavior", () => {
 		const result = await tool.invoke({ query: "propulsion" });
 		const parsed: SearchToolResultPayload = JSON.parse(String(result));
 
-		// The point of this test is which fields are *omitted*; the score value is
+		// The point of this test is which fields are *present*; the score value is
 		// incidental and is now a normalized fusion score rather than raw BM25.
 		expect(parsed.results[0]).toMatchObject({
 			rank: 1,
 			name: "orbital-index",
 			frontmatter: { aliases: ["Rocket Science"] },
 		});
-		expect(parsed.results[0]?.path).toBeUndefined();
-		expect(parsed.results[0]?.tags).toBeUndefined();
-		expect(parsed.results[0]?.matchBadges).toBeUndefined();
-		expect(parsed.results[0]?.matchExplanation).toBeUndefined();
+		expect(parsed.results[0]?.path).toBe("Notes/orbital-index.md");
+		expect(parsed.results[0]?.tags).toEqual(["#space"]);
+		expect(parsed.results[0]?.matchBadges).toEqual(["tag", "content"]);
+		expect(parsed.results[0]?.matchExplanation).toMatchObject({ heading: "Launch Checklist" });
+	});
+});
+
+/*
+ * The `algorithm` parameter and its availability handling.
+ *
+ * Retrieval strategy moved from a per-agent setting to a per-call parameter because
+ * there is no globally right answer — on the graded benchmark semantic wins the core
+ * tier while hybrid wins the hard tier, neither significantly. The caller holds the
+ * query context that decides it.
+ *
+ * The availability half fixes a real bug rather than guarding a new feature: see the
+ * comment on `mockSearchEmbedIndex`.
+ */
+describe("search_notes algorithm parameter", () => {
+	/**
+	 * A vector store that is configured, initialized and populated — the only state in
+	 * which a semantic request runs as asked.
+	 *
+	 * `getStats` is part of the contract because a configured index id is necessary but
+	 * not sufficient: `semanticSearch` returns a bare `[]` for six different failure
+	 * conditions, and `[]` is indistinguishable from "no matches".
+	 */
+	function semanticStore(
+		results: Array<{ path: string; name: string; score: number }>,
+		stats: { isReady?: boolean; documentCount?: number } = {},
+	) {
+		mockWaitForVectorStore.mockResolvedValue(true);
+		const semanticSearch = vi.fn().mockResolvedValue(results);
+		const getStats = vi.fn().mockResolvedValue({
+			isReady: stats.isReady ?? true,
+			documentCount: stats.documentCount ?? 42,
+			providerId: "openai",
+			modelId: "text-embedding-3-small",
+		});
+		mockGetVectorStoreService.mockReturnValue({ semanticSearch, getStats });
+		return semanticSearch;
+	}
+
+	beforeEach(() => {
+		vi.clearAllMocks();
+		mockToolSettings.showPath = undefined;
+		mockToolSettings.showTags = undefined;
+		mockToolSettings.showMatchBadges = undefined;
+		mockToolSettings.showMatchContext = undefined;
+		mockRecentNotes.length = 0;
+		mockSearchEmbedIndex = "openai:text-embedding-3-small";
+		mockStoredDescription = "default description (embeddings available)";
+		mockWaitForVectorStore.mockResolvedValue(false);
+		mockWaitForLexicalSearch.mockResolvedValue(true);
+		mockShouldBlockFile.mockReturnValue(false);
+		mockGetLexicalSearchService.mockReturnValue({ search: mockLexicalSearch, browse: mockBrowse });
+		mockLexicalSearch.mockResolvedValue([{ path: "Notes/alpha.md", name: "alpha", score: 12 }]);
+	});
+
+	it("defaults to lexical when the caller passes no algorithm", async () => {
+		const semanticSearch = semanticStore([{ path: "Notes/sem.md", name: "sem", score: 0.9 }]);
+
+		const tool = createSearchNotesTool({} as App);
+		const parsed: SearchToolResultPayload = JSON.parse(String(await tool.invoke({ query: "alpha" })));
+
+		expect(parsed.algorithm).toBe("lexical");
+		expect(semanticSearch).not.toHaveBeenCalled();
+		expect(mockLexicalSearch).toHaveBeenCalled();
+	});
+
+	it("runs the requested algorithm when an embedding index exists", async () => {
+		const semanticSearch = semanticStore([{ path: "Notes/sem.md", name: "sem", score: 0.9 }]);
+
+		const tool = createSearchNotesTool({} as App);
+		const parsed: SearchToolResultPayload = JSON.parse(
+			String(await tool.invoke({ query: "alpha", algorithm: "semantic" })),
+		);
+
+		expect(parsed.algorithm).toBe("semantic");
+		expect(parsed.requestedAlgorithm).toBeUndefined();
+		expect(parsed.message).toBeUndefined();
+		expect(semanticSearch).toHaveBeenCalled();
+		// Semantic mode is single-source: no lexical leg at all.
+		expect(mockLexicalSearch).not.toHaveBeenCalled();
+	});
+
+	it("downgrades semantic to lexical and explains why when no index is configured", async () => {
+		mockSearchEmbedIndex = null;
+		const semanticSearch = semanticStore([{ path: "Notes/sem.md", name: "sem", score: 0.9 }]);
+
+		const tool = createSearchNotesTool({} as App);
+		const parsed: SearchToolResultPayload = JSON.parse(
+			String(await tool.invoke({ query: "alpha", algorithm: "semantic" })),
+		);
+
+		expect(parsed.algorithm).toBe("lexical");
+		expect(parsed.requestedAlgorithm).toBe("semantic");
+		expect(parsed.message).toMatch(/no embedding index is configured/i);
+		// The agent must be told not to keep retrying a capability that cannot appear.
+		expect(parsed.message).toMatch(/do not retry/i);
+		expect(semanticSearch).not.toHaveBeenCalled();
+		// Crucially it still returns results, rather than an empty set blamed on the query.
+		expect(parsed.results.length).toBeGreaterThan(0);
+	});
+
+	it("downgrades hybrid the same way", async () => {
+		mockSearchEmbedIndex = null;
+
+		const tool = createSearchNotesTool({} as App);
+		const parsed: SearchToolResultPayload = JSON.parse(
+			String(await tool.invoke({ query: "alpha", algorithm: "hybrid" })),
+		);
+
+		expect(parsed.algorithm).toBe("lexical");
+		expect(parsed.requestedAlgorithm).toBe("hybrid");
+	});
+
+	it("does not claim a downgrade for an explicit lexical request", async () => {
+		mockSearchEmbedIndex = null;
+
+		const tool = createSearchNotesTool({} as App);
+		const parsed: SearchToolResultPayload = JSON.parse(
+			String(await tool.invoke({ query: "alpha", algorithm: "lexical" })),
+		);
+
+		expect(parsed.algorithm).toBe("lexical");
+		expect(parsed.requestedAlgorithm).toBeUndefined();
+		expect(parsed.message).toBeUndefined();
+	});
+
+	it("reports the downgrade even when the fallback finds nothing", async () => {
+		// The failure this exists to prevent: an empty semantic result set being reported
+		// as "no notes found", which reads as a fact about the query rather than about a
+		// missing capability, and sends the agent off reformulating for no reason.
+		mockSearchEmbedIndex = null;
+		mockLexicalSearch.mockResolvedValue([]);
+
+		const tool = createSearchNotesTool({} as App);
+		const parsed: SearchToolResultPayload = JSON.parse(
+			String(await tool.invoke({ query: "nothing matches this", algorithm: "semantic" })),
+		);
+
+		expect(parsed.results).toHaveLength(0);
+		expect(parsed.requestedAlgorithm).toBe("semantic");
+		expect(parsed.message).toMatch(/no embedding index is configured/i);
+		expect(parsed.message).toMatch(/also found no notes/i);
+	});
+
+	it("describes the tool differently depending on whether embeddings are available", async () => {
+		const withIndex = createSearchNotesTool({} as App).description;
+		mockSearchEmbedIndex = null;
+		const withoutIndex = createSearchNotesTool({} as App).description;
+
+		expect(withIndex).not.toBe(withoutIndex);
+		expect(withoutIndex).toMatch(/lexical only/i);
+	});
+
+	/*
+	 * The swap above must not trample a description the user wrote themselves.
+	 *
+	 * `normalizeAgent` merges DEFAULT_TOOLS_CONFIG into every agent, so the stored
+	 * description is always populated — a plain `?? fallback` would never fire, and
+	 * unconditionally overwriting would silently discard customizations. The tool
+	 * therefore swaps only when the stored value is still one of the shipped defaults.
+	 */
+	it("preserves a user-customized description instead of swapping it", async () => {
+		mockStoredDescription = "Find my notes, my way";
+
+		expect(createSearchNotesTool({} as App).description).toBe("Find my notes, my way");
+		mockSearchEmbedIndex = null;
+		expect(createSearchNotesTool({} as App).description).toBe("Find my notes, my way");
+	});
+
+	/*
+	 * A configured index id is necessary but NOT sufficient.
+	 *
+	 * `semanticSearch` returns a bare `[]` when the index is uninitialized, has no
+	 * instance, no model, no embeddings, the query is too large, or a provider call
+	 * threw — and `[]` reads identically to "this query has no matches". Reporting the
+	 * latter for the former makes the agent treat an infrastructure failure as evidence
+	 * about the vault's contents. These pin the distinction per cause, because the retry
+	 * advice differs: a missing index cannot appear mid-conversation, but a building one
+	 * can finish.
+	 */
+	it("downgrades when the index is configured but not initialized", async () => {
+		semanticStore([], { isReady: false });
+
+		const tool = createSearchNotesTool({} as App);
+		const parsed = JSON.parse(String(await tool.invoke({ query: "alpha", algorithm: "semantic" })));
+
+		expect(parsed.algorithm).toBe("lexical");
+		expect(parsed.requestedAlgorithm).toBe("semantic");
+		expect(parsed.message).toMatch(/could not be initialized/i);
+		// Must NOT tell the agent this is permanent — a provider can come back.
+		expect(parsed.message).not.toMatch(/do not retry/i);
+		expect(parsed.results.length).toBeGreaterThan(0);
+	});
+
+	/*
+	 * An empty index must NOT downgrade.
+	 *
+	 * `ensureIndex` builds on demand — `if (count === 0 …) await this.buildFullIndex(...)`
+	 * — so a configured-but-empty index is a first search that populates it and then
+	 * answers normally. An availability check that rejects on `documentCount === 0`
+	 * preempts that build and reports a permanent-sounding failure for a state that
+	 * resolves itself.
+	 */
+	it("does not downgrade an empty index — the search builds it on demand", async () => {
+		const semanticSearch = semanticStore([{ path: "Notes/sem.md", name: "sem", score: 0.9 }], {
+			documentCount: 0,
+		});
+
+		const tool = createSearchNotesTool({} as App);
+		const parsed = JSON.parse(String(await tool.invoke({ query: "alpha", algorithm: "hybrid" })));
+
+		expect(semanticSearch).toHaveBeenCalled();
+		expect(parsed.algorithm).toBe("hybrid");
+		expect(parsed.requestedAlgorithm).toBeUndefined();
+		expect(parsed.message).toBeUndefined();
+	});
+
+	it("downgrades rather than throwing when availability cannot be determined", async () => {
+		mockWaitForVectorStore.mockResolvedValue(true);
+		mockGetVectorStoreService.mockReturnValue({
+			semanticSearch: vi.fn(),
+			getStats: vi.fn().mockRejectedValue(new Error("index failed to open")),
+		});
+
+		const tool = createSearchNotesTool({} as App);
+		const parsed = JSON.parse(String(await tool.invoke({ query: "alpha", algorithm: "semantic" })));
+
+		expect(parsed.algorithm).toBe("lexical");
+		expect(parsed.requestedAlgorithm).toBe("semantic");
+		expect(parsed.results.length).toBeGreaterThan(0);
+	});
+
+	/*
+	 * `recentOnly` returns the recent-note history and never searches, so no algorithm
+	 * applies. Resolving one anyway labelled the history as lexical output and, on an
+	 * empty history, claimed a search found nothing for a search that never ran —
+	 * sending the agent off to reformulate a query that was never used.
+	 */
+	it("does not claim a downgrade for a recentOnly call", async () => {
+		mockSearchEmbedIndex = null;
+
+		const tool = createSearchNotesTool({} as App);
+		const parsed = JSON.parse(String(await tool.invoke({ recentOnly: true, algorithm: "semantic" })));
+
+		// The point of the fix: no downgrade metadata for a path that never searched,
+		// and no `algorithm` either — labelling plain history as lexical/semantic/hybrid
+		// retrieval output is false, and `algorithm` is a field consumers trust.
+		expect(parsed.algorithm).toBeUndefined();
+		expect(parsed.requestedAlgorithm).toBeUndefined();
+		expect(parsed.message).not.toMatch(/semantic search is unavailable/i);
+	});
+
+	it("reports no algorithm for recentOnly even when the index is healthy", async () => {
+		semanticStore([{ path: "Notes/sem.md", name: "sem", score: 0.9 }]);
+
+		const tool = createSearchNotesTool({} as App);
+		const parsed = JSON.parse(String(await tool.invoke({ recentOnly: true, algorithm: "semantic" })));
+
+		expect(parsed.algorithm).toBeUndefined();
+		expect(parsed.recentOnly).toBe(true);
+	});
+
+	it("explains an empty recentOnly result as history, not a failed search", async () => {
+		mockSearchEmbedIndex = null;
+
+		const tool = createSearchNotesTool({} as App);
+		const parsed = JSON.parse(String(await tool.invoke({ recentOnly: true, algorithm: "hybrid" })));
+
+		expect(parsed.results).toHaveLength(0);
+		expect(parsed.message).toMatch(/not a search/i);
+		expect(parsed.message).not.toMatch(/try a different search term/i);
+	});
+});
+
+/*
+ * `maxResults` is a per-call parameter for the same reason as `algorithm`: "find the
+ * note about X" wants a handful and "what do I have on Y" wants a page, and only the
+ * caller knows which. It is clamped rather than rejected — a model asking for 100 means
+ * "as many as you can", and failing the call over it helps nobody.
+ */
+describe("search_notes maxResults parameter", () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+		mockRecentNotes.length = 0;
+		mockSearchEmbedIndex = null;
+		mockStoredDescription = "default description (embeddings available)";
+		mockWaitForVectorStore.mockResolvedValue(false);
+		mockWaitForLexicalSearch.mockResolvedValue(true);
+		mockShouldBlockFile.mockReturnValue(false);
+		mockGetLexicalSearchService.mockReturnValue({ search: mockLexicalSearch, browse: mockBrowse });
+		mockLexicalSearch.mockResolvedValue(
+			Array.from({ length: 40 }, (_, i) => ({ path: `Notes/n${i}.md`, name: `n${i}`, score: 100 - i })),
+		);
+	});
+
+	it("defaults to 10 when the caller does not ask", async () => {
+		const tool = createSearchNotesTool({} as App);
+		const parsed = JSON.parse(String(await tool.invoke({ query: "alpha" })));
+
+		expect(parsed.maxResults).toBe(10);
+		expect(parsed.results).toHaveLength(10);
+	});
+
+	it("honours a caller-supplied value", async () => {
+		const tool = createSearchNotesTool({} as App);
+		const parsed = JSON.parse(String(await tool.invoke({ query: "alpha", maxResults: 3 })));
+
+		expect(parsed.results).toHaveLength(3);
+	});
+
+	it("clamps above the ceiling instead of failing", async () => {
+		const tool = createSearchNotesTool({} as App);
+		const parsed = JSON.parse(String(await tool.invoke({ query: "alpha", maxResults: 500 })));
+
+		expect(parsed.maxResults).toBe(25);
+		expect(parsed.results).toHaveLength(25);
+	});
+
+	it("clamps a non-positive value to at least one result", async () => {
+		const tool = createSearchNotesTool({} as App);
+		const parsed = JSON.parse(String(await tool.invoke({ query: "alpha", maxResults: 0 })));
+
+		expect(parsed.results).toHaveLength(1);
 	});
 });

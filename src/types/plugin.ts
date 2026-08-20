@@ -14,9 +14,14 @@ import type { SmartGraphSettings } from "./graph";
  * - `hybrid` — both legs fused at `SEMANTIC_SOURCE_WEIGHT`.
  *
  * The modal's Tab toggle picks `lexical` ↔ `semantic`, because by the time a user
- * toggles it they have already seen and rejected the lexical ordering. The agent's
- * `search_notes` tool defaults to whatever `dataStore.searchAlgorithm` says and is
- * usually left on hybrid, where there is no prior view to reject.
+ * toggles it they have already seen and rejected the lexical ordering.
+ *
+ * The agent's `search_notes` tool takes this as a **per-call parameter** rather than a
+ * setting, defaulting to `lexical`. There is no globally correct choice to configure:
+ * measured on the graded benchmark, semantic wins the core tier (δ=-0.0537) while hybrid
+ * wins the hard tier (+0.0493), and neither difference is significant. The caller holds
+ * the query context that decides it, so the model picks per call and escalates from
+ * `lexical` when wording rather than content is the obstacle.
  */
 export type SearchAlgorithm = "lexical" | "semantic" | "hybrid";
 
@@ -166,23 +171,14 @@ export interface StaleGuidance {
 	label: string;
 }
 
-/**
- * Tool-specific settings for search_notes tool
+/*
+ * `SearchNotesSettings` was removed: the tool has no user-configurable settings.
+ *
+ * Retrieval algorithm and result count are per-call parameters the model picks — it has
+ * the query context to choose and the user does not — and the result-detail flags are
+ * hardcoded on for the agent (they remain user-facing for the search *modal*). See
+ * `SearchAlgorithm` and `createSearchNotesTool`.
  */
-export interface SearchNotesSettings {
-	/** Maximum number of results to return */
-	maxResults: number;
-	/** Search algorithm to use */
-	algorithm: SearchAlgorithm;
-	/** Whether to include note paths in results */
-	showPath?: boolean;
-	/** Whether to include note tags in results */
-	showTags?: boolean;
-	/** Whether to include match badges in results */
-	showMatchBadges?: boolean;
-	/** Whether to include content snippets and heading context in results */
-	showMatchContext?: boolean;
-}
 
 /**
  * Tool-specific settings for read_content tool
@@ -238,7 +234,6 @@ export interface ManageNotesSettings {
  * Union type of all tool-specific settings
  */
 export type ToolSpecificSettings =
-	| SearchNotesSettings
 	| ReadContentSettings
 	| GrepNotesSettings
 	| ManageNotesSettings
@@ -587,7 +582,13 @@ export interface PluginData {
 	// Other
 	// ============================================================================
 
-	searchAlgorithm: SearchAlgorithm;
+	/**
+	 * Result-detail flags for the search **modal** (Settings → Search → Display).
+	 *
+	 * The agent's `search_notes` tool no longer reads these — it hardcodes all four on,
+	 * since it benefits from match context when choosing what to open and the token cost
+	 * is bounded by `maxResults`.
+	 */
 	searchShowPath: boolean;
 	searchShowTags: boolean;
 	searchShowMatchBadges: boolean;
