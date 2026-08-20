@@ -130,6 +130,35 @@ describe("update notices", () => {
 		expect(visible.map((n) => n.id)).toEqual(["update:a1:system-prompt"]);
 	});
 
+	it("stamps the current shipped version into the id", () => {
+		expect(updateNoticeId("a1", "system-prompt", undefined, 2)).toBe("update:a1:system-prompt@2");
+		expect(updateNoticeId(undefined, "skill", "explore-vault", "1.1")).toBe(
+			"update:global:skill:explore-vault@1.1",
+		);
+	});
+
+	/*
+	 * Dismissals persist forever in plugin data, so the version must be part of the key: a
+	 * user who dismissed the v2 notice has not opted out of hearing about v3. Without the
+	 * stamp, one dismissal would swallow every future update notice for that surface.
+	 */
+	it("re-surfaces a notice when the default bumps again after a dismissal", () => {
+		const v2: StaleGuidanceLike = { ...sys, currentVersion: 2 };
+		const v3: StaleGuidanceLike = { ...sys, currentVersion: 3 };
+		const dismissedV2 = [updateNoticeId("a1", "system-prompt", undefined, 2)];
+
+		expect(filterUpdateNotices([v2], dismissedV2)).toEqual([]);
+		expect(filterUpdateNotices([v3], dismissedV2).map((n) => n.id)).toEqual(["update:a1:system-prompt@3"]);
+	});
+
+	it("carries the customized flag through so the wording can tell the two cases apart", () => {
+		const kept: StaleGuidanceLike = { ...sys, customized: true };
+		const failedUpdate: StaleGuidanceLike = { ...sys, customized: false };
+
+		expect(filterUpdateNotices([kept], [])[0].customized).toBe(true);
+		expect(filterUpdateNotices([failedUpdate], [])[0].customized).toBe(false);
+	});
+
 	it("returns nothing when the whole block is dismissed", () => {
 		expect(filterUpdateNotices([sys, sys2], [DISMISS_ALL_ID])).toEqual([]);
 	});

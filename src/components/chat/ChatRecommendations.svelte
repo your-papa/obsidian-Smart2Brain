@@ -10,6 +10,7 @@ import {
 	toExecToolId,
 } from "../../agent/integrations/pluginIntegrations";
 import { icon } from "../../utils/utils";
+import { skillsDir } from "../../utils/agentPaths";
 import { Logger } from "../../utils/logging";
 import { extractErrorMessage } from "../../utils/errorMessage";
 import { ModelSelectionModal } from "../modal/ModelSelectionModal";
@@ -214,13 +215,21 @@ function dismiss(id: string): void {
 	data.dismissRecommendation(id);
 }
 
-// Opens the base-system-prompt diff for a stale-guidance notice's Review action.
+// Opens the right editing surface for a stale-guidance notice's Review action. The two
+// prompt surfaces get their diff modal (yours vs the current default); a skill is edited as
+// an ordinary vault note, so it opens as one — there is no modal for skill bodies.
 function reviewNotice(notice: UpdateNotice): void {
-	const mgr = plugin.agentManager;
-	if (!mgr) return;
-	if (notice.kind === "system-prompt" && notice.agentId) {
-		mgr.openSystemPromptDiff(notice.agentId);
+	if (notice.kind === "skill") {
+		if (notice.skillName) {
+			plugin.app.workspace.openLinkText(`${skillsDir()}/${notice.skillName}/SKILL.md`, "", true);
+		}
+		return;
 	}
+
+	const mgr = plugin.agentManager;
+	if (!mgr || !notice.agentId) return;
+	if (notice.kind === "system-prompt") mgr.openSystemPromptDiff(notice.agentId);
+	else mgr.openMemoryPromptDiff(notice.agentId);
 }
 </script>
 
@@ -290,7 +299,17 @@ function reviewNotice(notice: UpdateNotice): void {
         <div class="s2b-notice">
           <span class="s2b-notice-icon" use:icon={"refresh-cw"} style="--icon-size: 14px"></span>
           <span class="s2b-notice-text">
-            {#if notice.agentName}
+            <!-- customized === false means the file is an untouched OLD default whose silent
+                 auto-update failed — claiming "your customized version was kept" there would
+                 assert an edit the user never made. -->
+            {#if notice.customized === false}
+              {#if notice.agentName}
+                The default {notice.label} changed, but <strong>{notice.agentName}</strong>'s copy
+                couldn't be updated automatically.
+              {:else}
+                The default {notice.label} changed, but your copy couldn't be updated automatically.
+              {/if}
+            {:else if notice.agentName}
               The default {notice.label} changed. <strong>{notice.agentName}</strong>'s customized
               version was kept.
             {:else}

@@ -3,12 +3,7 @@ import { tool } from "@langchain/core/tools";
 import { HumanMessage } from "@langchain/core/messages";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { z } from "zod";
-import {
-	DEFAULT_TOOLS_CONFIG,
-	READ_CONTENT_DESC_DEFAULTS,
-	getData,
-	getReadContentDescription,
-} from "../../stores/dataStore.svelte";
+import { DEFAULT_TOOLS_CONFIG, getData, getReadContentDescription } from "../../stores/dataStore.svelte";
 import { getPendingChangesStore } from "../../stores/pendingChangesStore.svelte";
 import {
 	isImageExtension,
@@ -595,12 +590,11 @@ export function createReadContentTool(app: App, imageProcessor?: BaseChatModel, 
 
 	const toolConfig = getToolConfig();
 
-	// Select the appropriate description based on configured processors.
-	// Only override if the stored description matches one of the 4 defaults (user hasn't customized it).
-	let description = toolConfig?.description ?? defaultToolConfig.description;
-	if (READ_CONTENT_DESC_DEFAULTS.has(description)) {
-		description = getReadContentDescription(!!imageProcessor, !!pdfProcessor);
-	}
+	// Always derived from the live processor configuration — never read back from the stored
+	// config. Tool descriptions aren't user-editable (ToolConfigForm renders no input for
+	// them), so a stored value is only ever a shipped default, and honouring it would just
+	// freeze this at whichever variant was current when the config was last written.
+	const description = getReadContentDescription(!!imageProcessor, !!pdfProcessor);
 
 	return tool(readContentFn, {
 		name: toolConfig?.name ?? defaultToolConfig.name,

@@ -3,6 +3,8 @@
  * Skills are appended at runtime based on what's installed and enabled.
  */
 
+import { type ShippedHistory, fingerprint } from "../utils/shippedDefaults";
+
 export const BASE_SYSTEM_PROMPT = `# Role
 You are a privacy-aware assistant integrated into Obsidian. You help users search and understand their notes.
 
@@ -81,8 +83,30 @@ export function buildDefaultMemoryPrompt(folder: string): string {
 export const BASE_SYSTEM_PROMPT_VERSION = 1;
 
 /**
- * Maps each historical version number to the exact prompt string shipped at that version.
- * Lets normalizeAgent() detect "still on old default" vs "user customized" without storing
- * a hash. Keep all entries forever — never remove old versions.
+ * Every base system prompt we have ever shipped, as version → fingerprint. Lets callers tell
+ * "still on an old default" (update silently) from "user customized" (leave alone, raise a
+ * notice) — see {@link isShippedDefault}.
+ *
+ * When BASE_SYSTEM_PROMPT changes: bump {@link BASE_SYSTEM_PROMPT_VERSION}, and add the
+ * PREVIOUS text's fingerprint here under its old version number before replacing the
+ * constant. Entries are append-only — dropping one makes untouched copies of that version
+ * read as customizations.
  */
-export const HISTORICAL_SYSTEM_PROMPTS: ReadonlyMap<number, string> = new Map([[1, BASE_SYSTEM_PROMPT]]);
+export const SHIPPED_BASE_PROMPTS: ShippedHistory = new Map([
+	[BASE_SYSTEM_PROMPT_VERSION, fingerprint(BASE_SYSTEM_PROMPT)],
+]);
+
+/** Increment when DEFAULT_MEMORY_PROMPT changes in a way that affects agent behaviour. */
+export const DEFAULT_MEMORY_PROMPT_VERSION = 1;
+
+/**
+ * Every memory prompt we have ever shipped, as version → fingerprint. Same contract as
+ * {@link SHIPPED_BASE_PROMPTS}.
+ *
+ * This surface previously had no history at all — it was compared against the *current*
+ * constant only, so the first change to DEFAULT_MEMORY_PROMPT would have classified every
+ * existing install as user-customized: never auto-migrated, and never flagged either.
+ */
+export const SHIPPED_MEMORY_PROMPTS: ShippedHistory = new Map([
+	[DEFAULT_MEMORY_PROMPT_VERSION, fingerprint(DEFAULT_MEMORY_PROMPT)],
+]);

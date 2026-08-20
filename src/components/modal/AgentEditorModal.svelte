@@ -31,6 +31,7 @@ import {
 	toExecToolId,
 } from "../../agent/integrations/pluginIntegrations";
 import { BASE_SYSTEM_PROMPT, DEFAULT_MEMORY_PROMPT } from "../../agent/prompts";
+import { normalizeShipped } from "../../utils/shippedDefaults";
 import { agentPromptDir, basePromptPath, memoryPromptPath } from "../../utils/agentPaths";
 import { Logger } from "../../utils/logging";
 import { extractErrorMessage } from "../../utils/errorMessage";
@@ -263,7 +264,9 @@ const basePromptDrifted = $derived.by(() => {
 	void basePromptDriftTick;
 	if (!selectedAgent) return false;
 	const content = plugin.promptFilesService?.getBasePrompt(agentId) ?? BASE_SYSTEM_PROMPT;
-	return content.trim() !== BASE_SYSTEM_PROMPT.trim();
+	// Same normalization the shipped-default check uses, so a file that differs only by
+	// line endings or a trailing newline doesn't offer a diff against identical text.
+	return normalizeShipped(content) !== normalizeShipped(BASE_SYSTEM_PROMPT);
 });
 
 function openBasePromptDiff() {
@@ -290,7 +293,7 @@ const memoryPromptDrifted = $derived.by(() => {
 	void memoryPromptDriftTick;
 	if (!selectedAgent) return false;
 	const content = plugin.promptFilesService?.getMemoryPrompt(agentId) ?? DEFAULT_MEMORY_PROMPT;
-	return content.trim() !== DEFAULT_MEMORY_PROMPT.trim();
+	return normalizeShipped(content) !== normalizeShipped(DEFAULT_MEMORY_PROMPT);
 });
 
 function openMemoryPromptDiff() {

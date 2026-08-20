@@ -156,19 +156,35 @@ export interface PromptFileReader {
 }
 
 /**
- * A built-in prompt default that changed in a plugin update while the user had a customized
- * version, so it couldn't be auto-migrated. Surfaced as a dismissable "updated" notice in the
- * new-chat recommendations surface (issue #356). Only the per-agent base system prompt is
- * tracked this way now — skill/tool guidance moved into skill bodies (edited via the note).
+ * A built-in default that changed in a plugin update while the user had a customized version,
+ * so it couldn't be auto-migrated. Surfaced as a dismissable "updated" notice in the new-chat
+ * recommendations surface (issue #356), extended to all editable surfaces in #401.
+ *
+ * Tool descriptions are deliberately absent: they aren't user-editable (no input renders for
+ * them in ToolConfigForm), so a stored description is always a shipped default and is simply
+ * recomputed rather than tracked.
  */
 export interface StaleGuidance {
-	/** Owning agent for the base system prompt. */
+	/** Owning agent for the per-agent prompt surfaces. Absent for skills, which are global. */
 	agentId?: string;
 	agentName?: string;
 	/** Which surface is stale. */
-	kind: "system-prompt";
+	kind: "system-prompt" | "memory-prompt" | "skill";
 	/** Human-readable label for the notice, e.g. "system prompt". */
 	label: string;
+	/** For `kind: "skill"`, the bundled skill's name — used to open its note on Review. */
+	skillName?: string;
+	/**
+	 * The version the shipped default is CURRENTLY at. Part of the notice's dismissal key, so
+	 * dismissing this update's notice doesn't also swallow the notice for the next one.
+	 */
+	currentVersion?: number | string;
+	/**
+	 * True when the user's own edit was preserved (the normal case for skills). False when the
+	 * file is an untouched OLD default that the silent auto-update failed to rewrite — the
+	 * wording must not then claim a customization the user never made.
+	 */
+	customized?: boolean;
 }
 
 /*

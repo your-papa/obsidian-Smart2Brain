@@ -2,7 +2,8 @@ import type { App, DataAdapter } from "obsidian";
 import type { AgentsConfig, PromptFileReader } from "../types/plugin";
 import { agentPromptDir, agentRootDir, basePromptPath, memoryPromptPath, systemPromptsDir } from "../utils/agentPaths";
 import { Logger as Log } from "../utils/logging";
-import { BASE_SYSTEM_PROMPT, DEFAULT_MEMORY_PROMPT } from "./prompts";
+import { type ShippedHistory, currentShippedVersion, shippedVersion } from "../utils/shippedDefaults";
+import { BASE_SYSTEM_PROMPT, DEFAULT_MEMORY_PROMPT, SHIPPED_BASE_PROMPTS, SHIPPED_MEMORY_PROMPTS } from "./prompts";
 
 /**
  * The two prompt fragments concatenated into one agent's assembled system prompt, both living
@@ -17,6 +18,8 @@ interface PromptKind {
 	path: (agentId: string) => string;
 	/** Factory default written when the note is absent, and used when the cache is empty. */
 	fallback: string;
+	/** Every default we ever shipped for this kind, so seeding can tell an untouched old default (update silently) from a user edit (never touch). */
+	history: ShippedHistory;
 	/** Transient field on the agent config carrying a migrated pre-file customization. */
 	migratedField: "migratedBasePrompt" | "migratedMemoryPrompt";
 }
@@ -25,6 +28,7 @@ const BASE_PROMPT: PromptKind = {
 	label: "base prompt",
 	path: basePromptPath,
 	fallback: BASE_SYSTEM_PROMPT,
+	history: SHIPPED_BASE_PROMPTS,
 	migratedField: "migratedBasePrompt",
 };
 
@@ -32,6 +36,7 @@ const MEMORY_PROMPT: PromptKind = {
 	label: "memory prompt",
 	path: memoryPromptPath,
 	fallback: DEFAULT_MEMORY_PROMPT,
+	history: SHIPPED_MEMORY_PROMPTS,
 	migratedField: "migratedMemoryPrompt",
 };
 
@@ -86,10 +91,18 @@ export class PromptFilesService {
 	}
 
 	/**
-	 * Seed default files on first run: write each agent's note when absent (never clobber an
-	 * edit). Content is the kind's factory default, UNLESS a config→file migration stashed a
-	 * customized prompt on the agent's transient — in that case the user's old customization is
-	 * written to the new file (and the transient cleared) so the move never silently discards it.
+	 * Seed default files on first run, and keep untouched ones current on every run.
+	 *
+	 * - Absent → write the kind's factory default, UNLESS a config→file migration stashed a
+	 *   customized prompt on the agent's transient — then the user's old customization is
+	 *   written instead (and the transient cleared) so the move never silently discards it.
+	 * - Present and matching an OLD shipped default → the user never edited it, so the moved
+	 *   default is applied silently (same contract as `SkillsService.reconcileBundledSkill`).
+	 *   Without this, an untouched install would be stuck on the old prompt with only a
+	 *   notice asking the user to reset by hand.
+	 * - Present and anything else → the user's edit; never clobbered. If the shipped default
+	 *   has moved since, the staleness getter surfaces a notice — that path also catches a
+	 *   failed rewrite here, since the file then still fingerprints as an old default.
 	 */
 	async seedDefaults(agents: AgentsConfig): Promise<void> {
 		await this.ensureDirs();
@@ -101,9 +114,15 @@ export class PromptFilesService {
 				const migrated = agent?.[kind.migratedField]?.trim() ? agent[kind.migratedField] : null;
 				try {
 					if (await this.adapter.exists(path)) {
-						// File already present — never clobber an edit. The migrated prompt is
-						// superseded by the on-disk file, so the transient is spent: clear it.
+						// File already present — the migrated prompt is superseded by the
+						// on-disk file, so the transient is spent: clear it.
 						this.clearMigrated(kind, agent);
+						const content = await this.adapter.read(path);
+						const version = shippedVersion(content, kind.history);
+						if (version !== null && version !== currentShippedVersion(kind.history)) {
+							await this.adapter.write(path, kind.fallback);
+							Log.info(`Updated ${kind.label} for ${agentId} from shipped v${version} to current`);
+						}
 						continue;
 					}
 					await this.ensureParent(path);
