@@ -1,5 +1,5 @@
 import { normalizePath } from "obsidian";
-import { BASE_SYSTEM_PROMPT, DEFAULT_MEMORY_PROMPT, HISTORICAL_SYSTEM_PROMPTS } from "../agent/prompts";
+import { SHIPPED_BASE_PROMPTS, SHIPPED_MEMORY_PROMPTS } from "../agent/prompts";
 import {
 	createEmptySpaceFilter,
 	matchesSpaceMembershipDraftPath,
@@ -10,6 +10,7 @@ import {
 import { getSecret, listSecrets, removeSecret, setSecret } from "../lib/secretStorage";
 import { isAgentFilePath } from "../utils/fileFiltering";
 import { sanitizeAgentFileName } from "../utils/agentPaths";
+import { type ShippedHistory, isShippedDefault, shippedVersion } from "../utils/shippedDefaults";
 import type SecondBrainPlugin from "../main";
 import { DEFAULT_AGENT_ICON } from "../types/plugin";
 import type {
@@ -249,14 +250,6 @@ export const READ_CONTENT_DESC_PDF = `${READ_CONTENT_DESC_SHARED} Supports text,
 /** Both processors */
 export const READ_CONTENT_DESC_BOTH = `${READ_CONTENT_DESC_SHARED} Supports text, PDFs (analyzed via vision model), images, and Excalidraw.`;
 
-/** All 4 default description variants for matching */
-export const READ_CONTENT_DESC_DEFAULTS = new Set([
-	READ_CONTENT_DESC_NONE,
-	READ_CONTENT_DESC_IMAGE,
-	READ_CONTENT_DESC_PDF,
-	READ_CONTENT_DESC_BOTH,
-]);
-
 /**
  * Returns the appropriate read_content description based on processor configuration.
  */
@@ -276,17 +269,6 @@ export const SEARCH_NOTES_DESC_EMBEDDINGS = `${SEARCH_NOTES_DESC_SHARED} Pick th
 /** No embedding index — semantic and hybrid will fall back to lexical. */
 export const SEARCH_NOTES_DESC_LEXICAL_ONLY = `${SEARCH_NOTES_DESC_SHARED} This vault has no embedding index configured, so only \`algorithm: "lexical"\` is available; \`semantic\` and \`hybrid\` fall back to it and say so. Vary your search *terms* rather than the algorithm.`;
 
-/**
- * Both default variants, for "is this still the shipped default?" matching.
- *
- * `normalizeAgent` merges `DEFAULT_TOOLS_CONFIG` into every agent, so
- * `toolsConfig.search_notes.description` is *always* populated — a plain
- * `toolConfig?.description ?? dynamicDefault` in the tool factory would therefore never
- * fall through, and the embedding-aware description would be dead code. Same problem and
- * same solution as `READ_CONTENT_DESC_DEFAULTS` above.
- */
-export const SEARCH_NOTES_DESC_DEFAULTS = new Set([SEARCH_NOTES_DESC_EMBEDDINGS, SEARCH_NOTES_DESC_LEXICAL_ONLY]);
-
 /** Returns the search_notes description matching the vault's embedding-index state. */
 export function getSearchNotesDescription(hasEmbeddingIndex: boolean): string {
 	return hasEmbeddingIndex ? SEARCH_NOTES_DESC_EMBEDDINGS : SEARCH_NOTES_DESC_LEXICAL_ONLY;
@@ -300,9 +282,9 @@ export const DEFAULT_TOOLS_CONFIG: ToolsConfig = {
 	search_notes: {
 		enabled: true,
 		name: "search_notes",
-		// Seeded with the embeddings variant; `createSearchNotesTool` swaps it for the
-		// lexical-only text at build time when no index is configured. Any value NOT in
-		// `SEARCH_NOTES_DESC_DEFAULTS` is treated as a user customization and left alone.
+		// Seeded with the embeddings variant; `createSearchNotesTool` derives the live text
+		// (embeddings vs lexical-only) at build time, so this is only a placeholder for the
+		// stored config, never what the model actually sees.
 		description: SEARCH_NOTES_DESC_EMBEDDINGS,
 		// No settings: retrieval algorithm and result count are per-call tool parameters
 		// the model picks, and the result-detail flags are hardcoded on for the agent.
@@ -476,11 +458,8 @@ const MIGRATIONS: Migration[] = [
 			// the async seed writes it to the new file instead of clobbering it with the factory
 			// default. A recognized/absent default is dropped — the file seeds fresh from the default.
 			const oldPrompt = typeof a.systemPrompt === "string" ? (a.systemPrompt as string) : "";
-			const isShippedDefault =
-				!oldPrompt.trim() ||
-				oldPrompt === BASE_SYSTEM_PROMPT ||
-				[...HISTORICAL_SYSTEM_PROMPTS.values()].includes(oldPrompt);
-			if (!isShippedDefault) a.migratedBasePrompt = oldPrompt;
+			const recognized = !oldPrompt.trim() || isShippedDefault(oldPrompt, SHIPPED_BASE_PROMPTS);
+			if (!recognized) a.migratedBasePrompt = oldPrompt;
 			a.systemPrompt = undefined;
 			a.systemPromptVersion = undefined;
 			a.capabilityPrompts = undefined;
@@ -507,7 +486,7 @@ const MIGRATIONS: Migration[] = [
 	},
 	// v6 → v7: the memory prompt moves from this config field to a file
 	//          (Memory Prompts/<Agent Name>.md), same treatment as the v4→v5 base-prompt move.
-	//          If the user CUSTOMIZED it (non-empty and not equal to DEFAULT_MEMORY_PROMPT),
+	//          If the user CUSTOMIZED it (non-empty and not any memory prompt we ever shipped),
 	//          stash it in a transient so the async seed (PromptFilesService.seedDefaults)
 	//          writes it to the new file instead of clobbering it with the factory default.
 	//          A recognized/absent default is dropped — the file seeds fresh from the default.
@@ -515,8 +494,8 @@ const MIGRATIONS: Migration[] = [
 		for (const agent of Object.values(data.agents ?? {})) {
 			const a = agent as unknown as Record<string, unknown>;
 			const oldPrompt = typeof a.memoryPrompt === "string" ? (a.memoryPrompt as string) : "";
-			const isShippedDefault = !oldPrompt.trim() || oldPrompt === DEFAULT_MEMORY_PROMPT;
-			if (!isShippedDefault) a.migratedMemoryPrompt = oldPrompt;
+			const recognized = !oldPrompt.trim() || isShippedDefault(oldPrompt, SHIPPED_MEMORY_PROMPTS);
+			if (!recognized) a.migratedMemoryPrompt = oldPrompt;
 			a.memoryPrompt = undefined;
 		}
 	},
@@ -656,13 +635,24 @@ export class PluginDataStore {
 	 * The moment a user re-aligns a surface, its notice disappears on the next recompute (#356).
 	 */
 	get staleGuidance(): readonly StaleGuidance[] {
-		return computeStaleGuidance(this.#data.agents, this.#promptFileReader);
+		return computeStaleGuidance(this.#data.agents, this.#promptFileReader, this.#staleSkills);
 	}
 
 	/** Reader for file-backed prompt surfaces, injected by the prompt-file store once ready. */
 	#promptFileReader: PromptFileReader | null = null;
 	setPromptFileReader(reader: PromptFileReader | null): void {
 		this.#promptFileReader = reader;
+	}
+
+	/**
+	 * Bundled skills whose on-disk body is neither the current shipped version nor any older
+	 * one — i.e. the user edited them, so seeding couldn't update them in place. Reported by
+	 * SkillsService after each bootstrap. `$state` so the reactive `staleGuidance` getter
+	 * re-runs when bootstrap finishes (it completes well after the first render).
+	 */
+	#staleSkills: string[] = $state([]);
+	setStaleSkills(skillNames: readonly string[]): void {
+		this.#staleSkills = [...skillNames];
 	}
 
 	constructor(plugin: SecondBrainPlugin, initialData: PluginData) {
@@ -2321,42 +2311,89 @@ export class PluginDataStore {
 let _pluginDataStore: PluginDataStore | null = null;
 
 /**
- * Per-agent staleness for the base system prompt (file
- * `System Prompts/<Agent Name>/Base.md`): stale when the file content is an OLD shipped
- * default (the shipped default moved since the user's copy was written). A user customization
- * we don't recognize is left alone; absence ⇒ live default. Skill/tool guidance moved into
- * skill bodies, so it is no longer tracked here.
+ * The two file-backed prompt surfaces under `System Prompts/<Agent Name>/`, each paired with
+ * the history it is checked against and how its notice reads.
+ */
+const PROMPT_SURFACES = [
+	{
+		kind: "system-prompt",
+		label: "system prompt",
+		history: SHIPPED_BASE_PROMPTS,
+		read: (reader: PromptFileReader, agentId: string) => reader.getBasePrompt(agentId),
+	},
+	{
+		kind: "memory-prompt",
+		label: "memory instructions",
+		history: SHIPPED_MEMORY_PROMPTS,
+		read: (reader: PromptFileReader, agentId: string) => reader.getMemoryPrompt(agentId),
+	},
+] as const satisfies readonly {
+	kind: StaleGuidance["kind"];
+	label: string;
+	history: ShippedHistory;
+	read: (reader: PromptFileReader, agentId: string) => string | null;
+}[];
+
+/**
+ * Per-agent staleness for the file-backed prompts (`System Prompts/<Agent Name>/Base.md` and
+ * `Memory.md`): stale when the file holds an OLD shipped default — i.e. the shipped default
+ * moved since the user's copy was written, but the user never touched it, so we could not
+ * silently update it either (the file is theirs to edit).
+ *
+ * A customization we don't recognize is deliberately NOT flagged: the user wrote it on
+ * purpose, and nagging about it would be noise. Absence ⇒ the live default is used.
+ *
+ * Skill staleness is collected separately (skills are files under `Skills/`, not per-agent)
+ * and folded in by {@link computeStaleGuidance}.
  */
 function detectStaleGuidance(agent: AgentConfig, reader: PromptFileReader | null): StaleGuidance[] {
+	if (!reader) return [];
 	const stale: StaleGuidance[] = [];
 
-	if (reader) {
-		const content = reader.getBasePrompt(agent.id);
-		if (content !== null && content !== BASE_SYSTEM_PROMPT) {
-			for (const [, historical] of HISTORICAL_SYSTEM_PROMPTS) {
-				if (historical === content) {
-					stale.push({
-						agentId: agent.id,
-						agentName: agent.name,
-						kind: "system-prompt",
-						label: "system prompt",
-					});
-					break;
-				}
-			}
-		}
+	for (const surface of PROMPT_SURFACES) {
+		const content = surface.read(reader, agent.id);
+		if (content === null) continue;
+		const version = shippedVersion(content, surface.history);
+		// null ⇒ user's own text; the newest key ⇒ already current. Only an older shipped
+		// version means "the default moved out from under an untouched copy".
+		if (version === null || version === currentVersion(surface.history)) continue;
+		stale.push({
+			agentId: agent.id,
+			agentName: agent.name,
+			kind: surface.kind,
+			label: surface.label,
+		});
 	}
 
 	return stale;
 }
 
+/** The newest version in a history (insertion order is oldest → newest by construction). */
+function currentVersion(history: ShippedHistory): number | string | undefined {
+	let last: number | string | undefined;
+	for (const [version] of history) last = version;
+	return last;
+}
+
 /**
- * Aggregates per-agent base-system-prompt staleness across all agents (pure, no mutation).
- * `reader` is null before the prompt-file layer is ready.
+ * Aggregates staleness across all surfaces (pure, no mutation): the per-agent file-backed
+ * prompts, plus the bundled skills whose shipped body moved while the user held an edited
+ * copy. `reader` is null before the prompt-file layer is ready; `staleSkills` is empty until
+ * skill bootstrap has run.
+ *
+ * Skill records carry no agentId — a skill is a single vault file shared by every agent, not
+ * per-agent state — so their notice keys off `global` (see `updateNoticeId`).
  */
-function computeStaleGuidance(agents: AgentsConfig, reader: PromptFileReader | null): StaleGuidance[] {
+function computeStaleGuidance(
+	agents: AgentsConfig,
+	reader: PromptFileReader | null,
+	staleSkills: readonly string[],
+): StaleGuidance[] {
 	const stale: StaleGuidance[] = [];
 	for (const agent of Object.values(agents)) stale.push(...detectStaleGuidance(agent, reader));
+	for (const skillName of staleSkills) {
+		stale.push({ kind: "skill", label: `${skillName} skill`, skillName });
+	}
 	return stale;
 }
 

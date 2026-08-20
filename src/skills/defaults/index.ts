@@ -28,6 +28,13 @@ export interface BundledSkill {
 	category: SkillCategory;
 	/** Optional linked Obsidian core plugin ID */
 	corePluginId?: string;
+	/**
+	 * `metadata.version` from the frontmatter. Load-bearing since #401: it keys this body's
+	 * entry in `SHIPPED_SKILL_HISTORY`, which is what lets seeding tell "an old default we
+	 * shipped" (overwrite silently) from "the user's own edit" (leave alone, flag it).
+	 * Bump it whenever the body changes, or the improvement won't reach existing vaults.
+	 */
+	version?: string;
 }
 
 /**
@@ -38,6 +45,7 @@ function parseFrontmatter(content: string): {
 	name?: string;
 	linkedPluginId?: string;
 	corePluginId?: string;
+	version?: string;
 } {
 	const lines = content.split("\n");
 
@@ -63,6 +71,7 @@ function parseFrontmatter(content: string): {
 		name?: string;
 		linkedPluginId?: string;
 		corePluginId?: string;
+		version?: string;
 	} = {};
 
 	let inMetadata = false;
@@ -87,6 +96,8 @@ function parseFrontmatter(content: string): {
 						result.linkedPluginId = value;
 					} else if (key === "corePluginId") {
 						result.corePluginId = value;
+					} else if (key === "version") {
+						result.version = value;
 					}
 				}
 				continue;
@@ -143,7 +154,7 @@ function parseBundledSkill(path: string, content: string): BundledSkill | null {
 	const dirName = segments.pop();
 	if (!dirName) return null;
 
-	const { name, linkedPluginId, corePluginId } = parseFrontmatter(content);
+	const { name, linkedPluginId, corePluginId, version } = parseFrontmatter(content);
 
 	return {
 		// Use frontmatter name or fall back to directory name
@@ -151,6 +162,7 @@ function parseBundledSkill(path: string, content: string): BundledSkill | null {
 		content,
 		linkedPluginId,
 		corePluginId,
+		version,
 		category: determineCategory(linkedPluginId, corePluginId),
 	};
 }

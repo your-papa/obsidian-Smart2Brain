@@ -463,6 +463,31 @@ export class AgentManager {
 	}
 
 	/**
+	 * Memory-instructions counterpart of {@link openSystemPromptDiff}. Same modal and same
+	 * two-way diff (yours vs the current default); lives here rather than only in
+	 * AgentEditorModal so the stale-guidance notice can open it directly from the chat
+	 * recommendations surface.
+	 */
+	openMemoryPromptDiff(agentId: string): void {
+		const agent = getData().agents[agentId];
+		if (!agent) return;
+		const promptFiles = this.plugin.promptFilesService;
+		new SystemPromptModal(
+			this.plugin,
+			{
+				getPrompt: () => promptFiles?.getMemoryPrompt(agentId) ?? DEFAULT_MEMORY_PROMPT,
+				setPrompt: (prompt: string) => {
+					void promptFiles?.writeMemoryPrompt(agentId, prompt).then(() => {
+						this.invalidateSystemPromptCaches();
+					});
+				},
+				defaultPrompt: DEFAULT_MEMORY_PROMPT,
+			},
+			{ title: `Memory Instructions — ${agent.name}`, showDiff: true },
+		).open();
+	}
+
+	/**
 	 * Get available models for a provider by discovering them from the API.
 	 * @returns Array of available chat model names
 	 */

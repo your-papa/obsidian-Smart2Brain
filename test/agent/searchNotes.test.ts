@@ -52,21 +52,15 @@ vi.mock("../../src/utils/logging", () => ({
 let mockSearchEmbedIndex: string | null = "openai:text-embedding-3-small";
 
 /**
- * The description persisted in `toolsConfig`, as `normalizeAgent` would leave it.
- *
- * Defaults to a shipped default (not a custom string) because that is the real state
- * for every agent that has never been edited: the tool must be free to swap it for the
- * other shipped variant when the embedding index appears or disappears.
+ * The description persisted in `toolsConfig`, as `normalizeAgent` would leave it. The tool
+ * ignores it entirely and derives the live text instead — it's kept here so the tests can
+ * assert that a stored value has no influence.
  */
 let mockStoredDescription = "default description (embeddings available)";
 
 // The two description strings are inlined rather than pulled from constants: the factory
 // is hoisted above any `const` declaration, so it cannot reference one.
 vi.mock("../../src/stores/dataStore.svelte", () => ({
-	SEARCH_NOTES_DESC_DEFAULTS: new Set([
-		"default description (embeddings available)",
-		"default description (lexical only)",
-	]),
 	getSearchNotesDescription: (hasIndex: boolean) =>
 		hasIndex ? "default description (embeddings available)" : "default description (lexical only)",
 	getData: () => ({
@@ -1062,19 +1056,25 @@ describe("search_notes algorithm parameter", () => {
 	});
 
 	/*
-	 * The swap above must not trample a description the user wrote themselves.
+	 * The description is always derived from live state, never read back from the stored
+	 * config.
 	 *
-	 * `normalizeAgent` merges DEFAULT_TOOLS_CONFIG into every agent, so the stored
-	 * description is always populated — a plain `?? fallback` would never fire, and
-	 * unconditionally overwriting would silently discard customizations. The tool
-	 * therefore swaps only when the stored value is still one of the shipped defaults.
+	 * Tool descriptions aren't user-editable — ToolConfigForm renders no input for them — so
+	 * a stored value is only ever a cached shipped default. Honouring it would freeze the
+	 * tool at whichever variant was current when the config was last written, which is
+	 * exactly the bug the old "is it still a known default?" Set existed to work around
+	 * (#401 removed the Set along with the need for it).
 	 */
-	it("preserves a user-customized description instead of swapping it", async () => {
-		mockStoredDescription = "Find my notes, my way";
+	it("ignores a stored description and always derives from the live index state", async () => {
+		mockStoredDescription = "a stale description cached in the agent config";
 
-		expect(createSearchNotesTool({} as App).description).toBe("Find my notes, my way");
+		const withIndex = createSearchNotesTool({} as App).description;
 		mockSearchEmbedIndex = null;
-		expect(createSearchNotesTool({} as App).description).toBe("Find my notes, my way");
+		const withoutIndex = createSearchNotesTool({} as App).description;
+
+		expect(withIndex).not.toBe(mockStoredDescription);
+		expect(withoutIndex).not.toBe(mockStoredDescription);
+		expect(withoutIndex).toMatch(/lexical only/i);
 	});
 
 	/*

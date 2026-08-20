@@ -127,27 +127,28 @@ export function filterPluginNudges(candidates: readonly PluginNudge[], dismissed
 }
 
 /**
- * The kind of guidance surface a stale-guidance notice refers to. Mirrors
- * `StaleGuidance.kind` from types/plugin — duplicated here to keep this module
- * free of the plugin-types import (it stays pure/unit-testable). Only the per-agent
- * base system prompt is tracked now — skill/tool guidance moved into skill bodies.
+ * The kind of surface a stale-guidance notice refers to. Mirrors `StaleGuidance.kind`
+ * from types/plugin — duplicated here to keep this module free of the plugin-types
+ * import (it stays pure/unit-testable). Keep the two in sync.
  */
-export type UpdateNoticeKind = "system-prompt";
+export type UpdateNoticeKind = "system-prompt" | "memory-prompt" | "skill";
 
 /**
- * A notice that the base system prompt default changed upstream while the user had a
- * customization of it, so it couldn't be auto-updated (issue #356). Sourced from the
- * store's `staleGuidance` records.
+ * A notice that a shipped default changed upstream while the user had a customization of
+ * it, so it couldn't be auto-updated (issue #356, extended to all surfaces in #401).
+ * Sourced from the store's `staleGuidance` records.
  */
 export interface UpdateNotice {
-	/** Dismissal key, of the form `update:<agentId|global>:<kind>`. */
+	/** Dismissal key, of the form `update:<agentId|global>:<kind>[:<skillName>]`. */
 	id: string;
-	/** Owning agent for the base system prompt. */
+	/** Owning agent for the per-agent prompt surfaces; absent for skills (global). */
 	agentId?: string;
 	agentName?: string;
 	kind: UpdateNoticeKind;
 	/** Human label for the surface, e.g. "system prompt". */
 	label: string;
+	/** For `kind: "skill"`, which skill — lets Review open the right note. */
+	skillName?: string;
 }
 
 /** Minimal shape of a store `StaleGuidance` record consumed by {@link toUpdateNotice}. */
@@ -156,23 +157,28 @@ export interface StaleGuidanceLike {
 	agentName?: string;
 	kind: UpdateNoticeKind;
 	label: string;
+	skillName?: string;
 }
 
 /**
  * Dismissal key for an update notice. Global surfaces (no agentId) use the literal
  * `global` segment so their key is stable and distinct from any per-agent key.
+ *
+ * Skills are global but there can be several stale at once, so the skill name is appended —
+ * otherwise dismissing one skill's notice would dismiss every skill's.
  */
-export const updateNoticeId = (agentId: string | undefined, kind: UpdateNoticeKind): string =>
-	`update:${agentId ?? "global"}:${kind}`;
+export const updateNoticeId = (agentId: string | undefined, kind: UpdateNoticeKind, skillName?: string): string =>
+	`update:${agentId ?? "global"}:${kind}${skillName ? `:${skillName}` : ""}`;
 
 /** Maps a store stale-guidance record to a dismissable notice. */
 export function toUpdateNotice(record: StaleGuidanceLike): UpdateNotice {
 	return {
-		id: updateNoticeId(record.agentId, record.kind),
+		id: updateNoticeId(record.agentId, record.kind, record.skillName),
 		agentId: record.agentId,
 		agentName: record.agentName,
 		kind: record.kind,
 		label: record.label,
+		skillName: record.skillName,
 	};
 }
 

@@ -12,11 +12,14 @@ import { StartupProfiler } from "../utils/startupProfiler";
 import {
 	BUNDLED_CORE_SKILLS,
 	BUNDLED_INTEGRATION_SKILLS,
+	BUNDLED_SKILLS,
 	type BundledSkill,
 	getBundledIntegrationSkillForPlugin,
 } from "./defaults";
 import { isInternalPluginEnabled } from "../agent/integrations/pluginIntegrations";
 import { buildPluginApiSkill } from "./templates/pluginApiScripting";
+import { SHIPPED_SKILL_HISTORY, currentSkillVersion } from "./shippedSkills";
+import { shippedVersion } from "../utils/shippedDefaults";
 import { validateFrontmatter, type ValidationResult } from "./validation";
 
 /** SKILL.md filename per spec */
@@ -246,31 +249,39 @@ export class SkillsService {
 	async bootstrapDefaultSkills(): Promise<number> {
 		await this.ensureSkillsDir();
 		const skillsDir = this.getSkillsDir();
-		const seedSkills = this.getStartupSeedSkills();
 
-		// Fast path: one list() call to check if all seed skill folders are already present.
-		// Avoids N exists() round-trips on every startup after the first run.
+		// No fast path here: an "all folders present" early return is exactly what made a
+		// bumped skill version unreachable before #401 — the per-skill check never ran, so
+		// improvements to bundled skills only ever reached new vaults. Each skill below is
+		// now read and compared, which costs one read() per folder (~10) on a path already
+		// measured by StartupProfiler ("skills:bootstrap").
+		//
+		// Two groups are reconciled, and the distinction matters:
+		//  - the startup seed set (core skills + enabled core-plugin integrations), which is
+		//    installed when absent;
+		//  - every OTHER bundled skill already present in the vault. Community integration
+		//    skills are seeded on demand by `seedIntegrationSkill`, so they're absent from
+		//    the seed set — without this they'd be installed once and then never updated or
+		//    re-checked again. They are deliberately NOT installed here when absent; opting
+		//    into an integration remains the user's call.
 		const listing = await this.adapter.list(skillsDir);
-		const existingFolderNames = new Set(listing.folders.map((f) => f.split("/").pop()));
-		const allPresent = seedSkills.every((s) => existingFolderNames.has(s.name));
-		if (allPresent) {
-			Log.debug("All startup seed skills already installed, skipping bootstrap");
-			return 0;
-		}
+		const presentFolders = new Set(listing.folders.map((f) => f.split("/").pop()));
+		const seedSkills = this.getStartupSeedSkills();
+		const seedNames = new Set(seedSkills.map((s) => s.name));
+		const alreadyInstalled = BUNDLED_SKILLS.filter((s) => !seedNames.has(s.name) && presentFolders.has(s.name));
 
 		let installed = 0;
+		const stale: string[] = [];
 
-		for (const bundledSkill of seedSkills) {
-			// Skip if already exists (user may have customized)
-			if (await this.adapter.exists(`${skillsDir}/${bundledSkill.name}/${SKILL_FILENAME}`)) {
-				Log.debug(`Skill ${bundledSkill.name} already exists, skipping`);
-				continue;
-			}
-			if (await this.writeBundledSkill(bundledSkill)) {
-				installed++;
-				Log.info(`Installed default skill: ${bundledSkill.name}`);
-			}
+		for (const bundledSkill of [...seedSkills, ...alreadyInstalled]) {
+			const outcome = await this.reconcileBundledSkill(bundledSkill);
+			if (outcome === "installed" || outcome === "updated") installed++;
+			else if (outcome === "customized") stale.push(bundledSkill.name);
 		}
+
+		// Replace wholesale rather than append: this is the authoritative result of the pass,
+		// so a skill the user has since re-aligned drops out instead of lingering.
+		getData().setStaleSkills(stale);
 
 		if (installed > 0) {
 			Log.info(`Bootstrapped ${installed} default skills`);
@@ -280,17 +291,69 @@ export class SkillsService {
 	}
 
 	/**
-	 * Write a bundled skill's verbatim SKILL.md to disk (creating its dir), preserving the
-	 * file byte-for-byte rather than round-tripping through parse/serialize. Returns true on
-	 * success. Does not overwrite an existing file — callers check existence first.
+	 * Bring one bundled skill's on-disk copy in line with what we ship, without ever
+	 * clobbering the user's own writing:
+	 *
+	 * - absent              → write it (`"installed"`)
+	 * - current version     → leave it (`"current"`)
+	 * - an OLD shipped body → overwrite silently (`"updated"`) — untouched, so safe to move
+	 * - anything else       → the user edited it: leave it and report `"customized"` so the
+	 *                         caller can raise a notice offering to reconcile by hand
+	 *
+	 * A skill with no entry in {@link SHIPPED_SKILL_HISTORY} (no `metadata.version`) keeps
+	 * the old existence-only behaviour — we can't reason about its provenance.
 	 */
-	private async writeBundledSkill(skill: BundledSkill): Promise<boolean> {
+	private async reconcileBundledSkill(
+		skill: BundledSkill,
+	): Promise<"installed" | "updated" | "current" | "customized" | "failed"> {
+		const path = `${this.getSkillsDir()}/${skill.name}/${SKILL_FILENAME}`;
+
+		if (!(await this.adapter.exists(path))) {
+			return (await this.writeBundledSkill(skill)) ? "installed" : "failed";
+		}
+
+		const history = SHIPPED_SKILL_HISTORY.get(skill.name);
+		if (!history) return "current";
+
+		let existing: string;
+		try {
+			existing = await this.adapter.read(path);
+		} catch (error) {
+			// Unreadable: treat as customized rather than overwriting something we can't see.
+			Log.error(`Could not read skill ${skill.name} to check its version:`, error);
+			return "customized";
+		}
+
+		const version = shippedVersion(existing, history);
+		if (version === null) return "customized";
+		if (version === currentSkillVersion(skill.name)) return "current";
+
+		if (await this.writeBundledSkill(skill, { overwrite: true })) {
+			Log.info(`Updated bundled skill ${skill.name} from v${version} to v${skill.version}`);
+			return "updated";
+		}
+		return "failed";
+	}
+
+	/**
+	 * Write a bundled skill's verbatim SKILL.md to disk (creating its dir), preserving the
+	 * file byte-for-byte rather than round-tripping through parse/serialize — the fingerprint
+	 * in `SHIPPED_SKILL_HISTORY` is taken over exactly these bytes, so a re-serialized copy
+	 * would not match its own shipped version. Returns true on success.
+	 *
+	 * Callers must establish that overwriting is safe before passing `overwrite` — see
+	 * {@link reconcileBundledSkill}, which only does so for a body matching an older shipped
+	 * version (i.e. one the user demonstrably never edited).
+	 */
+	private async writeBundledSkill(skill: BundledSkill, opts?: { overwrite?: boolean }): Promise<boolean> {
 		const skillDir = `${this.getSkillsDir()}/${skill.name}`;
+		const path = `${skillDir}/${SKILL_FILENAME}`;
 		try {
 			if (!(await this.adapter.exists(skillDir))) {
 				await this.adapter.mkdir(skillDir);
 			}
-			await this.adapter.write(`${skillDir}/${SKILL_FILENAME}`, skill.content);
+			if (!opts?.overwrite && (await this.adapter.exists(path))) return false;
+			await this.adapter.write(path, skill.content);
 			return true;
 		} catch (error) {
 			Log.error(`Failed to write skill ${skill.name}:`, error);
@@ -302,9 +365,13 @@ export class SkillsService {
 	 * Seed the skill documenting a community-plugin integration, on demand (called when the
 	 * user enables the integration). Prefers a *prewritten* bundled integration skill for the
 	 * plugin (written verbatim); if none exists, falls back to the introspect-first
-	 * `buildPluginApiSkill` template (written via `saveSkill`). Skips if a SKILL.md is already
-	 * present for the resolved skill name (user may have customized it). Callers should
-	 * re-discover afterwards so the new skill enters the cache.
+	 * `buildPluginApiSkill` template (written via `saveSkill`). Callers should re-discover
+	 * afterwards so the new skill enters the cache.
+	 *
+	 * An already-present bundled skill is reconciled rather than skipped (see
+	 * {@link reconcileBundledSkill}): re-enabling an integration picks up an improved body,
+	 * but never overwrites one the user has edited. The generated-template path still skips
+	 * when present — a template has no shipped version to compare against.
 	 *
 	 * @returns the seeded skill's name, or null if seeding failed.
 	 */
@@ -313,10 +380,11 @@ export class SkillsService {
 		const bundled = getBundledIntegrationSkillForPlugin(pluginId);
 
 		if (bundled) {
-			if (await this.adapter.exists(`${this.getSkillsDir()}/${bundled.name}/${SKILL_FILENAME}`)) {
-				return bundled.name;
-			}
-			return (await this.writeBundledSkill(bundled)) ? bundled.name : null;
+			// Same three-way reconcile as startup bootstrap, so a community integration skill
+			// that improves upstream reaches vaults that already have it — the on-demand path
+			// had the identical skip-if-exists gap.
+			const outcome = await this.reconcileBundledSkill(bundled);
+			return outcome === "failed" ? null : bundled.name;
 		}
 
 		// No prewritten skill — generate the introspect-first template.

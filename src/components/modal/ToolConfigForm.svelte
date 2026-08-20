@@ -1,8 +1,6 @@
 <script lang="ts">
 import {
 	DEFAULT_TOOLS_CONFIG,
-	READ_CONTENT_DESC_DEFAULTS,
-	SEARCH_NOTES_DESC_DEFAULTS,
 	getData,
 	getReadContentDescription,
 	getSearchNotesDescription,
@@ -243,18 +241,6 @@ function snapshotKey(snapshot: ToolConfigSnapshot): string {
 	return JSON.stringify(snapshot);
 }
 
-/**
- * Is this description still one the plugin ships, rather than a user's own text?
- *
- * Two tools have more than one shipped default and swap between them automatically —
- * `read_content` by processor capability, `search_notes` by whether an embedding index
- * exists — so a plain equality check against `defaultConfig.description` would flag an
- * untouched config as customized and offer a pointless "Reset to default".
- */
-function isDefaultDescription(value: string): boolean {
-	return READ_CONTENT_DESC_DEFAULTS.has(value) || SEARCH_NOTES_DESC_DEFAULTS.has(value);
-}
-
 const initialSnapshotKey = snapshotKey(initialSnapshot);
 const defaultSnapshotKey = snapshotKey(defaultSnapshot);
 
@@ -279,10 +265,11 @@ const isDirty = $derived.by(() => {
 const isAtDefault = $derived.by(() => {
 	const currentSnapshot: ToolConfigSnapshot = {
 		name,
-		// Normalize known-default description variants so an automatic swap doesn't make
-		// the config appear "non-default": read_content's varies by processor capability,
-		// search_notes' by whether an embedding index exists.
-		description: isDefaultDescription(description) ? defaultConfig.description : description,
+		// Pinned to the default: the description isn't user-editable, and two tools swap
+		// theirs automatically (read_content by processor capability, search_notes by
+		// whether an embedding index exists). Comparing the live value would make an
+		// untouched config look "non-default" and offer a pointless "Reset to default".
+		description: defaultConfig.description,
 		maxResults,
 		allowCreate,
 		allowUpdate,
@@ -299,18 +286,17 @@ const showResetToDefault = $derived(!isAtDefault);
 
 /** Build the persisted patch from current field state (shared by Save + live-commit). */
 function buildConfigPatch(): Partial<ToolConfig> {
-	// read_content's shipped default description varies by processor capability; if the
-	// persisted description is still one of those known-default variants, keep it in sync with
-	// the current processor mode rather than freezing it at whatever variant was true on load.
+	// Two tools' shipped descriptions vary with live state — read_content's by processor
+	// capability, search_notes' by whether an embedding index exists — so recompute rather
+	// than persisting whichever variant happened to be current when the modal opened. The
+	// tool factories derive the description the same way at build time, so what's persisted
+	// here is only ever a cache of that; nothing user-authored can be lost.
 	let resolvedDescription = description;
 	if (capturedToolId === "read_content") {
 		const hasImg = resolveHasProcessor(imageProcessorMode, imageProcessor, chatModelSupportsVision);
 		const hasPdf = resolveHasProcessor(pdfProcessorMode, pdfProcessor, chatModelSupportsPdf);
-		if (READ_CONTENT_DESC_DEFAULTS.has(description))
-			resolvedDescription = getReadContentDescription(hasImg, hasPdf);
-	} else if (capturedToolId === "search_notes" && SEARCH_NOTES_DESC_DEFAULTS.has(description)) {
-		// Same reasoning as read_content: don't freeze an untouched default at whichever
-		// variant happened to be current when the modal opened.
+		resolvedDescription = getReadContentDescription(hasImg, hasPdf);
+	} else if (capturedToolId === "search_notes") {
 		resolvedDescription = getSearchNotesDescription(Boolean(pluginData.searchEmbedIndex));
 	}
 

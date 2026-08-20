@@ -5,7 +5,7 @@ import type { SearchAlgorithm } from "../../types/plugin";
 import { getLexicalSearchService, waitForLexicalSearch } from "../../search/LexicalSearchService";
 import { rankSearchResults } from "../../search/finalSearchRanking";
 import { buildRecentBoostMap, getRecentNotes } from "../../search/recentNotes";
-import { SEARCH_NOTES_DESC_DEFAULTS, getData, getSearchNotesDescription } from "../../stores/dataStore.svelte";
+import { getData, getSearchNotesDescription } from "../../stores/dataStore.svelte";
 import { getPendingChangesStore } from "../../stores/pendingChangesStore.svelte";
 import { normalizeVaultPath } from "../../utils/pathUtils";
 import { getVectorStoreService, type SearchFilter, type SearchResult, waitForVectorStore } from "../../vectorstore";
@@ -499,16 +499,11 @@ export function createSearchNotesTool(app: App) {
 	// rebuilds the tool — without that, this description would go stale the moment a
 	// user set up embeddings mid-conversation.
 	//
-	// `normalizeAgent` merges DEFAULT_TOOLS_CONFIG into every agent, so
-	// `toolConfig.description` is always populated and `?? fallback` would never fire.
-	// Swap only when the stored value is still one of the shipped defaults; anything
-	// else is a user customization and is left exactly as written.
+	// Always derived from the live index state, never read back from the stored config:
+	// tool descriptions aren't user-editable (ToolConfigForm renders no input for them),
+	// so a stored value is only ever a shipped default.
 	const embeddingIndexAvailable = hasSearchEmbeddingIndex();
-	const storedDescription = toolConfig?.description;
-	const description =
-		storedDescription && !SEARCH_NOTES_DESC_DEFAULTS.has(storedDescription)
-			? storedDescription
-			: getSearchNotesDescription(embeddingIndexAvailable);
+	const description = getSearchNotesDescription(embeddingIndexAvailable);
 
 	return tool(searchFn, {
 		name: toolConfig?.name ?? "search_notes",

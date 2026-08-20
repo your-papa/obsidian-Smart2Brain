@@ -4,7 +4,7 @@ description: Search, read, and explore the user's vault — find notes by tag, p
 allowed-tools: search_notes list_directory read_content grep_notes get_all_tags get_properties execute_javascript
 metadata:
   author: "S2B"
-  version: "1.1"
+  version: "1.0"
   category: "core"
 ---
 

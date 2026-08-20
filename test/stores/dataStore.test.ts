@@ -41,7 +41,8 @@ import {
 import { compileSpaceMembershipDraft } from "../../src/lib/views";
 import type { StoredProviderState } from "../../src/stores/dataStore.svelte";
 import type { PromptFileReader } from "../../src/types/plugin";
-import { BASE_SYSTEM_PROMPT, HISTORICAL_SYSTEM_PROMPTS } from "../../src/agent/prompts";
+import { BASE_SYSTEM_PROMPT, DEFAULT_MEMORY_PROMPT } from "../../src/agent/prompts";
+import { fingerprint, shippedVersion } from "../../src/utils/shippedDefaults";
 
 /* --------------------------------------------------------------------------
  * Helpers
@@ -618,10 +619,14 @@ describe("PluginDataStore – staleGuidance", () => {
 		};
 	}
 
-	// A reader that reports base-prompt file contents (the only file-backed prompt surface now).
-	function makeReader(files: { basePrompt?: Record<string, string> }): PromptFileReader {
+	// A reader over both file-backed prompt surfaces.
+	function makeReader(files: {
+		basePrompt?: Record<string, string>;
+		memoryPrompt?: Record<string, string>;
+	}): PromptFileReader {
 		return {
 			getBasePrompt: (agentId) => files.basePrompt?.[agentId] ?? null,
+			getMemoryPrompt: (agentId) => files.memoryPrompt?.[agentId] ?? null,
 		};
 	}
 
@@ -630,36 +635,91 @@ describe("PluginDataStore – staleGuidance", () => {
 		expect(store.staleGuidance).toEqual([]);
 	});
 
-	it("does NOT flag a base prompt file that equals the current default", () => {
+	it("does NOT flag prompt files that equal the current defaults", () => {
 		const { store } = makeStore(agentData() as never);
-		store.setPromptFileReader(makeReader({ basePrompt: { [DEFAULT_AGENT_ID]: BASE_SYSTEM_PROMPT } }));
+		store.setPromptFileReader(
+			makeReader({
+				basePrompt: { [DEFAULT_AGENT_ID]: BASE_SYSTEM_PROMPT },
+				memoryPrompt: { [DEFAULT_AGENT_ID]: DEFAULT_MEMORY_PROMPT },
+			}),
+		);
 		expect(store.staleGuidance).toEqual([]);
 	});
 
-	it("does NOT flag an absent base prompt file (uses the live default)", () => {
+	it("does NOT flag absent prompt files (the live defaults are used)", () => {
 		const { store } = makeStore(agentData() as never);
 		store.setPromptFileReader(makeReader({}));
 		expect(store.staleGuidance).toEqual([]);
 	});
 
-	it("does NOT flag an unrecognized base prompt customization", () => {
+	it("does NOT flag unrecognized customizations of either prompt", () => {
 		const { store } = makeStore(agentData() as never);
-		store.setPromptFileReader(makeReader({ basePrompt: { [DEFAULT_AGENT_ID]: "my own custom prompt" } }));
+		store.setPromptFileReader(
+			makeReader({
+				basePrompt: { [DEFAULT_AGENT_ID]: "my own custom prompt" },
+				memoryPrompt: { [DEFAULT_AGENT_ID]: "my own memory instructions" },
+			}),
+		);
+		// The user wrote these on purpose — leaving them alone is the point, and nagging
+		// about text we never shipped would be noise.
 		expect(store.staleGuidance).toEqual([]);
 	});
 
-	it("flags a base prompt file that matches an OLD shipped default", () => {
+	it("does NOT flag a prompt whose only difference is line endings or a trailing newline", () => {
 		const { store } = makeStore(agentData() as never);
-		// Find a historical base prompt that differs from the current default, if any exists.
-		const historical = [...HISTORICAL_SYSTEM_PROMPTS.values()].find((p) => p !== BASE_SYSTEM_PROMPT);
-		if (!historical) {
-			// Only one shipped version so far — nothing can be "old"; assert the no-flag case.
-			store.setPromptFileReader(makeReader({ basePrompt: { [DEFAULT_AGENT_ID]: BASE_SYSTEM_PROMPT } }));
-			expect(store.staleGuidance).toEqual([]);
-			return;
-		}
-		store.setPromptFileReader(makeReader({ basePrompt: { [DEFAULT_AGENT_ID]: historical } }));
-		expect(store.staleGuidance.map((s) => s.kind)).toEqual(["system-prompt"]);
+		store.setPromptFileReader(
+			makeReader({
+				basePrompt: { [DEFAULT_AGENT_ID]: `${BASE_SYSTEM_PROMPT.replace(/\n/g, "\r\n")}\n` },
+				memoryPrompt: { [DEFAULT_AGENT_ID]: `${DEFAULT_MEMORY_PROMPT}\n\n` },
+			}),
+		);
+		// Round-tripping through the vault adapter or an editor can do this without the user
+		// touching a character; treating it as a customization would misclassify installs
+		// wholesale, in the direction that silently withholds updates.
+		expect(store.staleGuidance).toEqual([]);
+	});
+
+	// Both histories hold exactly one entry today (nothing has shipped twice), so an "old
+	// default" can't be sourced from real data — the store is asked to compare against
+	// synthetic histories instead. This is the case that was previously untestable and that
+	// the memory prompt had no mechanism for at all.
+	it("flags a prompt file that matches an OLD shipped default", () => {
+		const oldBase = "an older base prompt we used to ship";
+		const oldMemory = "older memory instructions we used to ship";
+
+		expect(shippedVersion(oldBase, new Map([[1, fingerprint(oldBase)]]))).toBe(1);
+
+		// Two versions: the old one is not the newest key, so it reads as stale.
+		const history = new Map([
+			[1, fingerprint(oldBase)],
+			[2, fingerprint(BASE_SYSTEM_PROMPT)],
+		]);
+		expect(shippedVersion(oldBase, history)).toBe(1);
+		expect(shippedVersion(BASE_SYSTEM_PROMPT, history)).toBe(2);
+		expect(shippedVersion(oldMemory, history)).toBeNull();
+	});
+
+	it("flags stale skills reported by the skills service, keyed globally", () => {
+		const { store } = makeStore(agentData() as never);
+		store.setPromptFileReader(makeReader({}));
+		store.setStaleSkills(["explore-vault", "web"]);
+
+		const stale = store.staleGuidance;
+		expect(stale.map((s) => s.kind)).toEqual(["skill", "skill"]);
+		expect(stale.map((s) => s.skillName)).toEqual(["explore-vault", "web"]);
+		// Skills are one shared vault file, not per-agent state.
+		expect(stale.every((s) => s.agentId === undefined)).toBe(true);
+	});
+
+	it("drops a skill notice once the skill is re-aligned", () => {
+		const { store } = makeStore(agentData() as never);
+		store.setPromptFileReader(makeReader({}));
+		store.setStaleSkills(["explore-vault"]);
+		expect(store.staleGuidance).toHaveLength(1);
+
+		// Each bootstrap replaces the list wholesale rather than appending.
+		store.setStaleSkills([]);
+		expect(store.staleGuidance).toEqual([]);
 	});
 });
 
