@@ -11,7 +11,7 @@ import { kMeans, suggestK, hdbscan, type KMeansResult, type HDBSCANResult } from
 import { project2D, reduceDimensions } from "./projection";
 import type { ProjectionMethod } from "../types/graph";
 import type { ComputeWorkerRequest, ComputeWorkerResponse, SerializedVectorBatch } from "./computeWorker";
-import { scanSemanticPairs, type SemanticPair } from "./semanticEdges";
+import { computeSemanticPairs, type SemanticPair } from "./semanticEdges";
 import ComputeWorkerConstructor from "./computeWorker?worker&inline";
 import Graph from "graphology";
 import betweennessCentrality from "graphology-metrics/centrality/betweenness";
@@ -255,7 +255,7 @@ function runOnMainThread(request: ComputeWorkerRequest): ComputeWorkerResponse |
 			return { id: request.id, type: "leiden" as const, result: { communities, centrality } };
 		}
 		case "semanticEdges": {
-			const result = scanSemanticPairs(
+			return computeSemanticPairs(
 				request.vectors.data,
 				request.vectors.count,
 				request.vectors.dim,
@@ -266,8 +266,7 @@ function runOnMainThread(request: ComputeWorkerRequest): ComputeWorkerResponse |
 					threshold: request.threshold,
 					excludePairs: request.excludePairs ? new Set(request.excludePairs) : undefined,
 				},
-			);
-			return { id: request.id, type: "semanticEdges" as const, result };
+			).then((result) => ({ id: request.id, type: "semanticEdges" as const, result }));
 		}
 	}
 }

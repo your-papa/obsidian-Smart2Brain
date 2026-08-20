@@ -169,13 +169,14 @@ onDestroy(() => {
 /**
  * Upper bound on notes for semantic edge building.
  *
- * The scan runs in the compute worker, so the UI stays responsive regardless —
- * but the work is still O(n²) in notes. Measured at 1024 dimensions it costs
- * ~0.5s at 1k notes, ~2s at 2k, and ~8s at 4k; past this the wait stops being
- * worth it and the graph stays wiki-only. Raising this is safe for
- * responsiveness, only for patience.
+ * Neighbour search is HNSW-accelerated past ~2k chunks (see
+ * `computeSemanticPairs`), so the old O(n²) time wall is gone. What remains is
+ * memory: every chunk vector is copied into the compute worker, roughly
+ * notes × chunks-per-note × dim × 4 bytes — on the order of 150 MB at this cap
+ * with dim 1024. Past it the transfer itself becomes the problem and the graph
+ * stays wiki-only.
  */
-const SEMANTIC_EDGE_MAX_NOTES = 5000;
+const SEMANTIC_EDGE_MAX_NOTES = 20000;
 
 /**
  * Scales cosine similarity into the same range as authored-link weights for

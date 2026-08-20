@@ -8,7 +8,7 @@
 
 import { kMeans, suggestK, hdbscan } from "./clustering";
 import type { HDBSCANResult } from "./clustering";
-import { scanSemanticPairs, type SemanticPair } from "./semanticEdges";
+import { computeSemanticPairs, type SemanticPair } from "./semanticEdges";
 import { project2D, reduceDimensions } from "./projection";
 import type { ProjectionMethod } from "../types/graph";
 import Graph from "graphology";
@@ -267,7 +267,7 @@ workerScope.onmessage = async (e: MessageEvent<ComputeWorkerRequest>) => {
 				break;
 			}
 			case "semanticEdges": {
-				const result = scanSemanticPairs(
+				const result = await computeSemanticPairs(
 					msg.vectors.data,
 					msg.vectors.count,
 					msg.vectors.dim,
