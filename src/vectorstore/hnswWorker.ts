@@ -100,6 +100,10 @@ globalThis.onmessage = async (e: MessageEvent<HNSWWorkerRequest>) => {
 				result = doc ?? null;
 				break;
 			}
+			case "getAllByPath": {
+				result = await requireStore().getAllByPath(args[0] as string);
+				break;
+			}
 			case "getDocumentMtime": {
 				result = (await requireStore().getDocumentMtime(args[0] as string)) ?? null;
 				break;

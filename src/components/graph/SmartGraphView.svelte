@@ -1,52 +1,9 @@
-<script module lang="ts">
-import type { GraphEdge as CachedGraphEdge } from "../../types/graph";
-
-// ── Topic-derivation caches ─────────────────────────────────
-//
-// Module-scoped so they survive closing and reopening the graph view — the
-// expensive derivations (Leiden partitions, granularity probing, semantic
-// edges, AI topic labels) are pure over the graph plus the keys embedded in
-// each entry, so staleness is handled by keying, not by component lifecycle.
-// Shared by every graph leaf (they all describe the same vault); dropped only
-// when the plugin reloads.
-
-/**
- * Leiden partitions keyed by `${seed}:${resolution}:${edge mode}`, valid for
- * the graph whose topology signature is {@link leidenGraphSignature}.
- */
-let leidenCache = new Map<string, Record<string, number>>();
-
-/**
- * Signature of the graph the Leiden cache and granularity ladder were derived
- * from. A rebuild that produces an identical graph — reopening the view, a
- * Refresh over an unchanged vault, a filter round-trip — keeps them all, so
- * topics reappear from cache instead of re-spending seconds of worker time.
- */
-let leidenGraphSignature = "";
-
-/** The derived granularity ladder for that same graph, restored on reopen. */
-let savedGranularityLadder: number[] | null = null;
-
-/**
- * The last semantic edge set, keyed by wiki-graph signature + semantic
- * settings + the embedding index's `lastUpdated` stamp — so a reopen skips
- * the HNSW neighbour search entirely unless notes or embeddings changed.
- */
-let cachedSemanticEdges: { key: string; edges: CachedGraphEdge[] } | null = null;
-
-/**
- * Cache of membership-signature → generated topic label, so re-running Leiden
- * at the same grouping (or reopening the view) doesn't re-spend API calls.
- */
-let topicLabelCache = new Map<string, string>();
-</script>
-
 <script lang="ts">
 import { untrack, tick, onDestroy } from "svelte";
-import { getAllTags, Notice, type WorkspaceLeaf } from "obsidian";
+import { getAllTags, Notice, TFile, type TAbstractFile, type WorkspaceLeaf } from "obsidian";
 import { getPlugin } from "../../stores/state.svelte";
 import { getData } from "../../stores/dataStore.svelte";
-import { getIndexableVaultFiles, isAgentFilePath } from "../../utils/fileFiltering";
+import { getIndexableVaultFiles, isAgentFilePath, isEmbeddableFile } from "../../utils/fileFiltering";
 import { Logger } from "../../utils/logging";
 import { isMobileUI } from "../../utils/platform";
 import { ConfirmModal } from "../modal/ConfirmModal";
@@ -83,6 +40,20 @@ import {
 	type TopicHierarchy,
 } from "../../utils/topicHierarchy";
 import { edgeKey, graphTopologySignature } from "../../utils/graphUtils";
+import {
+	applyWikiPatch,
+	queryNoteSemanticEdges,
+	replaceSemanticEdgesForPaths,
+	voteNodeCommunity,
+} from "../../utils/liveGraphPatch";
+import {
+	getCachedSemanticEdges,
+	loadPersistedTopicCaches,
+	scheduleTopicCacheSave,
+	setCachedSemanticEdges,
+	swapActiveGraphCache,
+	topicCaches,
+} from "../../views/smart-graph/topicCaches";
 import { buildCollapsedGraph, UNSORTED_CLUSTER } from "../../utils/mergeNodes";
 import { leidenAsync } from "../../utils/computeWorkerManager";
 import { VIEW_TYPE_CHAT } from "../../views/chat/Chat";
@@ -95,6 +66,10 @@ import GraphControls from "./GraphControls.svelte";
 
 const plugin = getPlugin();
 const data = getData();
+
+// Start restoring persisted topic caches immediately so the IndexedDB read
+// overlaps mounting; buildGraph awaits the same promise before reading them.
+void loadPersistedTopicCaches();
 
 // Graph state
 
@@ -149,7 +124,8 @@ let refitAfterTopicsSettle = false;
 let leidenCommunities: Record<string, number> = $state({});
 
 // (The Leiden cache, graph signature, semantic edge cache and topic label
-// cache live in the module script above, so they survive view reopen.)
+// cache live in `topicCaches` — module-scoped so they survive view reopen,
+// and persisted to IndexedDB so they survive an Obsidian restart too.)
 
 // Filter state
 let selectedFolders: string[] = $state([]);
@@ -215,6 +191,14 @@ onDestroy(() => {
  * stays wiki-only.
  */
 const SEMANTIC_EDGE_MAX_NOTES = 20000;
+
+/**
+ * Minimum fraction of on-screen nodes a cached partition must still cover to
+ * be painted as interim topics while the real segmentation computes. High
+ * enough that a heavily changed vault paints honestly grey instead of mostly
+ * wrong; low enough that everyday edits between sessions keep instant topics.
+ */
+const INTERIM_TOPIC_MIN_COVERAGE = 0.8;
 
 /**
  * Scales cosine similarity into the same range as authored-link weights for
@@ -448,7 +432,10 @@ async function loadSemanticEdges(wikiData: GraphData, localBuildVersion: number)
 		settings.semanticNeighborCount,
 		settings.semanticThreshold,
 	].join("|");
-	if (cachedSemanticEdges?.key === cacheKey) return cachedSemanticEdges.edges;
+	// Keyed (not single-slot), so both sides of an immerse or filter round-trip
+	// keep their edge sets and the return leg is served from cache.
+	const cachedEdges = getCachedSemanticEdges(cacheKey);
+	if (cachedEdges) return cachedEdges;
 
 	const documents = await getVectorStoreService().getAllDocumentVectors();
 	if (localBuildVersion !== buildVersion || documents.length === 0) return [];
@@ -463,7 +450,8 @@ async function loadSemanticEdges(wikiData: GraphData, localBuildVersion: number)
 		threshold: settings.semanticThreshold,
 		excludeEdgeKeys: wikiEdgeKeys,
 	});
-	cachedSemanticEdges = { key: cacheKey, edges };
+	setCachedSemanticEdges(cacheKey, edges);
+	scheduleTopicCacheSave();
 	return edges;
 }
 
@@ -484,6 +472,13 @@ async function buildGraph() {
 	loadingMessage = "Building graph...";
 
 	try {
+		// Restored caches must be in place before this build reads them: the
+		// semantic-edge cache is consulted mid-build, and the signature comparison
+		// below decides whether persisted partitions apply. Resolves instantly
+		// after the first call.
+		await loadPersistedTopicCaches();
+		if (localBuildVersion !== buildVersion) return;
+
 		const filter = getFilter();
 		const { graphData: wikiData } = buildWikiGraph(plugin.app, filter, immersePaths ?? undefined);
 		// A newer build (or unmount) superseded us before we could apply.
@@ -494,6 +489,26 @@ async function buildGraph() {
 		// A pending refit belongs to the build being replaced. (Topic-state
 		// invalidation waits until the fused graph is known — see below.)
 		refitAfterTopicsSettle = false;
+
+		// Stale-while-revalidate topics: a fresh view instance starts with no
+		// communities, so even a fully cached reopen would paint grey until the
+		// fused graph resolves — and after a vault change (or a restart following
+		// one) the wait is a full semantic scan plus a Leiden run. If the cached
+		// partition still covers most of these nodes, paint it as an interim:
+		// stale for at most the few changed notes, and replaced the moment the
+		// real segmentation lands.
+		if (Object.keys(leidenCommunities).length === 0) {
+			const cached = topicCaches.leiden.get(currentPartitionKey());
+			if (cached) {
+				const covered = wikiData.nodes.reduce((n, node) => (cached[node.id] !== undefined ? n + 1 : n), 0);
+				if (covered >= wikiData.nodes.length * INTERIM_TOPIC_MIN_COVERAGE) {
+					Logger.info(
+						`[SmartGraph] Interim topics from cache (${covered}/${wikiData.nodes.length} nodes covered)`,
+					);
+					leidenCommunities = cached;
+				}
+			}
+		}
 
 		// Paint the authored graph right away so the view isn't blank while
 		// embeddings load, then refine it once semantic edges arrive.
@@ -530,19 +545,34 @@ async function buildGraph() {
 		// changes, a filter round-trip) keeps them all, so the topics reappear
 		// from cache instantly instead of re-spending seconds of worker time.
 		const signature = graphTopologySignature(graphData);
-		if (signature !== leidenGraphSignature) {
-			leidenGraphSignature = signature;
-			leidenCache.clear();
+		if (signature !== topicCaches.graphSignature) {
+			// A different graph: re-key the active cache slot. The outgoing
+			// graph's derivations are archived under its signature and restored
+			// when that graph comes back (immerse exit, a filter round-trip), so
+			// those transitions re-apply topics from cache instead of re-running
+			// Leiden, the ladder probes and labeling from scratch.
+			const restored = swapActiveGraphCache(signature);
+			// Whichever way the swap went, the archive layout changed on disk.
+			scheduleTopicCacheSave();
+			// A fresh (or restored) segmentation replaces every incremental
+			// vote, so accumulated live-update drift is settled.
+			liveTopicDrift = 0;
+			// The hierarchy is per-graph component state; recomputed by the
+			// segmentation run below (from cache when restored).
 			topicHierarchy = null;
-			granularityLadder = [...GRANULARITY_LEVEL_RESOLUTIONS];
-			// The ladder describes the old graph; hide the slider until it's re-derived.
-			hasDerivedGranularityLadder = false;
-			savedGranularityLadder = null;
-		} else if (savedGranularityLadder) {
+			if (restored && topicCaches.granularityLadder) {
+				granularityLadder = topicCaches.granularityLadder;
+				hasDerivedGranularityLadder = true;
+			} else {
+				granularityLadder = [...GRANULARITY_LEVEL_RESOLUTIONS];
+				// The ladder describes another graph; hide the slider until it's re-derived.
+				hasDerivedGranularityLadder = false;
+			}
+		} else if (topicCaches.granularityLadder) {
 			// A fresh view instance starts on the fallback ladder even though this
 			// graph has already been probed — restore the derived ladder so the
 			// slider appears immediately instead of hiding through a re-probe.
-			granularityLadder = savedGranularityLadder;
+			granularityLadder = topicCaches.granularityLadder;
 			hasDerivedGranularityLadder = true;
 		}
 
@@ -561,6 +591,9 @@ async function buildGraph() {
 		// is already stale and nodes drift out of view. Re-frame once the topics
 		// have actually landed.
 		refitAfterTopicsSettle = true;
+		// Live vault-change patches may run from here on — they diff against a
+		// graph this build has now fully established.
+		hasBuiltOnce = true;
 	} catch (e) {
 		if (ac.signal.aborted || localBuildVersion !== buildVersion) return;
 		console.error("[SmartGraph] Error building graph:", e);
@@ -643,6 +676,320 @@ onDestroy(() => {
 	labelingAbort?.abort();
 });
 
+// ─── Live vault-change updates (issue #404) ─────────────────────────────
+//
+// While the view is open, vault and metadata events patch the open graph in
+// place instead of waiting for a manual Refresh. The wiki structure is diffed
+// against a fresh (cheap) rebuild; semantic edges are re-queried per changed
+// note against the live vault index; topics are re-assigned by neighbour vote,
+// with a full Leiden re-run only once enough incremental drift accumulates.
+// Refresh remains ground truth — it rebuilds everything from scratch.
+
+/** Quiet period after the last vault/metadata event before a patch is applied. */
+const LIVE_UPDATE_DEBOUNCE_MS = 1500;
+/** Re-check cadence for notes whose embeddings haven't landed yet. */
+const SEMANTIC_RETRY_INTERVAL_MS = 5000;
+/**
+ * Give up waiting for fresh embeddings after this many checks (~2 min): covers
+ * the vector store's 10s modify debounce plus embedding latency, without
+ * polling forever for notes that will never be (re-)embedded.
+ */
+const SEMANTIC_RETRY_MAX_ATTEMPTS = 24;
+
+/**
+ * Incrementally voted topic assignments since the last full Leiden run. Each
+ * vote is a heuristic stand-in for Leiden; past a threshold the approximations
+ * compound and the real thing re-runs (see {@link maybeReclusterAfterDrift}).
+ */
+let liveTopicDrift = 0;
+/** True once the first full build has landed — live patches diff against it. */
+let hasBuiltOnce = false;
+let liveUpdateTimer: ReturnType<typeof setTimeout> | null = null;
+/** Renames since the last flush, applied to the canvas position cache first. */
+let pendingRenames: Array<{ from: string; to: string }> = [];
+/**
+ * Notes whose semantic edges need re-querying, keyed by path. `mtime` is the
+ * file mtime the stored embeddings must catch up to before the query is worth
+ * running; `attempts` bounds the wait.
+ */
+const pendingSemantic = new Map<string, { mtime: number; attempts: number }>();
+let semanticRetryTimer: ReturnType<typeof setTimeout> | null = null;
+let isProcessingSemantic = false;
+
+function isLiveRelevantFile(file: TAbstractFile): file is TFile {
+	return file instanceof TFile && !isAgentFilePath(file.path);
+}
+
+/** Queue a note for a semantic re-query once its embeddings are current. */
+function queueSemanticRefresh(file: TFile) {
+	if (!data.graphEmbedIndex || !isEmbeddableFile(file)) return;
+	pendingSemantic.set(file.path, { mtime: file.stat.mtime, attempts: 0 });
+}
+
+function scheduleLiveUpdate() {
+	if (isDestroyed) return;
+	if (liveUpdateTimer != null) clearTimeout(liveUpdateTimer);
+	liveUpdateTimer = setTimeout(() => {
+		liveUpdateTimer = null;
+		flushLiveUpdate();
+	}, LIVE_UPDATE_DEBOUNCE_MS);
+}
+
+const liveVaultEventRefs = [
+	plugin.app.vault.on("create", (file) => {
+		if (!isLiveRelevantFile(file)) return;
+		queueSemanticRefresh(file);
+		scheduleLiveUpdate();
+	}),
+	plugin.app.vault.on("modify", (file) => {
+		if (!isLiveRelevantFile(file)) return;
+		queueSemanticRefresh(file);
+		scheduleLiveUpdate();
+	}),
+	plugin.app.vault.on("delete", (file) => {
+		if (!isLiveRelevantFile(file)) return;
+		pendingSemantic.delete(file.path);
+		scheduleLiveUpdate();
+	}),
+	plugin.app.vault.on("rename", (file, oldPath) => {
+		if (!(file instanceof TFile)) return;
+		pendingSemantic.delete(oldPath);
+		if (isAgentFilePath(file.path) && isAgentFilePath(oldPath)) return;
+		pendingRenames.push({ from: oldPath, to: file.path });
+		queueSemanticRefresh(file);
+		scheduleLiveUpdate();
+	}),
+];
+// Fires when link resolution completes after any change — this is what catches
+// edits whose only effect is on OTHER notes' resolved links (e.g. creating a
+// note that turns previously unresolved links elsewhere into edges).
+const liveMetadataEventRef = plugin.app.metadataCache.on("resolved", () => scheduleLiveUpdate());
+
+onDestroy(() => {
+	for (const ref of liveVaultEventRefs) plugin.app.vault.offref(ref);
+	plugin.app.metadataCache.offref(liveMetadataEventRef);
+	if (liveUpdateTimer != null) clearTimeout(liveUpdateTimer);
+	if (semanticRetryTimer != null) clearTimeout(semanticRetryTimer);
+});
+
+/** Apply pending vault changes to the open graph. */
+function flushLiveUpdate() {
+	if (isDestroyed) return;
+	// A full build in flight already sees the current vault; patching under it
+	// would race two writers of graphData. Come back once it lands.
+	if (!hasBuiltOnce || isLoading) {
+		scheduleLiveUpdate();
+		return;
+	}
+
+	// Renames first: the canvas position cache must know the new ids before the
+	// patched data lands, so renamed notes stay in place.
+	for (const { from, to } of pendingRenames) canvasComponent?.transferNodePosition(from, to);
+	pendingRenames = [];
+
+	// New folders/tags/extensions should appear in the filter dropdowns too.
+	loadFilterOptions();
+
+	const { graphData: freshWiki } = buildWikiGraph(plugin.app, getFilter(), immersePaths ?? undefined);
+	const patch = applyWikiPatch(graphData, freshWiki);
+	if (patch.changed) {
+		const communities = { ...leidenCommunities };
+		let drift = 0;
+		for (const path of patch.removedPaths) {
+			if (communities[path] !== undefined) {
+				delete communities[path];
+				drift++;
+			}
+		}
+		const topicEdges = getTopicEdgesFor(patch.data);
+		for (const path of patch.addedPaths) {
+			const vote = voteNodeCommunity(path, topicEdges, communities, leidenWeight);
+			if (vote !== undefined) {
+				communities[path] = vote;
+				drift++;
+			}
+		}
+		// A surviving note whose links changed may now belong elsewhere; re-vote
+		// it, but only count actual moves as drift.
+		for (const path of patch.touchedPaths) {
+			const vote = voteNodeCommunity(path, topicEdges, communities, leidenWeight);
+			if (vote !== undefined && vote !== communities[path]) {
+				communities[path] = vote;
+				drift++;
+			}
+		}
+		applyLivePatch(patch.data, communities, drift);
+
+		// A removed note can't stay selected — mirror the pruned selection out so
+		// chat trays don't keep offering a note that no longer exists.
+		if (patch.removedPaths.length > 0 && selectedPaths.length > 0) {
+			const removed = new Set(patch.removedPaths);
+			const surviving = selectedPaths.filter((path) => !removed.has(path));
+			if (surviving.length !== selectedPaths.length) {
+				canvasComponent?.selectNodesByPaths(surviving);
+				handleSelectionChange(surviving);
+			}
+		}
+
+		Logger.info(
+			`[SmartGraph] Live patch: +${patch.addedPaths.length} −${patch.removedPaths.length} nodes, ${patch.touchedPaths.length} touched (drift ${liveTopicDrift})`,
+		);
+	} else {
+		Logger.debug("[SmartGraph] Live update: no structural change");
+	}
+
+	void processPendingSemanticQueries();
+}
+
+/**
+ * Land a patched graph: canvas told to stay put, communities updated, segments
+ * re-resolved, drift accounted.
+ */
+function applyLivePatch(patched: GraphData, communities: Record<string, number>, drift: number) {
+	canvasComponent?.markIncrementalUpdate();
+	leidenCommunities = communities;
+	// Keep the current rung's cache entry in step, so a granularity round-trip
+	// back to this γ doesn't resurrect the pre-patch assignment. Other rungs go
+	// stale for the changed notes only, until drift or Refresh re-clusters.
+	// Only refresh an entry that exists — a missing one means a fresh Leiden run
+	// is in flight for this key, and it will land its own (better) result.
+	if (Object.keys(communities).length > 0 && topicCaches.leiden.has(currentPartitionKey())) {
+		topicCaches.leiden.set(currentPartitionKey(), communities);
+		scheduleTopicCacheSave();
+	}
+	graphData = patched;
+	resolveAndApplySegments(graphData);
+	liveTopicDrift += drift;
+	maybeReclusterAfterDrift();
+}
+
+/**
+ * Fall back to a real Leiden run once enough incremental votes accumulated.
+ *
+ * Each vote is locally plausible but never merges or splits communities the
+ * way Leiden would, so approximation error compounds with every patch. The
+ * threshold scales with graph size — a fixed count would re-cluster a large
+ * vault constantly and a small one never. The granularity ladder survives:
+ * its rungs describe the vault's structure coarsely enough that a few percent
+ * of changed notes don't invalidate them.
+ */
+function maybeReclusterAfterDrift() {
+	const threshold = Math.max(8, Math.ceil(graphData.nodes.length * 0.02));
+	if (liveTopicDrift < threshold) return;
+	Logger.info(`[SmartGraph] Live topic drift ${liveTopicDrift} ≥ ${threshold} — re-running Leiden`);
+	liveTopicDrift = 0;
+	// The cached partitions and the hierarchy describe the pre-drift graph.
+	topicCaches.graphSignature = graphTopologySignature(graphData);
+	topicCaches.leiden.clear();
+	topicHierarchy = null;
+	void runLeidenSegmentation();
+}
+
+/**
+ * Re-query semantic edges for changed notes, waiting for their embeddings.
+ *
+ * The vector store re-embeds a modified note ~10s after the last edit, so a
+ * query at patch time would read stale vectors. Each queued note is retried on
+ * an interval until its stored mtime catches up with the file — or attempts
+ * run out, in which case whatever vectors exist are used (better than
+ * dropping the note's inferred edges entirely).
+ */
+async function processPendingSemanticQueries() {
+	if (isDestroyed || isProcessingSemantic || pendingSemantic.size === 0) return;
+	if (!data.graphEmbedIndex) {
+		pendingSemantic.clear();
+		return;
+	}
+	// Same ceiling as the full build: past it the graph is wiki-only, so there
+	// are no semantic edges to keep current.
+	if (graphData.nodes.length > SEMANTIC_EDGE_MAX_NOTES) {
+		pendingSemantic.clear();
+		return;
+	}
+	isProcessingSemantic = true;
+	const localBuildVersion = buildVersion;
+	try {
+		const serviceReady = await waitForVectorStore();
+		if (!serviceReady || isDestroyed) return;
+		const store = await getVectorStoreService()
+			.getOrCreateInstance(data.graphEmbedIndex)
+			.then((inst) => inst.store)
+			.catch(() => null);
+		if (!store || isDestroyed) return;
+
+		const nodePaths = new Set(graphData.nodes.map((node) => node.path));
+		const replacements = new Map<string, GraphEdge[]>();
+		for (const [path, entry] of [...pendingSemantic]) {
+			// Filtered out of the graph (or deleted since queueing) — nothing to do.
+			if (!nodePaths.has(path)) {
+				pendingSemantic.delete(path);
+				continue;
+			}
+			const storedMtime = await store.getDocumentMtime(path).catch(() => undefined);
+			if (isDestroyed) return;
+			const embeddingsCurrent = storedMtime !== undefined && storedMtime >= entry.mtime;
+			if (!embeddingsCurrent && entry.attempts < SEMANTIC_RETRY_MAX_ATTEMPTS) {
+				entry.attempts++;
+				continue;
+			}
+			pendingSemantic.delete(path);
+			// Never embedded (private, excluded, provider down) — no edges to infer.
+			if (storedMtime === undefined) continue;
+
+			const wikiKeys = new Set(
+				graphData.edges
+					.filter((e) => e.type === "wiki" && (e.source === path || e.target === path))
+					.map((e) => edgeKey(e.source, e.target)),
+			);
+			const edges = await queryNoteSemanticEdges(store, path, nodePaths, {
+				neighborCount: settings.semanticNeighborCount,
+				threshold: settings.semanticThreshold,
+				excludeEdgeKeys: wikiKeys,
+			}).catch((error) => {
+				Logger.error(`[SmartGraph] Live semantic query failed for ${path}:`, error);
+				return [] as GraphEdge[];
+			});
+			if (isDestroyed) return;
+			replacements.set(path, edges);
+		}
+
+		// A full rebuild landed while we were querying — it recomputed every
+		// semantic edge itself, so these results describe a replaced graph.
+		if (localBuildVersion !== buildVersion) return;
+
+		if (replacements.size > 0) {
+			const paths = new Set(replacements.keys());
+			const merged = [...replacements.values()].flat();
+			const { data: patched, changed } = replaceSemanticEdgesForPaths(graphData, paths, merged);
+			if (changed) {
+				const communities = { ...leidenCommunities };
+				let drift = 0;
+				const topicEdges = getTopicEdgesFor(patched);
+				for (const path of paths) {
+					const vote = voteNodeCommunity(path, topicEdges, communities, leidenWeight);
+					if (vote !== undefined && vote !== communities[path]) {
+						communities[path] = vote;
+						drift++;
+					}
+				}
+				applyLivePatch(patched, communities, drift);
+				Logger.info(`[SmartGraph] Live semantic patch for ${paths.size} note(s)`);
+			}
+		}
+	} finally {
+		isProcessingSemantic = false;
+		scheduleSemanticRetry();
+	}
+}
+
+function scheduleSemanticRetry() {
+	if (isDestroyed || pendingSemantic.size === 0 || semanticRetryTimer != null) return;
+	semanticRetryTimer = setTimeout(() => {
+		semanticRetryTimer = null;
+		void processPendingSemanticQueries();
+	}, SEMANTIC_RETRY_INTERVAL_MS);
+}
+
 /**
  * Drop every piece of state recorded against topic *numbers*.
  *
@@ -708,7 +1055,8 @@ function handleRevealFile(path: string) {
 		// Reveal in Obsidian's file explorer
 		const explorer = plugin.app.workspace.getLeavesOfType("file-explorer")[0];
 		if (explorer) {
-			(explorer.view as any).revealInFolder?.(file);
+			// `revealInFolder` is an undocumented internal on the file-explorer view.
+			(explorer.view as { revealInFolder?: (file: TAbstractFile) => void }).revealInFolder?.(file);
 		}
 	}
 }
@@ -898,7 +1246,12 @@ function leidenWeight(edge: GraphEdge): number {
  * topics reflect nothing but the user's own linking.
  */
 function getTopicEdges(): GraphEdge[] {
-	return graphData.edges.filter((e) =>
+	return getTopicEdgesFor(graphData);
+}
+
+/** Same filter over an arbitrary graph — used by live patches before they land. */
+function getTopicEdgesFor(gd: GraphData): GraphEdge[] {
+	return gd.edges.filter((e) =>
 		settings.linkOnlyTopics ? e.type === "wiki" : e.type === "wiki" || e.type === "semantic",
 	);
 }
@@ -935,7 +1288,7 @@ async function runLeidenSegmentation() {
 	}
 
 	const cacheKey = currentPartitionKey();
-	const cached = leidenCache.get(cacheKey);
+	const cached = topicCaches.leiden.get(cacheKey);
 	if (cached) {
 		Logger.info(`[SmartGraph] Leiden cache hit (γ=${settings.leidenResolution.toFixed(2)})`);
 		leidenCommunities = cached;
@@ -968,7 +1321,8 @@ async function runLeidenSegmentation() {
 	);
 	// Always worth caching — the result is correct for the settings it ran under,
 	// even if those are no longer the ones on screen.
-	leidenCache.set(cacheKey, result);
+	topicCaches.leiden.set(cacheKey, result);
+	scheduleTopicCacheSave();
 	// …but only *apply* it if those settings are still current. `buildVersion`
 	// alone can't tell: it tracks graph rebuilds, while γ, seed and link-mode all
 	// change the partition without touching the graph. A slow run started at one γ
@@ -1019,12 +1373,12 @@ async function deriveGranularityLevels(topicEdges: GraphEdge[]) {
 			if (localBuildVersion !== buildVersion) return;
 
 			const cacheKey = partitionKey(resolution, linkOnly, seed);
-			let communities = leidenCache.get(cacheKey);
+			let communities = topicCaches.leiden.get(cacheKey);
 			if (!communities) {
 				try {
 					const result = await leidenAsync(sources, targets, weights, seed, resolution);
 					if (localBuildVersion !== buildVersion) return;
-					leidenCache.set(cacheKey, result);
+					topicCaches.leiden.set(cacheKey, result);
 					communities = result;
 				} catch (error) {
 					// A failed probe just means one fewer candidate rung.
@@ -1066,8 +1420,10 @@ async function deriveGranularityLevels(topicEdges: GraphEdge[]) {
 		}
 		hasDerivedGranularityLadder = true;
 		// Remember the outcome for this graph, so reopening the view restores the
-		// ladder instead of re-probing.
-		savedGranularityLadder = granularityLadder;
+		// ladder instead of re-probing. The probes also filled the Leiden cache,
+		// so this save persists every rung at once.
+		topicCaches.granularityLadder = granularityLadder;
+		scheduleTopicCacheSave();
 	} finally {
 		isDerivingGranularityLadder = false;
 	}
@@ -1094,7 +1450,7 @@ async function computeTopicHierarchy(topicEdges: GraphEdge[]) {
 	const finePartition = currentPartitionKey();
 
 	let communities: Record<string, number>;
-	const cached = leidenCache.get(cacheKey);
+	const cached = topicCaches.leiden.get(cacheKey);
 	if (cached) {
 		communities = cached;
 	} else {
@@ -1107,7 +1463,8 @@ async function computeTopicHierarchy(topicEdges: GraphEdge[]) {
 				coarseResolution,
 			);
 			if (localBuildVersion !== buildVersion) return;
-			leidenCache.set(cacheKey, result);
+			topicCaches.leiden.set(cacheKey, result);
+			scheduleTopicCacheSave();
 			communities = result;
 		} catch (error) {
 			Logger.error("[SmartGraph] Coarse Leiden failed; hierarchy unavailable:", error);
@@ -1135,7 +1492,7 @@ async function computeTopicHierarchy(topicEdges: GraphEdge[]) {
  * The granularity ladder is re-derived too, since its rungs came from the old seed.
  */
 async function handleSeedChange() {
-	leidenCache.clear();
+	topicCaches.leiden.clear();
 	hasDerivedGranularityLadder = false;
 	await runLeidenSegmentation();
 }
@@ -1238,12 +1595,18 @@ function resolveAndApplySegments(gd: GraphData) {
 				const tc = leidenCommunities[edge.target];
 				if (sc === undefined || tc === undefined || sc === tc) continue;
 				// source sees a foreign neighbor tc
-				if (!neighborCommunityVotes.has(edge.source)) neighborCommunityVotes.set(edge.source, new Map());
-				const sv = neighborCommunityVotes.get(edge.source)!;
+				let sv = neighborCommunityVotes.get(edge.source);
+				if (!sv) {
+					sv = new Map();
+					neighborCommunityVotes.set(edge.source, sv);
+				}
 				sv.set(tc, (sv.get(tc) ?? 0) + 1);
 				// target sees a foreign neighbor sc
-				if (!neighborCommunityVotes.has(edge.target)) neighborCommunityVotes.set(edge.target, new Map());
-				const tv = neighborCommunityVotes.get(edge.target)!;
+				let tv = neighborCommunityVotes.get(edge.target);
+				if (!tv) {
+					tv = new Map();
+					neighborCommunityVotes.set(edge.target, tv);
+				}
 				tv.set(sc, (tv.get(sc) ?? 0) + 1);
 			}
 			// Count total topic-edge degree per node
@@ -1347,12 +1710,15 @@ async function runTopicLabeling() {
 	try {
 		const labels = await labelTopics(topics, settings.graphChatModel, {
 			signal: controller.signal,
-			cache: topicLabelCache,
+			cache: topicCaches.topicLabels,
 		});
 		// A rebuild (or unmount) landed while we were waiting — these labels are
 		// keyed to topic ids that may no longer mean the same thing.
 		if (controller.signal.aborted || localBuildVersion !== buildVersion) return;
 		generatedClusterLabels = labels;
+		// labelTopics filled the membership-keyed label cache — persist it so a
+		// restart doesn't re-spend the API calls.
+		scheduleTopicCacheSave();
 	} finally {
 		if (labelingAbort === controller) {
 			isLabeling = false;
@@ -1511,7 +1877,7 @@ function handleGranularityChange(level: number) {
 	const resolution = granularityToResolution(level, granularityLadder);
 	if (resolution === settings.leidenResolution) return;
 
-	const cached = leidenCache.get(partitionKey(resolution));
+	const cached = topicCaches.leiden.get(partitionKey(resolution));
 	if (!cached) return;
 
 	handleSettingsChange({ leidenResolution: resolution });

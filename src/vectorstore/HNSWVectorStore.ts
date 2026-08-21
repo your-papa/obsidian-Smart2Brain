@@ -468,6 +468,16 @@ export class HNSWVectorStore implements VectorStore {
 	}
 
 	/**
+	 * Get every chunk vector of a note. `getByPath` returns only one chunk;
+	 * per-note operations (e.g. the graph's incremental semantic re-query)
+	 * need all of them.
+	 */
+	async getAllByPath(path: string): Promise<DocumentVector[]> {
+		const stored = await this.getAllStoredForPath(path);
+		return stored.map((s) => this.toDocumentVector(s));
+	}
+
+	/**
 	 * Check if a document exists and get its mtime.
 	 */
 	async getDocumentMtime(path: string): Promise<number | undefined> {

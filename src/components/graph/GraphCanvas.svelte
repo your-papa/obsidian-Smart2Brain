@@ -562,6 +562,39 @@ let simNodesVersion = 0;
 // a full force-simulation re-settle on immersion exit.
 const persistentPositionCache = new Map<string, { x: number; y: number }>();
 
+// Set by markIncrementalUpdate() and consumed by the next setupGraph: the
+// incoming data is a live vault-change patch, so the layout settles gently in
+// place and the camera stays put instead of re-framing the whole graph.
+let incrementalUpdatePending = false;
+
+/**
+ * Arm the next graph-data change as a live incremental update (issue #404).
+ *
+ * Called by the view right before it patches `graphData` in response to vault
+ * events. Without this, any node addition takes the mode-switch path — slow
+ * drift plus a camera refit — which would yank the view around every time a
+ * note is created while the graph is open.
+ */
+export function markIncrementalUpdate() {
+	incrementalUpdatePending = true;
+}
+
+/**
+ * Carry a node's layout position across a rename.
+ *
+ * Called before the renamed graph data lands: the new id inherits the old
+ * node's position (live simulation position first, cached position as
+ * fallback), so a renamed note stays where it was instead of re-scattering.
+ */
+export function transferNodePosition(oldId: string, newId: string) {
+	if (oldId === newId) return;
+	const sim = simNodeMap.get(oldId);
+	const position =
+		sim && sim.x != null && sim.y != null ? { x: sim.x, y: sim.y } : persistentPositionCache.get(oldId);
+	if (position) persistentPositionCache.set(newId, { x: position.x, y: position.y });
+	persistentPositionCache.delete(oldId);
+}
+
 // Cached cluster map for edge rendering (nodeId → cluster).
 // Rebuilt only when simNodes changes — cluster assignments are stable between renders.
 let cachedNodeClusterMap: Map<string, number | undefined> = new Map();
@@ -1875,6 +1908,15 @@ function buildInternalData(data: GraphData): {
 		centroidX /= knownForCentroid.size;
 		centroidY /= knownForCentroid.size;
 	}
+	// Radius of the known layout, for placing connection-less new nodes on its
+	// rim. Dropping them at the centroid buries them inside the existing node
+	// mass where they're invisible (and charge repulsion pushes an isolated node
+	// out to the rim anyway — the rim is simply where it will settle).
+	let knownLayoutRadius = 0;
+	for (const { x, y } of knownForCentroid.values()) {
+		const distance = Math.hypot(x - centroidX, y - centroidY);
+		if (distance > knownLayoutRadius) knownLayoutRadius = distance;
+	}
 
 	// Create mutable copies.
 	// Priority: oldPositions (current frame) → persistentPositionCache (prior view) → circle pre-layout.
@@ -1889,6 +1931,39 @@ function buildInternalData(data: GraphData): {
 	// Spread radius for circle pre-layout: scale with node count so the graph fills
 	// a reasonable area before forces kick in (reduces initial chaos).
 	const circleRadius = Math.max(150, Math.sqrt(unknownCount) * linkDistance * 0.5);
+
+	// A node created while the graph is open should appear next to what it
+	// connects to, not in a ring around the whole layout — seed unknown nodes at
+	// the centroid of their already-positioned neighbours when they have any.
+	const knownPosition = (id: string) => oldPositions.get(id) ?? persistentPositionCache.get(id);
+	const neighborIds = new Map<string, string[]>();
+	if (unknownCount > 0 && hasAnyKnown) {
+		for (const e of data.edges) {
+			if (!neighborIds.has(e.source)) neighborIds.set(e.source, []);
+			if (!neighborIds.has(e.target)) neighborIds.set(e.target, []);
+			neighborIds.get(e.source)?.push(e.target);
+			neighborIds.get(e.target)?.push(e.source);
+		}
+	}
+	const neighborSeedPosition = (id: string): { x: number; y: number } | null => {
+		const neighbors = neighborIds.get(id);
+		if (!neighbors) return null;
+		let sumX = 0;
+		let sumY = 0;
+		let count = 0;
+		for (const neighborId of neighbors) {
+			const position = knownPosition(neighborId);
+			if (!position) continue;
+			sumX += position.x;
+			sumY += position.y;
+			count++;
+		}
+		if (count === 0) return null;
+		const angle = Math.random() * 2 * Math.PI;
+		const radius = 30 + Math.random() * 40;
+		return { x: sumX / count + Math.cos(angle) * radius, y: sumY / count + Math.sin(angle) * radius };
+	};
+
 	simNodes = data.nodes.map((n) => {
 		const sn: SimNode = { ...n };
 		// Priority matters: a position inherited from what this node *replaces on
@@ -1901,10 +1976,19 @@ function buildInternalData(data: GraphData): {
 			sn.y = old.y;
 		} else {
 			allPositionsKnown = false;
-			if (hasAnyKnown) {
-				// Scatter new nodes in a ring around the centroid of the known layout
+			const seeded = hasAnyKnown ? neighborSeedPosition(n.id) : null;
+			if (seeded) {
+				sn.x = seeded.x;
+				sn.y = seeded.y;
+			} else if (hasAnyKnown) {
+				// No positioned neighbours — scatter on the rim of the known
+				// layout: the sparse band where an unconnected node settles
+				// anyway, and still inside the current camera frame (the camera
+				// doesn't move for live updates, so "just past the furthest
+				// node" would be just out of view).
 				const angle = (2 * Math.PI * newNodeIndex) / Math.max(1, unknownCount);
-				const radius = 80 + Math.random() * 60;
+				const radius =
+					knownLayoutRadius > 0 ? knownLayoutRadius * (0.9 + Math.random() * 0.1) : 80 + Math.random() * 60;
 				sn.x = centroidX + Math.cos(angle) * radius;
 				sn.y = centroidY + Math.sin(angle) * radius;
 			} else {
@@ -1959,6 +2043,7 @@ function setupForceSimulation(
 	oldPositions: Map<string, { x: number; y: number }>,
 	allPositionsKnown: boolean,
 	isFreshLayout: boolean,
+	isIncrementalUpdate = false,
 ) {
 	// Save the default d3 link strength function so we can apply linkStrength as
 	// a multiplier, matching how Obsidian's native graph works.
@@ -2065,6 +2150,13 @@ function setupForceSimulation(
 		needsInitialFit = true;
 		forceTickCount = 0;
 	}
+	// A live vault-change patch settles locally around the changed nodes (they
+	// were seeded near their neighbours) and never moves the camera — the user
+	// may be reading the graph while a note syncs in.
+	else if (isIncrementalUpdate && oldPositions.size > 0) {
+		simulation.alpha(allPositionsKnown ? 0.05 : 0.3);
+		needsInitialFit = false;
+	}
 	// All nodes restored from cache → gentle settle, no camera refit needed.
 	// Some nodes had prior positions (mode switch) → slow drift into place.
 	// No prior positions → full simulation from scratch.
@@ -2108,6 +2200,11 @@ function isColorOnlyChange(data: GraphData): boolean {
 }
 
 function setupGraph(data: GraphData) {
+	// Consume the incremental flag whichever path this change takes, so a
+	// leftover flag can't misclassify a later unrelated rebuild.
+	const isIncrementalUpdate = incrementalUpdatePending;
+	incrementalUpdatePending = false;
+
 	if (data.nodes.length === 0) {
 		if (simulation) {
 			simulation.stop();
@@ -2166,7 +2263,7 @@ function setupGraph(data: GraphData) {
 	}
 
 	const { oldPositions, allPositionsKnown, isFreshLayout } = buildInternalData(data);
-	setupForceSimulation(oldPositions, allPositionsKnown, isFreshLayout);
+	setupForceSimulation(oldPositions, allPositionsKnown, isFreshLayout, isIncrementalUpdate);
 }
 
 // React to graphData changes — setupGraph is called via untrack so that writes
