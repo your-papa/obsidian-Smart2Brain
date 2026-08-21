@@ -75,6 +75,7 @@ import {
 } from "./integrations/pluginIntegrations";
 
 import { getRegistry } from "../providers/registry";
+import { ensureProviderRegistered } from "../providers/registrySync";
 
 import type { StructuredToolInterface } from "@langchain/core/tools";
 import type { MultiServerMCPClient } from "@langchain/mcp-adapters";
@@ -1437,6 +1438,18 @@ export class AgentManager {
 		const subAgents = this.resolveSubAgentSpecs(selectedAgent);
 		const cacheKey = this.buildRunnableCacheKey(selectedAgent, chatModel, summarizationModel);
 
+		// Self-heal before resolving: the registry is normally kept in step by the data
+		// store's provider mutations, but a run can still reach a provider that isn't
+		// registered (a code path that mutated config without going through those hooks).
+		// Registering on demand here is far cheaper than the alternative failure mode below,
+		// which clears the user's model selection. Mirrors VectorStoreService, which has had
+		// the same on-demand registration for embeddings.
+		for (const provider of new Set(
+			[chatModel.provider, summarizationModel.provider, titleModel.provider].filter(Boolean),
+		)) {
+			ensureProviderRegistered(pluginData, provider);
+		}
+
 		let resolved: ResolvedRun;
 		try {
 			resolved = await agent.resolveRun({
@@ -1450,6 +1463,8 @@ export class AgentManager {
 			});
 		} catch (error) {
 			if (error instanceof ProviderNotFoundError) {
+				// Genuinely gone (deleted, or its secret was cleared) — on-demand registration
+				// above already had its chance, so clearing the model is the correct response.
 				pluginData.updateAgent(selectedAgent.id, { chatModel: null });
 				new Notice(`Provider "${chatModel.provider}" is no longer available. Please select a new model.`);
 			}
