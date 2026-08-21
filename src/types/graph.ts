@@ -225,7 +225,7 @@ export const DEFAULT_SMART_GRAPH_SETTINGS: SmartGraphSettings = {
 	// mild repulsion and strong cluster cohesion keep topics as compact blobs.
 	linkDistance: 60,
 	chargeStrength: -120,
-	centerStrength: 0.05,
+	centerStrength: 0.07,
 	linkStrength: 1,
 	clusterCohesionStrength: 0.55,
 	showWikiLinks: true,

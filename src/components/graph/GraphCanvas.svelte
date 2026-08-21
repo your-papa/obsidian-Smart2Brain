@@ -15,6 +15,7 @@ import type { GraphData, GraphNode, EdgeType } from "../../types/graph";
 import { deriveClusterRepresentativesFromGraph } from "../../views/smart-graph/graphDataBuilder";
 import { computeNodeBounds, easeOutCubic, framingTransform, type FramingPadding } from "../../utils/graphAnimation";
 import { buildTopicRegion, centroid } from "../../utils/convexHull";
+import { densityForceProfile, nodeDrawRadius, zoomNodeScale } from "../../utils/graphUtils";
 import { resolveNodePaths, topicNodeId } from "../../utils/mergeNodes";
 import { PixiRenderer, readThemeColors, type ClusterPillHit } from "./pixiRenderer";
 
@@ -117,7 +118,30 @@ let pixi: PixiRenderer | null = null;
 
 // Node size auto-tuned from graph size: larger for small graphs, smaller for dense ones.
 // Uses a continuous log scale so the transition is smooth, clamped to a readable range.
-let nodeSize = $derived(Math.max(2, Math.round(7 - Math.log10(Math.max(graphData.nodes.length, 10)) * 1.8)));
+//
+// Counts the notes the graph *represents* — a collapsed topic counts as its
+// members, not as one node. The tune adapts to vault size, and reading the
+// on-screen node count instead made collapse-all jump the base (2 → 5 on a
+// large vault, with the degree cap and label font scaling along): the closer
+// camera fit already magnifies the handful of topic nodes, so re-inflating
+// their world radius on top rendered them as giant discs.
+let representedNoteCount = $derived(
+	graphData.nodes.reduce((count, node) => count + (node.kind === "topic" ? (node.memberPaths?.length ?? 1) : 1), 0),
+);
+let nodeSize = $derived(Math.max(2, Math.round(7 - Math.log10(Math.max(representedNoteCount, 10)) * 1.8)));
+
+// Density-adaptive physics: unlike node size (which keys off *represented*
+// notes so folding doesn't change the sizing regime), the forces key off the
+// nodes actually on screen — that count is what decides how far out the camera
+// must sit to frame everything. Each force gets its own multiplier (see
+// densityForceProfile for the asymmetry between the intra- and inter-cluster
+// length scales). The user's slider values are the baseline at the reference
+// density, where every multiplier is exactly 1.
+let forceProfile = $derived(densityForceProfile(graphData.nodes.length));
+let effectiveLinkDistance = $derived(linkDistance * forceProfile.spacing);
+let effectiveChargeStrength = $derived(chargeStrength * forceProfile.charge);
+let effectiveCenterStrength = $derived(centerStrength * forceProfile.center);
+let effectiveClusterCohesion = $derived(clusterCohesionStrength * forceProfile.cohesion);
 
 // Edge alpha auto-tuned from edge count: fade edges as the graph grows denser so
 // overlapping edges don't compound into a dark mass.  Clamped to [0.18, 0.60].
@@ -211,7 +235,12 @@ let simPausedWhileHidden = false;
 
 // D3-compatible node/link types
 type SimNode = GraphNode & SimulationNodeDatum;
-type SimLink = SimulationLinkDatum<SimNode> & { weight: number; type: EdgeType };
+type SimLink = SimulationLinkDatum<SimNode> & {
+	weight: number;
+	type: EdgeType;
+	/** Born in the latest data change — only these take the edge fade-in. */
+	isNew?: boolean;
+};
 
 let simNodes: SimNode[] = [];
 let simLinks: SimLink[] = [];
@@ -220,8 +249,10 @@ let simLinks: SimLink[] = [];
 // Holds every drawable edge type; per-type visibility is decided in drawEdges.
 let renderableSimLinks: SimLink[] = [];
 
-// Edge fade-in: edges start invisible and fade to full opacity after each
-// setupSimulation call, providing a smooth crossfade on mode/data changes.
+// Edge fade-in: edges *born in the latest data change* start invisible and
+// fade to full opacity (see `SimLink.isNew`). Pre-existing edges are exempt,
+// so a local change — one topic folding, one note arriving — doesn't flash
+// the whole graph's edges.
 let edgeFadeAlpha = 1;
 const EDGE_FADE_RATE = 0.04; // reaches 1 in 25 ticks (~0.4s at 60fps)
 
@@ -245,9 +276,23 @@ const MIN_TOPIC_LINK_DISTANCE_FACTOR = 0.45;
 /**
  * How far a topic's notes are seeded from its collapsed position when expanding.
  * Just enough that the force sim has a gradient to push them apart — seeding
- * them all on the exact same point would leave them stuck there.
+ * them all on the exact same point would leave them stuck there. Deliberately
+ * small: the visible outward travel *is* the expand animation, and any distance
+ * covered by the seed itself is a teleport the eye can't follow.
  */
-const EXPAND_SCATTER_RADIUS = 45;
+const EXPAND_SCATTER_RADIUS = 18;
+
+/**
+ * Spawn-grow animation for nodes born in a data change (a topic node on
+ * collapse, member notes on expand, a note created while the graph is open).
+ * Growing from a fraction of the final radius at the position the change
+ * happened gives the eye a single point to follow instead of a full-size pop.
+ */
+const NODE_SPAWN_MS = 320;
+const NODE_SPAWN_START_SCALE = 0.25;
+
+/** Birth timestamps of nodes still growing in, cleared as each finishes. */
+const nodeSpawnTimes = new Map<string, number>();
 
 /**
  * Alpha held during a collapse/expand transition — matches what releasing a drag
@@ -704,13 +749,13 @@ function buildHitGrid() {
 }
 
 /** The original linear scan — still used while the layout is in motion. */
-function findNodeLinear(x: number, y: number, hitRadius: number): GraphNode | null {
+function findNodeLinear(x: number, y: number, hitRadius: number, displayFactor: number): GraphNode | null {
 	// Search in reverse order (top-most nodes first)
 	for (let i = simNodes.length - 1; i >= 0; i--) {
 		const node = simNodes[i];
 		const dx = (node.x ?? 0) - x;
 		const dy = (node.y ?? 0) - y;
-		const reach = getNodeRadius(node) + hitRadius;
+		const reach = getNodeRadius(node) * displayFactor + hitRadius;
 		if (dx * dx + dy * dy <= reach * reach) {
 			return node;
 		}
@@ -728,16 +773,20 @@ function findNodeAt(screenX: number, screenY: number): GraphNode | null {
 	const { x, y } = screenToGraph(screenX, screenY);
 	const scale = pixi?.scale ?? 1;
 	const hitRadius = (Math.max(1, nodeSize) + 4) / scale;
+	// Nodes are drawn counter-scaled against the zoom, so the hit target must
+	// grow and shrink with them. Applied at query time only — the grid itself
+	// stores camera-independent positions and stays valid across zooms.
+	const displayFactor = zoomNodeScale(scale);
 
 	// While ticking, positions change under the grid every frame — scan instead.
 	if (hitGridDirty && simulation && simulation.alpha() > 0.03) {
-		return findNodeLinear(x, y, hitRadius);
+		return findNodeLinear(x, y, hitRadius, displayFactor);
 	}
 	if (hitGridDirty || !hitGrid) buildHitGrid();
 
 	// The zoomed-out hit slack can exceed one cell, so widen the neighbourhood
 	// to however many cells the search radius spans.
-	const searchRadius = hitGridMaxRadius + hitRadius;
+	const searchRadius = hitGridMaxRadius * displayFactor + hitRadius;
 	const span = Math.ceil(searchRadius / hitGridCellSize);
 	const cx = Math.floor(x / hitGridCellSize);
 	const cy = Math.floor(y / hitGridCellSize);
@@ -752,7 +801,7 @@ function findNodeAt(screenX: number, screenY: number): GraphNode | null {
 				if (order <= bestOrder) continue;
 				const dx = (node.x ?? 0) - x;
 				const dy = (node.y ?? 0) - y;
-				const reach = getNodeRadius(node) + hitRadius;
+				const reach = getNodeRadius(node) * displayFactor + hitRadius;
 				if (dx * dx + dy * dy <= reach * reach) {
 					best = node;
 					bestOrder = order;
@@ -881,27 +930,25 @@ function weightPull(link: SimLink): number {
 function weightedLinkDistance(link: SimLink): number {
 	const source = link.source as SimNode;
 	const target = link.target as SimNode;
-	if (source?.kind !== "topic" && target?.kind !== "topic") return linkDistance;
+	if (source?.kind !== "topic" && target?.kind !== "topic") return effectiveLinkDistance;
 
 	// Same log curve as the pull, inverted: the heaviest edges sit at
 	// MIN_TOPIC_LINK_DISTANCE_FACTOR of the normal length.
 	const weight = Math.max(1, link.weight);
 	const t = Math.min(1, Math.log2(weight) / Math.log2(WEIGHT_DISTANCE_SATURATION));
-	return linkDistance * (1 - t * (1 - MIN_TOPIC_LINK_DISTANCE_FACTOR));
+	return effectiveLinkDistance * (1 - t * (1 - MIN_TOPIC_LINK_DISTANCE_FACTOR));
 }
 
 /**
  * Get the draw radius for a node from its degree and the auto-tuned nodeSize.
  *
- * Size encodes exactly one thing — connectedness — so it stays unambiguous.
- * Bridge nodes are surfaced by the highlight toggle's color, not by size.
- * Must match the renderer's sprite radius (`syncNodes`), since this value
- * also drives hit-testing, collision spacing, and label offsets.
+ * Delegates to the shared {@link nodeDrawRadius} formula (also used by the
+ * renderer's `syncNodes`) so hit-testing, collision spacing and label offsets
+ * can never disagree with the drawn circle. Bridge nodes are surfaced by the
+ * highlight toggle's color, not by size.
  */
 function getNodeRadius(node: GraphNode): number {
-	const base = Math.max(1, nodeSize);
-	const degree = node.degree ?? 0;
-	return base + Math.min(Math.log1p(degree) * 2.5, base * 5);
+	return nodeDrawRadius(node, nodeSize);
 }
 
 /**
@@ -995,9 +1042,14 @@ function render(mode: RenderMode) {
 				if (hullFadeProgress >= 1) outgoingHulls = [];
 				else requestRender("world");
 			}
+			// The incoming grouping fades with the cross-fade itself, not with the
+			// edge fade: tying it to `edgeFadeAlpha` blanked every region on any
+			// data change, so folding one topic made all of them blink. During a
+			// cross-fade the unchanged topics resolve between two near-identical
+			// shapes at complementary alphas, which reads as holding steady.
 			renderer.drawHulls(hulls, {
 				focusedClusters,
-				fadeAlpha: edgeFadeAlpha,
+				fadeAlpha: outgoingHulls.length > 0 ? easeOutCubic(hullFadeProgress) : 1,
 				outgoing: outgoingHulls,
 				outgoingAlpha: outgoingHulls.length > 0 ? 1 - easeOutCubic(hullFadeProgress) : 0,
 			});
@@ -1008,7 +1060,7 @@ function render(mode: RenderMode) {
 			lastHullPaths = [];
 			lastHullSignature = "";
 			hullFadeProgress = 1;
-			renderer.drawHulls([], { focusedClusters, fadeAlpha: edgeFadeAlpha });
+			renderer.drawHulls([], { focusedClusters, fadeAlpha: 1 });
 		}
 
 		// ── Edges ──────────────────────────────────────────────
@@ -1051,6 +1103,24 @@ function render(mode: RenderMode) {
 		}
 
 		// ── Nodes ──────────────────────────────────────────────
+		// Advance spawn-grow animations: each newborn node's radius eases from a
+		// fraction to full size, finished entries drop out, and an unfinished
+		// animation requests the next world frame so it completes even once the
+		// simulation is at rest.
+		let spawnScales: Map<string, number> | null = null;
+		if (nodeSpawnTimes.size > 0) {
+			const now = performance.now();
+			spawnScales = new Map();
+			for (const [id, born] of nodeSpawnTimes) {
+				const t = (now - born) / NODE_SPAWN_MS;
+				if (t >= 1) {
+					nodeSpawnTimes.delete(id);
+					continue;
+				}
+				spawnScales.set(id, NODE_SPAWN_START_SCALE + (1 - NODE_SPAWN_START_SCALE) * easeOutCubic(t));
+			}
+			if (isWorld && nodeSpawnTimes.size > 0) requestRender("world");
+		}
 		renderer.syncNodes(simNodes, nodeSize, {
 			selectedNodes,
 			hoveredNodeId: hoveredNode?.id ?? null,
@@ -1059,6 +1129,7 @@ function render(mode: RenderMode) {
 			isForceMode: true,
 			hoverAlphas,
 			nodeClusterMap,
+			spawnScales,
 		});
 	}
 
@@ -1071,12 +1142,40 @@ function render(mode: RenderMode) {
 	const hovId = hoveredNode?.id ?? null;
 	const hoverNeighbors = hovId ? adjacency.get(hovId) : undefined;
 
+	// Nodes are drawn counter-scaled against the zoom; labels must anchor above
+	// the circle as drawn, size themselves against it, and judge visibility by
+	// the size the user actually sees.
+	const labelZoomFactor = zoomNodeScale(scale);
+
 	// Label font size in CSS pixels (screen space).
 	// The renderer counter-scales each label with t.scale.set(1/viewport_scale), which
-	// makes the effective screen size equal to t.style.fontSize exactly — so this value
-	// is the on-screen pixel height at every zoom level, no division by scale needed.
-	// Tied to nodeSize so labels feel proportional when the user adjusts node size.
-	const LABEL_FONT_PX = Math.max(Math.round(nodeSize * 2.5), 10);
+	// makes the effective screen size equal to t.style.fontSize exactly — so these
+	// values are on-screen pixel heights at every zoom level, no division by scale.
+	//
+	// Sized per node against the circle as drawn (which carries the degree curve
+	// and the zoom counter-scale on top of `nodeSize`), because a single shared
+	// size fails in both directions: derived from the base it left big collapsed
+	// topics captioned in tiny text, and derived from the largest node it made
+	// every label big whenever a few large nodes were on screen.
+	//
+	// The response is deliberately compressed — a node 4× the radius gets a 2×
+	// label, not 4× — so size differences stay legible as a hierarchy without
+	// the largest captions dominating the canvas.
+	const LABEL_FONT_MIN_PX = 10;
+	const LABEL_FONT_MAX_PX = 22;
+	/** Node screen radius that maps to the baseline font size. */
+	const LABEL_REFERENCE_RADIUS = 6;
+	const baselineFontPx = Math.max(nodeSize * 2.5, LABEL_FONT_MIN_PX);
+	function labelFontFor(node: SimNode): number {
+		const screenRadius = getNodeRadius(node) * labelZoomFactor * scale;
+		const ratio = Math.sqrt(Math.max(screenRadius, 1) / LABEL_REFERENCE_RADIUS);
+		return Math.round(Math.min(LABEL_FONT_MAX_PX, Math.max(LABEL_FONT_MIN_PX, baselineFontPx * ratio)));
+	}
+
+	// The occlusion grid is a fixed lattice, so it takes one representative
+	// size — the baseline. Per-label widths are still measured exactly in
+	// `canDrawLabel`; this only sets the row height.
+	const LABEL_FONT_PX = Math.round(Math.max(baselineFontPx, LABEL_FONT_MIN_PX));
 
 	// Label occlusion culling — grid-based O(n) instead of O(n²) linear scan.
 	// The canvas is divided into LABEL_CELL_W×LABEL_CELL_H px cells (screen space).
@@ -1096,10 +1195,10 @@ function render(mode: RenderMode) {
 		labelGrid.fill(0);
 	}
 
-	function canDrawLabel(nodeX: number, labelY: number, approxCharCount: number): boolean {
-		// LABEL_FONT_PX is already in screen px, so sw/sh are screen px directly
-		const sw = approxCharCount * LABEL_FONT_PX * 0.55;
-		const sh = LABEL_FONT_PX;
+	function canDrawLabel(nodeX: number, labelY: number, approxCharCount: number, fontPx = LABEL_FONT_PX): boolean {
+		// Font sizes are already in screen px, so sw/sh are screen px directly
+		const sw = approxCharCount * fontPx * 0.55;
+		const sh = fontPx;
 		const screen = renderer.worldToScreen(nodeX, labelY);
 		const x1 = screen.x - sw / 2 - LABEL_PAD_X;
 		const y1 = screen.y - sh - LABEL_PAD_Y;
@@ -1173,46 +1272,48 @@ function render(mode: RenderMode) {
 	}> = [];
 
 	for (const node of sortedLabelNodes) {
-		const radius = getNodeRadius(node);
+		const radius = getNodeRadius(node) * labelZoomFactor;
 		const labelY = node.y - radius - 2 / scale;
 		const nodeAlpha = hoverAlphas.get(node.id) ?? 0.85;
 		// Screen-space radius: how large the node circle appears on screen
 		const screenRadius = radius * scale;
+		// Each label is sized to its own node, so occlusion must measure with it.
+		const fontSize = labelFontFor(node);
 
 		if (hovId && node.id === hovId) {
 			// Hovered node: always show label, skip occlusion check (it wins)
-			canDrawLabel(node.x, labelY, node.label.length);
+			canDrawLabel(node.x, labelY, node.label.length, fontSize);
 			labelEntries.push({
 				nodeX: node.x,
 				nodeY: labelY,
 				text: node.label,
 				color: c.textNormal,
 				alpha: 1,
-				fontSize: LABEL_FONT_PX,
+				fontSize,
 			});
 		} else if (hovId && hoverNeighbors?.has(node.id)) {
-			if (!canDrawLabel(node.x, labelY, node.label.length)) continue;
+			if (!canDrawLabel(node.x, labelY, node.label.length, fontSize)) continue;
 			labelEntries.push({
 				nodeX: node.x,
 				nodeY: labelY,
 				text: node.label,
 				color: c.textMuted,
 				alpha: nodeAlpha,
-				fontSize: LABEL_FONT_PX,
+				fontSize,
 			});
 		} else if (node.highlighted && !hovId) {
-			if (!canDrawLabel(node.x, labelY, node.label.length)) continue;
+			if (!canDrawLabel(node.x, labelY, node.label.length, fontSize)) continue;
 			labelEntries.push({
 				nodeX: node.x,
 				nodeY: labelY,
 				text: node.label,
 				color: c.textAccent,
 				alpha: 1,
-				fontSize: LABEL_FONT_PX,
+				fontSize,
 			});
 		} else if (screenRadius >= MIN_LABEL_SCREEN_RADIUS) {
 			// Node is large enough on screen to anchor a label — show it if space allows
-			if (!canDrawLabel(node.x, labelY, node.label.length)) continue;
+			if (!canDrawLabel(node.x, labelY, node.label.length, fontSize)) continue;
 			// Smooth fade-in over a 2px radius window so labels don't pop in abruptly
 			const fadeAlpha = Math.min(1, (screenRadius - MIN_LABEL_SCREEN_RADIUS) / 2);
 			labelEntries.push({
@@ -1221,7 +1322,7 @@ function render(mode: RenderMode) {
 				text: node.label,
 				color: node.highlighted ? c.textAccent : c.textNormal,
 				alpha: nodeAlpha * fadeAlpha,
-				fontSize: LABEL_FONT_PX,
+				fontSize,
 			});
 		}
 	}
@@ -1896,6 +1997,15 @@ function buildInternalData(data: GraphData): {
 		}
 	}
 
+	// Identity of the outgoing frame, for entrance animations: nodes and edges
+	// not present in it are the *change*, and only they animate in — the rest of
+	// the graph holds still so the change is what the eye lands on.
+	const previousNodeIds = new Set(simNodes.map((n) => n.id));
+	const previousEdgeKeys = new Set<string>();
+	for (const link of renderableSimLinks) {
+		previousEdgeKeys.add(simLinkKey((link.source as SimNode).id, (link.target as SimNode).id, link.type));
+	}
+
 	// Compute centroid from all known positions (old + cached) for scattering new nodes
 	let centroidX = 0;
 	let centroidY = 0;
@@ -1930,7 +2040,7 @@ function buildInternalData(data: GraphData): {
 	const unknownCount = data.nodes.filter((n) => !oldPositions.has(n.id) && !persistentPositionCache.has(n.id)).length;
 	// Spread radius for circle pre-layout: scale with node count so the graph fills
 	// a reasonable area before forces kick in (reduces initial chaos).
-	const circleRadius = Math.max(150, Math.sqrt(unknownCount) * linkDistance * 0.5);
+	const circleRadius = Math.max(150, Math.sqrt(unknownCount) * effectiveLinkDistance * 0.5);
 
 	// A node created while the graph is open should appear next to what it
 	// connects to, not in a ring around the whole layout — seed unknown nodes at
@@ -2005,6 +2115,20 @@ function buildInternalData(data: GraphData): {
 
 	simNodeMap = new Map(simNodes.map((n) => [n.id, n]));
 
+	// Stamp entrance animations for nodes born in this change. A fresh layout is
+	// excluded — everything is new there, and it has its own reveal (the canvas
+	// stays hidden until the layout partially settles).
+	if (previousNodeIds.size > 0) {
+		const now = performance.now();
+		for (const n of simNodes) {
+			if (!previousNodeIds.has(n.id)) nodeSpawnTimes.set(n.id, now);
+		}
+	}
+	// Nodes removed by the change can't finish an animation they're no longer in.
+	for (const id of nodeSpawnTimes.keys()) {
+		if (!simNodeMap.has(id)) nodeSpawnTimes.delete(id);
+	}
+
 	simLinks = data.edges
 		.filter((e) => simNodeMap.has(e.source) && simNodeMap.has(e.target))
 		.map((e) => ({
@@ -2012,6 +2136,7 @@ function buildInternalData(data: GraphData): {
 			target: simNodeMap.get(e.target)!,
 			weight: e.weight,
 			type: e.type,
+			isNew: !previousEdgeKeys.has(simLinkKey(e.source, e.target, e.type)),
 		}));
 
 	// Pre-split by edge type to avoid filtering every render frame
@@ -2029,10 +2154,17 @@ function buildInternalData(data: GraphData): {
 		adjacency.get(tId)?.add(sId);
 	}
 
-	// Start edge fade-in on full data change
+	// Start the edge fade-in. Only edges marked `isNew` above consume it — the
+	// rest of the graph renders at full opacity throughout, so a local change
+	// (one topic folding) no longer flashes every edge on screen.
 	edgeFadeAlpha = 0;
 
 	return { oldPositions, allPositionsKnown, isFreshLayout };
+}
+
+/** Canonical identity of a rendered edge — endpoint order doesn't matter. */
+function simLinkKey(a: string, b: string, type: string): string {
+	return a < b ? `${a}\0${b}\0${type}` : `${b}\0${a}\0${type}`;
 }
 
 // ============================================================================
@@ -2061,12 +2193,12 @@ function setupForceSimulation(
 	simulation = forceSimulation<SimNode>(simNodes);
 	simulation
 		.force("link", baseLinkForce)
-		.force("charge", forceManyBody().strength(chargeStrength).distanceMin(30))
+		.force("charge", forceManyBody().strength(effectiveChargeStrength).distanceMin(30))
 		// Obsidian uses forceX + forceY for centering (spring toward origin),
 		// NOT forceCenter (which shifts the centroid). This is the key difference.
-		.force("centerX", forceX<SimNode>(0).strength(centerStrength))
-		.force("centerY", forceY<SimNode>(0).strength(centerStrength))
-		.force("cluster", clusterCohesionForce(simNodes, clusterCohesionStrength))
+		.force("centerX", forceX<SimNode>(0).strength(effectiveCenterStrength))
+		.force("centerY", forceY<SimNode>(0).strength(effectiveCenterStrength))
+		.force("cluster", clusterCohesionForce(simNodes, effectiveClusterCohesion))
 		.force(
 			"collide",
 			forceCollide<SimNode>().radius((d) => getNodeRadius(d) + 2),
@@ -2231,7 +2363,7 @@ function setupGraph(data: GraphData) {
 		}
 		// Sync the cohesion force strength to the current prop value.
 		const clusterForce = simulation?.force("cluster") as ReturnType<typeof clusterCohesionForce> | undefined;
-		if (clusterForce) clusterForce.strength(clusterCohesionStrength);
+		if (clusterForce) clusterForce.strength(effectiveClusterCohesion);
 		// Re-derive cluster metadata so pills on the canvas reflect the new segmentation.
 		// (buildInternalData is not called in this path, so we update it explicitly.)
 		refreshClusterMetadata(data);
@@ -2298,11 +2430,14 @@ $effect(() => {
 // Reading `simulation` ($state) means this effect re-runs when a new simulation
 // is created (e.g. after a full graph rebuild), so slider changes always apply.
 $effect(() => {
-	const _charge = chargeStrength;
-	const _link = linkDistance;
-	const _center = centerStrength;
+	// The density-adjusted values, so a slider change hot-applies at the same
+	// spread the full setup uses. Both are value-stable $deriveds: a color-only
+	// graph change re-evaluates them but doesn't re-fire this effect.
+	const _charge = effectiveChargeStrength;
+	const _link = effectiveLinkDistance;
+	const _center = effectiveCenterStrength;
 	const _linkStr = linkStrength;
-	const _cohesion = clusterCohesionStrength;
+	const _cohesion = effectiveClusterCohesion;
 	const sim = simulation; // $state — tracks simulation creation
 
 	if (!sim) return;
@@ -2522,7 +2657,15 @@ export function followLayout() {
 	// such a node, which is why the view stayed zoomed out until the node was
 	// dragged: releasing a drag sets alphaTarget(0.3), and *that* sustained pull
 	// is what recentred it. This gives the transition the same treatment.
-	simulation.alphaTarget(RETARGET_ALPHA).restart();
+	//
+	// Damped like the granularity transition: the sustained alpha with the
+	// default (low) drag made expanding notes spring out and rebound, and moved
+	// the camera on the fast refit cadence — jumpy on both counts. The recluster
+	// drag keeps the motion flowing, and `isReclustering` selects the slower,
+	// longer-eased camera sampling; the tick handler hands both back once the
+	// layout comes to rest.
+	simulation.alphaTarget(RETARGET_ALPHA).velocityDecay(RECLUSTER_VELOCITY_DECAY).restart();
+	isReclustering = true;
 	if (retargetTimer != null) clearTimeout(retargetTimer);
 	retargetTimer = setTimeout(() => {
 		retargetTimer = null;
