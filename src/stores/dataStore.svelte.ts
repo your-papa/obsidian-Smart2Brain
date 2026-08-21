@@ -51,6 +51,7 @@ import {
 	type ProviderInstanceMeta,
 	type ProviderTemplateId,
 } from "../providers/index";
+import { syncAllProviders, syncProvider, unsyncProvider } from "../providers/registrySync";
 
 const LANGSMITH_API_KEY_SECRET_ID = buildManagedSecretId("langsmith", "apiKey");
 /** Managed secret id for a web-search provider's API key, e.g. "web-search-brave-api-key". */
@@ -2070,6 +2071,15 @@ export class PluginDataStore {
 			}
 		}
 
+		// This is the commit point for a newly added provider (ProviderSetup flips it on a
+		// successful connection). Registering here is what makes the provider usable in chat
+		// immediately, instead of only after the next Obsidian reload.
+		if (isConfigured) {
+			syncProvider(this, providerId);
+		} else {
+			unsyncProvider(providerId);
+		}
+
 		this.saveSettings();
 	}
 
@@ -2091,6 +2101,9 @@ export class PluginDataStore {
 			// Store directly
 			config.auth.values[fieldName] = value;
 		}
+		// Refresh the registry's cached auth — it snapshots the resolved AuthObject at
+		// registration, so an edited key/baseUrl would otherwise keep using the old value.
+		this.syncProviderIfConfigured(providerId);
 		this.saveSettings();
 	}
 
@@ -2108,6 +2121,7 @@ export class PluginDataStore {
 		} else {
 			delete config.auth.secretIds[fieldName];
 		}
+		this.syncProviderIfConfigured(providerId);
 		this.saveSettings();
 	}
 
@@ -2128,7 +2142,19 @@ export class PluginDataStore {
 		const config = this.#data.providerConfig[providerId];
 		if (!config) return;
 		config.auth.authMode = authMode;
+		this.syncProviderIfConfigured(providerId);
 		this.saveSettings();
+	}
+
+	/**
+	 * Refreshes the runtime registry entry for a provider after its auth changed, but only
+	 * once it's configured. Drafts are deliberately skipped: an unconfigured provider is a
+	 * half-filled Setup modal, and registering it would expose a provider the user hasn't
+	 * committed (and that onClose may delete).
+	 */
+	private syncProviderIfConfigured(providerId: string): void {
+		if (!this.isProviderConfigured(providerId)) return;
+		syncProvider(this, providerId);
 	}
 
 	isProviderUsingCodexAuth(providerId: string): boolean {
@@ -2276,6 +2302,10 @@ export class PluginDataStore {
 			}
 		}
 
+		// A rename touches two IDs (drop the old entry, add the new), so reconcile the whole
+		// registry rather than syncing a single ID.
+		syncAllProviders(this);
+
 		await this.saveSettings();
 	}
 
@@ -2305,6 +2335,11 @@ export class PluginDataStore {
 				removeSecret(this._plugin.app, secretId);
 			}
 		}
+
+		// Drop the runtime registry entry. Without this the deleted provider stays live and
+		// fully usable in memory — holding the resolved API key we just cleared from
+		// SecretStorage — until the next Obsidian reload.
+		unsyncProvider(providerId);
 
 		await this.saveSettings();
 	}

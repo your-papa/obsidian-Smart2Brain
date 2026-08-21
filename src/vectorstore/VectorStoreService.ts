@@ -11,11 +11,11 @@ import { decode, encode } from "@msgpack/msgpack";
 import { Notice, TFile, getAllTags } from "obsidian";
 import { hydrateEmbeddingModel } from "../lib/modelMetadataNormalizer";
 import type SecondBrainPlugin from "../main";
-import { getProviderDefinition } from "../providers/index";
 import { fetchModelsDevData } from "../providers/modelsDevApi";
 import { getOllamaModelsCache } from "../providers/ollamaModels";
 import { fetchOpenRouterModels } from "../providers/openrouterModels";
 import { getRegistry } from "../providers/registry";
+import { ensureProviderRegistered } from "../providers/registrySync";
 import { getData } from "../stores/dataStore.svelte";
 import { chunkText } from "../utils/chunkText";
 import { getEmbeddableVaultFiles, isEmbeddableFile, readIndexableContent } from "../utils/fileFiltering";
@@ -1066,22 +1066,7 @@ export class VectorStoreService {
 	 * on demand here when needed.
 	 */
 	private ensureProviderRegistered(providerId: string): boolean {
-		const registry = getRegistry();
-		if (registry.has(providerId)) return true;
-
-		const data = getData();
-		const auth = data.getResolvedAuthState(providerId);
-		if (!auth) return false;
-
-		const def = getProviderDefinition(providerId, data.getAllProviderMeta());
-		if (!def) return false;
-
-		try {
-			registry.register(providerId, def, auth);
-			return true;
-		} catch {
-			return false;
-		}
+		return ensureProviderRegistered(getData(), providerId);
 	}
 
 	/**
