@@ -4,6 +4,7 @@ import {
 	decodeTopicCaches,
 	encodeTopicCaches,
 	getCachedSemanticEdges,
+	setActiveGraphResolution,
 	setCachedSemanticEdges,
 	snapshotTopicCaches,
 	swapActiveGraphCache,
@@ -26,6 +27,7 @@ function sampleSnapshot(): TopicCacheSnapshot {
 						["7:0.5:wiki", { "a.md": 0, "b.md": 0 }],
 					]),
 					granularityLadder: [0.4, 1.0, 2.2],
+					resolution: 1.0,
 					lastUsed: 100,
 				},
 			],
@@ -34,6 +36,7 @@ function sampleSnapshot(): TopicCacheSnapshot {
 				{
 					leiden: new Map([["7:1:fused", { "a.md": 0, "b.md": 1 }]]),
 					granularityLadder: null,
+					resolution: 2.2,
 					lastUsed: 50,
 				},
 			],
@@ -53,6 +56,7 @@ describe("encodeTopicCaches / decodeTopicCaches", () => {
 		for (const [signature, entry] of original.graphs) {
 			const decodedEntry = decoded?.graphs.get(signature);
 			expect(decodedEntry?.granularityLadder).toEqual(entry.granularityLadder);
+			expect(decodedEntry?.resolution).toBe(entry.resolution);
 			expect([...decodedEntry!.leiden.keys()].sort()).toEqual([...entry.leiden.keys()].sort());
 			for (const [key, partition] of entry.leiden) {
 				expect(decodedEntry?.leiden.get(key)).toEqual(partition);
@@ -68,12 +72,15 @@ describe("encodeTopicCaches / decodeTopicCaches", () => {
 	it("round-trips empty optional caches", () => {
 		const original: TopicCacheSnapshot = {
 			activeSignature: "sig",
-			graphs: new Map([["sig", { leiden: new Map([["7:1:fused", { "a.md": 0 }]]), granularityLadder: null, lastUsed: 1 }]]),
+			graphs: new Map([
+				["sig", { leiden: new Map([["7:1:fused", { "a.md": 0 }]]), granularityLadder: null, resolution: null, lastUsed: 1 }],
+			]),
 			semanticEdges: new Map(),
 			topicLabels: new Map(),
 		};
 		const decoded = decodeTopicCaches(encodeTopicCaches(original));
 		expect(decoded?.graphs.get("sig")?.granularityLadder).toBeNull();
+		expect(decoded?.graphs.get("sig")?.resolution).toBeNull();
 		expect(decoded?.semanticEdges.size).toBe(0);
 		expect(decoded?.topicLabels.size).toBe(0);
 		expect(decoded?.graphs.get("sig")?.leiden.get("7:1:fused")).toEqual({ "a.md": 0 });
@@ -123,6 +130,36 @@ describe("swapActiveGraphCache", () => {
 		// And re-immersing restores the immersed slot too.
 		expect(swapActiveGraphCache("swap-immersed")).toBe(true);
 		expect(topicCaches.leiden.get("7:1:fused")).toEqual({ "a.md": 0 });
+	});
+
+	it("keeps granularity per graph across an immerse round-trip", () => {
+		// Full graph viewed at γ 1.0.
+		swapActiveGraphCache("res-full");
+		topicCaches.leiden.set("7:1:fused", { "a.md": 0 });
+		setActiveGraphResolution(1.0);
+
+		// Immerse and dial the topics finer — a statement about the subset.
+		swapActiveGraphCache("res-immersed", 1.0);
+		topicCaches.leiden.set("7:4.2:fused", { "a.md": 0 });
+		setActiveGraphResolution(4.2);
+
+		// Exiting restores the full graph's own γ, not the immersed one.
+		expect(swapActiveGraphCache("res-full", 4.2)).toBe(true);
+		expect(topicCaches.resolution).toBe(1.0);
+
+		// …and re-immersing brings the subset's γ back.
+		expect(swapActiveGraphCache("res-immersed", 1.0)).toBe(true);
+		expect(topicCaches.resolution).toBe(4.2);
+	});
+
+	it("leaves resolution null for a graph never assigned one", () => {
+		swapActiveGraphCache("res-fresh-a");
+		topicCaches.leiden.set("7:1:fused", { "a.md": 0 });
+		setActiveGraphResolution(2.2);
+		// A graph seen for the first time has no γ of its own — the caller keeps
+		// the current global setting rather than being moved.
+		swapActiveGraphCache("res-fresh-b", 2.2);
+		expect(topicCaches.resolution).toBeNull();
 	});
 
 	it("treats a swap to the current signature as a restore no-op", () => {

@@ -50,6 +50,7 @@ import {
 	getCachedSemanticEdges,
 	loadPersistedTopicCaches,
 	scheduleTopicCacheSave,
+	setActiveGraphResolution,
 	setCachedSemanticEdges,
 	swapActiveGraphCache,
 	topicCaches,
@@ -551,7 +552,9 @@ async function buildGraph() {
 			// when that graph comes back (immerse exit, a filter round-trip), so
 			// those transitions re-apply topics from cache instead of re-running
 			// Leiden, the ladder probes and labeling from scratch.
-			const restored = swapActiveGraphCache(signature);
+			// Pass the γ on screen so it's recorded against the *outgoing* graph
+			// before the slot re-keys.
+			const restored = swapActiveGraphCache(signature, settings.leidenResolution);
 			// Whichever way the swap went, the archive layout changed on disk.
 			scheduleTopicCacheSave();
 			// A fresh (or restored) segmentation replaces every incremental
@@ -567,6 +570,16 @@ async function buildGraph() {
 				granularityLadder = [...GRANULARITY_LEVEL_RESOLUTIONS];
 				// The ladder describes another graph; hide the slider until it's re-derived.
 				hasDerivedGranularityLadder = false;
+			}
+			// Granularity is per-graph: dialling the topics finer while immersed
+			// describes the subset, not the vault. Restore this graph's own γ so
+			// returning to it re-segments the way the user left it rather than
+			// inheriting the granularity set on the graph in between.
+			if (topicCaches.resolution != null && topicCaches.resolution !== settings.leidenResolution) {
+				data.smartGraphSettings = { ...settings, leidenResolution: topicCaches.resolution };
+				// Topic ids are positions in a fresh partition, so anything holding
+				// an id (folds, focus, selection) refers to a different grouping now.
+				clearTopicIndexedState();
 			}
 		} else if (topicCaches.granularityLadder) {
 			// A fresh view instance starts on the fallback ladder even though this
@@ -1019,6 +1032,11 @@ function handleSettingsChange(partial: Partial<SmartGraphSettings>) {
 	const previousKey = currentPartitionKey();
 	data.smartGraphSettings = { ...settings, ...partial };
 	if (currentPartitionKey() !== previousKey) clearTopicIndexedState();
+	// Remember the granularity against *this* graph, so switching away and back
+	// (immerse, filters) restores it rather than the last γ set anywhere. Every
+	// path that changes γ — slider drag, commit, arrow keys, dev panel — routes
+	// through here.
+	if (partial.leidenResolution !== undefined) setActiveGraphResolution(partial.leidenResolution);
 }
 
 function handleFolderFilterChange(folders: string[]) {

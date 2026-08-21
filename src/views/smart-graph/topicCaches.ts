@@ -52,6 +52,15 @@ export interface TopicCaches {
 	/** The derived granularity ladder for that same graph, restored on reopen. */
 	granularityLadder: number[] | null;
 	/**
+	 * The γ this graph was last viewed at, so granularity is per-graph rather
+	 * than one global setting. Immersing and dialling the topics finer is a
+	 * statement about the subset, not about the vault — without this, exiting
+	 * immerse would leave the full graph re-segmented at the subset's γ.
+	 * Null until the user has actually chosen a granularity for this graph;
+	 * the stored global setting is the fallback.
+	 */
+	resolution: number | null;
+	/**
 	 * Membership-signature → generated topic label, so re-running Leiden at the
 	 * same grouping (or reopening the view) doesn't re-spend API calls. Global
 	 * across graphs: a topic that exists in both the full and an immersed graph
@@ -65,12 +74,14 @@ export const topicCaches: TopicCaches = {
 	leiden: new Map(),
 	graphSignature: "",
 	granularityLadder: null,
+	resolution: null,
 	topicLabels: new Map(),
 };
 
 interface ArchivedGraphCaches {
 	leiden: Map<string, Record<string, number>>;
 	granularityLadder: number[] | null;
+	resolution: number | null;
 	lastUsed: number;
 }
 
@@ -106,19 +117,28 @@ function evictOldest<T extends { lastUsed: number }>(map: Map<string, T>, maxSiz
 /**
  * Re-key the active cache slot to a different graph.
  *
- * The outgoing graph's derivations (partitions + ladder) are archived under
- * its signature rather than cleared; if the incoming signature was archived
- * earlier, its derivations are restored and the caller can treat the switch
- * like a signature match. Returns true when a restore happened.
+ * The outgoing graph's derivations (partitions + ladder + the γ it was last
+ * viewed at) are archived under its signature rather than cleared; if the
+ * incoming signature was archived earlier, they're restored and the caller can
+ * treat the switch like a signature match. Returns true when a restore
+ * happened.
+ *
+ * `currentResolution` is the γ on screen right now — recorded against the
+ * outgoing graph so returning to it re-applies its own granularity instead of
+ * inheriting whatever the graph in between was dialled to.
  */
-export function swapActiveGraphCache(signature: string): boolean {
-	if (signature === topicCaches.graphSignature) return true;
+export function swapActiveGraphCache(signature: string, currentResolution?: number): boolean {
+	if (signature === topicCaches.graphSignature) {
+		if (currentResolution !== undefined) topicCaches.resolution = currentResolution;
+		return true;
+	}
 
 	// Archive the outgoing graph — but only when it actually derived something.
 	if (topicCaches.graphSignature && topicCaches.leiden.size > 0) {
 		archivedGraphs.set(topicCaches.graphSignature, {
 			leiden: topicCaches.leiden,
 			granularityLadder: topicCaches.granularityLadder,
+			resolution: currentResolution ?? topicCaches.resolution,
 			lastUsed: Date.now(),
 		});
 	}
@@ -128,9 +148,15 @@ export function swapActiveGraphCache(signature: string): boolean {
 	topicCaches.graphSignature = signature;
 	topicCaches.leiden = restored?.leiden ?? new Map();
 	topicCaches.granularityLadder = restored?.granularityLadder ?? null;
+	topicCaches.resolution = restored?.resolution ?? null;
 
 	evictOldest(archivedGraphs, MAX_CACHED_GRAPHS - 1);
 	return restored !== undefined;
+}
+
+/** Record the γ the active graph is being viewed at. */
+export function setActiveGraphResolution(resolution: number): void {
+	topicCaches.resolution = resolution;
 }
 
 /** Look up a cached semantic edge set by its full cache key. */
@@ -151,13 +177,18 @@ export function setCachedSemanticEdges(key: string, edges: GraphEdge[]): void {
 // Serialization
 // ============================================================================
 
-/** v2: multiple graphs (active + archived) instead of a single slot. */
-const TOPIC_CACHE_VERSION = 2;
+/**
+ * v2: multiple graphs (active + archived) instead of a single slot.
+ * v3: each cached graph carries the γ it was last viewed at.
+ */
+const TOPIC_CACHE_VERSION = 3;
 
 /** One graph's cached derivations, as carried in a snapshot. */
 export interface CachedGraphEntry {
 	leiden: Map<string, Record<string, number>>;
 	granularityLadder: number[] | null;
+	/** The γ this graph was last viewed at; null when never chosen. */
+	resolution: number | null;
 	lastUsed: number;
 }
 
@@ -177,6 +208,7 @@ interface PersistedGraphCaches {
 	/** Partition key → community id per node, aligned with `nodePaths`; -1 = absent. */
 	partitions: Record<string, number[]>;
 	granularityLadder: number[] | null;
+	resolution: number | null;
 	lastUsed: number;
 }
 
@@ -196,6 +228,7 @@ export function snapshotTopicCaches(): TopicCacheSnapshot {
 		graphs.set(signature, {
 			leiden: entry.leiden,
 			granularityLadder: entry.granularityLadder,
+			resolution: entry.resolution,
 			lastUsed: entry.lastUsed,
 		});
 	}
@@ -203,6 +236,7 @@ export function snapshotTopicCaches(): TopicCacheSnapshot {
 		graphs.set(topicCaches.graphSignature, {
 			leiden: topicCaches.leiden,
 			granularityLadder: topicCaches.granularityLadder,
+			resolution: topicCaches.resolution,
 			lastUsed: Date.now(),
 		});
 	}
@@ -222,6 +256,7 @@ function restoreSnapshot(snapshot: TopicCacheSnapshot): void {
 		archivedGraphs.set(signature, {
 			leiden: entry.leiden,
 			granularityLadder: entry.granularityLadder,
+			resolution: entry.resolution,
 			lastUsed: entry.lastUsed,
 		});
 	}
@@ -229,6 +264,7 @@ function restoreSnapshot(snapshot: TopicCacheSnapshot): void {
 	topicCaches.graphSignature = snapshot.activeSignature;
 	topicCaches.leiden = active?.leiden ?? new Map();
 	topicCaches.granularityLadder = active?.granularityLadder ?? null;
+	topicCaches.resolution = active?.resolution ?? null;
 	for (const [key, entry] of snapshot.semanticEdges) semanticEdgeSets.set(key, entry);
 	for (const [key, label] of snapshot.topicLabels) topicCaches.topicLabels.set(key, label);
 }
@@ -255,6 +291,7 @@ function encodeGraph(signature: string, entry: CachedGraphEntry): PersistedGraph
 		nodePaths,
 		partitions,
 		granularityLadder: entry.granularityLadder ? [...entry.granularityLadder] : null,
+		resolution: entry.resolution,
 		lastUsed: entry.lastUsed,
 	};
 }
@@ -306,6 +343,7 @@ function decodeGraph(raw: unknown): { signature: string; entry: CachedGraphEntry
 		entry: {
 			leiden,
 			granularityLadder: Array.isArray(ladder) && ladder.every((g) => typeof g === "number") ? [...ladder] : null,
+			resolution: typeof persisted.resolution === "number" ? persisted.resolution : null,
 			lastUsed: typeof persisted.lastUsed === "number" ? persisted.lastUsed : 0,
 		},
 	};
