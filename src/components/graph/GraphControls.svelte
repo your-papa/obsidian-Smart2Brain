@@ -368,24 +368,6 @@ $effect(() => {
         </span>
       </div>
 
-      <!-- ── Scope ────────────────────────────── -->
-      <!-- What is in the graph at all. This sits above Topics because it decides
-           the input: changing the file set changes which notes exist to be
-           grouped, so every topic below is derived from whatever is scoped here.
-           It previously sat under Display, which read as a cosmetic preference
-           when it is the most consequential control in the panel. -->
-      <span class="section-label">Scope</span>
-      <SettingContainer
-        name="Markdown only"
-        desc="Show only Markdown notes; off shows all indexable files"
-        compact
-      >
-        <Toggle
-          checked={settings.markdownOnly}
-          onchange={(value) => onSettingsChange({ markdownOnly: value })}
-        />
-      </SettingContainer>
-
       <!-- ── Topics ───────────────────────────── -->
       <!-- Granularity and "Inferred links" both decide *which topics exist*
            (they re-run Leiden), so they belong together and above the topic list
@@ -472,6 +454,23 @@ $effect(() => {
           {/each}
         </div>
       {/if}
+
+      <!-- ── Scope ────────────────────────────── -->
+      <!-- What is in the graph at all. Placed after Topics rather than before it:
+           it is the rarest thing to touch — usually set once and left — so the
+           controls reached on every visit stay at the top, where the topic list
+           can also sit directly under the settings that produce it. -->
+      <span class="section-label">Scope</span>
+      <SettingContainer
+        name="Markdown only"
+        desc="Show only Markdown notes; off shows all indexable files"
+        compact
+      >
+        <Toggle
+          checked={settings.markdownOnly}
+          onchange={(value) => onSettingsChange({ markdownOnly: value })}
+        />
+      </SettingContainer>
 
       <!-- ── Display ───────────────────────────── -->
       <!-- Purely how the graph above is drawn — nothing here changes which notes
