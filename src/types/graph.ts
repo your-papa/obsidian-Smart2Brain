@@ -210,6 +210,15 @@ export interface SmartGraphSettings {
 	showClusterLabels: boolean;
 	/** Whether to draw a tinted region behind each topic's notes */
 	showTopicHulls: boolean;
+	/**
+	 * Whether detected topics are applied to the view at all.
+	 *
+	 * Display-only: Leiden still runs and `leidenCommunities` stays populated, so
+	 * flipping this is instant and costs no recompute. Off, every note renders in
+	 * the default node colour with no regions or labels — which is the point, it's
+	 * the before/after that shows what the clustering actually contributed.
+	 */
+	showTopics: boolean;
 }
 
 /**
@@ -250,6 +259,7 @@ export const DEFAULT_SMART_GRAPH_SETTINGS: SmartGraphSettings = {
 	highlightBridges: false,
 	showClusterLabels: true,
 	showTopicHulls: true,
+	showTopics: true,
 };
 
 /**

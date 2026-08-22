@@ -1087,6 +1087,12 @@ function handleSettingsChange(partial: Partial<SmartGraphSettings>) {
 	if (partial.leidenResolution !== undefined) {
 		setCachedResolution(graphTopologySignature(graphData), partial.leidenResolution);
 	}
+	// Topics are applied in `resolveAndApplySegments`, which nothing re-runs on its
+	// own — repaint from the communities already in hand. Deliberately not a Leiden
+	// run: this toggle is display-only, so both directions are just a re-colour.
+	if (partial.showTopics !== undefined) {
+		resolveAndApplySegments(graphData);
+	}
 }
 
 function handleFolderFilterChange(folders: string[]) {
@@ -1686,7 +1692,11 @@ function handleFocusSegment(segmentId: string, multi: boolean) {
  */
 function resolveAndApplySegments(gd: GraphData) {
 	const themeColors = resolveThemeColors();
-	const resolved = resolveSegments(plugin.app, gd, "leiden", {
+	// `"none"` resolves to no segments, which strips every node's colour and
+	// cluster below — the whole effect of the topics toggle. Suppressing it here
+	// rather than skipping the Leiden run keeps `leidenCommunities` intact, so
+	// turning topics back on is a re-render rather than a recompute.
+	const resolved = resolveSegments(plugin.app, gd, (settings.showTopics ?? true) ? "leiden" : "none", {
 		clusterMap: new Map(),
 		clusterLabels: effectiveClusterLabels,
 		themeColors,
@@ -2178,16 +2188,26 @@ function handleHoverPreview(event: MouseEvent, path: string, targetEl: HTMLEleme
     <div class="graph-selection-bar">
       <span class="selection-count">
         {#if selectedPaths.length > 0}
-          {selectedPaths.length} notes selected{isImmersed ? " · immersed" : ""}
+          <strong>{selectedPaths.length}</strong>
+          {selectedPaths.length === 1 ? "note" : "notes"} selected{isImmersed ? " · immersed" : ""}
         {:else}
-          {graphData.nodes.length} notes · immersed
+          <strong>{graphData.nodes.length}</strong>
+          {graphData.nodes.length === 1 ? "note" : "notes"} · immersed
         {/if}
       </span>
+      <!-- Left of the divider with the count: this moves the camera, it doesn't
+           act on the notes the way the verbs on the right do. Grouping it with
+           the count keeps that split legible, and leaves both icon-only buttons
+           bracketing the labelled actions rather than sitting among them. -->
+      {#if selectedPaths.length > 0}
+        <Button iconId="scan" onClick={handleZoomToSelection} tooltip="Zoom to selection (F)" />
+      {/if}
+      <div class="selection-divider"></div>
       <div class="selection-actions">
         {#if selectedPaths.length > 0}
-          <Button iconId="scan" onClick={handleZoomToSelection} tooltip="Zoom to selection (F)" />
           {#if selectedTopicsCollapseAction !== null}
             <Button
+              iconId={selectedTopicsCollapseAction === "collapse" ? "fold-vertical" : "unfold-vertical"}
               buttonText={selectedTopicsCollapseAction === "collapse" ? "Collapse" : "Expand"}
               onClick={() => void handleCollapseSelectedTopics()}
               tooltip={withKey(
@@ -2199,23 +2219,29 @@ function handleHoverPreview(event: MouseEvent, path: string, targetEl: HTMLEleme
             />
           {/if}
           <Button
+            iconId="scan-search"
             buttonText="Immerse"
             onClick={handleImmerse}
             tooltip={withKey("Rebuild graph with selected notes only", "I")}
           />
-          <Button
-            buttonText="Open all"
-            onClick={handleOpenAllSelected}
-            tooltip={withKey("Open all selected notes in new tabs", "O")}
-          />
           {#if !hasOpenChat}
             <Button
+              iconId="message-square"
               buttonText="Open in chat"
               onClick={handleSendToChat}
               tooltip={withKey("Reveal the chat and attach the selected notes", "A")}
             />
           {/if}
-          <Button buttonText="Clear" onClick={handleClearSelection} tooltip="Clear selection (Esc)" />
+          <Button
+            iconId="copy-plus"
+            buttonText="Open all"
+            onClick={handleOpenAllSelected}
+            tooltip={withKey("Open all selected notes in new tabs", "O")}
+          />
+
+          <!-- Icon-only: dismissing isn't one of the verbs you came here for, so
+               it reads as an affordance on the bar rather than a peer action. -->
+          <Button iconId="x" onClick={handleClearSelection} tooltip="Clear selection (Esc)" />
         {:else}
           <Button buttonText="Exit" onClick={handleExitImmerse} tooltip="Exit immerse (Esc)" />
         {/if}
@@ -2288,30 +2314,71 @@ function handleHoverPreview(event: MouseEvent, path: string, targetEl: HTMLEleme
 
   .graph-selection-bar {
     position: absolute;
-    bottom: 12px;
+    /* Clear Obsidian's status bar, which floats over the bottom-right of the
+       canvas — at the previous 12px the two overlapped and the word/backlink
+       counts collided with the bar's own buttons. */
+    bottom: 34px;
     left: 50%;
     transform: translateX(-50%);
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 8px 16px;
-    background: var(--background-primary);
+    gap: 10px;
+    padding: 6px 8px 6px 14px;
+    /* Secondary background + native shadow token, so the bar reads as a floating
+       surface the way Obsidian's own popovers do rather than as a flat card that
+       tracks the canvas colour. */
+    background: var(--background-secondary);
     border: 1px solid var(--background-modifier-border);
-    border-radius: 8px;
-    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.2);
+    /* `--radius-l` (12px) rather than the composer's literal 22px: that 22px is
+       half the composer's height — a pill — not a house rounding, and it only
+       reads as one at that height. 12px is Obsidian's own value for floating
+       panels, and being a token it tracks whatever the user's theme defines. */
+    border-radius: var(--radius-l);
+    box-shadow: var(--shadow-l);
     z-index: 12;
     white-space: nowrap;
+    animation: s2b-selection-bar-in 120ms ease-out;
+  }
+
+  /* Slide up a touch on appear — the bar shows up in response to a selection
+     made elsewhere on the canvas, so a little motion draws the eye to it. */
+  @keyframes s2b-selection-bar-in {
+    from {
+      opacity: 0;
+      transform: translateX(-50%) translateY(6px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
   }
 
   .selection-count {
-    font-size: 13px;
-    font-weight: 500;
+    font-size: var(--font-ui-small);
+    font-weight: var(--font-medium);
+    color: var(--text-muted);
+  }
+
+  /* The number is the thing being acted on, so it carries the emphasis while the
+     surrounding words stay muted. */
+  .selection-count :global(strong) {
     color: var(--text-normal);
+    font-weight: var(--font-semibold);
   }
 
   .selection-actions {
     display: flex;
-    gap: 6px;
+    align-items: center;
+    gap: 4px;
+  }
+
+  /* Separates the count and its view control from the verbs acting on the notes. */
+  .selection-divider {
+    width: 1px;
+    align-self: stretch;
+    margin: 2px 0;
+    background: var(--background-modifier-border);
+    flex-shrink: 0;
   }
 
   /* On a phone the centered, nowrap bar overflows both screen edges — the

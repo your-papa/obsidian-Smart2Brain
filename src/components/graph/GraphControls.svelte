@@ -87,6 +87,10 @@ let {
 let isCollapsed = $state(true);
 let isDevCollapsed = $state(true);
 
+/** Defaulted here rather than in the template — settings persisted before this
+ *  toggle existed have no value for it, and topics-on is the established behaviour. */
+let showTopics = $derived(settings.showTopics ?? true);
+
 /**
  * Live height of the main panel, so the dev panel can stack directly beneath
  * it. Measured rather than assumed: the panel grows and shrinks as sections
@@ -269,7 +273,15 @@ $effect(() => {
 });
 </script>
 
-<!-- Unified vertical toolbar -->
+<!--
+  Unified vertical toolbar.
+
+  Icons are `m` (18px), not Button's `s` (16px) default. This rail is a standing
+  stack of tool toggles floating over the canvas — the same pattern as Obsidian's
+  ribbon and nav-action buttons, which are 18px/30px. The 16px default matches
+  view-header actions instead, which is a different, denser pattern, and at this
+  size the rail read as undersized against the canvas.
+-->
 <div class="graph-toolbar">
   <Button iconId="maximize" onClick={onFitToView} tooltip={fitTooltip} />
   <Button
@@ -278,15 +290,28 @@ $effect(() => {
     onClick={() => onLassoModeChange?.(!lassoMode)}
     styles={lassoMode ? "is-active" : ""}
   />
+  <!-- Show/hide detected topics. Display-only, so flipping it is instant and the
+       graph underneath is unchanged — that's what makes it readable as "here is
+       what the clustering added". -->
   <Button
-    iconId="atom"
+    iconId={showTopics ? "shapes" : "circle-dashed"}
+    tooltip={showTopics
+      ? "Hide topics — show the raw graph without clustering"
+      : "Show topics — colour notes by their detected topic"}
+    onClick={() => onSettingsChange({ showTopics: !showTopics })}
+    styles={showTopics ? "is-active" : ""}
+  />
+  <Button
+    iconId={isTopicsCollapsed ? "ungroup" : "group"}
     tooltip={isLeidenRunning
       ? "Computing topics…"
-      : isTopicsCollapsed
-        ? "Expand all topics back into notes (S)"
-        : "Collapse all topics into single nodes (S) — or select topics and use Collapse"}
+      : !showTopics
+        ? "Turn topics on to collapse them"
+        : isTopicsCollapsed
+          ? "Expand all topics back into notes (S)"
+          : "Collapse all topics into single nodes (S) — or select topics and use Collapse"}
     onClick={() => onToggleCollapseAll?.()}
-    disabled={isLeidenRunning}
+    disabled={isLeidenRunning || !showTopics}
     styles={isTopicsCollapsed ? "is-active" : ""}
   />
   <div class="toolbar-icon-wrapper">
@@ -631,6 +656,29 @@ $effect(() => {
     flex-direction: column;
     gap: 6px;
     z-index: 11;
+  }
+
+  /* Sized here rather than via Button's `iconSize` prop: for an icon-only button
+     that prop also pins width/height to the icon size as an inline style, which
+     would shrink the click target to 18px — a bigger glyph on a smaller thing to
+     hit. Setting both from CSS keeps them independent.
+
+     18px/30px matches Obsidian's ribbon and nav-action buttons. This rail is that
+     pattern — a standing stack of tool toggles — not the denser 16px/28px
+     view-header strip that Button defaults to. */
+  .graph-toolbar :global(button.clickable-icon) {
+    width: 30px;
+    height: 30px;
+  }
+
+  .graph-toolbar :global(button.clickable-icon .s2b-button-icon) {
+    width: var(--icon-m);
+    height: var(--icon-m);
+  }
+
+  .graph-toolbar :global(button.clickable-icon svg) {
+    width: var(--icon-m);
+    height: var(--icon-m);
   }
 
   /* These render at 30x26 — well under the touch floor, and they're the only

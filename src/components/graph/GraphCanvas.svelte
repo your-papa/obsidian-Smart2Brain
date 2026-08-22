@@ -328,10 +328,57 @@ const RECLUSTER_VELOCITY_DECAY = 0.55;
  * per-cluster member damping — combined ~5× weaker than it once was, so
  * settled clusters keep breathing room). Migration across the layout to a
  * *new* topic needs the strong pull back for a moment, or freshly split
- * topics stay spatially interleaved with overlapping hulls. Restored to the
- * equilibrium strength when the transition ends.
+ * topics stay spatially interleaved with overlapping hulls. Ramped back to the
+ * equilibrium strength as the transition ends (see RECLUSTER_BOOST_RAMP_*).
  */
 const RECLUSTER_COHESION_BOOST = 3;
+
+/**
+ * Alpha span over which the migration boost eases back to equilibrium.
+ *
+ * The boost used to be handed back in one step at alpha < 0.02 — but at 3× the
+ * equilibrium pull, the migration leaves every cluster compressed well past
+ * where charge repulsion wants it, and the simulation still has ~2.5s of ticks
+ * left below 0.02. Stepping the force field there made the settled-looking
+ * graph visibly push apart once, seconds after the migration seemed done.
+ *
+ * The ramp spans the *whole* transition (it starts at RECLUSTER_ALPHA, i.e. on
+ * the first tick) rather than a narrow window at the end: a flat full-boost
+ * plateau followed by a late release still read as two animations — migrate,
+ * then relax. Eased from the start, relinquishing the boost is simply part of
+ * the settling motion.
+ */
+const RECLUSTER_BOOST_RAMP_START = RECLUSTER_ALPHA;
+const RECLUSTER_BOOST_RAMP_END = 0.02;
+
+/**
+ * Current cohesion boost factor for the migration, as a function of alpha.
+ * Pure in alpha so the tick handler and the physics-rebuild effect can never
+ * disagree about the strength mid-transition.
+ *
+ * Smoothstep rather than linear: its zero slope at both ends means the factor
+ * holds near the full boost early — while alpha is high and the migration is
+ * covering real distance — and lands on 1 tangentially, so there is no kink in
+ * the force field at either boundary. (In wall-clock terms alpha decays
+ * exponentially, so the middle of the curve is also stretched over the longest
+ * stretch of the transition.)
+ */
+function reclusterBoostFactor(alpha: number): number {
+	if (alpha >= RECLUSTER_BOOST_RAMP_START) return RECLUSTER_COHESION_BOOST;
+	if (alpha <= RECLUSTER_BOOST_RAMP_END) return 1;
+	const t = (RECLUSTER_BOOST_RAMP_START - alpha) / (RECLUSTER_BOOST_RAMP_START - RECLUSTER_BOOST_RAMP_END);
+	const eased = t * t * (3 - 2 * t);
+	return RECLUSTER_COHESION_BOOST + (1 - RECLUSTER_COHESION_BOOST) * eased;
+}
+
+/**
+ * True only while the 3× migration boost is in play — i.e. the transition was
+ * started by a topic reassignment. `isReclustering` alone can't distinguish
+ * that from a collapse/expand `followLayout` transition, which shares the
+ * decay/camera treatment but never boosts cohesion; ramping there would
+ * *introduce* a triple-strength pull mid-collapse rather than remove a step.
+ */
+let reclusterBoostActive = false;
 
 /**
  * Delay before the corrective fit that runs after the layout has stopped
@@ -457,6 +504,14 @@ function requestRender(mode: RenderMode) {
 const EDGE_REDRAW_SCALE_STEP = 0.05;
 /** Camera scale at which edges were last tessellated. */
 let lastEdgeDrawScale = 1;
+
+/**
+ * Zoom band currently governing the label budget (index into
+ * LABEL_BUDGET_ZOOM_STEPS). Held across frames so a camera hovering exactly on a
+ * threshold doesn't oscillate between two budgets — the band only changes once
+ * the scale has moved decisively past the boundary (see LABEL_BUDGET_HYSTERESIS).
+ */
+let labelBudgetStepIndex = -1;
 /** Camera scale at the last viewport-move callback — distinguishes zoom from pan. */
 let lastViewportScale = 1;
 
@@ -572,9 +627,13 @@ function handleKeyDown(e: KeyboardEvent) {
 
 // Persistent label occlusion grid — allocated once, zeroed at the start of each render.
 // Avoids a ~10KB allocation + GC at 60fps. Resized only when canvas dimensions change.
-let labelGrid: Uint8Array = new Uint8Array(0);
-let labelGridCols = 0;
-let labelGridRows = 0;
+/**
+ * Occupied label-occlusion cells for the current frame, keyed by packed
+ * world-anchored cell coordinates. A Set rather than the previous screen-sized
+ * Uint8Array because world-anchored columns are unbounded (and negative);
+ * cleared each frame rather than reallocated.
+ */
+const labelCellsOccupied = new Set<number>();
 
 // Node ID → SimNode map for O(1) lookups (built once in setupSimulation)
 let simNodeMap: Map<string, SimNode> = new Map();
@@ -1108,6 +1167,109 @@ function render(mode: RenderMode) {
 	// readable threshold — no manual zoom setting needed. The occlusion grid
 	// handles crowding; this threshold handles legibility.
 	const MIN_LABEL_SCREEN_RADIUS = 5; // px — node must be at least this big on screen
+
+	/**
+	 * Simulation alpha at and below which ordinary labels are fully visible.
+	 *
+	 * Deliberately below the 0.05 the camera's final fit uses: the camera only has
+	 * to stop chasing the layout, whereas a label has to be *readable*, and text
+	 * still creeping is more distracting than text that arrives late. The layout
+	 * keeps drifting visibly for a while after alpha 0.05.
+	 */
+	const LABEL_SETTLE_ALPHA = 0.02;
+	/** Alpha at which ordinary labels are fully hidden; between the two they fade. */
+	const LABEL_SETTLE_ALPHA_MAX = 0.05;
+	/**
+	 * Ordinary labels fade out while the layout is still moving.
+	 *
+	 * Anchoring the occlusion lattice to the world stopped labels re-rolling under
+	 * a *camera* move, but during a live simulation the nodes genuinely move
+	 * relative to each other, so cell ownership legitimately changes frame to
+	 * frame and the flicker is real rather than an artefact. There's nothing to
+	 * read mid-settle anyway — the captions are still sliding around — so they
+	 * fade in once the graph stops.
+	 *
+	 * A fade rather than a hard cutoff: switching at a threshold would make every
+	 * label pop in at once the instant alpha crossed it.
+	 *
+	 * Hovered, highlighted and cluster-representative labels are exempt — those
+	 * answer a direct question ("what is this?") and must respond immediately,
+	 * settled or not.
+	 */
+	const simAlpha = simulation?.alpha() ?? 0;
+	const settleLabelAlpha =
+		simAlpha <= LABEL_SETTLE_ALPHA
+			? 1
+			: simAlpha >= LABEL_SETTLE_ALPHA_MAX
+				? 0
+				: 1 - (simAlpha - LABEL_SETTLE_ALPHA) / (LABEL_SETTLE_ALPHA_MAX - LABEL_SETTLE_ALPHA);
+
+	/**
+	 * How many *ordinary* nodes may be captioned at once.
+	 *
+	 * The radius gate alone barely discriminates: `nodeDrawRadius` is
+	 * `log1p(degree)`-shaped, so a degree-3 note and a degree-30 hub differ by
+	 * only a couple of screen pixels and nearly every node clears the threshold
+	 * together. Hundreds then contend for the same occlusion cells, and because
+	 * winning a cell is binary, two similar nodes drifting a pixel apart trade the
+	 * label back and forth every frame — that's the flicker, not the volume alone.
+	 *
+	 * Ranking by degree and captioning only the top slice fixes both: the hubs
+	 * worth reading keep their labels (and keep them *stably*, since the ranking
+	 * only changes when the graph does), while the long tail stays quiet until you
+	 * hover it or zoom in far enough that few nodes are on screen at all.
+	 *
+	 * Priority tiers above ordinary — hovered, its neighbours, highlighted, and
+	 * cluster representatives — are exempt and never counted against this budget.
+	 *
+	 * The budget is the overview value; it grows with zoom (see below), where
+	 * crowding is the thing that stops being true.
+	 */
+	const ORDINARY_LABEL_BUDGET_BASE = 12;
+	/**
+	 * Graphs at or below this many nodes skip the budget entirely.
+	 *
+	 * The budget exists to resolve contention, and a small graph has none — the
+	 * occlusion grid alone keeps it readable. Capping here would only hide labels
+	 * that fit perfectly well.
+	 */
+	const LABEL_BUDGET_MIN_NODES = 60;
+	/**
+	 * Zoom multipliers on the budget, applied in discrete steps.
+	 *
+	 * A budget computed continuously from `scale` slides by one label at a time as
+	 * the camera moves, and since each increment flips exactly one caption on or
+	 * off, panning and zooming made labels blink. Stepping instead means the
+	 * budget holds constant across a whole zoom band and changes at a handful of
+	 * thresholds — a single deliberate change rather than a continuous shimmer.
+	 *
+	 * Zooming in still earns more labels: fewer nodes remain on screen, so the
+	 * occlusion grid has room the cap shouldn't be withholding.
+	 */
+	const LABEL_BUDGET_ZOOM_STEPS: Array<{ minScale: number; multiplier: number }> = [
+		{ minScale: 4, multiplier: 5 },
+		{ minScale: 2, multiplier: 2.5 },
+		{ minScale: 1, multiplier: 1 },
+	];
+	/**
+	 * Fraction the scale must overshoot a boundary before the band changes.
+	 * Without it, a camera resting on a threshold flips between two budgets on
+	 * sub-pixel jitter — trading the flicker for a rarer but identical one.
+	 */
+	const LABEL_BUDGET_HYSTERESIS = 0.12;
+	const nextStepIndex = LABEL_BUDGET_ZOOM_STEPS.findIndex((step) => {
+		// Leaving the current band costs extra; entering a new one is unchanged, so
+		// the boundary is sticky in whichever direction we're already committed to.
+		const isCurrent = LABEL_BUDGET_ZOOM_STEPS.indexOf(step) === labelBudgetStepIndex;
+		const threshold = isCurrent ? step.minScale * (1 - LABEL_BUDGET_HYSTERESIS) : step.minScale;
+		return scale >= threshold;
+	});
+	if (nextStepIndex !== -1) labelBudgetStepIndex = nextStepIndex;
+	const zoomMultiplier = LABEL_BUDGET_ZOOM_STEPS[labelBudgetStepIndex]?.multiplier ?? 1;
+	const ORDINARY_LABEL_BUDGET =
+		simNodes.length <= LABEL_BUDGET_MIN_NODES
+			? Number.POSITIVE_INFINITY
+			: Math.round(ORDINARY_LABEL_BUDGET_BASE * zoomMultiplier);
 	const showClusterAnchors = showClusterLabels && clusterRepresentativeNodes.size > 0;
 	const hovId = hoveredNode?.id ?? null;
 	const hoverNeighbors = hovId ? adjacency.get(hovId) : undefined;
@@ -1148,22 +1310,22 @@ function render(mode: RenderMode) {
 	const LABEL_FONT_PX = Math.round(Math.max(baselineFontPx, LABEL_FONT_MIN_PX));
 
 	// Label occlusion culling — grid-based O(n) instead of O(n²) linear scan.
-	// The canvas is divided into LABEL_CELL_W×LABEL_CELL_H px cells (screen space).
+	// Cells are LABEL_CELL_W×LABEL_CELL_H screen pixels, but anchored to the
+	// *world* origin rather than the screen corner: a pan moves every label and
+	// the lattice together, so nobody changes cells and contention outcomes hold
+	// still. When the lattice was screen-anchored, panning slid all labels across
+	// fixed cell boundaries, and two labels that never visually overlapped could
+	// share a cell at one camera offset and not the next — re-rolling who wins on
+	// every pan frame, which read as labels flashing while the camera moved.
 	// A label is allowed only if none of the cells it spans are already occupied.
 	const LABEL_CELL_W = 60; // px — approx half an average label width
 	const LABEL_CELL_H = LABEL_FONT_PX + 6; // px — label height + padding
 	const LABEL_PAD_X = 2;
 	const LABEL_PAD_Y = 1;
-	const neededCols = Math.ceil(width / LABEL_CELL_W) + 1;
-	const neededRows = Math.ceil(height / LABEL_CELL_H) + 1;
-	// Resize persistent grid only when canvas dimensions change; otherwise just zero it
-	if (neededCols !== labelGridCols || neededRows !== labelGridRows) {
-		labelGridCols = neededCols;
-		labelGridRows = neededRows;
-		labelGrid = new Uint8Array(labelGridCols * labelGridRows);
-	} else {
-		labelGrid.fill(0);
-	}
+	labelCellsOccupied.clear();
+	// Where the world origin currently lands on screen; subtracting it from a
+	// screen coordinate yields a pan-invariant coordinate (world × zoom).
+	const labelGridOrigin = renderer.worldToScreen(0, 0);
 
 	function canDrawLabel(nodeX: number, labelY: number, approxCharCount: number, fontPx = LABEL_FONT_PX): boolean {
 		// Font sizes are already in screen px, so sw/sh are screen px directly
@@ -1175,22 +1337,34 @@ function render(mode: RenderMode) {
 		const x2 = screen.x + sw / 2 + LABEL_PAD_X;
 		const y2 = screen.y + LABEL_PAD_Y;
 
-		// Convert to grid cell range
-		const col0 = Math.max(0, Math.floor(x1 / LABEL_CELL_W));
-		const col1 = Math.min(labelGridCols - 1, Math.floor(x2 / LABEL_CELL_W));
-		const row0 = Math.max(0, Math.floor(y1 / LABEL_CELL_H));
-		const row1 = Math.min(labelGridRows - 1, Math.floor(y2 / LABEL_CELL_H));
+		// Reject anything off-screen outright (screen space — this part *should*
+		// track the camera). Off-screen labels would otherwise occupy cells — and,
+		// now that ordinary labels are budgeted, spend a slot — while painting
+		// nothing the user can see. That also makes zooming in behave: as fewer
+		// nodes remain on screen, the budget is spent on them rather than on hubs
+		// somewhere off-canvas.
+		if (x2 < 0 || y2 < 0 || x1 > width || y1 > height) return false;
+
+		// Convert to world-anchored cell range (unbounded ints, negative is fine).
+		const col0 = Math.floor((x1 - labelGridOrigin.x) / LABEL_CELL_W);
+		const col1 = Math.floor((x2 - labelGridOrigin.x) / LABEL_CELL_W);
+		const row0 = Math.floor((y1 - labelGridOrigin.y) / LABEL_CELL_H);
+		const row1 = Math.floor((y2 - labelGridOrigin.y) / LABEL_CELL_H);
+
+		// Pack col/row into one integer key. 16 bits each — collisions need cells
+		// 65 536 apart (≈4M px), far beyond any real layout.
+		const cellKey = (c: number, r: number) => ((c & 0xffff) << 16) | (r & 0xffff);
 
 		// Check — any occupied cell means overlap
 		for (let r = row0; r <= row1; r++) {
 			for (let c = col0; c <= col1; c++) {
-				if (labelGrid[r * labelGridCols + c]) return false;
+				if (labelCellsOccupied.has(cellKey(c, r))) return false;
 			}
 		}
 		// Mark cells as occupied
 		for (let r = row0; r <= row1; r++) {
 			for (let c = col0; c <= col1; c++) {
-				labelGrid[r * labelGridCols + c] = 1;
+				labelCellsOccupied.add(cellKey(c, r));
 			}
 		}
 		return true;
@@ -1231,6 +1405,11 @@ function render(mode: RenderMode) {
 		});
 	}
 	const sortedLabelNodes = cachedSortedLabelNodes;
+
+	// Ordinary (untiered) labels placed so far this frame, against
+	// ORDINARY_LABEL_BUDGET. Nodes arrive degree-sorted, so the budget is spent on
+	// the most connected notes first.
+	let ordinaryLabelsDrawn = 0;
 
 	const labelEntries: Array<{
 		nodeX: number;
@@ -1281,9 +1460,16 @@ function render(mode: RenderMode) {
 				alpha: 1,
 				fontSize,
 			});
-		} else if (screenRadius >= MIN_LABEL_SCREEN_RADIUS) {
+		} else if (
+			settleLabelAlpha > 0 &&
+			screenRadius >= MIN_LABEL_SCREEN_RADIUS &&
+			ordinaryLabelsDrawn < ORDINARY_LABEL_BUDGET
+		) {
 			// Node is large enough on screen to anchor a label — show it if space allows
 			if (!canDrawLabel(node.x, labelY, node.label.length, fontSize)) continue;
+			// Counted only once the label is actually placed, so labels lost to
+			// occlusion don't silently consume the budget and leave it under-filled.
+			ordinaryLabelsDrawn++;
 			// Smooth fade-in over a 2px radius window so labels don't pop in abruptly
 			const fadeAlpha = Math.min(1, (screenRadius - MIN_LABEL_SCREEN_RADIUS) / 2);
 			labelEntries.push({
@@ -1291,7 +1477,7 @@ function render(mode: RenderMode) {
 				nodeY: labelY,
 				text: node.label,
 				color: node.highlighted ? c.textAccent : c.textNormal,
-				alpha: nodeAlpha * fadeAlpha,
+				alpha: nodeAlpha * fadeAlpha * settleLabelAlpha,
 				fontSize,
 			});
 		}
@@ -2107,13 +2293,23 @@ function setupForceSimulation(
 			hitGridDirty = true;
 			// A finished re-cluster transition hands its slower decay back, so the
 			// next drag or retarget feels normal instead of inheriting the drift.
-			// The migration cohesion boost is handed back with it — the settled
-			// layout must live at the gentle equilibrium strength.
-			if (isReclustering && simulation && simulation.alpha() < 0.02) {
-				isReclustering = false;
-				simulation.alphaDecay(baseAlphaDecay).velocityDecay(baseVelocityDecay);
-				const clusterForce = simulation.force("cluster") as ReturnType<typeof clusterCohesionForce> | undefined;
-				clusterForce?.strength(effectiveClusterCohesion);
+			// The migration cohesion boost isn't stepped off here — it eases out
+			// along `reclusterBoostFactor` as alpha falls through the ramp window,
+			// so releasing the over-compressed clusters is part of the same settle
+			// instead of a visible second push after it.
+			if (isReclustering && simulation) {
+				const tickAlpha = simulation.alpha();
+				if (reclusterBoostActive && tickAlpha < RECLUSTER_BOOST_RAMP_START) {
+					const clusterForce = simulation.force("cluster") as
+						| ReturnType<typeof clusterCohesionForce>
+						| undefined;
+					clusterForce?.strength(effectiveClusterCohesion * reclusterBoostFactor(tickAlpha));
+				}
+				if (tickAlpha < RECLUSTER_BOOST_RAMP_END) {
+					isReclustering = false;
+					reclusterBoostActive = false;
+					simulation.alphaDecay(baseAlphaDecay).velocityDecay(baseVelocityDecay);
+				}
 			}
 
 			// During initial settling, continuously refit the camera so it
@@ -2172,6 +2368,9 @@ function setupForceSimulation(
 	baseAlphaDecay = simulation.alphaDecay();
 	baseVelocityDecay = simulation.velocityDecay();
 	isReclustering = false;
+	// A fresh force set carries no migration boost; a stale flag would let the
+	// tick handler re-apply one to a simulation that never asked for it.
+	reclusterBoostActive = false;
 
 	// On a fresh layout, hide the canvas briefly so the first visible frame is
 	// already partially settled rather than the initial random-pile explosion.
@@ -2291,8 +2490,9 @@ function setupGraph(data: GraphData) {
 			// but that same gentleness can no longer *migrate* nodes across the
 			// layout when a granularity change hands them new topics, so freshly
 			// split groups stayed spatially interleaved and their hulls overlapped.
-			// Boost the pull for the transition only; the tick handler that ends
-			// the re-cluster (alpha < 0.02) restores the equilibrium strength.
+			// Boost the pull for the transition only; the tick handler eases it
+			// back to equilibrium across the RECLUSTER_BOOST_RAMP alpha window.
+			reclusterBoostActive = true;
 			clusterForce?.strength(effectiveClusterCohesion * RECLUSTER_COHESION_BOOST);
 			simulation
 				.alpha(RECLUSTER_ALPHA)
@@ -2381,10 +2581,14 @@ $effect(() => {
 	});
 	// Recreating the forces resets cohesion to its equilibrium strength; restore
 	// the migration boost if a re-cluster is still in flight, or a settings
-	// write landing mid-transition would strand topics half-migrated.
-	if (isReclustering) {
+	// write landing mid-transition would strand topics half-migrated. At the
+	// alpha-dependent factor, not the full boost — a write landing mid-ramp
+	// snapping the strength back up to 3× would reintroduce exactly the
+	// discontinuity the ramp exists to remove. Gated on the boost flag because
+	// `followLayout` transitions share `isReclustering` without ever boosting.
+	if (reclusterBoostActive) {
 		const migratingCluster = sim.force("cluster") as ReturnType<typeof clusterCohesionForce> | undefined;
-		migratingCluster?.strength(effectiveClusterCohesion * RECLUSTER_COHESION_BOOST);
+		migratingCluster?.strength(effectiveClusterCohesion * reclusterBoostFactor(sim.alpha()));
 	}
 
 	// Reheat only when a force parameter really changed. `settings` is replaced
