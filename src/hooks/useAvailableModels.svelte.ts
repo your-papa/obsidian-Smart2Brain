@@ -4,6 +4,7 @@ import { hydrateChatModel, hydrateEmbeddingModel } from "../lib/modelMetadataNor
 import { fetchModelsDevData, type ModelsDevApiResponse } from "../providers/modelsDevApi";
 import { getOllamaModelsCache, type OllamaModelInfo } from "../providers/ollamaModels";
 import { fetchOpenRouterModels, type OpenRouterModelInfo } from "../providers/openrouterModels";
+import { fetchOrcaRouterModels, type OrcaRouterModelInfo } from "../providers/orcarouterModels";
 import { getProviderDefinition, isEmbeddingProvider } from "../providers/index";
 import type { EmbedModelConfig } from "../providers/index";
 import type { ChatModel } from "../stores/chatStore.svelte";
@@ -64,6 +65,7 @@ export class AvailableModels {
 	#plugin = getPlugin();
 	#modelsDevData = $state<ModelsDevApiResponse | null>(null);
 	#openRouterData = $state<Map<string, OpenRouterModelInfo> | null>(null);
+	#orcaRouterData = $state<Map<string, OrcaRouterModelInfo> | null>(null);
 	#metadataLoadStarted = false;
 
 	constructor() {
@@ -75,9 +77,14 @@ export class AvailableModels {
 			return;
 		}
 		this.#metadataLoadStarted = true;
-		const [modelsDevData, openRouterData] = await Promise.all([fetchModelsDevData(), fetchOpenRouterModels()]);
+		const [modelsDevData, openRouterData, orcaRouterData] = await Promise.all([
+			fetchModelsDevData(),
+			fetchOpenRouterModels(),
+			fetchOrcaRouterModels(),
+		]);
 		this.#modelsDevData = modelsDevData;
 		this.#openRouterData = openRouterData;
+		this.#orcaRouterData = orcaRouterData;
 	}
 
 	#getOllamaData(): Map<string, OllamaModelInfo> | null {
@@ -188,6 +195,7 @@ export class AvailableModels {
 			hydrateChatModel(model.provider, model.model, {
 				modelsDevData: this.#modelsDevData,
 				openRouterData: this.#openRouterData,
+				orcaRouterData: this.#orcaRouterData,
 				ollamaData,
 				temperature: model.modelConfig.temperature,
 			}),
@@ -208,6 +216,7 @@ export class AvailableModels {
 			hydrateEmbeddingModel(model.provider, model.model, {
 				modelsDevData: this.#modelsDevData,
 				openRouterData: this.#openRouterData,
+				orcaRouterData: this.#orcaRouterData,
 				ollamaData,
 				similarityThresholdDefault: model.modelConfig.similarityThreshold,
 			}),
@@ -294,6 +303,10 @@ export class AvailableModels {
 
 	get openRouterModels(): Map<string, OpenRouterModelInfo> | null {
 		return this.#openRouterData;
+	}
+
+	get orcaRouterModels(): Map<string, OrcaRouterModelInfo> | null {
+		return this.#orcaRouterData;
 	}
 
 	getOllamaModelInfo(modelId: string): OllamaModelInfo | undefined {

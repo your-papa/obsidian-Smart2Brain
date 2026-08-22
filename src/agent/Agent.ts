@@ -51,7 +51,7 @@ const MAX_TEXT_ATTACHMENT_CHARS = 120_000;
 const MAX_PDF_EXTRACT_CHARS = 180_000;
 
 /** Providers whose APIs accept native PDF file content blocks. */
-export const NATIVE_PDF_PROVIDERS = new Set(["anthropic", "openai", "openrouter"]);
+export const NATIVE_PDF_PROVIDERS = new Set(["anthropic", "openai", "openrouter", "orcarouter"]);
 
 function truncateContent(content: string, maxChars: number): string {
 	if (content.length <= maxChars) return content;

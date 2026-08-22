@@ -11,6 +11,7 @@ import { anthropicProvider } from "./anthropic";
 import { ollamaProvider } from "./ollama";
 import { openaiProvider } from "./openai";
 import { openrouterProvider } from "./openrouter";
+import { orcarouterProvider } from "./orcarouter";
 import { openAICodexProvider } from "./openai-codex";
 import { createOmlxProvider } from "./omlx";
 
@@ -50,6 +51,11 @@ export const PROVIDER_TEMPLATES: readonly ProviderTemplateDefinition[] = [
 		id: "openrouter",
 		displayName: "OpenRouter",
 		description: "OpenRouter account and model catalog.",
+	},
+	{
+		id: "orcarouter",
+		displayName: "OrcaRouter",
+		description: "OrcaRouter gateway with 200+ frontier models.",
 	},
 ] as const;
 
@@ -94,6 +100,12 @@ function createTemplateDefinition(
 		case "openrouter":
 			return {
 				...openrouterProvider,
+				id: instanceId,
+				displayName: meta.displayName,
+			};
+		case "orcarouter":
+			return {
+				...orcarouterProvider,
 				id: instanceId,
 				displayName: meta.displayName,
 			};
@@ -167,3 +179,4 @@ export { anthropicProvider } from "./anthropic";
 export { openaiProvider } from "./openai";
 export { ollamaProvider } from "./ollama";
 export { openrouterProvider } from "./openrouter";
+export { orcarouterProvider } from "./orcarouter";

@@ -153,6 +153,10 @@ export function extractVendor(
 		return model.model.split("/")[0];
 	}
 
+	if ((model.templateId === "orcarouter" || model.provider === "orcarouter") && model.model.includes("/")) {
+		return model.model.split("/")[0];
+	}
+
 	if (model.templateId === "openai-codex" || model.provider === "openai") {
 		return "openai";
 	}

@@ -14,7 +14,8 @@ export type ProviderTemplateId =
 	| "anthropic"
 	| "ollama"
 	| "omlx"
-	| "openrouter";
+	| "openrouter"
+	| "orcarouter";
 
 /**
  * Persisted metadata for a configured provider instance.
