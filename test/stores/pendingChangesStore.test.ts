@@ -455,6 +455,67 @@ describe("PendingChangesStore", () => {
 				void original;
 			});
 
+			/**
+			 * The bar renders `getActionableForThread`. If that returned only pending
+			 * entries, a thread whose sole entry was fully resolved at group level would
+			 * render nothing — stranding the applied text with no way to reach the undo.
+			 */
+			it("reports a group-resolved entry as still actionable", async () => {
+				const { id } = await stagePartiallyAccepted();
+				store.rejectChangeGroup(id, 0);
+
+				expect(store.getPendingCount("thread-1")).toBe(0);
+				// ...but the note still holds the accepted group, so the UI must show it.
+				expect(store.getActionableForThread("thread-1").map((e) => e.id)).toEqual([id]);
+				expect(store.hasUnrevertedApplication(store.getEntry(id)!)).toBe(true);
+			});
+
+			it("stops reporting it once the content has been undone", async () => {
+				const { id, afterGroupAccept } = await stagePartiallyAccepted();
+				store.rejectChangeGroup(id, 0);
+				plugin.app.vault.read = vi.fn().mockResolvedValue(afterGroupAccept);
+
+				await store.rejectAll("thread-1");
+
+				expect(store.getActionableForThread("thread-1")).toEqual([]);
+				expect(store.hasUnrevertedApplication(store.getEntry(id)!)).toBe(false);
+			});
+
+			it("undoAppliedGroups restores a single entry", async () => {
+				const { id, original, afterGroupAccept } = await stagePartiallyAccepted();
+				store.rejectChangeGroup(id, 0);
+				plugin.app.vault.read = vi.fn().mockResolvedValue(afterGroupAccept);
+				(plugin.app.vault.modify as ReturnType<typeof vi.fn>).mockClear();
+
+				const skipped = await store.undoAppliedGroups(id);
+
+				expect(skipped).toBeUndefined();
+				expect(plugin.app.vault.modify).toHaveBeenCalledWith(expect.anything(), original);
+				expect(store.getActionableForThread("thread-1")).toEqual([]);
+			});
+
+			it("undoAppliedGroups reports a skip without overwriting user edits", async () => {
+				const { id } = await stagePartiallyAccepted();
+				store.rejectChangeGroup(id, 0);
+				plugin.app.vault.read = vi.fn().mockResolvedValue("my own later edits\n");
+				(plugin.app.vault.modify as ReturnType<typeof vi.fn>).mockClear();
+
+				const skipped = await store.undoAppliedGroups(id);
+
+				expect(skipped).toBe("note.md");
+				expect(plugin.app.vault.modify).not.toHaveBeenCalled();
+			});
+
+			it("cleanupResolved keeps an entry that still has content on disk", async () => {
+				const { id } = await stagePartiallyAccepted();
+				store.rejectChangeGroup(id, 0);
+
+				store.cleanupResolved("thread-1");
+
+				// Dropping it would discard the only record of the pre-proposal content.
+				expect(store.getEntry(id)).toBeDefined();
+			});
+
 			it("reverts to the pre-proposal content when the file is untouched since", async () => {
 				const { id, original, afterGroupAccept } = await stagePartiallyAccepted();
 
