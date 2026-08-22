@@ -402,7 +402,7 @@ export function createDefaultAgentConfig(id?: string, name?: string): AgentConfi
 function createDefaultAgent(): AgentConfig {
 	return {
 		id: DEFAULT_AGENT_ID,
-		name: "Default Agent",
+		name: "S2B Agent",
 		icon: DEFAULT_AGENT_ICON,
 		chatModel: null,
 		summarizationModel: null,

@@ -138,7 +138,7 @@ describe("PluginDataStore – Agent CRUD", () => {
 
 	it("should have the default agent on creation", () => {
 		expect(store.getAgent(DEFAULT_AGENT_ID)).toBeDefined();
-		expect(store.getAgent(DEFAULT_AGENT_ID)!.name).toBe("Default Agent");
+		expect(store.getAgent(DEFAULT_AGENT_ID)!.name).toBe("S2B Agent");
 		expect(store.getAgentIds()).toContain(DEFAULT_AGENT_ID);
 	});
 
@@ -490,7 +490,7 @@ describe("createData", () => {
 				agents: {
 					[DEFAULT_AGENT_ID]: {
 						id: DEFAULT_AGENT_ID,
-						name: "Default Agent",
+						name: "S2B Agent",
 						chatModel: null,
 						systemPrompt: "Saved prompt",
 						skills: {},
@@ -517,7 +517,7 @@ describe("createData", () => {
 				agents: {
 					[DEFAULT_AGENT_ID]: {
 						id: DEFAULT_AGENT_ID,
-						name: "Default Agent",
+						name: "S2B Agent",
 						chatModel: null,
 						systemPrompt: "MY CUSTOM PROMPT",
 						skills: {},
@@ -546,7 +546,7 @@ describe("createData", () => {
 				agents: {
 					[DEFAULT_AGENT_ID]: {
 						id: DEFAULT_AGENT_ID,
-						name: "Default Agent",
+						name: "S2B Agent",
 						chatModel: null,
 						systemPrompt: BASE_SYSTEM_PROMPT,
 						skills: {},
@@ -577,7 +577,7 @@ describe("createData", () => {
 			loadData: vi.fn().mockResolvedValue({
 				...structuredClone(DEFAULT_SETTINGS),
 				agents: {
-					[DEFAULT_AGENT_ID]: mkAgent(DEFAULT_AGENT_ID, "Default Agent"),
+					[DEFAULT_AGENT_ID]: mkAgent(DEFAULT_AGENT_ID, "S2B Agent"),
 					// Distinct raw names that both sanitize to "Research Assistant".
 					a1: mkAgent("a1", "Research/Assistant"),
 					a2: mkAgent("a2", "Research Assistant"),
@@ -607,7 +607,7 @@ describe("PluginDataStore – staleGuidance", () => {
 			agents: {
 				[DEFAULT_AGENT_ID]: {
 					id: DEFAULT_AGENT_ID,
-					name: "Default Agent",
+					name: "S2B Agent",
 					chatModel: null,
 					skills: {},
 					toolsConfig: { ...structuredClone(DEFAULT_TOOLS_CONFIG) },
