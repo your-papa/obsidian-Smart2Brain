@@ -833,14 +833,6 @@ export class Agent {
 		// context (run()-scoped, concurrency-safe). Without this the fetch issued
 		// deep inside the stream would read whichever context another concurrent
 		// run last set.
-		const stream = bindAsyncIterableToTransportContext(
-			await agent.stream(streamInput, {
-				...invokeConfig,
-				streamMode: ["messages", "tools", "values"] as const,
-			}),
-			transportContext,
-		);
-
 		let rawResult: unknown;
 		// Track tool calls in progress to correlate start/end events
 		const pendingToolCalls = new Map<string, { name: string; input: unknown }>();
@@ -863,6 +855,15 @@ export class Agent {
 		// Running text accumulator for the current AI message (reset on new aiMessageId).
 		let preambleAccumulator = "";
 		try {
+			const stream = bindAsyncIterableToTransportContext(
+				await runWithAiTransportContext(transportContext, () =>
+					agent.stream(streamInput, {
+						...invokeConfig,
+						streamMode: ["messages", "tools", "values"] as const,
+					}),
+				),
+				transportContext,
+			);
 			for await (const chunk of stream) {
 				// Check if aborted before processing
 				if (options.signal?.aborted) {
@@ -1138,14 +1139,6 @@ export class Agent {
 		const transportLabel = `agent.editFromCheckpoint:${runId}`;
 		const transportContext = createAiTransportContext("default", transportLabel);
 
-		const stream = bindAsyncIterableToTransportContext(
-			await agent.stream(input, {
-				...invokeConfig,
-				streamMode: ["messages", "tools", "values"] as const,
-			}),
-			transportContext,
-		);
-
 		let rawResult: unknown;
 		const pendingToolCalls = new Map<string, { name: string; input: unknown }>();
 		const taskCallStack: string[] = [];
@@ -1156,6 +1149,15 @@ export class Agent {
 		const toolCallPreambles = new Map<string, string>();
 		let preambleAccumulator = "";
 		try {
+			const stream = bindAsyncIterableToTransportContext(
+				await runWithAiTransportContext(transportContext, () =>
+					agent.stream(input, {
+						...invokeConfig,
+						streamMode: ["messages", "tools", "values"] as const,
+					}),
+				),
+				transportContext,
+			);
 			for await (const chunk of stream) {
 				if (options.signal?.aborted) {
 					Logger.debug("agent.editFromCheckpoint.aborted", { runId, threadId });
@@ -1398,14 +1400,6 @@ export class Agent {
 		const transportLabel = `agent.regenerateFromCheckpoint:${runId}`;
 		const transportContext = createAiTransportContext("default", transportLabel);
 
-		const stream = bindAsyncIterableToTransportContext(
-			await agent.stream(input, {
-				...invokeConfig,
-				streamMode: ["messages", "tools", "values"] as const,
-			}),
-			transportContext,
-		);
-
 		let rawResult: unknown;
 		const pendingToolCalls = new Map<string, { name: string; input: unknown }>();
 		const taskCallStack: string[] = [];
@@ -1416,6 +1410,15 @@ export class Agent {
 		const toolCallPreambles = new Map<string, string>();
 		let preambleAccumulator = "";
 		try {
+			const stream = bindAsyncIterableToTransportContext(
+				await runWithAiTransportContext(transportContext, () =>
+					agent.stream(input, {
+						...invokeConfig,
+						streamMode: ["messages", "tools", "values"] as const,
+					}),
+				),
+				transportContext,
+			);
 			for await (const chunk of stream) {
 				if (options.signal?.aborted) {
 					Logger.debug("agent.regenerateFromCheckpoint.aborted", { runId, threadId });
