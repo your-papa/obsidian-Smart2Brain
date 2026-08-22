@@ -2427,98 +2427,118 @@ onMount(() => {
 	const renderer = new PixiRenderer();
 	pixi = renderer;
 
-	renderer.init(containerEl, theme).then(() => {
-		lastViewportScale = renderer.scale;
-		// Re-render when the viewport moves. A zoom must refresh counter-scaled
-		// strokes and label visibility; a pure pan only needs the screen-space
-		// overlay (labels, pills, tooltip) re-laid-out.
-		renderer.onViewportMoved(() => {
-			const scale = renderer.scale;
-			if (scale !== lastViewportScale) {
-				lastViewportScale = scale;
-				requestRender("zoom");
-			} else {
-				requestRender("overlay");
-			}
-			// A pan can carry the view outside the margin edges were culled to —
-			// re-tessellate before the missing region scrolls fully into view.
-			if (lastEdgeCullRect && !rectContains(lastEdgeCullRect, viewWorldRect(renderer, 0))) {
-				edgesViewportStale = true;
-				requestRender("zoom");
-			}
-			if (pendingUserViewportMove || pendingUserViewportZoom) {
-				pendingUserViewportMove = false;
-				pendingUserViewportZoom = false;
-				onUserViewportChange?.();
-			}
-		});
+	// `renderer.init()` awaits WebGL context creation, so the cleanup below can run
+	// before it resolves (the user closes the graph tab while it is starting up).
+	// The cleanup is synchronous and would find `__graphCleanup` still unassigned,
+	// after which this continuation would register a ResizeObserver, a
+	// MutationObserver on document.body and a `css-change` listener that nothing
+	// owns — leaking them plus `containerEl` and the destroyed renderer. Bail here
+	// instead; the cleanup has already released everything that existed at its turn.
+	let mountDisposed = false;
 
-		// If graphData arrived before pixi was ready (happens when GraphCanvas
-		// mounts while a build completes, e.g. on first open), do the initial
-		// snap/fit that setupForceSimulation missed.
-		if (simNodes.length > 0) {
-			// Force mode: simulation is already running.
-			// If it has already settled (alpha low), snap the camera immediately
-			// since the tick loop won't fire again to do the initial fit.
-			const alpha = simulation?.alpha() ?? 0;
-			if (alpha < 0.05) {
-				const bounds = computeNodeBounds(simNodes);
-				if (bounds) {
-					const frame = framingFocus(
-						bounds,
-						{ width: renderer.width, height: renderer.height },
-						GRAPH_FIT_PADDING,
-						GRAPH_FIT_MAX_SCALE,
-						computeCoreNodeBounds(simNodes),
-					);
-					renderer.snapToFrame(frame.centerX, frame.centerY, frame.scale);
+	renderer
+		.init(containerEl, theme)
+		.then(() => {
+			if (mountDisposed) return;
+			lastViewportScale = renderer.scale;
+			// Re-render when the viewport moves. A zoom must refresh counter-scaled
+			// strokes and label visibility; a pure pan only needs the screen-space
+			// overlay (labels, pills, tooltip) re-laid-out.
+			renderer.onViewportMoved(() => {
+				const scale = renderer.scale;
+				if (scale !== lastViewportScale) {
+					lastViewportScale = scale;
+					requestRender("zoom");
+				} else {
+					requestRender("overlay");
 				}
-			} else {
-				// Simulation still running — tick loop will handle fitting.
-				needsInitialFit = true;
-				forceTickCount = 0;
-			}
-			requestRender("world");
-		}
-
-		const resizeObserver = new ResizeObserver(() => {
-			const rect = containerEl.getBoundingClientRect();
-			renderer.resize(rect.width, rect.height);
-			requestRender("world");
-		});
-		resizeObserver.observe(containerEl);
-
-		// Listen for Obsidian theme changes — covers both "css-change" events (CSS
-		// snippets) and class mutations on body (.theme-dark / .theme-light toggle).
-		const handleCssChange = () => {
-			const newTheme = readThemeColors(containerEl);
-			renderer.updateTheme(newTheme);
-			requestRender("world");
-		};
-		document.body.addEventListener("css-change", handleCssChange);
-
-		const themeMutationObserver = new MutationObserver((mutations) => {
-			for (const m of mutations) {
-				if (m.type === "attributes" && m.attributeName === "class") {
-					handleCssChange();
-					break;
+				// A pan can carry the view outside the margin edges were culled to —
+				// re-tessellate before the missing region scrolls fully into view.
+				if (lastEdgeCullRect && !rectContains(lastEdgeCullRect, viewWorldRect(renderer, 0))) {
+					edgesViewportStale = true;
+					requestRender("zoom");
 				}
-			}
-		});
-		themeMutationObserver.observe(document.body, {
-			attributes: true,
-			attributeFilter: ["class"],
-		});
+				if (pendingUserViewportMove || pendingUserViewportZoom) {
+					pendingUserViewportMove = false;
+					pendingUserViewportZoom = false;
+					onUserViewportChange?.();
+				}
+			});
 
-		// Store cleanup references
-		(containerEl as any).__graphCleanup = () => {
-			resizeObserver.disconnect();
-			document.body.removeEventListener("css-change", handleCssChange);
-			themeMutationObserver.disconnect();
-		};
-	});
+			// If graphData arrived before pixi was ready (happens when GraphCanvas
+			// mounts while a build completes, e.g. on first open), do the initial
+			// snap/fit that setupForceSimulation missed.
+			if (simNodes.length > 0) {
+				// Force mode: simulation is already running.
+				// If it has already settled (alpha low), snap the camera immediately
+				// since the tick loop won't fire again to do the initial fit.
+				const alpha = simulation?.alpha() ?? 0;
+				if (alpha < 0.05) {
+					const bounds = computeNodeBounds(simNodes);
+					if (bounds) {
+						const frame = framingFocus(
+							bounds,
+							{ width: renderer.width, height: renderer.height },
+							GRAPH_FIT_PADDING,
+							GRAPH_FIT_MAX_SCALE,
+							computeCoreNodeBounds(simNodes),
+						);
+						renderer.snapToFrame(frame.centerX, frame.centerY, frame.scale);
+					}
+				} else {
+					// Simulation still running — tick loop will handle fitting.
+					needsInitialFit = true;
+					forceTickCount = 0;
+				}
+				requestRender("world");
+			}
+
+			const resizeObserver = new ResizeObserver(() => {
+				const rect = containerEl.getBoundingClientRect();
+				renderer.resize(rect.width, rect.height);
+				requestRender("world");
+			});
+			resizeObserver.observe(containerEl);
+
+			// Listen for Obsidian theme changes — covers both "css-change" events (CSS
+			// snippets) and class mutations on body (.theme-dark / .theme-light toggle).
+			const handleCssChange = () => {
+				const newTheme = readThemeColors(containerEl);
+				renderer.updateTheme(newTheme);
+				requestRender("world");
+			};
+			document.body.addEventListener("css-change", handleCssChange);
+
+			const themeMutationObserver = new MutationObserver((mutations) => {
+				for (const m of mutations) {
+					if (m.type === "attributes" && m.attributeName === "class") {
+						handleCssChange();
+						break;
+					}
+				}
+			});
+			themeMutationObserver.observe(document.body, {
+				attributes: true,
+				attributeFilter: ["class"],
+			});
+
+			// Store cleanup references
+			(containerEl as any).__graphCleanup = () => {
+				resizeObserver.disconnect();
+				document.body.removeEventListener("css-change", handleCssChange);
+				themeMutationObserver.disconnect();
+			};
+		})
+		.catch((error) => {
+			// A WebGL context failure would otherwise surface only as an unhandled
+			// rejection. Nothing is registered yet at this point, so there is nothing
+			// to unwind — report it and leave the canvas blank.
+			console.error("[GraphCanvas] Failed to initialize the graph renderer:", error);
+		});
 
 	return () => {
+		// Tell a still-pending `renderer.init()` continuation to bail — see above.
+		mountDisposed = true;
 		(containerEl as any).__graphCleanup?.();
 		visibilityObserver.disconnect();
 		if (renderRafId != null) {

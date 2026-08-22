@@ -581,17 +581,68 @@ const STORE_NAME = "caches";
 const RECORD_KEY = "topic-caches";
 const SAVE_DEBOUNCE_MS = 3000;
 
+/**
+ * How long to wait on a blocked `indexedDB.open` before failing with a real error.
+ * Mirrors the constant in HNSWVectorStore / MiniSearchService.
+ */
+const OPEN_BLOCKED_TIMEOUT_MS = 10_000;
+
 function openDatabase(): Promise<IDBDatabase> {
 	const dbName = `${DB_NAME_PREFIX}-${getData().vaultSlug}`;
 	return new Promise((resolve, reject) => {
 		const request = indexedDB.open(dbName, DB_VERSION);
+		let settled = false;
+		let blockedTimer: ReturnType<typeof setTimeout> | null = null;
+
+		const finish = (fn: () => void) => {
+			if (settled) return;
+			settled = true;
+			if (blockedTimer !== null) clearTimeout(blockedTimer);
+			fn();
+		};
+
 		request.onupgradeneeded = () => {
 			if (!request.result.objectStoreNames.contains(STORE_NAME)) {
 				request.result.createObjectStore(STORE_NAME);
 			}
 		};
-		request.onsuccess = () => resolve(request.result);
-		request.onerror = () => reject(request.error);
+
+		// A blocked open fires neither `success` nor `error`, so without this the
+		// promise never settles — hanging whichever caller awaited it. Latent while
+		// DB_VERSION is 1 (no upgrade has ever run, so `blocked` cannot fire), but it
+		// arms itself the day the version is bumped. Matches the guards in
+		// HNSWVectorStore.openIndexedDB and MiniSearchService.open.
+		request.onblocked = () => {
+			Logger.warn(
+				`[SmartGraph] Topic-cache DB open blocked on "${dbName}" — another connection is still open. ` +
+					`Waiting ${OPEN_BLOCKED_TIMEOUT_MS}ms for it to close.`,
+			);
+			if (blockedTimer !== null) clearTimeout(blockedTimer);
+			blockedTimer = setTimeout(() => {
+				finish(() =>
+					reject(
+						new Error(
+							`Timed out opening the topic-cache database "${dbName}": another Obsidian window has it open with an older version.`,
+						),
+					),
+				);
+			}, OPEN_BLOCKED_TIMEOUT_MS);
+		};
+
+		request.onsuccess = () => {
+			const db = request.result;
+			// Yield to a future upgrade from another connection instead of being the
+			// one that blocks it. Every caller opens, uses and closes the handle, so
+			// there is no long-lived state to reconcile on close.
+			db.onversionchange = () => {
+				Logger.warn(
+					`[SmartGraph] Another connection requested a version upgrade of "${dbName}" — closing ours to let it proceed.`,
+				);
+				db.close();
+			};
+			finish(() => resolve(db));
+		};
+		request.onerror = () => finish(() => reject(request.error));
 	});
 }
 
