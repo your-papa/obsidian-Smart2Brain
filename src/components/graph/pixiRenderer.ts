@@ -729,9 +729,23 @@ export class PixiRenderer {
 			let strokeWidth = 0;
 			if (isSelected) {
 				strokeColor = c.accent;
-				strokeWidth = 3 / scale;
+				// Same weight as the hover/highlight ring below: the dimming of
+				// everything unselected already carries the selection, so this ring
+				// only has to confirm it. Heavier, it read as a crust on the node
+				// rather than a marker on it, and a large lasso became a wall of rings.
+				strokeWidth = 2 / scale;
 			} else if (node.highlighted || isHovered) {
-				strokeColor = isHovered ? c.textNormal : c.accent;
+				// Accent, matching selection — `textNormal` used to draw this ring, but
+				// that's the theme's *maximum* contrast: near-white on dark themes and
+				// near-black (#222) on light ones, where it read as a hard black
+				// outline rather than a highlight.
+				//
+				// The exception is hovering an already-highlighted node, which is a
+				// normal state rather than a rare one (bridge/isolated highlighting is
+				// a persistent property, not a transient). Those nodes are *filled*
+				// with accent, so an accent ring on them would vanish into the fill —
+				// they take `textMuted`, which contrasts on either theme polarity.
+				strokeColor = isHovered && node.highlighted ? c.textMuted : c.accent;
 				strokeWidth = 2 / scale;
 			}
 
@@ -890,15 +904,24 @@ export class PixiRenderer {
 		const scale = this.viewport.scaled || 1;
 		const normalWidth = 1.2 / scale;
 		const highlightWidth = 1.6 / scale;
-		// Inferred edges read as a quieter background layer behind authored links.
-		const semanticWidth = 0.9 / scale;
-		const semanticAlphaScale = 0.45;
+		// Inferred edges carry the same colour weight as authored ones — same
+		// width, same alpha, same `c.graphLine`. The dash pattern already tells the
+		// two apart, so dimming them as well (they were 0.9px at 0.45 alpha) only
+		// made them hard to see at all; the inferred structure is worth reading,
+		// not just hinting at.
+		const semanticWidth = normalWidth;
 		const dash = 5 / scale;
 		const dashGap = 4 / scale;
 
 		// Dashed segments can't share the batched line buckets (each needs its own
 		// sub-path walk), so they collect separately and draw underneath.
 		const semanticLineBuckets = new Map<string, Array<{ sx: number; sy: number; tx: number; ty: number }>>();
+		// Hovered inferred edges, kept apart so the density fallback below can leave
+		// them dashed while the bulk layer goes solid.
+		const highlightSemanticLineBuckets = new Map<
+			string,
+			Array<{ sx: number; sy: number; tx: number; ty: number }>
+		>();
 
 		// Loop-invariant: the base alpha is tuned for the overview, lifted as the
 		// camera zooms in (where few edges are on screen to crowd each other).
@@ -973,10 +996,7 @@ export class PixiRenderer {
 			const rawAlpha =
 				(!inFocus ? 0.05 : !inSelection ? 0.05 : isHighlighted ? 0.9 : safeBaseEdgeAlpha) *
 				safeEdgeFadeAlpha *
-				(isHighlighted ? 1 : edgeHoverAlpha / 0.85) *
-				// Fade inferred edges unless they're the ones being hovered, so hovering a
-				// note still reveals why it sits where it does.
-				(isSemantic && !isHighlighted ? semanticAlphaScale : 1);
+				(isHighlighted ? 1 : edgeHoverAlpha / 0.85);
 
 			// Quantize alpha to reduce unique buckets (round to nearest 0.05)
 			const alpha = clampUnitInterval(Math.round(rawAlpha * 20) / 20, 0);
@@ -994,10 +1014,15 @@ export class PixiRenderer {
 			const key = `${color}|${width.toFixed(4)}|${alpha.toFixed(2)}`;
 
 			if (isSemantic) {
-				let semanticBucket = semanticLineBuckets.get(key);
+				// Hovered inferred edges keep their dashes even when the rest of the
+				// layer has fallen back to solid: a hover reveals a handful of edges,
+				// so the per-dash cost is trivial there, and it's the one moment the
+				// user is asking "authored or inferred?" about a specific connection.
+				const target = isHighlighted ? highlightSemanticLineBuckets : semanticLineBuckets;
+				let semanticBucket = target.get(key);
 				if (!semanticBucket) {
 					semanticBucket = [];
-					semanticLineBuckets.set(key, semanticBucket);
+					target.set(key, semanticBucket);
 				}
 				semanticBucket.push({ sx, sy, tx, ty });
 				// Arrowheads denote authored direction; an inferred similarity has none.
@@ -1076,13 +1101,17 @@ export class PixiRenderer {
 			}
 		};
 
-		const drawDashedBuckets = (buckets: Map<string, Array<{ sx: number; sy: number; tx: number; ty: number }>>) => {
+		const drawDashedBuckets = (
+			buckets: Map<string, Array<{ sx: number; sy: number; tx: number; ty: number }>>,
+			/** Draw dashes regardless of density — used for the few hovered edges. */
+			alwaysDash = false,
+		) => {
 			// Past the limit, dashes cost more than they communicate — draw the
 			// whole inferred layer as quieter solid strokes instead (see
 			// SEMANTIC_DASH_EDGE_LIMIT).
 			let totalEdges = 0;
 			for (const segments of buckets.values()) totalEdges += segments.length;
-			const asSolid = totalEdges > SEMANTIC_DASH_EDGE_LIMIT;
+			const asSolid = !alwaysDash && totalEdges > SEMANTIC_DASH_EDGE_LIMIT;
 
 			for (const [key, segments] of buckets) {
 				const [color, widthStr, alphaStr] = key.split("|");
@@ -1113,6 +1142,8 @@ export class PixiRenderer {
 			drawArrowBuckets(normalArrowBuckets);
 		}
 		drawLineBuckets(highlightLineBuckets);
+		// Hovered inferred edges join the highlighted tier, still dashed.
+		drawDashedBuckets(highlightSemanticLineBuckets, true);
 		if (opts.directedWikiEdges) {
 			drawArrowBuckets(highlightArrowBuckets);
 		}

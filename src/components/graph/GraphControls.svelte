@@ -87,6 +87,10 @@ let {
 let isCollapsed = $state(true);
 let isDevCollapsed = $state(true);
 
+/** Defaulted here rather than in the template — settings persisted before this
+ *  toggle existed have no value for it, and topics-on is the established behaviour. */
+let showTopics = $derived(settings.showTopics ?? true);
+
 /**
  * Live height of the main panel, so the dev panel can stack directly beneath
  * it. Measured rather than assumed: the panel grows and shrinks as sections
@@ -134,24 +138,35 @@ let graphStats = $derived.by(() => {
  */
 let inferredLinksOn = $derived(!(settings.linkOnlyTopics ?? false) && (settings.showSemanticLinks ?? true));
 
+/**
+ * What the control does, plus the live result of its current state.
+ *
+ * Delivered as one description through the row's normal hover tooltip, exactly
+ * like every other compact setting here. An earlier version split these — help
+ * behind an info icon, measurement inline under the toggle — which gave this one
+ * row two affordances no other row had, and put a paragraph in a column of
+ * single-line switches. The measurement is worth reading, but not worth breaking
+ * the shape of the panel for; a user who wants the number is already hovering
+ * the control they just flipped.
+ */
 let inferredLinksHint = $derived.by(() => {
 	const total = graphData.nodes.length;
 	if (!inferredLinksOn) {
 		// Only report link coverage when topics really are link-only. A stored
 		// half-state (hidden but still grouping) would make that number a lie.
 		if (!settings.linkOnlyTopics) {
-			return "Hidden, but still grouping notes. Toggle twice to exclude them from topics as well";
+			return "Hidden, but still grouping notes. Toggle twice to exclude them from topics as well.";
 		}
 		if (total === 0) return "Off — topics come from the links you wrote.";
 		const placed = graphData.nodes.filter((n) => n.cluster != null).length;
 		const percent = Math.round((placed / total) * 100);
-		return `Your links alone group ${placed} of ${total} notes (${percent}%). The other ${total - placed} are unlinked.`;
+		return `Off — topics come from the links you wrote. Your links alone group ${placed} of ${total} notes (${percent}%); the other ${total - placed} are unlinked.`;
 	}
 	const inferred = graphData.edges.filter((e) => e.type === "semantic").length;
 	if (inferred === 0) {
-		return "Connect notes by meaning as well as by the links you wrote — needs a graph embedding index";
+		return "Connect notes by meaning as well as by the links you wrote — needs a graph embedding index.";
 	}
-	return `Adding ${inferred} similarity connections so unlinked notes still find a topic. Turn off to see what your own links cover.`;
+	return `Connect notes by meaning as well as by the links you wrote: ${inferred} similarity connections so unlinked notes still find a topic. Turn off to see what your own links cover.`;
 });
 
 function handleLinkDistanceChange(val: number) {
@@ -269,7 +284,15 @@ $effect(() => {
 });
 </script>
 
-<!-- Unified vertical toolbar -->
+<!--
+  Unified vertical toolbar.
+
+  Icons are `m` (18px), not Button's `s` (16px) default. This rail is a standing
+  stack of tool toggles floating over the canvas — the same pattern as Obsidian's
+  ribbon and nav-action buttons, which are 18px/30px. The 16px default matches
+  view-header actions instead, which is a different, denser pattern, and at this
+  size the rail read as undersized against the canvas.
+-->
 <div class="graph-toolbar">
   <Button iconId="maximize" onClick={onFitToView} tooltip={fitTooltip} />
   <Button
@@ -278,15 +301,42 @@ $effect(() => {
     onClick={() => onLassoModeChange?.(!lassoMode)}
     styles={lassoMode ? "is-active" : ""}
   />
+  <!-- Show/hide detected topics. Display-only, so flipping it is instant and the
+       graph underneath is unchanged — that's what makes it readable as "here is
+       what the clustering added". -->
+  <!-- A wand rather than a shape: the point of this toggle is that the topics
+       were *found for you*, not that regions appear. `shapes`/`circle-dashed`
+       named the visible result, which read as a drawing option and gave no hint
+       there was anything inferred behind it. One icon across both states, since
+       the `is-active` tint already carries on/off — swapping the glyph as well
+       made the control look like two different buttons. -->
   <Button
-    iconId="atom"
+    iconId="wand-sparkles"
+    tooltip={showTopics
+      ? "Hide topics — show the raw graph without clustering"
+      : "Show topics — colour notes by their detected topic"}
+    onClick={() => onSettingsChange({ showTopics: !showTopics })}
+    styles={showTopics ? "is-active" : ""}
+  />
+  <!-- Chevrons rather than `group`/`ungroup`: Lucide's group icon is a dashed
+       selection marquee around two rectangles, which means "group the selected
+       objects" in a design tool — there is no marquee here, and its corner
+       brackets collided with `maximize` on this same rail. Converging and
+       diverging chevrons are the collapse/expand idiom from every tree and
+       outline UI, and say exactly what happens: many nodes fold into one, one
+       unfolds back into many. The glyph swaps per state because this action is
+       genuinely bidirectional, unlike the show/hide toggle above it. -->
+  <Button
+    iconId={isTopicsCollapsed ? "chevrons-up-down" : "chevrons-down-up"}
     tooltip={isLeidenRunning
       ? "Computing topics…"
-      : isTopicsCollapsed
-        ? "Expand all topics back into notes (S)"
-        : "Collapse all topics into single nodes (S) — or select topics and use Collapse"}
+      : !showTopics
+        ? "Turn topics on to collapse them"
+        : isTopicsCollapsed
+          ? "Expand all topics back into notes (S)"
+          : "Collapse all topics into single nodes (S) — or select topics and use Collapse"}
     onClick={() => onToggleCollapseAll?.()}
-    disabled={isLeidenRunning}
+    disabled={isLeidenRunning || !showTopics}
     styles={isTopicsCollapsed ? "is-active" : ""}
   />
   <div class="toolbar-icon-wrapper">
@@ -327,7 +377,7 @@ $effect(() => {
       </div>
 
       <!-- ── Topics ───────────────────────────── -->
-      <!-- Granularity and "Ignore inferred links" both decide *which topics exist*
+      <!-- Granularity and "Inferred links" both decide *which topics exist*
            (they re-run Leiden), so they belong together and above the topic list
            they produce. Everything under Display only changes how the same topics
            are drawn. -->
@@ -365,9 +415,12 @@ $effect(() => {
       <!-- One switch for the whole concept: inferred links are either part of the
            graph (drawn *and* grouping notes) or absent. Splitting "draw" from
            "count" allowed a state where hidden edges silently decided the topics.
-           `showDesc` because the off-state description is a live measurement of
-           the user's own linking — the whole point of turning this off. -->
-      <SettingContainer name="Inferred links" desc={inferredLinksHint} compact showDesc>
+
+           A plain compact row like every other setting here: `inferredLinksHint`
+           folds the live measurement into the same hover description, so the
+           number is still there without this row growing an extra line and an
+           affordance nothing else in the panel has. -->
+      <SettingContainer name="Inferred links" desc={inferredLinksHint} compact>
         <Toggle
           checked={!(settings.linkOnlyTopics ?? false) && (settings.showSemanticLinks ?? true)}
           onchange={(value) =>
@@ -410,8 +463,12 @@ $effect(() => {
         </div>
       {/if}
 
-      <!-- ── Display ───────────────────────────── -->
-      <span class="section-label">Display</span>
+      <!-- ── Scope ────────────────────────────── -->
+      <!-- What is in the graph at all. Placed after Topics rather than before it:
+           it is the rarest thing to touch — usually set once and left — so the
+           controls reached on every visit stay at the top, where the topic list
+           can also sit directly under the settings that produce it. -->
+      <span class="section-label">Scope</span>
       <SettingContainer
         name="Markdown only"
         desc="Show only Markdown notes; off shows all indexable files"
@@ -422,6 +479,11 @@ $effect(() => {
           onchange={(value) => onSettingsChange({ markdownOnly: value })}
         />
       </SettingContainer>
+
+      <!-- ── Display ───────────────────────────── -->
+      <!-- Purely how the graph above is drawn — nothing here changes which notes
+           are included or how they group. -->
+      <span class="section-label">Display</span>
       <SettingContainer
         name="Topic regions"
         desc="Tint the area behind each topic so groups read at a glance"
@@ -631,6 +693,29 @@ $effect(() => {
     flex-direction: column;
     gap: 6px;
     z-index: 11;
+  }
+
+  /* Sized here rather than via Button's `iconSize` prop: for an icon-only button
+     that prop also pins width/height to the icon size as an inline style, which
+     would shrink the click target to 18px — a bigger glyph on a smaller thing to
+     hit. Setting both from CSS keeps them independent.
+
+     18px/30px matches Obsidian's ribbon and nav-action buttons. This rail is that
+     pattern — a standing stack of tool toggles — not the denser 16px/28px
+     view-header strip that Button defaults to. */
+  .graph-toolbar :global(button.clickable-icon) {
+    width: 30px;
+    height: 30px;
+  }
+
+  .graph-toolbar :global(button.clickable-icon .s2b-button-icon) {
+    width: var(--icon-m);
+    height: var(--icon-m);
+  }
+
+  .graph-toolbar :global(button.clickable-icon svg) {
+    width: var(--icon-m);
+    height: var(--icon-m);
   }
 
   /* These render at 30x26 — well under the touch floor, and they're the only
