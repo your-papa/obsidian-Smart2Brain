@@ -47,6 +47,7 @@ import {
 	voteNodeCommunity,
 } from "../../utils/liveGraphPatch";
 import {
+	ensureActiveGraphCache,
 	getCachedSemanticEdges,
 	loadPersistedTopicCaches,
 	scheduleTopicCacheSave,
@@ -932,10 +933,21 @@ async function processPendingSemanticQueries() {
 
 		const nodePaths = new Set(graphData.nodes.map((node) => node.path));
 		const replacements = new Map<string, GraphEdge[]>();
+		/**
+		 * Retire an entry only if it is still the one this pass processed.
+		 *
+		 * The loop awaits the vector store, and an edit landing during that await
+		 * replaces the entry with a newer mtime. Deleting by path alone would
+		 * discard that replacement, leaving the note on stale semantic edges
+		 * until some later vault event happened to requeue it.
+		 */
+		const retire = (path: string, processed: { mtime: number; attempts: number }) => {
+			if (pendingSemantic.get(path) === processed) pendingSemantic.delete(path);
+		};
 		for (const [path, entry] of [...pendingSemantic]) {
 			// Filtered out of the graph (or deleted since queueing) — nothing to do.
 			if (!nodePaths.has(path)) {
-				pendingSemantic.delete(path);
+				retire(path, entry);
 				continue;
 			}
 			const storedMtime = await store.getDocumentMtime(path).catch(() => undefined);
@@ -945,7 +957,7 @@ async function processPendingSemanticQueries() {
 				entry.attempts++;
 				continue;
 			}
-			pendingSemantic.delete(path);
+			retire(path, entry);
 			// Never embedded (private, excluded, provider down) — no edges to infer.
 			if (storedMtime === undefined) continue;
 
@@ -963,6 +975,10 @@ async function processPendingSemanticQueries() {
 				return [] as GraphEdge[];
 			});
 			if (isDestroyed) return;
+			// Requeued while the query ran: the note changed again, so this result
+			// already describes an older version. Drop it and let the retry pass
+			// (which the finally block schedules) query the current content.
+			if (pendingSemantic.has(path)) continue;
 			replacements.set(path, edges);
 		}
 
@@ -1294,6 +1310,10 @@ function currentPartitionKey(): string {
 
 async function runLeidenSegmentation() {
 	const localBuildVersion = buildVersion;
+	// Another graph leaf (a split or duplicated tab showing a different filter or
+	// immersion) may have re-keyed the shared active cache slot since this leaf
+	// last touched it. Re-assert our own graph before reading partitions from it.
+	ensureActiveGraphCache(graphTopologySignature(graphData));
 	const topicEdges = getTopicEdges();
 	if (topicEdges.length === 0) {
 		// Link-only mode on a vault with no links at all: clear stale communities so
@@ -1322,6 +1342,11 @@ async function runLeidenSegmentation() {
 	const sources = topicEdges.map((e) => e.source);
 	const targets = topicEdges.map((e) => e.target);
 	const weights = topicEdges.map(leidenWeight);
+	// The graph this run describes. A live vault patch changes the node set
+	// without bumping buildVersion or the partition key, so neither of those
+	// guards would notice — the result would be applied over, and cached
+	// against, a graph it was never computed for.
+	const runSignature = graphTopologySignature(graphData);
 	const start = performance.now();
 	isLeidenRunning = true;
 	let result: Awaited<ReturnType<typeof leidenAsync>>;
@@ -1334,6 +1359,14 @@ async function runLeidenSegmentation() {
 	// communities are keyed by nodes that may no longer exist. Discard them
 	// rather than applying stale segments over the current graph.
 	if (localBuildVersion !== buildVersion) return;
+	// Same for a live patch, which changes the graph without a rebuild: the
+	// result describes a node set that has since moved on. The patch's own
+	// neighbour-vote already covers the affected notes, and drift will trigger
+	// a fresh run when it accumulates.
+	if (graphTopologySignature(graphData) !== runSignature) {
+		Logger.info("[SmartGraph] Discarding a Leiden result the graph has moved past");
+		return;
+	}
 	Logger.info(
 		`[SmartGraph] Leiden (γ=${settings.leidenResolution.toFixed(2)}, ${topicEdges.length} edges, ${graphData.nodes.length} nodes): ${Math.round(performance.now() - start)}ms`,
 	);
@@ -1373,6 +1406,9 @@ async function deriveGranularityLevels(topicEdges: GraphEdge[]) {
 	isDerivingGranularityLadder = true;
 
 	const localBuildVersion = buildVersion;
+	// Same shared-slot guard as runLeidenSegmentation: the probes both read and
+	// fill the active Leiden cache.
+	ensureActiveGraphCache(graphTopologySignature(graphData));
 	// Captured once, and used for every probe below. The loop awaits between
 	// rungs, so reading these live would let a mid-loop change split the ladder
 	// across two partitions — and, because they also form the cache key, file

@@ -155,7 +155,7 @@ export const GRANULARITY_PROBE_RESOLUTIONS = [
 ] as const;
 
 /** Never derive a ladder longer than this, however varied the vault. */
-export const MAX_DERIVED_GRANULARITY_LEVELS = 7;
+export const MAX_DERIVED_GRANULARITY_LEVELS = 6;
 
 /**
  * Most topics a granularity level may produce and still be offered.

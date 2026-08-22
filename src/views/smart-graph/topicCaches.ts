@@ -160,6 +160,24 @@ export function setActiveGraphResolution(resolution: number): void {
 	topicCaches.resolution = resolution;
 }
 
+/**
+ * Ensure the active slot describes `signature`, swapping it in if not.
+ *
+ * The slot is module-level and shared by every graph leaf. One leaf is the
+ * normal case (the command reuses the existing view), but a user can split or
+ * duplicate the tab, or restore a layout with two — and then two leaves
+ * showing different filtered or immersed topologies each re-key the slot under
+ * the other. Whoever reads next would consume the other leaf's Leiden
+ * partition or ladder.
+ *
+ * Callers hold the signature of the graph they are actually rendering, so any
+ * entry point that is going to read or write the slot can cheaply re-assert
+ * it. A no-op when the slot already matches, which is every single-leaf case.
+ */
+export function ensureActiveGraphCache(signature: string): void {
+	if (signature !== topicCaches.graphSignature) swapActiveGraphCache(signature);
+}
+
 /** Look up a cached semantic edge set by its full cache key. */
 export function getCachedSemanticEdges(key: string): GraphEdge[] | null {
 	const entry = semanticEdgeSets.get(key);
