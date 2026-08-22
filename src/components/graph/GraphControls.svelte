@@ -318,8 +318,16 @@ $effect(() => {
     onClick={() => onSettingsChange({ showTopics: !showTopics })}
     styles={showTopics ? "is-active" : ""}
   />
+  <!-- Chevrons rather than `group`/`ungroup`: Lucide's group icon is a dashed
+       selection marquee around two rectangles, which means "group the selected
+       objects" in a design tool — there is no marquee here, and its corner
+       brackets collided with `maximize` on this same rail. Converging and
+       diverging chevrons are the collapse/expand idiom from every tree and
+       outline UI, and say exactly what happens: many nodes fold into one, one
+       unfolds back into many. The glyph swaps per state because this action is
+       genuinely bidirectional, unlike the show/hide toggle above it. -->
   <Button
-    iconId={isTopicsCollapsed ? "ungroup" : "group"}
+    iconId={isTopicsCollapsed ? "chevrons-up-down" : "chevrons-down-up"}
     tooltip={isLeidenRunning
       ? "Computing topics…"
       : !showTopics

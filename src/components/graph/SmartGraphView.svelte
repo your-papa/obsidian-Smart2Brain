@@ -2232,8 +2232,11 @@ function handleHoverPreview(event: MouseEvent, path: string, targetEl: HTMLEleme
       <div class="selection-actions">
         {#if selectedPaths.length > 0}
           {#if selectedTopicsCollapseAction !== null}
+            <!-- Same chevrons as the toolbar's collapse-all: this is that action
+                 scoped to a selection rather than a different one, so it should
+                 not carry a different glyph. -->
             <Button
-              iconId={selectedTopicsCollapseAction === "collapse" ? "fold-vertical" : "unfold-vertical"}
+              iconId={selectedTopicsCollapseAction === "collapse" ? "chevrons-down-up" : "chevrons-up-down"}
               buttonText={selectedTopicsCollapseAction === "collapse" ? "Collapse" : "Expand"}
               onClick={() => void handleCollapseSelectedTopics()}
               tooltip={withKey(
