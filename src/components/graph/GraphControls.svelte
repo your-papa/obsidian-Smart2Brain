@@ -4,6 +4,7 @@ import RangeSlider from "../ui/RangeSlider.svelte";
 import Toggle from "../ui/Toggle.svelte";
 import SettingContainer from "../settings/SettingContainer.svelte";
 import { isMobileUI } from "../../utils/platform";
+import { icon } from "../../utils/utils";
 import {
 	type SmartGraphSettings,
 	type GraphData,
@@ -138,6 +139,23 @@ let graphStats = $derived.by(() => {
  */
 let inferredLinksOn = $derived(!(settings.linkOnlyTopics ?? false) && (settings.showSemanticLinks ?? true));
 
+/**
+ * What the control *is* — static across every state, so it lives behind the info
+ * icon rather than taking a line of the panel. Separated from the measurement
+ * below because the two have opposite lifetimes: this is read once while
+ * learning the control, the number is read every time it changes.
+ */
+const INFERRED_LINKS_HELP =
+	"Connect notes by meaning as well as by the links you wrote, so unlinked notes still find a topic. Turn it off to see what your own linking covers on its own. Requires a graph embedding index.";
+
+/**
+ * The live result of the current state — a measurement, not help. Stays inline
+ * (`showDesc`) because it is the payoff for flipping the toggle: watching the
+ * coverage drop is the whole point of turning inferred links off.
+ *
+ * Returns "" when there is nothing measured to report, so the row collapses back
+ * to a plain toggle instead of holding a line for restated help.
+ */
 let inferredLinksHint = $derived.by(() => {
 	const total = graphData.nodes.length;
 	if (!inferredLinksOn) {
@@ -146,16 +164,16 @@ let inferredLinksHint = $derived.by(() => {
 		if (!settings.linkOnlyTopics) {
 			return "Hidden, but still grouping notes. Toggle twice to exclude them from topics as well";
 		}
-		if (total === 0) return "Off — topics come from the links you wrote.";
+		if (total === 0) return "";
 		const placed = graphData.nodes.filter((n) => n.cluster != null).length;
 		const percent = Math.round((placed / total) * 100);
 		return `Your links alone group ${placed} of ${total} notes (${percent}%). The other ${total - placed} are unlinked.`;
 	}
 	const inferred = graphData.edges.filter((e) => e.type === "semantic").length;
-	if (inferred === 0) {
-		return "Connect notes by meaning as well as by the links you wrote — needs a graph embedding index";
-	}
-	return `Adding ${inferred} similarity connections so unlinked notes still find a topic. Turn off to see what your own links cover.`;
+	// No index yet: there is no measurement to show, and the reason lives in the
+	// info tooltip alongside the rest of the explanation.
+	if (inferred === 0) return "";
+	return `Adding ${inferred} similarity connections so unlinked notes still find a topic.`;
 });
 
 function handleLinkDistanceChange(val: number) {
@@ -351,8 +369,26 @@ $effect(() => {
         </span>
       </div>
 
+      <!-- ── Scope ────────────────────────────── -->
+      <!-- What is in the graph at all. This sits above Topics because it decides
+           the input: changing the file set changes which notes exist to be
+           grouped, so every topic below is derived from whatever is scoped here.
+           It previously sat under Display, which read as a cosmetic preference
+           when it is the most consequential control in the panel. -->
+      <span class="section-label">Scope</span>
+      <SettingContainer
+        name="Markdown only"
+        desc="Show only Markdown notes; off shows all indexable files"
+        compact
+      >
+        <Toggle
+          checked={settings.markdownOnly}
+          onchange={(value) => onSettingsChange({ markdownOnly: value })}
+        />
+      </SettingContainer>
+
       <!-- ── Topics ───────────────────────────── -->
-      <!-- Granularity and "Ignore inferred links" both decide *which topics exist*
+      <!-- Granularity and "Inferred links" both decide *which topics exist*
            (they re-run Leiden), so they belong together and above the topic list
            they produce. Everything under Display only changes how the same topics
            are drawn. -->
@@ -390,9 +426,15 @@ $effect(() => {
       <!-- One switch for the whole concept: inferred links are either part of the
            graph (drawn *and* grouping notes) or absent. Splitting "draw" from
            "count" allowed a state where hidden edges silently decided the topics.
-           `showDesc` because the off-state description is a live measurement of
-           the user's own linking — the whole point of turning this off. -->
+
+           The explanation lives behind the info icon; only the live measurement
+           stays inline (`showDesc`), and `inferredLinksHint` returns "" when
+           there is nothing measured — so the row holds a line for a number worth
+           reading, never for restated help. -->
       <SettingContainer name="Inferred links" desc={inferredLinksHint} compact showDesc>
+        {#snippet nameSuffix()}
+          <span class="info-icon" aria-label={INFERRED_LINKS_HELP} use:icon={"info"}></span>
+        {/snippet}
         <Toggle
           checked={!(settings.linkOnlyTopics ?? false) && (settings.showSemanticLinks ?? true)}
           onchange={(value) =>
@@ -436,17 +478,9 @@ $effect(() => {
       {/if}
 
       <!-- ── Display ───────────────────────────── -->
+      <!-- Purely how the graph above is drawn — nothing here changes which notes
+           are included or how they group. -->
       <span class="section-label">Display</span>
-      <SettingContainer
-        name="Markdown only"
-        desc="Show only Markdown notes; off shows all indexable files"
-        compact
-      >
-        <Toggle
-          checked={settings.markdownOnly}
-          onchange={(value) => onSettingsChange({ markdownOnly: value })}
-        />
-      </SettingContainer>
       <SettingContainer
         name="Topic regions"
         desc="Tint the area behind each topic so groups read at a glance"
@@ -778,6 +812,24 @@ $effect(() => {
     font-size: var(--font-ui-small);
     color: var(--text-faint);
     padding-right: 4px;
+  }
+
+  /* Carries the static explanation as a tooltip, so the row keeps its inline
+     line for the live measurement instead. Faint at rest and only resolving on
+     hover — it is an affordance for help that is there when wanted, not a mark
+     competing with the setting's own name. */
+  .info-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--icon-xs);
+    height: var(--icon-xs);
+    color: var(--text-faint);
+    cursor: help;
+  }
+
+  .info-icon:hover {
+    color: var(--text-muted);
   }
 
   .section-label--with-action {
