@@ -1,6 +1,6 @@
 import { calculateAliasBoost, calculateTitleBoost, getAliasMatchKind, type AliasMatchKind } from "./searchRanking";
 import { createQueryPlan } from "./queryPlan";
-import { getRecentRerankScore, type RecentBoostInfo } from "./recentNotes";
+import { getRecentRerankScore, MAX_RECENT_BOOST, type RecentBoostInfo } from "./recentNotes";
 import type { SearchMatchBadge, SearchRankingDebug, SearchResult } from "../vectorstore/types";
 
 /*
@@ -480,7 +480,7 @@ export function rankSearchResults({
 			const relativeRelevance = rawRelativeRelevance(entry);
 			const recentEligible = relativeRelevance >= RECENT_RELATIVE_ELIGIBILITY;
 			const effectiveRecentBoost = recentEligible ? recentBoost : 0;
-			const recentStrength = effectiveRecentBoost > 0 ? effectiveRecentBoost / 4.5 : 0;
+			const recentStrength = effectiveRecentBoost > 0 ? effectiveRecentBoost / MAX_RECENT_BOOST : 0;
 
 			const aliasMatchKind = queryPlan ? getAliasMatchKind(queryPlan, entry.result.frontmatter) : undefined;
 			const recentAliasBonusWeight = getRecentAliasBonusWeight(aliasMatchKind);

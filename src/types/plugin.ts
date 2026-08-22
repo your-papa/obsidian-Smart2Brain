@@ -31,6 +31,18 @@ export interface RecentNoteEntry {
 }
 
 /**
+ * How long after being opened a note still counts as "recent".
+ *
+ * Recency is bounded by age rather than by a count of entries: a fixed-size
+ * history evicts the morning's notes after a busy afternoon, and keeps a
+ * months-old note at full strength as long as nothing displaces it. Lives here
+ * rather than beside the search helpers because the data store prunes on write
+ * and the search layer filters on read, and the store must not import from
+ * `search/` (which reads the store, and would form a cycle).
+ */
+export const RECENT_NOTE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
  * Configuration for the default embedding model used for vector search.
  */
 export interface DefaultEmbedModel {
