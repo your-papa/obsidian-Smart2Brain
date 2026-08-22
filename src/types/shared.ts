@@ -64,7 +64,14 @@ export interface PendingNoteUpdate {
 	/** Proposed new content */
 	newContent: string;
 	/** Snapshot of originalContent before any group-level accepts mutated it.
-	 *  Set on the first `acceptChangeGroup` call so `rejectAll` can restore the file. */
+	 *
+	 *  Presence means "applied content is in the note that the user has not signed
+	 *  off on", which is what `rejectAll` / the pending-changes bar key off (see
+	 *  `PendingChangesStore.hasUnrevertedApplication`). Set on the first
+	 *  `acceptChangeGroup`, and cleared once the outcome settles: every group
+	 *  accepted (or the whole entry accepted), or the applied text reverted.
+	 *  Leaving it set past that point would make a completed acceptance look like
+	 *  something to undo. */
 	initialOriginalContent?: string;
 }
 

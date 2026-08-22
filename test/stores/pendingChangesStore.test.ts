@@ -460,6 +460,51 @@ describe("PendingChangesStore", () => {
 			 * entries, a thread whose sole entry was fully resolved at group level would
 			 * render nothing — stranding the applied text with no way to reach the undo.
 			 */
+			/**
+			 * Regression (review of PR #411): accepting EVERY group flips the entry to
+			 * `accepted` while `initialOriginalContent` stayed set, so `rejectAll` — which
+			 * selects on that snapshot — reverted a change the user had explicitly
+			 * accepted, silently discarding it. The snapshot is now cleared the moment the
+			 * outcome settles, so it only ever means "unreviewed partial write present".
+			 */
+			it("does not revert an update whose groups were ALL accepted", async () => {
+				const { id, afterGroupAccept } = await stagePartiallyAccepted();
+
+				// Accept the one remaining group; the entry completes.
+				plugin.app.vault.read = vi.fn().mockResolvedValue(afterGroupAccept);
+				await store.acceptChangeGroup(id, 0);
+				expect(store.getEntry(id)?.status).toBe("accepted");
+
+				// A second, unrelated entry keeps the thread's Reject All live.
+				store.addChanges([{ type: "create", path: "other.md", content: "X" }], "tc-2", "thread-1");
+
+				expect(store.hasUnrevertedApplication(store.getEntry(id)!)).toBe(false);
+				expect(store.getActionableForThread("thread-1").map((e) => e.id)).not.toContain(id);
+
+				(plugin.app.vault.modify as ReturnType<typeof vi.fn>).mockClear();
+				await store.rejectAll("thread-1");
+
+				// The accepted note must be left exactly as the user accepted it.
+				expect(plugin.app.vault.modify).not.toHaveBeenCalled();
+			});
+
+			it("does not revert after a whole-entry accept following a group accept", async () => {
+				const { id, afterGroupAccept } = await stagePartiallyAccepted();
+
+				// Accept the rest of the entry via the row-level action rather than groups.
+				plugin.app.vault.read = vi.fn().mockResolvedValue(afterGroupAccept);
+				await store.acceptChange(id);
+				expect(store.getEntry(id)?.status).toBe("accepted");
+
+				store.addChanges([{ type: "create", path: "other.md", content: "X" }], "tc-2", "thread-1");
+				expect(store.hasUnrevertedApplication(store.getEntry(id)!)).toBe(false);
+
+				(plugin.app.vault.modify as ReturnType<typeof vi.fn>).mockClear();
+				await store.rejectAll("thread-1");
+
+				expect(plugin.app.vault.modify).not.toHaveBeenCalled();
+			});
+
 			it("reports a group-resolved entry as still actionable", async () => {
 				const { id } = await stagePartiallyAccepted();
 				store.rejectChangeGroup(id, 0);

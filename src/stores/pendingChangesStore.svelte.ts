@@ -306,6 +306,10 @@ export class PendingChangesStore {
 		});
 
 		entry.status = "accepted";
+		// The whole proposal is applied with the user's approval, so any partial-write
+		// snapshot from earlier group accepts is settled — see `hasUnrevertedApplication`.
+		// Leaving it set would let `rejectAll` revert a change they just accepted.
+		if (change.type === "update") change.initialOriginalContent = undefined;
 		this.scheduleSave();
 		this.notifyChange();
 	}
@@ -395,6 +399,13 @@ export class PendingChangesStore {
 				change.originalContent = newVaultContent;
 				if (change.originalContent === change.newContent) {
 					entry.status = "accepted";
+					// Every group is now applied and the user approved each one, so the
+					// note's content is theirs — not an unreviewed partial write. Drop the
+					// pre-proposal snapshot: it exists to mark "there is applied content
+					// here the user has not signed off on", and keeping it would make
+					// `rejectAll` treat this completed acceptance as something to undo,
+					// silently reverting a change they explicitly accepted.
+					change.initialOriginalContent = undefined;
 				}
 			});
 
@@ -561,15 +572,22 @@ export class PendingChangesStore {
 	}
 
 	/**
-	 * Whether this entry has partially-applied content still written to the note.
+	 * Whether this entry has applied content in the note that the user has NOT
+	 * signed off on.
 	 *
-	 * True from the first `acceptChangeGroup` until a revert clears the snapshot —
-	 * *independently of status*. An entry whose groups were all resolved individually
-	 * is `accepted` or `rejected` while its applied text is still on disk, so status
-	 * alone cannot answer "is there anything left to undo here".
+	 * `initialOriginalContent` is the invariant: set on the first
+	 * `acceptChangeGroup`, and cleared the moment the outcome is settled — either
+	 * every group was accepted (the content is now theirs) or the applied text was
+	 * reverted (there is nothing left on disk). So it means "unreviewed partial
+	 * write present", not merely "a group was once accepted".
 	 *
-	 * Single source of truth for the two callers that must agree: `rejectAll` (what to
-	 * revert) and `PendingChangesBar` (whether to stay visible so the user can ask).
+	 * Status alone cannot answer this. Resolving the last group individually flips
+	 * the entry to `accepted`/`rejected` while partial text may still be on disk,
+	 * which is why this is keyed on the snapshot rather than on status.
+	 *
+	 * Single source of truth for the callers that must agree: `rejectAll` (what to
+	 * revert), `PendingChangesBar` (whether to stay visible), and `cleanupResolved`
+	 * (what is safe to forget).
 	 */
 	hasUnrevertedApplication(entry: PendingChangeEntry): boolean {
 		return entry.change.type === "update" && entry.change.initialOriginalContent !== undefined;
