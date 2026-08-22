@@ -505,6 +505,60 @@ describe("PendingChangesStore", () => {
 				expect(plugin.app.vault.modify).not.toHaveBeenCalled();
 			});
 
+			/**
+			 * Regression (review of PR #411): `#handleFileRename` skipped non-pending
+			 * entries, so a group-resolved entry kept a stale path after its note was
+			 * renamed. The revert then looked up a file that no longer existed there and
+			 * reported success while the applied content sat at the new path.
+			 */
+			it("follows a rename of a note that still has applied content", async () => {
+				// `load()` is what registers the vault rename handler.
+				await store.load();
+				const { id, original, afterGroupAccept } = await stagePartiallyAccepted();
+				store.rejectChangeGroup(id, 0);
+				expect(store.getEntry(id)?.status).toBe("rejected");
+
+				// The vault rename handler fires for the non-pending entry too.
+				const renameCb = (plugin.app.vault.on as ReturnType<typeof vi.fn>).mock.calls.find(
+					(c) => c[0] === "rename",
+				)?.[1] as (file: { path: string }, oldPath: string) => void;
+				renameCb({ path: "renamed.md" }, "note.md");
+
+				expect(store.getEntry(id)?.change.path).toBe("renamed.md");
+
+				// The undo now targets the note where it actually lives.
+				plugin.app.vault.getAbstractFileByPath = vi.fn().mockReturnValue(makeTFile("renamed.md"));
+				plugin.app.vault.read = vi.fn().mockResolvedValue(afterGroupAccept);
+				(plugin.app.vault.modify as ReturnType<typeof vi.fn>).mockClear();
+
+				const skipped = await store.undoAppliedGroups(id);
+
+				expect(skipped).toBeUndefined();
+				expect(plugin.app.vault.modify).toHaveBeenCalledWith(expect.anything(), original);
+			});
+
+			/**
+			 * Regression (same review): a missing target returned `undefined` — the
+			 * "success" signal — so the UI said the note was restored when nothing had
+			 * been written, and the entry stayed actionable forever because the snapshot
+			 * is only cleared on a real write.
+			 */
+			it("reports a missing note instead of claiming it was restored", async () => {
+				const { id } = await stagePartiallyAccepted();
+				store.rejectChangeGroup(id, 0);
+
+				// The note was deleted (or moved while the plugin was unloaded).
+				plugin.app.vault.getAbstractFileByPath = vi.fn().mockReturnValue(null);
+				(plugin.app.vault.modify as ReturnType<typeof vi.fn>).mockClear();
+
+				const skipped = await store.undoAppliedGroups(id);
+
+				expect(skipped).toEqual({ path: "note.md", reason: "missing" });
+				expect(plugin.app.vault.modify).not.toHaveBeenCalled();
+				// And it must not remain permanently unresolvable.
+				expect(store.getActionableForThread("thread-1")).toEqual([]);
+			});
+
 			it("reports a group-resolved entry as still actionable", async () => {
 				const { id } = await stagePartiallyAccepted();
 				store.rejectChangeGroup(id, 0);
@@ -547,7 +601,7 @@ describe("PendingChangesStore", () => {
 
 				const skipped = await store.undoAppliedGroups(id);
 
-				expect(skipped).toBe("note.md");
+				expect(skipped).toEqual({ path: "note.md", reason: "conflict" });
 				expect(plugin.app.vault.modify).not.toHaveBeenCalled();
 			});
 
@@ -587,7 +641,7 @@ describe("PendingChangesStore", () => {
 				// Regression: this used to unconditionally modify() back to the
 				// pre-proposal content, destroying the user's edits.
 				expect(plugin.app.vault.modify).not.toHaveBeenCalled();
-				expect(skipped).toEqual(["note.md"]);
+				expect(skipped).toEqual([{ path: "note.md", reason: "conflict" }]);
 				// The proposal is still dead either way.
 				expect(store.getEntry(id)?.status).toBe("rejected");
 			});
@@ -604,7 +658,7 @@ describe("PendingChangesStore", () => {
 
 				const skipped = await store.rejectAll("thread-1");
 
-				expect(skipped).toEqual(["note.md"]);
+				expect(skipped).toEqual([{ path: "note.md", reason: "conflict" }]);
 				expect(store.getEntry(id)?.status).toBe("rejected");
 				expect(store.getEntry(plainId)?.status).toBe("rejected");
 				expect(store.getPendingCount("thread-1")).toBe(0);
@@ -618,7 +672,7 @@ describe("PendingChangesStore", () => {
 
 				const skipped = await store.rejectAll("thread-1");
 
-				expect(skipped).toEqual(["note.md"]);
+				expect(skipped).toEqual([{ path: "note.md", reason: "failed" }]);
 			});
 		});
 	});

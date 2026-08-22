@@ -4,6 +4,7 @@ import { firstChangedLine, revealAndScroll } from "../../lib/pendingChangeNaviga
 import { getPlugin } from "../../stores/state.svelte";
 import { getPendingChangesStore } from "../../stores/pendingChangesStore.svelte";
 import type { PendingChangeEntry } from "../../types/shared";
+import type { RevertSkip } from "../../stores/pendingChangesStore.svelte";
 import { icon } from "../../utils/utils";
 import { VIEW_TYPE_CHAT } from "../../views/chat/Chat";
 import MarkdownRenderer from "../ui/MarkdownRenderer.svelte";
@@ -136,10 +137,22 @@ function handleReject(entry: PendingChangeEntry) {
  *  no longer pending (so accept/reject would both be no-ops on it). */
 async function handleUndoApplied(entry: PendingChangeEntry) {
 	const skipped = await store.undoAppliedGroups(entry.id);
-	if (skipped) {
-		new Notice(`Left "${changePathLabel(entry)}" as-is — it changed after the change was partially applied.`);
-	} else {
+	if (!skipped) {
 		new Notice(`Restored: ${changePathLabel(entry)}`);
+		return;
+	}
+	new Notice(describeSkip(skipped));
+}
+
+/** A restore that didn't happen, phrased for the reason it didn't. */
+function describeSkip(skip: RevertSkip): string {
+	switch (skip.reason) {
+		case "conflict":
+			return `Left "${skip.path}" as-is — it changed after the change was partially applied.`;
+		case "missing":
+			return `Could not restore "${skip.path}" — that note no longer exists. Any applied content moved with it.`;
+		case "failed":
+			return `Failed to restore "${skip.path}". See the console for details.`;
 	}
 }
 
@@ -166,12 +179,11 @@ async function handleRejectAll() {
 	if (skipped.length === 0) {
 		new Notice(hadPending ? "Rejected all pending changes" : "Restored the partially applied notes");
 	} else {
-		// A partially-accepted note that changed on disk since is left alone rather
-		// than overwritten. Say so — otherwise "Rejected all" reads as "everything
-		// was undone" while those files still hold the accepted groups.
-		new Notice(
-			`Rejected all pending changes. ${skipped.length} note(s) were left as-is because they changed after being partially applied: ${skipped.join(", ")}`,
-		);
+		// A partially-accepted note that couldn't be restored is left as it is. Say
+		// so per reason — otherwise "Rejected all" reads as "everything was undone"
+		// while those files still hold the accepted groups.
+		const head = hadPending ? "Rejected all pending changes." : "Finished undoing applied changes.";
+		new Notice(`${head} ${skipped.map(describeSkip).join(" ")}`);
 	}
 }
 
