@@ -9,7 +9,7 @@ type TestAgent = {
 };
 const state: { agentFolder: string; agents: Record<string, TestAgent> } = {
 	agentFolder: "Agents",
-	agents: { "default-agent": { id: "default-agent", name: "Default Agent" } },
+	agents: { "default-agent": { id: "default-agent", name: "S2B Agent" } },
 };
 vi.mock("../../src/stores/dataStore.svelte", () => ({
 	getData: () => ({
@@ -88,14 +88,14 @@ function makeService(adapter: ReturnType<typeof makeAdapter>) {
 }
 
 const AGENTS = { "default-agent": { id: "default-agent" } } as never;
-const AGENT_DIR = "Agents/System Prompts/Default Agent";
+const AGENT_DIR = "Agents/System Prompts/S2B Agent";
 const BASE_PATH = `${AGENT_DIR}/Base.md`;
 const MEMORY_PATH = `${AGENT_DIR}/Memory.md`;
 
 describe("PromptFilesService.seedDefaults — reconciling existing files against shipped history", () => {
 	beforeEach(() => {
 		state.agentFolder = "Agents";
-		state.agents = { "default-agent": { id: "default-agent", name: "Default Agent" } };
+		state.agents = { "default-agent": { id: "default-agent", name: "S2B Agent" } };
 	});
 
 	// The mock factory inlines these same four strings (hoisting forbids referencing the
@@ -161,7 +161,7 @@ describe("PromptFilesService.seedDefaults — reconciling existing files against
 describe("PromptFilesService — promptBaseVersions stamp", () => {
 	beforeEach(() => {
 		state.agentFolder = "Agents";
-		state.agents = { "default-agent": { id: "default-agent", name: "Default Agent" } };
+		state.agents = { "default-agent": { id: "default-agent", name: "S2B Agent" } };
 	});
 
 	it("stamps the current version when seeding a fresh file", async () => {

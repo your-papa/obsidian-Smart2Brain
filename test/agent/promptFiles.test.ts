@@ -6,7 +6,7 @@ vi.mock("obsidian", () => import("../__mocks__/obsidian"));
 // subfolder name is derived from its current name — see agentPromptDir).
 const state: { agentFolder: string; agents: Record<string, { id: string; name?: string }> } = {
 	agentFolder: "Agents",
-	agents: { "default-agent": { id: "default-agent", name: "Default Agent" } },
+	agents: { "default-agent": { id: "default-agent", name: "S2B Agent" } },
 };
 vi.mock("../../src/stores/dataStore.svelte", () => ({
 	getData: () => ({
@@ -98,14 +98,14 @@ function makeService(adapter: ReturnType<typeof makeAdapter>) {
 const AGENTS = { "default-agent": { id: "default-agent" } } as never;
 
 // The default agent's name-based prompt subfolder under the default agent folder.
-const AGENT_DIR = "Agents/System Prompts/Default Agent";
+const AGENT_DIR = "Agents/System Prompts/S2B Agent";
 const DEFAULT_PATH = `${AGENT_DIR}/Base.md`;
 const MEMORY_DEFAULT_PATH = `${AGENT_DIR}/Memory.md`;
 
 describe("PromptFilesService", () => {
 	beforeEach(() => {
 		state.agentFolder = "Agents";
-		state.agents = { "default-agent": { id: "default-agent", name: "Default Agent" } };
+		state.agents = { "default-agent": { id: "default-agent", name: "S2B Agent" } };
 	});
 
 	it("seeds the default base prompt file (in the agent's named subfolder) only when absent", async () => {
@@ -133,7 +133,7 @@ describe("PromptFilesService", () => {
 		expect(dirIdx).toBeGreaterThanOrEqual(0);
 		// Root must be created no later than the nested dir.
 		expect(rootIdx).toBeLessThan(dirIdx);
-		expect(adapter.files.get("Meta/Agents/System Prompts/Default Agent/Base.md")).toBe(BASE_SYSTEM_PROMPT);
+		expect(adapter.files.get("Meta/Agents/System Prompts/S2B Agent/Base.md")).toBe(BASE_SYSTEM_PROMPT);
 	});
 
 	it("does not clobber an edited base prompt on seed", async () => {
@@ -203,7 +203,7 @@ describe("PromptFilesService", () => {
 
 		await svc.writeBasePrompt("default-agent", "x");
 
-		expect(adapter.files.has("Meta/Agents/System Prompts/Default Agent/Base.md")).toBe(true);
+		expect(adapter.files.has("Meta/Agents/System Prompts/S2B Agent/Base.md")).toBe(true);
 	});
 
 	// v4→v5 migration stashes a customized prompt on `migratedBasePrompt`; seedDefaults must write

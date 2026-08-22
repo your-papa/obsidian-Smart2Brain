@@ -95,7 +95,7 @@ function createNewAgent() {
         <span class="agent-pill-icon">
           <Icon name={getAgentIcon(selectedAgent)} size="xs" />
         </span>
-        <span class="agent-pill-label">{selectedAgent?.name ?? "Default Agent"}</span>
+        <span class="agent-pill-label">{selectedAgent?.name ?? "S2B Agent"}</span>
       </span>
     {/snippet}
 
