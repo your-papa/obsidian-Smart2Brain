@@ -293,7 +293,15 @@ onDestroy(() => {
 });
 </script>
 
-<div class="note-context" data-testid="note-context-root">
+<!-- Graph shortcuts are bound at the view root rather than on the canvas, so they
+     stay live when focus sits on a control elsewhere in this view. Matches
+     SmartGraphView; keydown only fires for focus inside this subtree. -->
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<div
+  class="note-context"
+  data-testid="note-context-root"
+  onkeydown={(e) => canvasComponent?.handleKeyDown(e)}
+>
   <div class="note-context__surface">
     <div class="note-context__overlay">
       {#if isLoadingSemantic}

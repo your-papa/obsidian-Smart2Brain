@@ -540,9 +540,23 @@ function rectContains(outer: WorldRect, inner: WorldRect): boolean {
 	return inner.minX >= outer.minX && inner.maxX <= outer.maxX && inner.minY >= outer.minY && inner.maxY <= outer.maxY;
 }
 
-function handleKeyDown(e: KeyboardEvent) {
+/**
+ * Graph keyboard shortcuts.
+ *
+ * Exported because the canvas is not the only place these have to work: clicking
+ * a topic row in the settings panel makes a selection *and* moves focus to that
+ * row, so a canvas-scoped listener left the selection-bar verbs (I/O/A/C)
+ * unreachable — the shortcuts were dead exactly when there was something to use
+ * them on, and clicking back onto the canvas to restore focus cleared the
+ * selection. The view binds this at its own root so anything inside the graph
+ * leaf keeps them live.
+ */
+export function handleKeyDown(e: KeyboardEvent) {
 	const tag = (e.target as HTMLElement | null)?.tagName;
 	if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+	// A slider or other range control owns its arrow keys; stepping granularity
+	// from under it would fight the control the user is actually operating.
+	if ((e.target as HTMLElement | null)?.closest?.('input, [role="slider"], [contenteditable="true"]')) return;
 
 	if (
 		(e.key === "Meta" || e.key === "Control") &&
@@ -2900,7 +2914,6 @@ export function panToClusters(clusters: Set<number>) {
   onpointermove={handleMouseMove}
   onpointerup={handleMouseUp}
   onclick={handleClick}
-  onkeydown={handleKeyDown}
   onwheel={handleWheel}
   onmouseleave={handleMouseLeave}
   oncontextmenu={handleContextMenu}

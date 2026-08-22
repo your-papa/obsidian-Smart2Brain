@@ -2161,7 +2161,14 @@ function handleHoverPreview(event: MouseEvent, path: string, targetEl: HTMLEleme
 }
 </script>
 
-<div class="smart-graph-view">
+<!-- Keydown sits on the whole view, not just the canvas: selecting a topic from
+     the settings panel moves focus to that panel row, and a canvas-scoped
+     listener meant the selection-bar shortcuts went dead exactly when a
+     selection existed. Keydown still only fires for focus inside this subtree,
+     so this widens the shortcuts to the graph leaf without claiming keys
+     globally. `GraphCanvas.handleKeyDown` already ignores text inputs. -->
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<div class="smart-graph-view" onkeydown={(e) => canvasComponent?.handleKeyDown(e)}>
   {#if isLoading && graphData.nodes.length === 0}
     <div class="graph-loading">
       <LoadingAnimation />
