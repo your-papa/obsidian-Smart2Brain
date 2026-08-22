@@ -304,8 +304,14 @@ $effect(() => {
   <!-- Show/hide detected topics. Display-only, so flipping it is instant and the
        graph underneath is unchanged — that's what makes it readable as "here is
        what the clustering added". -->
+  <!-- A wand rather than a shape: the point of this toggle is that the topics
+       were *found for you*, not that regions appear. `shapes`/`circle-dashed`
+       named the visible result, which read as a drawing option and gave no hint
+       there was anything inferred behind it. One icon across both states, since
+       the `is-active` tint already carries on/off — swapping the glyph as well
+       made the control look like two different buttons. -->
   <Button
-    iconId={showTopics ? "shapes" : "circle-dashed"}
+    iconId="wand-sparkles"
     tooltip={showTopics
       ? "Hide topics — show the raw graph without clustering"
       : "Show topics — colour notes by their detected topic"}
