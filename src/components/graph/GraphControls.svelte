@@ -307,17 +307,18 @@ $effect(() => {
   size the rail read as undersized against the canvas.
 -->
 <div class="graph-toolbar">
-  <!-- Immersion's exit lives on the rail rather than in a sheet, because it is a
-       mode rather than a transient result: it persists while you pan, select and
-       immerse further, so its control has to persist too without covering the
-       canvas. Only shown while immersed — a rail button that did nothing the
-       rest of the time would be worse than no button. Accented so the rail also
-       answers "why am I only seeing some of my notes?". -->
-  {#if isImmersed}
+  <!-- Mobile only. Immersion is a mode rather than a transient result — it
+       persists while you pan, select and immerse further — so its exit has to
+       persist too without covering the canvas, which a bottom sheet would.
+       Desktop needs none of this: the selection bar is a slim strip that already
+       carries "Exit" without blocking anything, so a rail button there would
+       just be the same action twice. Accented so the rail also answers "why am
+       I only seeing some of my notes?". -->
+  {#if isImmersed && onMobile}
     <Button
       iconId="log-out"
       onClick={() => onExitImmerse?.()}
-      tooltip={onMobile ? "Exit immerse — back to the full graph" : "Exit immerse (Esc)"}
+      tooltip="Exit immerse — back to the full graph"
       styles="is-active"
     />
   {/if}
