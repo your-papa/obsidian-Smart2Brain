@@ -16,6 +16,7 @@ import {
 	extractCapabilities as extractOpenRouterCapabilities,
 	fetchOpenRouterModels,
 } from "../providers/openrouterModels";
+import { extractOrcaRouterCapabilities, fetchOrcaRouterModels } from "../providers/orcarouterModels";
 import type { VisibleNoteRef } from "../hooks/useVisibleNotes.svelte";
 import type { SelectionRef } from "../hooks/useSelection.svelte";
 import type { GraphNoteRef } from "../stores/chatStore.svelte";
@@ -245,6 +246,15 @@ async function resolveVisionSupport(providerId: string, modelId: string): Promis
 		if (models) {
 			const info = models.get(modelId);
 			if (info) return extractOpenRouterCapabilities(info).supportsVision;
+		}
+	}
+
+	// 2b. OrcaRouter: derive vision from architecture.input_modalities (cached)
+	if (providerId === "orcarouter") {
+		const models = await fetchOrcaRouterModels();
+		if (models) {
+			const info = models.get(modelId);
+			if (info) return extractOrcaRouterCapabilities(info).supportsVision;
 		}
 	}
 

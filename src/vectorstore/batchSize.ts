@@ -5,6 +5,7 @@ export function getDefaultEmbeddingBatchSize(providerId: string): number {
 	switch (providerId) {
 		case "openai":
 		case "openrouter":
+		case "orcarouter":
 			return 100;
 		case "omlx":
 		case "ollama":

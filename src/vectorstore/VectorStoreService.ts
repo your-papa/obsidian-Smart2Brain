@@ -14,6 +14,7 @@ import type SecondBrainPlugin from "../main";
 import { fetchModelsDevData } from "../providers/modelsDevApi";
 import { getOllamaModelsCache } from "../providers/ollamaModels";
 import { fetchOpenRouterModels } from "../providers/openrouterModels";
+import { fetchOrcaRouterModels } from "../providers/orcarouterModels";
 import { getRegistry } from "../providers/registry";
 import { ensureProviderRegistered } from "../providers/registrySync";
 import { getData } from "../stores/dataStore.svelte";
@@ -565,9 +566,10 @@ export class VectorStoreService {
 			return inst.maxInputTokensCache.maxInputTokens;
 		}
 
-		const [modelsDevData, openRouterData] = await Promise.all([
+		const [modelsDevData, openRouterData, orcaRouterData] = await Promise.all([
 			fetchModelsDevData(),
 			defaultModel.provider === "openrouter" ? fetchOpenRouterModels() : Promise.resolve(null),
+			defaultModel.provider === "orcarouter" ? fetchOrcaRouterModels() : Promise.resolve(null),
 		]);
 
 		const ollamaData =
@@ -582,6 +584,7 @@ export class VectorStoreService {
 		const metadata = hydrateEmbeddingModel(defaultModel.provider, defaultModel.model, {
 			modelsDevData,
 			openRouterData,
+			orcaRouterData,
 			ollamaData,
 		});
 

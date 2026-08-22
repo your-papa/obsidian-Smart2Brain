@@ -13,6 +13,7 @@ import AnthropicLogo from "../../components/ui/logos/AnthropicLogo.svelte";
 import OllamaLogo from "../../components/ui/logos/OllamaLogo.svelte";
 import OpenAILogo from "../../components/ui/logos/OpenAILogo.svelte";
 import OpenRouterLogo from "../../components/ui/logos/OpenRouterLogo.svelte";
+import OrcaRouterLogo from "../../components/ui/logos/OrcaRouterLogo.svelte";
 import OmlxLogo from "../../components/ui/logos/OmlxLogo.svelte";
 import {
 	createAuthStateQuery,
@@ -57,7 +58,15 @@ const isConfigured = $derived(data.isProviderConfigured(providerId));
 
 // Picker display order: lead with the most-used providers so the grid scans fast.
 // Templates not listed fall to the end in their registry order.
-const PICKER_ORDER: ProviderTemplateId[] = ["openai-compatible", "omlx", "openrouter", "ollama", "openai", "anthropic"];
+const PICKER_ORDER: ProviderTemplateId[] = [
+	"openai-compatible",
+	"omlx",
+	"openrouter",
+	"orcarouter",
+	"ollama",
+	"openai",
+	"anthropic",
+];
 // oMLX is a macOS-native app (Apple Silicon), so its template is only offered on macOS.
 const providerTemplates = [...getAllProviderTemplates()]
 	.filter((t) => t.id !== "omlx" || Platform.isMacOS)
@@ -228,6 +237,7 @@ const TEMPLATE_LOGOS: Partial<Record<ProviderTemplateId, Component<LogoProps>>> 
 	ollama: OllamaLogo,
 	omlx: OmlxLogo,
 	openrouter: OpenRouterLogo,
+	orcarouter: OrcaRouterLogo,
 };
 
 function getTemplateLogo(id: ProviderTemplateId): Component<LogoProps> {

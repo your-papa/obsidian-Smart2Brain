@@ -4,6 +4,7 @@ import {
 	extractCapabilities as extractOpenRouterCapabilities,
 	type OpenRouterModelInfo,
 } from "../providers/openrouterModels";
+import { extractOrcaRouterCapabilities, type OrcaRouterModelInfo } from "../providers/orcarouterModels";
 import type { HydratedChatModelMetadata, HydratedEmbeddingModelMetadata } from "../types/modelMetadata";
 
 const DEFAULT_CHAT_CONTEXT_WINDOW = 128000;
@@ -12,6 +13,7 @@ const DEFAULT_SIMILARITY_THRESHOLD = 0.7;
 const DEFAULT_EMBED_MAX_INPUT_TOKENS_BY_PROVIDER: Record<string, number> = {
 	openai: 8191,
 	openrouter: 8191,
+	orcarouter: 8191,
 	ollama: 8191,
 	anthropic: 8191,
 };
@@ -19,6 +21,7 @@ const DEFAULT_EMBED_MAX_INPUT_TOKENS_BY_PROVIDER: Record<string, number> = {
 export interface ModelHydrationSourceData {
 	modelsDevData?: ModelsDevApiResponse | null;
 	openRouterData?: Map<string, OpenRouterModelInfo> | null;
+	orcaRouterData?: Map<string, OrcaRouterModelInfo> | null;
 	ollamaData?: Map<string, OllamaModelInfo> | null;
 	temperature?: number;
 	similarityThresholdDefault?: number;
@@ -83,11 +86,15 @@ function lookupMetadata(
 	sourceData: ModelHydrationSourceData,
 ): {
 	openRouter?: OpenRouterModelInfo;
+	orcaRouter?: OrcaRouterModelInfo;
 	ollama?: OllamaModelInfo;
 	modelsDev?: ReturnType<typeof lookupModelInfoSync>;
 } {
 	const openRouter =
 		provider === "openrouter" && sourceData.openRouterData ? sourceData.openRouterData.get(variantKey) : undefined;
+
+	const orcaRouter =
+		provider === "orcarouter" && sourceData.orcaRouterData ? sourceData.orcaRouterData.get(variantKey) : undefined;
 
 	const ollama = provider === "ollama" && sourceData.ollamaData ? sourceData.ollamaData.get(variantKey) : undefined;
 
@@ -95,7 +102,7 @@ function lookupMetadata(
 		? lookupModelInfoSync(sourceData.modelsDevData, provider, variantKey)
 		: null;
 
-	return { openRouter, ollama, modelsDev };
+	return { openRouter, orcaRouter, ollama, modelsDev };
 }
 
 export function hydrateChatModel(
@@ -103,24 +110,32 @@ export function hydrateChatModel(
 	variantKey: string,
 	sourceData: ModelHydrationSourceData = {},
 ): HydratedChatModelMetadata {
-	const { openRouter, ollama, modelsDev } = lookupMetadata(provider, variantKey, sourceData);
+	const { openRouter, orcaRouter, ollama, modelsDev } = lookupMetadata(provider, variantKey, sourceData);
 	const paramSize = normalizeParamSize(ollama?.parameterSize);
 	const quantization = ollama?.quantization;
 
 	const displayName = buildDisplayName(
 		provider,
 		variantKey,
-		openRouter?.name || ollama?.name || modelsDev?.name,
+		openRouter?.name || orcaRouter?.name || ollama?.name || modelsDev?.name,
 		paramSize,
 	);
 
 	const contextWindow =
-		openRouter?.context_length || ollama?.contextLength || modelsDev?.limit?.context || DEFAULT_CHAT_CONTEXT_WINDOW;
+		openRouter?.context_length ||
+		orcaRouter?.context_length ||
+		ollama?.contextLength ||
+		modelsDev?.limit?.context ||
+		DEFAULT_CHAT_CONTEXT_WINDOW;
 
-	const inputUsdPer1M = toUsdPer1MFromPerToken(openRouter?.pricing?.prompt);
-	const outputUsdPer1M = toUsdPer1MFromPerToken(openRouter?.pricing?.completion);
+	const inputUsdPer1M =
+		toUsdPer1MFromPerToken(openRouter?.pricing?.prompt) ?? toUsdPer1MFromPerToken(orcaRouter?.pricing?.prompt);
+	const outputUsdPer1M =
+		toUsdPer1MFromPerToken(openRouter?.pricing?.completion) ??
+		toUsdPer1MFromPerToken(orcaRouter?.pricing?.completion);
 	const hasPricing = inputUsdPer1M !== undefined || outputUsdPer1M !== undefined;
 	const openRouterCapabilities = openRouter ? extractOpenRouterCapabilities(openRouter) : undefined;
+	const orcaRouterCapabilities = orcaRouter ? extractOrcaRouterCapabilities(orcaRouter) : undefined;
 
 	return {
 		kind: "chat",
@@ -133,12 +148,23 @@ export function hydrateChatModel(
 		temperature: sourceData.temperature,
 		capabilities: {
 			toolCalls:
-				openRouterCapabilities?.supportsToolCalls ?? ollama?.supportsTools ?? modelsDev?.tool_call ?? undefined,
+				openRouterCapabilities?.supportsToolCalls ??
+				orcaRouterCapabilities?.supportsToolCalls ??
+				ollama?.supportsTools ??
+				modelsDev?.tool_call ??
+				undefined,
 			vision:
-				openRouterCapabilities?.supportsVision ?? ollama?.supportsVision ?? modelsDev?.attachment ?? undefined,
+				openRouterCapabilities?.supportsVision ??
+				orcaRouterCapabilities?.supportsVision ??
+				ollama?.supportsVision ??
+				modelsDev?.attachment ??
+				undefined,
 			reasoning: openRouterCapabilities?.supportsReasoning ?? modelsDev?.reasoning ?? undefined,
 			structuredOutput:
-				openRouterCapabilities?.supportsStructuredOutput ?? modelsDev?.structured_output ?? undefined,
+				openRouterCapabilities?.supportsStructuredOutput ??
+				orcaRouterCapabilities?.supportsStructuredOutput ??
+				modelsDev?.structured_output ??
+				undefined,
 		},
 		pricing: hasPricing ? { inputUsdPer1M, outputUsdPer1M } : undefined,
 	};
@@ -149,14 +175,14 @@ export function hydrateEmbeddingModel(
 	variantKey: string,
 	sourceData: ModelHydrationSourceData = {},
 ): HydratedEmbeddingModelMetadata {
-	const { openRouter, ollama, modelsDev } = lookupMetadata(provider, variantKey, sourceData);
+	const { openRouter, orcaRouter, ollama, modelsDev } = lookupMetadata(provider, variantKey, sourceData);
 	const paramSize = normalizeParamSize(ollama?.parameterSize);
 	const quantization = ollama?.quantization;
 
 	const displayName = buildDisplayName(
 		provider,
 		variantKey,
-		openRouter?.name || ollama?.name || modelsDev?.name,
+		openRouter?.name || orcaRouter?.name || ollama?.name || modelsDev?.name,
 		paramSize,
 	);
 
@@ -167,13 +193,15 @@ export function hydrateEmbeddingModel(
 
 	const maxInputTokens =
 		maxInputFromOpenRouter ||
+		orcaRouter?.context_length ||
 		ollama?.contextLength ||
 		modelsDev?.limit?.input ||
 		modelsDev?.limit?.context ||
 		providerDefaultMaxInputTokens ||
 		DEFAULT_EMBEDDING_MAX_INPUT_TOKENS;
 
-	const inputUsdPer1M = toUsdPer1MFromPerToken(openRouter?.pricing?.prompt);
+	const inputUsdPer1M =
+		toUsdPer1MFromPerToken(openRouter?.pricing?.prompt) ?? toUsdPer1MFromPerToken(orcaRouter?.pricing?.prompt);
 
 	return {
 		kind: "embedding",

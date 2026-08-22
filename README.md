@@ -43,7 +43,7 @@ The three are designed to work together: search surfaces your notes, the graph r
 
 **🔌 Provider & model choice**
 
-- **Providers:** OpenAI (and any OpenAI-compatible endpoint), Anthropic, Ollama (local), OpenRouter, and OpenAI Codex sign-in. Multiple instances of a provider with distinct names/endpoints are supported.
+- **Providers:** OpenAI (and any OpenAI-compatible endpoint), Anthropic, Ollama (local), OpenRouter, [OrcaRouter](https://www.orcarouter.ai), and OpenAI Codex sign-in. Multiple instances of a provider with distinct names/endpoints are supported.
 - **Local & private:** With Ollama, models run entirely on your machine and no data leaves it.
 - **Quickly switch models:** Change the active model per chat — e.g. one model for scientific writing, another for brainstorming.
 - **Fine-grained privacy controls:** Mark individual providers as *trusted* or *untrusted*. Set the vault to **private-by-default** (only notes you explicitly allow can reach a provider) or **public-by-default** (only notes you explicitly exclude are blocked). Untrusted providers — cloud APIs, by default — are blocked from reading, embedding, or being sent private notes, even if the agent tries to access them.
