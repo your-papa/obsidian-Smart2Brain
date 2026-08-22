@@ -48,10 +48,12 @@ import {
 } from "../../utils/liveGraphPatch";
 import {
 	ensureActiveGraphCache,
+	getCachedPartition,
 	getCachedSemanticEdges,
 	loadPersistedTopicCaches,
 	scheduleTopicCacheSave,
 	setActiveGraphResolution,
+	setCachedPartition,
 	setCachedSemanticEdges,
 	swapActiveGraphCache,
 	topicCaches,
@@ -1371,8 +1373,10 @@ async function runLeidenSegmentation() {
 		`[SmartGraph] Leiden (γ=${settings.leidenResolution.toFixed(2)}, ${topicEdges.length} edges, ${graphData.nodes.length} nodes): ${Math.round(performance.now() - start)}ms`,
 	);
 	// Always worth caching — the result is correct for the settings it ran under,
-	// even if those are no longer the ones on screen.
-	topicCaches.leiden.set(cacheKey, result);
+	// even if those are no longer the ones on screen. Addressed by signature:
+	// another leaf may have re-keyed the active slot while this ran, and an
+	// unaddressed write would file this partition under *its* graph.
+	setCachedPartition(runSignature, cacheKey, result);
 	scheduleTopicCacheSave();
 	// …but only *apply* it if those settings are still current. `buildVersion`
 	// alone can't tell: it tracks graph rebuilds, while γ, seed and link-mode all
@@ -1425,18 +1429,22 @@ async function deriveGranularityLevels(topicEdges: GraphEdge[]) {
 	// edges, so its map covers just connected nodes, and segment resolution
 	// drops communities whose members aren't on screen.
 	const visibleNodeIds = new Set(graphData.nodes.map((node) => node.id));
+	// The graph this sweep describes. The loop awaits per rung, so another leaf
+	// can re-key the active slot between them — every read and write below is
+	// addressed by signature rather than trusting whichever slot is current.
+	const runSignature = graphTopologySignature(graphData);
 
 	try {
 		for (const resolution of GRANULARITY_PROBE_RESOLUTIONS) {
 			if (localBuildVersion !== buildVersion) return;
 
 			const cacheKey = partitionKey(resolution, linkOnly, seed);
-			let communities = topicCaches.leiden.get(cacheKey);
+			let communities = getCachedPartition(runSignature, cacheKey);
 			if (!communities) {
 				try {
 					const result = await leidenAsync(sources, targets, weights, seed, resolution);
 					if (localBuildVersion !== buildVersion) return;
-					topicCaches.leiden.set(cacheKey, result);
+					setCachedPartition(runSignature, cacheKey, result);
 					communities = result;
 				} catch (error) {
 					// A failed probe just means one fewer candidate rung.
@@ -1506,9 +1514,12 @@ async function computeTopicHierarchy(topicEdges: GraphEdge[]) {
 	// which one that is: the coarse Leiden below may await long enough for γ, the
 	// seed or the link mode to move on.
 	const finePartition = currentPartitionKey();
+	// Addressed by signature for the same reason as the segmentation run: the
+	// coarse Leiden below awaits, and another leaf may re-key the active slot.
+	const runSignature = graphTopologySignature(graphData);
 
 	let communities: Record<string, number>;
-	const cached = topicCaches.leiden.get(cacheKey);
+	const cached = getCachedPartition(runSignature, cacheKey);
 	if (cached) {
 		communities = cached;
 	} else {
@@ -1521,7 +1532,7 @@ async function computeTopicHierarchy(topicEdges: GraphEdge[]) {
 				coarseResolution,
 			);
 			if (localBuildVersion !== buildVersion) return;
-			topicCaches.leiden.set(cacheKey, result);
+			setCachedPartition(runSignature, cacheKey, result);
 			scheduleTopicCacheSave();
 			communities = result;
 		} catch (error) {

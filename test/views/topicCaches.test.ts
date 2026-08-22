@@ -3,8 +3,10 @@ import type { GraphEdge } from "../../src/types/graph";
 import {
 	decodeTopicCaches,
 	encodeTopicCaches,
+	getCachedPartition,
 	getCachedSemanticEdges,
 	setActiveGraphResolution,
+	setCachedPartition,
 	setCachedSemanticEdges,
 	snapshotTopicCaches,
 	swapActiveGraphCache,
@@ -205,6 +207,44 @@ describe("swapActiveGraphCache", () => {
 		// re-keyed the slot, so the latest graph was archived, not lost.)
 		expect(swapActiveGraphCache("swap-evict-7")).toBe(true);
 		expect(topicCaches.leiden.get("7:1:fused")).toEqual({ "a.md": 7 });
+	});
+});
+
+describe("signature-addressed partitions", () => {
+	it("files an async result under its own graph when another leaf re-keyed the slot", () => {
+		// The race: a Leiden run starts on graph A, another leaf swaps the shared
+		// active slot to graph B, and the completed partition lands in B's map —
+		// where it would later be served as B's partition.
+		swapActiveGraphCache("addr-a");
+		topicCaches.leiden.set("seed", { "a.md": 0 });
+		swapActiveGraphCache("addr-b");
+		topicCaches.leiden.set("seed", { "b.md": 0 });
+
+		// Result of a run that started while A was active.
+		setCachedPartition("addr-a", "7:1:fused", { "a.md": 1 });
+
+		// B (the active slot) must be untouched…
+		expect(topicCaches.graphSignature).toBe("addr-b");
+		expect(getCachedPartition("addr-b", "7:1:fused")).toBeUndefined();
+		// …and A must have it when we return.
+		expect(getCachedPartition("addr-a", "7:1:fused")).toEqual({ "a.md": 1 });
+		expect(swapActiveGraphCache("addr-a")).toBe(true);
+		expect(topicCaches.leiden.get("7:1:fused")).toEqual({ "a.md": 1 });
+	});
+
+	it("writes straight through when the graph is still active", () => {
+		swapActiveGraphCache("addr-active");
+		setCachedPartition("addr-active", "7:1:fused", { "x.md": 2 });
+		expect(topicCaches.leiden.get("7:1:fused")).toEqual({ "x.md": 2 });
+		expect(getCachedPartition("addr-active", "7:1:fused")).toEqual({ "x.md": 2 });
+	});
+
+	it("preserves a result for a graph that is neither active nor archived", () => {
+		swapActiveGraphCache("addr-elsewhere");
+		topicCaches.leiden.set("seed", { "e.md": 0 });
+		setCachedPartition("addr-unknown", "7:1:fused", { "u.md": 3 });
+		// Returning to that graph finds its computation waiting.
+		expect(getCachedPartition("addr-unknown", "7:1:fused")).toEqual({ "u.md": 3 });
 	});
 });
 

@@ -178,6 +178,48 @@ export function ensureActiveGraphCache(signature: string): void {
 	if (signature !== topicCaches.graphSignature) swapActiveGraphCache(signature);
 }
 
+/**
+ * Store a Leiden partition against the graph it was computed for.
+ *
+ * Async work (a Leiden run, a probe sweep) starts while one graph is active
+ * and finishes an arbitrary time later — by which point another leaf may have
+ * re-keyed the active slot. Writing to `topicCaches.leiden` at that point
+ * files the result under the *other* graph, where it would later be served as
+ * that graph's partition and paint the wrong communities.
+ *
+ * Addressing the write by signature makes it land correctly whichever slot is
+ * active: the active map when it still matches, the archived entry otherwise.
+ * A signature with no entry either way is simply dropped — that graph is gone
+ * (evicted, or never derived anything), so nothing would ever read it back.
+ */
+export function setCachedPartition(signature: string, key: string, communities: Record<string, number>): void {
+	if (signature === topicCaches.graphSignature) {
+		topicCaches.leiden.set(key, communities);
+		return;
+	}
+	const archived = archivedGraphs.get(signature);
+	if (archived) {
+		archived.leiden.set(key, communities);
+		archived.lastUsed = Date.now();
+		return;
+	}
+	// Not the active graph and not archived: preserve it rather than lose the
+	// computation, so returning to that graph finds its partition waiting.
+	archivedGraphs.set(signature, {
+		leiden: new Map([[key, communities]]),
+		granularityLadder: null,
+		resolution: null,
+		lastUsed: Date.now(),
+	});
+	evictOldest(archivedGraphs, MAX_CACHED_GRAPHS - 1);
+}
+
+/** Read a partition from the graph it belongs to, active slot or archive. */
+export function getCachedPartition(signature: string, key: string): Record<string, number> | undefined {
+	if (signature === topicCaches.graphSignature) return topicCaches.leiden.get(key);
+	return archivedGraphs.get(signature)?.leiden.get(key);
+}
+
 /** Look up a cached semantic edge set by its full cache key. */
 export function getCachedSemanticEdges(key: string): GraphEdge[] | null {
 	const entry = semanticEdgeSets.get(key);
