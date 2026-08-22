@@ -675,16 +675,6 @@ describe("PendingChangesStore", () => {
 				expect(plugin.app.vault.modify).not.toHaveBeenCalled();
 			});
 
-			it("cleanupResolved keeps an entry that still has content on disk", async () => {
-				const { id } = await stagePartiallyAccepted();
-				store.rejectChangeGroup(id, 0);
-
-				store.cleanupResolved("thread-1");
-
-				// Dropping it would discard the only record of the pre-proposal content.
-				expect(store.getEntry(id)).toBeDefined();
-			});
-
 			it("reverts to the pre-proposal content when the file is untouched since", async () => {
 				const { id, original, afterGroupAccept } = await stagePartiallyAccepted();
 
@@ -814,23 +804,10 @@ describe("PendingChangesStore", () => {
 	});
 
 	/* --------------------------------------------------------------------------
-	 * cleanupResolved / removeThread
+	 * removeThread
 	 * ------------------------------------------------------------------------*/
 
 	describe("cleanup", () => {
-		it("cleanupResolved should remove accepted/rejected but keep pending", () => {
-			const [id1] = store.addChanges([{ type: "create", path: "a.md", content: "A" }], "tc-1", "thread-1");
-			const [id2] = store.addChanges([{ type: "create", path: "b.md", content: "B" }], "tc-2", "thread-1");
-
-			store.rejectChange(id1);
-
-			store.cleanupResolved("thread-1");
-
-			expect(store.getEntry(id1)).toBeUndefined();
-			expect(store.getEntry(id2)).toBeDefined();
-			expect(store.getEntry(id2)?.status).toBe("pending");
-		});
-
 		it("removeThread should remove all entries for a thread", () => {
 			store.addChanges([{ type: "create", path: "a.md", content: "A" }], "tc-1", "thread-1");
 			store.addChanges([{ type: "create", path: "b.md", content: "B" }], "tc-2", "thread-1");
@@ -840,6 +817,35 @@ describe("PendingChangesStore", () => {
 
 			expect(store.getEntriesForThread("thread-1")).toHaveLength(0);
 			expect(store.getEntriesForThread("thread-2")).toHaveLength(1);
+		});
+
+		/**
+		 * `AgentManager.deleteThread` calls this. Before that wiring, a deleted chat
+		 * left its staged changes in pending-changes.json forever: the vault `delete`
+		 * handler in main.ts is gated on `isAgentFilePath`, so a removed `.chat` never
+		 * reached this store. The entries stayed keyed to a thread that no longer
+		 * existed, kept being tracked by the rename handler, and were unreachable from
+		 * any UI.
+		 */
+		it("clears entries that no UI could otherwise reach again", () => {
+			const [pendingId] = store.addChanges(
+				[{ type: "update", path: "note.md", originalContent: "a", newContent: "b" }],
+				"tc-1",
+				"Chats/gone.chat",
+			);
+			const [resolvedId] = store.addChanges(
+				[{ type: "create", path: "other.md", content: "X" }],
+				"tc-2",
+				"Chats/gone.chat",
+			);
+			store.rejectChange(resolvedId);
+
+			store.removeThread("Chats/gone.chat");
+
+			// Both statuses go — the thread is gone, so neither is reviewable.
+			expect(store.getEntry(pendingId)).toBeUndefined();
+			expect(store.getEntry(resolvedId)).toBeUndefined();
+			expect(store.getPendingCount("Chats/gone.chat")).toBe(0);
 		});
 	});
 
