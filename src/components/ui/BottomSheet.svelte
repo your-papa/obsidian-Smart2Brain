@@ -1,6 +1,7 @@
 <script lang="ts">
 import { untrack } from "svelte";
 import type { Snippet } from "svelte";
+import { claimTouchGestures } from "../../utils/claimTouchGestures";
 
 interface Props {
 	open: boolean;
@@ -247,8 +248,14 @@ const sheetHeight = $derived.by(() => {
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div class="s2b-sheet-dismiss" onclick={onClose}></div>
 
+  <!-- One attachment on the root covers everything inside: the drag handle, the
+       granularity slider, and the scrolling body. The host's swipe recognizer
+       is a bubble-phase `touchmove` on `window`, so stopping the event here
+       starves it before it can decide an axis — see the action for the
+       on-device measurement this is based on. -->
   <div
     bind:this={sheetEl}
+    use:claimTouchGestures
     class="s2b-bottom-sheet"
     class:s2b-bottom-sheet--dragging={isDragging}
     style="height: {sheetHeight}"
@@ -324,12 +331,11 @@ const sheetHeight = $derived.by(() => {
     box-shadow: var(--shadow-l);
     animation: s2b-sheet-in 160ms ease-out;
     transition: height 200ms cubic-bezier(0.32, 0.72, 0, 1);
-    /* Claim every gesture that lands on the sheet's own chrome. Obsidian binds
-       swipe-down to the command palette and horizontal swipes to the sidebars
-       as JS touch listeners, and the browser only withholds those events from
-       the host if we declare we are handling the axis. Left at `auto`, a drag
-       that started anywhere but the 24px handle opened the command palette.
-       The scroll region below re-enables the one axis it genuinely needs. */
+    /* Stops the browser's own panning on the sheet's chrome, so a drag on the
+       handle never also scrolls something underneath. Keeping the host's swipe
+       recognizers out is a separate job, done by `use:claimTouchGestures` on
+       this same element — `touch-action` alone provably does not do it. The
+       scroll region below re-enables the one axis it genuinely needs. */
     touch-action: none;
   }
 

@@ -1,4 +1,7 @@
 <script lang="ts">
+import { onDestroy } from "svelte";
+import { claimTouchGestures } from "../../utils/claimTouchGestures";
+
 interface Props {
 	value?: number;
 	min?: number;
@@ -23,17 +26,51 @@ let {
 	oncommit,
 }: Props = $props();
 
+/** Pending rAF for the deferred `onchange`, so drags coalesce to one per frame. */
+let liveFrame: number | null = null;
+
+/**
+ * Update the thumb immediately; run the consumer's work after the paint.
+ *
+ * `onchange` fires on every pointer sample during a drag, and a consumer can do
+ * real work in it — the graph's granularity handler re-derives segments and
+ * repaints its canvas, measured at ~115ms on a 4,207-note vault. Calling it
+ * synchronously here blocks the browser from painting the new thumb position,
+ * so the *slider itself* lagged the finger even though `value` was already
+ * correct. The work is main-thread by nature (style reads, canvas paint), so
+ * it cannot simply be moved to a worker.
+ *
+ * Deferring to `requestAnimationFrame` lets the thumb paint first and collapses
+ * a burst of samples into one call per frame. Drag-and-watch still works — the
+ * consumer sees the newest value every frame — it just no longer sits in front
+ * of the control's own rendering.
+ */
 function handleInput(e: Event) {
 	const target = e.target as HTMLInputElement;
 	value = Number(target.value);
-	onchange?.(value);
+	if (!onchange) return;
+	if (liveFrame !== null) cancelAnimationFrame(liveFrame);
+	liveFrame = requestAnimationFrame(() => {
+		liveFrame = null;
+		onchange?.(value);
+	});
 }
 
 function handleChange(e: Event) {
 	const target = e.target as HTMLInputElement;
 	value = Number(target.value);
+	// Drop any deferred live update: the commit below supersedes it, and letting
+	// it fire afterwards would re-apply a stale mid-drag value on top.
+	if (liveFrame !== null) {
+		cancelAnimationFrame(liveFrame);
+		liveFrame = null;
+	}
 	oncommit?.(value);
 }
+
+onDestroy(() => {
+	if (liveFrame !== null) cancelAnimationFrame(liveFrame);
+});
 
 /**
  * How far along the track the value sits, 0–1.
@@ -51,7 +88,7 @@ const fillRatio = $derived.by(() => {
 });
 </script>
 
-<div class="flex items-center gap-2 {className}">
+<div class="s2b-range-row flex items-center gap-2 {className}">
 	{#if showValue}
 		<output class="text-ui-small text-text-muted w-8 text-right">{value}</output>
 	{/if}
@@ -59,6 +96,7 @@ const fillRatio = $derived.by(() => {
 	     native filled track (and the theme's thumb sizing) rather than the bare
 	     rail the base `input[type="range"]` rule gives. -->
 	<input
+		use:claimTouchGestures
 		type="range"
 		class="slider s2b-range w-full cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
 		style="--slider-fill-ratio: {fillRatio};"
@@ -74,25 +112,15 @@ const fillRatio = $derived.by(() => {
 
 <style>
 	/*
-	 * `touch-action: none` is the load-bearing line on mobile.
+	 * `touch-action: none` stops the *browser's* own panning, so dragging the
+	 * thumb never also scrolls the surrounding panel.
 	 *
-	 * Obsidian's mobile CSS leaves range inputs at `touch-action: manipulation`,
-	 * which declares "this element does not handle panning" — so a horizontal drag
-	 * on the slider is handed to Obsidian's sidebar-swipe gesture instead of moving
-	 * the thumb. Dragging the granularity slider opened the sidebar rather than
-	 * changing the value. Claiming the gesture here keeps the drag with the
-	 * control the finger is actually on.
-	 *
-	 * `none`, not `pan-y`. `pan-y` still declares "I do not handle horizontal
-	 * panning", which is exactly the axis the sidebar-swipe listens on — so the
-	 * sidebar kept opening mid-drag. Only `none` claims both axes and stops the
-	 * browser generating the pan the host is watching for.
-	 *
-	 * `pan-y` was originally chosen so a tall panel could still be scrolled by
-	 * dragging over the slider. That trade no longer applies: the slider sits in
-	 * a card inside a scrolling sheet, with the row's label, the surrounding
-	 * card and the whole sheet body all available to scroll from — none of which
-	 * is a 6px-tall control whose entire purpose is the horizontal drag.
+	 * It does NOT stop Obsidian's sidebar swipe. That is a JS recognizer
+	 * (bubble-phase `touchmove` on `window`), which receives the event stream
+	 * no matter what `touch-action` says — `manipulation` → `pan-y` (#417) and
+	 * then `pan-y` → `none` both failed on hardware for exactly this reason.
+	 * `use:claimTouchGestures` on the input is what actually protects the drag;
+	 * see that action for the on-device measurement.
 	 *
 	 * Deliberately no track or thumb styling: Obsidian paints both itself off the
 	 * `slider` class and the `--slider-fill-ratio` we set inline, and overriding
@@ -101,6 +129,20 @@ const fillRatio = $derived.by(() => {
 	 */
 	.s2b-range {
 		touch-action: none;
+	}
+
+	/* Obsidian's base rule is `input[type="range"] { width: 100px }`, which beats
+	   the `w-full` utility class on specificity — measured 100px in a 194px slot
+	   on a phone, so the control was using barely half the room it had. Match the
+	   element selector to win, and let the row grow into the slot. */
+	.s2b-range-row {
+		flex: 1;
+		min-width: 0;
+	}
+
+	input[type="range"].s2b-range {
+		width: 100%;
+		min-width: 0;
 	}
 
 	/* No transparent border to grow the hit area on mobile.
