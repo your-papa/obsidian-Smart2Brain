@@ -74,6 +74,7 @@ import { VIEW_TYPE_CHAT } from "../../views/chat/Chat";
 import { VIEW_TYPE_SMART_GRAPH } from "../../views/smart-graph/SmartGraphView";
 import { getSessionRegistry } from "../../stores/chatStore.svelte";
 import LoadingAnimation from "../ui/LoadingAnimation.svelte";
+import BottomSheet from "../ui/BottomSheet.svelte";
 import Button from "../ui/Button.svelte";
 import GraphCanvas from "./GraphCanvas.svelte";
 import GraphControls from "./GraphControls.svelte";
@@ -1233,6 +1234,32 @@ const onMobile = isMobileUI();
 const withKey = (tooltip: string, key: string) => (onMobile ? tooltip : `${tooltip} (${key})`);
 
 /**
+ * Whether the settings panel is hidden. Owned here rather than inside
+ * `GraphControls` because on mobile it is a bottom sheet, and the selection
+ * sheet has to be able to take that slot over — see below.
+ */
+let isControlsCollapsed = $state(true);
+
+/**
+ * One sheet at a time: a selection appearing closes the settings sheet.
+ *
+ * Both surfaces are bottom-anchored on mobile, so leaving them both open would
+ * either stack them over most of the screen or have them overlap. The selection
+ * wins because it is the more transient of the two and the one the user just
+ * created.
+ *
+ * A genuine side effect on a separate surface, not state synchronisation: it
+ * fires on the *transition into* having a selection, so reopening the settings
+ * sheet while a selection is still live doesn't immediately close it again.
+ */
+let hadSelection = false;
+$effect(() => {
+	const hasSelection = selectedPaths.length > 0 || isImmersed;
+	if (hasSelection && !hadSelection && onMobile) isControlsCollapsed = true;
+	hadSelection = hasSelection;
+});
+
+/**
  * Open a set of notes in tabs, confirming first past the threshold.
  *
  * Shared by the selection bar's "Open all" and a collapsed topic's context
@@ -2210,72 +2237,155 @@ function handleHoverPreview(event: MouseEvent, path: string, targetEl: HTMLEleme
     />
   {/if}
 
-  {#if isImmersed || selectedPaths.length > 0}
-    <div class="graph-selection-bar">
-      <span class="selection-count">
-        {#if selectedPaths.length > 0}
-          <strong>{selectedPaths.length}</strong>
-          {selectedPaths.length === 1 ? "note" : "notes"} selected{isImmersed ? " · immersed" : ""}
-        {:else}
-          <strong>{graphData.nodes.length}</strong>
-          {graphData.nodes.length === 1 ? "note" : "notes"} · immersed
-        {/if}
-      </span>
-      <!-- Left of the divider with the count: this moves the camera, it doesn't
-           act on the notes the way the verbs on the right do. Grouping it with
-           the count keeps that split legible, and leaves both icon-only buttons
-           bracketing the labelled actions rather than sitting among them. -->
-      {#if selectedPaths.length > 0}
-        <Button iconId="scan" onClick={handleZoomToSelection} tooltip="Zoom to selection (F)" />
-      {/if}
-      <div class="selection-divider"></div>
-      <div class="selection-actions">
-        {#if selectedPaths.length > 0}
-          {#if selectedTopicsCollapseAction !== null}
-            <!-- Same chevrons as the toolbar's collapse-all: this is that action
-                 scoped to a selection rather than a different one, so it should
-                 not carry a different glyph. -->
-            <Button
-              iconId={selectedTopicsCollapseAction === "collapse" ? "chevrons-down-up" : "chevrons-up-down"}
-              buttonText={selectedTopicsCollapseAction === "collapse" ? "Collapse" : "Expand"}
-              onClick={() => void handleCollapseSelectedTopics()}
-              tooltip={withKey(
-                selectedTopicsCollapseAction === "collapse"
-                  ? "Fold the selected topics into single nodes"
-                  : "Unfold the selected topics back into notes",
-                "C",
-              )}
-            />
-          {/if}
-          <Button
-            iconId="scan-search"
-            buttonText="Immerse"
-            onClick={handleImmerse}
-            tooltip={withKey("Rebuild graph with selected notes only", "I")}
-          />
-          {#if !hasOpenChat}
-            <Button
-              iconId="message-square"
-              buttonText="Open in chat"
-              onClick={handleSendToChat}
-              tooltip={withKey("Reveal the chat and attach the selected notes", "A")}
-            />
-          {/if}
-          <Button
-            iconId="copy-plus"
-            buttonText="Open all"
-            onClick={handleOpenAllSelected}
-            tooltip={withKey("Open all selected notes in new tabs", "O")}
-          />
+  <!-- What the selection bar says about itself, shared by both modalities. -->
+  {#snippet selectionCount()}
+    {#if selectedPaths.length > 0}
+      <strong>{selectedPaths.length}</strong>
+      {selectedPaths.length === 1 ? "note" : "notes"} selected{isImmersed ? " · immersed" : ""}
+    {:else}
+      <strong>{graphData.nodes.length}</strong>
+      {graphData.nodes.length === 1 ? "note" : "notes"} · immersed
+    {/if}
+  {/snippet}
 
-          <!-- Icon-only: dismissing isn't one of the verbs you came here for, so
-               it reads as an affordance on the bar rather than a peer action. -->
-          <Button iconId="x" onClick={handleClearSelection} tooltip="Clear selection (Esc)" />
-        {:else}
-          <Button buttonText="Exit" onClick={handleExitImmerse} tooltip="Exit immerse (Esc)" />
+  {#if isImmersed || selectedPaths.length > 0}
+    {#if onMobile}
+      <!--
+        The desktop bar's only mobile treatment was `flex-wrap: wrap`, which
+        turned one row into three and left the divider — a rule that separates
+        the count from the verbs — pointing at nothing. A sheet is a narrow
+        column by construction, so the verbs stack as full-width rows and the
+        divider has no job to be left without.
+
+        Not draggable: this is a fixed list of verbs with nothing to expand
+        into, so a handle would advertise a gesture that does nothing.
+      -->
+      <BottomSheet
+        open={true}
+        onClose={selectedPaths.length > 0 ? handleClearSelection : handleExitImmerse}
+        draggable={false}
+        ariaLabel="Graph selection"
+      >
+        <div class="selection-sheet">
+          <div class="selection-sheet-header">
+            <span class="selection-count">{@render selectionCount()}</span>
+            <Button
+              iconId="x"
+              onClick={selectedPaths.length > 0 ? handleClearSelection : handleExitImmerse}
+              tooltip={selectedPaths.length > 0 ? "Clear selection" : "Exit immerse"}
+            />
+          </div>
+          <div class="selection-sheet-actions">
+            {#if selectedPaths.length > 0}
+              <!-- Promoted from icon-only to a labelled row. It rendered at
+                   30x26 on the bar — the easiest control here to mis-tap, and
+                   it sat next to a destructive one. -->
+              <Button
+                iconId="scan"
+                buttonText="Zoom to selection"
+                onClick={handleZoomToSelection}
+                tooltip="Move the camera to fit the selected notes"
+              />
+              {#if selectedTopicsCollapseAction !== null}
+                <Button
+                  iconId={selectedTopicsCollapseAction === "collapse" ? "chevrons-down-up" : "chevrons-up-down"}
+                  buttonText={selectedTopicsCollapseAction === "collapse" ? "Collapse" : "Expand"}
+                  onClick={() => void handleCollapseSelectedTopics()}
+                  tooltip={selectedTopicsCollapseAction === "collapse"
+                    ? "Fold the selected topics into single nodes"
+                    : "Unfold the selected topics back into notes"}
+                />
+              {/if}
+              <Button
+                iconId="scan-search"
+                buttonText="Immerse"
+                onClick={handleImmerse}
+                tooltip="Rebuild graph with selected notes only"
+              />
+              {#if !hasOpenChat}
+                <Button
+                  iconId="message-square"
+                  buttonText="Open in chat"
+                  onClick={handleSendToChat}
+                  tooltip="Reveal the chat and attach the selected notes"
+                />
+              {/if}
+              <Button
+                iconId="copy-plus"
+                buttonText="Open all"
+                onClick={handleOpenAllSelected}
+                tooltip="Open all selected notes in new tabs"
+              />
+            {:else}
+              <Button
+                iconId="log-out"
+                buttonText="Exit immerse"
+                onClick={handleExitImmerse}
+                tooltip="Return to the full graph"
+              />
+            {/if}
+          </div>
+        </div>
+      </BottomSheet>
+    {:else}
+      <div class="graph-selection-bar">
+        <span class="selection-count">{@render selectionCount()}</span>
+        <!-- Left of the divider with the count: this moves the camera, it doesn't
+             act on the notes the way the verbs on the right do. Grouping it with
+             the count keeps that split legible, and leaves both icon-only buttons
+             bracketing the labelled actions rather than sitting among them. -->
+        {#if selectedPaths.length > 0}
+          <Button iconId="scan" onClick={handleZoomToSelection} tooltip="Zoom to selection (F)" />
         {/if}
+        <div class="selection-divider"></div>
+        <div class="selection-actions">
+          {#if selectedPaths.length > 0}
+            {#if selectedTopicsCollapseAction !== null}
+              <!-- Same chevrons as the toolbar's collapse-all: this is that action
+                   scoped to a selection rather than a different one, so it should
+                   not carry a different glyph. -->
+              <Button
+                iconId={selectedTopicsCollapseAction === "collapse" ? "chevrons-down-up" : "chevrons-up-down"}
+                buttonText={selectedTopicsCollapseAction === "collapse" ? "Collapse" : "Expand"}
+                onClick={() => void handleCollapseSelectedTopics()}
+                tooltip={withKey(
+                  selectedTopicsCollapseAction === "collapse"
+                    ? "Fold the selected topics into single nodes"
+                    : "Unfold the selected topics back into notes",
+                  "C",
+                )}
+              />
+            {/if}
+            <Button
+              iconId="scan-search"
+              buttonText="Immerse"
+              onClick={handleImmerse}
+              tooltip={withKey("Rebuild graph with selected notes only", "I")}
+            />
+            {#if !hasOpenChat}
+              <Button
+                iconId="message-square"
+                buttonText="Open in chat"
+                onClick={handleSendToChat}
+                tooltip={withKey("Reveal the chat and attach the selected notes", "A")}
+              />
+            {/if}
+            <Button
+              iconId="copy-plus"
+              buttonText="Open all"
+              onClick={handleOpenAllSelected}
+              tooltip={withKey("Open all selected notes in new tabs", "O")}
+            />
+
+            <!-- Icon-only: dismissing isn't one of the verbs you came here for, so
+                 it reads as an affordance on the bar rather than a peer action. -->
+            <Button iconId="x" onClick={handleClearSelection} tooltip="Clear selection (Esc)" />
+          {:else}
+            <Button buttonText="Exit" onClick={handleExitImmerse} tooltip="Exit immerse (Esc)" />
+          {/if}
+        </div>
       </div>
-    </div>
+    {/if}
   {/if}
 
   <GraphControls
@@ -2305,6 +2415,7 @@ function handleHoverPreview(event: MouseEvent, path: string, targetEl: HTMLEleme
     focusedSegmentIds={focusedSegmentIds}
     onFocusSegment={handleFocusSegment}
     onToggleCollapseAll={handleToggleCollapseAll}
+    bind:isCollapsed={isControlsCollapsed}
   />
 </div>
 
@@ -2410,28 +2521,49 @@ function handleHoverPreview(event: MouseEvent, path: string, targetEl: HTMLEleme
     flex-shrink: 0;
   }
 
-  /* On a phone the centered, nowrap bar overflows both screen edges — the
-     buttons past the viewport can't be tapped. Pin it to the safe width,
-     let the count + actions wrap, and let the actions fill the row so every
-     button stays on-screen and comfortably tappable. */
-  :global(.is-mobile) .graph-selection-bar {
-    left: 8px;
-    right: 8px;
-    transform: none;
-    max-width: none;
-    flex-wrap: wrap;
-    justify-content: center;
-    white-space: normal;
-    /* Sit clear of Obsidian's floating mobile navbar (a ~52px pill anchored to
-       the bottom with a gap below it — it occupies ~84px of the viewport
-       bottom and floats over the full-height graph canvas). Obsidian exposes
-       no reliable height var for it, so clear it with a fixed offset plus any
-       device safe-area inset. */
-    bottom: calc(92px + var(--safe-area-inset-bottom, 0px));
+  /* ── Mobile selection sheet ──────────────────────────────────────────────
+     Replaces the wrapped bar entirely. The bar used to hang at a hardcoded
+     `bottom: 92px` to clear Obsidian's floating navbar, which left it in open
+     canvas attached to neither the content nor the screen edge; the sheet is
+     anchored at `bottom: 0` inside `.smart-graph-view`, which already subtracts
+     the navbar band from its own height, so the clearance comes from the one
+     measurement that was already right. */
+
+  .selection-sheet {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding-top: 2px;
   }
 
-  :global(.is-mobile) .selection-actions {
-    flex-wrap: wrap;
-    justify-content: center;
+  /* The count is the sheet's title, which is why there is no divider here:
+     a header separated from its body by layout doesn't need a rule to say so. */
+  .selection-sheet-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--background-modifier-border);
+  }
+
+  .selection-sheet-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  /* Full-width rows at the touch floor. `justify-content` is set explicitly
+     because Obsidian's base `button` rule centres content, which ragged the
+     labels once the buttons became full-width. */
+  .selection-sheet-actions :global(button) {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 10px;
+    width: 100%;
+    min-height: 44px;
+    padding: 8px 12px;
+    text-align: left;
   }
 </style>

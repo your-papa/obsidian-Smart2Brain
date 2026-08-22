@@ -1207,6 +1207,7 @@
 .is-mobile .attach-context-button.clickable-icon,
 .is-mobile .chat-input-icon-button.clickable-icon,
 .is-mobile .graph-controls .clickable-icon,
+.is-mobile .s2b-bottom-sheet .clickable-icon,
 .is-mobile .provider-icon-button.clickable-icon,
 .is-mobile .pcb-action-icon {
 	min-width: 44px !important;

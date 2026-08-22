@@ -1,4 +1,5 @@
 <script lang="ts">
+import BottomSheet from "../ui/BottomSheet.svelte";
 import Button from "../ui/Button.svelte";
 import RangeSlider from "../ui/RangeSlider.svelte";
 import Toggle from "../ui/Toggle.svelte";
@@ -53,6 +54,12 @@ interface Props {
 	isTopicsCollapsed?: boolean;
 	/** Collapse or expand all topics at once (the atom button / S shortcut). */
 	onToggleCollapseAll?: () => void;
+	/**
+	 * Whether the settings panel is hidden. Bindable so the parent can close it
+	 * — on mobile the panel is a bottom sheet, and a selection appearing has to
+	 * be able to take the sheet slot over (only one sheet at a time).
+	 */
+	isCollapsed?: boolean;
 }
 
 let {
@@ -82,9 +89,9 @@ let {
 	onFocusSegment,
 	isTopicsCollapsed = false,
 	onToggleCollapseAll,
+	isCollapsed = $bindable(true),
 }: Props = $props();
 
-let isCollapsed = $state(true);
 let isDevCollapsed = $state(true);
 
 /** Defaulted here rather than in the template — settings persisted before this
@@ -359,184 +366,212 @@ $effect(() => {
   {/if}
 </div>
 
-<!-- Main settings panel -->
-<div class="graph-controls" class:collapsed={isCollapsed} bind:clientHeight={mainPanelHeight}>
-  {#if !isCollapsed}
-    <div class="graph-controls-body">
-      <!-- ── Stats row ──────────────────────────── -->
-      <div class="stats-row">
-        <span class="stats-text">
-          {#if isLoading}
-            <span class="loading-label">{loadingLabel}</span>
-          {:else if graphStats}
-            {nodeCount} notes · {graphStats.unlinkedNotes} unlinked · {graphStats.wikiEdges} links{#if graphStats.semanticEdges > 0}{" "}· {graphStats.semanticEdges} inferred{/if}
-          {:else}
-            {nodeCount} notes
-          {/if}
-        </span>
-      </div>
-
-      <!-- ── Topics ───────────────────────────── -->
-      <!-- Granularity and "Inferred links" both decide *which topics exist*
-           (they re-run Leiden), so they belong together and above the topic list
-           they produce. Everything under Display only changes how the same topics
-           are drawn. -->
-      <span class="section-label">Topics</span>
-
-      <!-- Held back until the vault's levels are known: the slider's length is
-           derived, so showing it early would change its range under the user. -->
-      {#if granularityReady}
-        <!-- Distinct from the camera zoom (scroll, +/-), which changes scale.
-             This changes how finely notes are grouped into topics — hence the
-             separate `granularity*` vocabulary throughout. -->
-        <SettingContainer
-          name="Granularity"
-          desc={onMobile
-            ? "Left: a few broad topics. Right: many specific ones. Every note stays visible."
-            : "Left: a few broad topics. Right: many specific ones. Every note stays visible. (↑/↓ on the graph)"}
-          compact
-        >
-          <RangeSlider
-            value={granularityLevel}
-            min={MIN_GRANULARITY_LEVEL}
-            max={granularityMaxLevel}
-            step={1}
-            showValue={true}
-            onchange={(v) => onGranularityChange?.(v)}
-            oncommit={(v) => onGranularityCommit?.(v)}
-          />
-        </SettingContainer>
-      {:else}
-        <SettingContainer name="Granularity" desc="Working out this vault's topic levels…" compact>
-          <span class="granularity-pending">…</span>
-        </SettingContainer>
-      {/if}
-
-      <!-- One switch for the whole concept: inferred links are either part of the
-           graph (drawn *and* grouping notes) or absent. Splitting "draw" from
-           "count" allowed a state where hidden edges silently decided the topics.
-
-           A plain compact row like every other setting here: `inferredLinksHint`
-           folds the live measurement into the same hover description, so the
-           number is still there without this row growing an extra line and an
-           affordance nothing else in the panel has. -->
-      <SettingContainer name="Inferred links" desc={inferredLinksHint} compact>
-        <Toggle
-          checked={!(settings.linkOnlyTopics ?? false) && (settings.showSemanticLinks ?? true)}
-          onchange={(value) =>
-            onSettingsChange({ linkOnlyTopics: !value, showSemanticLinks: value })}
-        />
-      </SettingContainer>
-
-      {#if segments.length > 0}
-        <div class="section-label section-label--with-action">
-          <span
-            >Found · {segments.length}
-            {#if !onMobile}<span class="section-label-hint">shift/⌘ multi-select</span>{/if}</span
-          >
-          <!-- The spinner doubles as the cancel control: hovering (or focusing)
-               a live run swaps it for an X. Listeners go on the button itself
-               rather than a wrapper — it is already focusable, so keyboard users
-               reach the cancel affordance by tabbing to it. -->
-          <Button
-            bind:element={labelButtonEl}
-            iconId={showCancelLabeling ? "x" : isLabeling ? "loader" : "sparkles"}
-            ariaLabel={isLabeling ? "Cancel naming topics" : "Name topics with AI"}
-            tooltip={isLabeling ? "Cancel naming" : "Name topics with AI"}
-            onClick={() => (isLabeling ? onCancelLabeling?.() : onLabelTopics?.())}
-            styles={isLabeling && !showCancelLabeling ? "is-spinning" : ""}
-          />
-        </div>
-        <div class="segment-list">
-          {#each segments as seg (seg.id)}
-            <button
-              type="button"
-              class="segment-row"
-              class:segment-row--active={focusedSegmentIds.has(seg.id)}
-              onclick={(e) => onFocusSegment?.(seg.id, e.shiftKey || e.metaKey || e.ctrlKey)}
-            >
-              <span class="segment-dot" style="background-color: {seg.color}"></span>
-              <span class="segment-label">{seg.label}</span>
-              <span class="segment-count">{seg.paths.size}</span>
-            </button>
-          {/each}
-        </div>
-      {/if}
-
-      <!-- ── Scope ────────────────────────────── -->
-      <!-- What is in the graph at all. Placed after Topics rather than before it:
-           it is the rarest thing to touch — usually set once and left — so the
-           controls reached on every visit stay at the top, where the topic list
-           can also sit directly under the settings that produce it. -->
-      <span class="section-label">Scope</span>
-      <SettingContainer
-        name="Markdown only"
-        desc="Show only Markdown notes; off shows all indexable files"
-        compact
-      >
-        <Toggle
-          checked={settings.markdownOnly}
-          onchange={(value) => onSettingsChange({ markdownOnly: value })}
-        />
-      </SettingContainer>
-
-      <!-- ── Display ───────────────────────────── -->
-      <!-- Purely how the graph above is drawn — nothing here changes which notes
-           are included or how they group. -->
-      <span class="section-label">Display</span>
-      <SettingContainer
-        name="Topic regions"
-        desc="Tint the area behind each topic so groups read at a glance"
-        compact
-      >
-        <Toggle
-          checked={settings.showTopicHulls ?? true}
-          onchange={(value) => onSettingsChange({ showTopicHulls: value })}
-        />
-      </SettingContainer>
-      <SettingContainer
-        name="Topic labels"
-        desc="Show the topic name pills over the graph"
-        compact
-      >
-        <Toggle
-          checked={settings.showClusterLabels ?? true}
-          onchange={(value) => onSettingsChange({ showClusterLabels: value })}
-        />
-      </SettingContainer>
-      <SettingContainer
-        name="Direction arrows"
-        desc="Show arrows for directed wiki links"
-        compact
-      >
-        <Toggle
-          checked={settings.directedWikiEdges}
-          onchange={(value) => onSettingsChange({ directedWikiEdges: value })}
-        />
-      </SettingContainer>
-      <SettingContainer
-        name="Highlight isolated"
-        desc="Mark notes with no wiki links in accent color"
-        compact
-      >
-        <Toggle
-          checked={settings.highlightIsolated}
-          onchange={(value) => onSettingsChange({ highlightIsolated: value })}
-        />
-      </SettingContainer>
-      <SettingContainer
-        name="Highlight bridges"
-        desc="Mark notes that connect multiple topics in accent color"
-        compact
-      >
-        <Toggle
-          checked={settings.highlightBridges}
-          onchange={(value) => onSettingsChange({ highlightBridges: value })}
-        />
-      </SettingContainer>
+<!--
+  The panel's controls, defined once and rendered into whichever container the
+  platform calls for: a floating popover on desktop, a bottom sheet on mobile.
+  One copy of the markup, so a control added here cannot go missing from one
+  modality.
+-->
+{#snippet panelBody()}
+  <div class="graph-controls-body">
+    <!-- ── Stats row ──────────────────────────── -->
+    <div class="stats-row">
+      <span class="stats-text">
+        {#if isLoading}
+          <span class="loading-label">{loadingLabel}</span>
+        {:else if graphStats}
+          {nodeCount} notes · {graphStats.unlinkedNotes} unlinked · {graphStats.wikiEdges} links{#if graphStats.semanticEdges > 0}{" "}· {graphStats.semanticEdges} inferred{/if}
+        {:else}
+          {nodeCount} notes
+        {/if}
+      </span>
     </div>
-  {/if}
-</div>
+
+    <!-- ── Topics ───────────────────────────── -->
+    <!-- Granularity and "Inferred links" both decide *which topics exist*
+         (they re-run Leiden), so they belong together and above the topic list
+         they produce. Everything under Display only changes how the same topics
+         are drawn. -->
+    <span class="section-label">Topics</span>
+
+    <!-- Held back until the vault's levels are known: the slider's length is
+         derived, so showing it early would change its range under the user. -->
+    {#if granularityReady}
+      <!-- Distinct from the camera zoom (scroll, +/-), which changes scale.
+           This changes how finely notes are grouped into topics — hence the
+           separate `granularity*` vocabulary throughout. -->
+      <SettingContainer
+        name="Granularity"
+        desc={onMobile
+          ? "Left: a few broad topics. Right: many specific ones. Every note stays visible."
+          : "Left: a few broad topics. Right: many specific ones. Every note stays visible. (↑/↓ on the graph)"}
+        compact
+      >
+        <RangeSlider
+          value={granularityLevel}
+          min={MIN_GRANULARITY_LEVEL}
+          max={granularityMaxLevel}
+          step={1}
+          showValue={true}
+          onchange={(v) => onGranularityChange?.(v)}
+          oncommit={(v) => onGranularityCommit?.(v)}
+        />
+      </SettingContainer>
+    {:else}
+      <SettingContainer name="Granularity" desc="Working out this vault's topic levels…" compact>
+        <span class="granularity-pending">…</span>
+      </SettingContainer>
+    {/if}
+
+    <!-- One switch for the whole concept: inferred links are either part of the
+         graph (drawn *and* grouping notes) or absent. Splitting "draw" from
+         "count" allowed a state where hidden edges silently decided the topics.
+
+         A plain compact row like every other setting here: `inferredLinksHint`
+         folds the live measurement into the same hover description, so the
+         number is still there without this row growing an extra line and an
+         affordance nothing else in the panel has. -->
+    <SettingContainer name="Inferred links" desc={inferredLinksHint} compact>
+      <Toggle
+        checked={!(settings.linkOnlyTopics ?? false) && (settings.showSemanticLinks ?? true)}
+        onchange={(value) =>
+          onSettingsChange({ linkOnlyTopics: !value, showSemanticLinks: value })}
+      />
+    </SettingContainer>
+
+    {#if segments.length > 0}
+      <div class="section-label section-label--with-action">
+        <span
+          >Found · {segments.length}
+          {#if !onMobile}<span class="section-label-hint">shift/⌘ multi-select</span>{/if}</span
+        >
+        <!-- The spinner doubles as the cancel control: hovering (or focusing)
+             a live run swaps it for an X. Listeners go on the button itself
+             rather than a wrapper — it is already focusable, so keyboard users
+             reach the cancel affordance by tabbing to it. -->
+        <Button
+          bind:element={labelButtonEl}
+          iconId={showCancelLabeling ? "x" : isLabeling ? "loader" : "sparkles"}
+          ariaLabel={isLabeling ? "Cancel naming topics" : "Name topics with AI"}
+          tooltip={isLabeling ? "Cancel naming" : "Name topics with AI"}
+          onClick={() => (isLabeling ? onCancelLabeling?.() : onLabelTopics?.())}
+          styles={isLabeling && !showCancelLabeling ? "is-spinning" : ""}
+        />
+      </div>
+      <div class="segment-list">
+        {#each segments as seg (seg.id)}
+          <button
+            type="button"
+            class="segment-row"
+            class:segment-row--active={focusedSegmentIds.has(seg.id)}
+            onclick={(e) => onFocusSegment?.(seg.id, e.shiftKey || e.metaKey || e.ctrlKey)}
+          >
+            <span class="segment-dot" style="background-color: {seg.color}"></span>
+            <span class="segment-label">{seg.label}</span>
+            <span class="segment-count">{seg.paths.size}</span>
+          </button>
+        {/each}
+      </div>
+    {/if}
+
+    <!-- ── Scope ────────────────────────────── -->
+    <!-- What is in the graph at all. Placed after Topics rather than before it:
+         it is the rarest thing to touch — usually set once and left — so the
+         controls reached on every visit stay at the top, where the topic list
+         can also sit directly under the settings that produce it. -->
+    <span class="section-label">Scope</span>
+    <SettingContainer
+      name="Markdown only"
+      desc="Show only Markdown notes; off shows all indexable files"
+      compact
+    >
+      <Toggle
+        checked={settings.markdownOnly}
+        onchange={(value) => onSettingsChange({ markdownOnly: value })}
+      />
+    </SettingContainer>
+
+    <!-- ── Display ───────────────────────────── -->
+    <!-- Purely how the graph above is drawn — nothing here changes which notes
+         are included or how they group. -->
+    <span class="section-label">Display</span>
+    <SettingContainer
+      name="Topic regions"
+      desc="Tint the area behind each topic so groups read at a glance"
+      compact
+    >
+      <Toggle
+        checked={settings.showTopicHulls ?? true}
+        onchange={(value) => onSettingsChange({ showTopicHulls: value })}
+      />
+    </SettingContainer>
+    <SettingContainer
+      name="Topic labels"
+      desc="Show the topic name pills over the graph"
+      compact
+    >
+      <Toggle
+        checked={settings.showClusterLabels ?? true}
+        onchange={(value) => onSettingsChange({ showClusterLabels: value })}
+      />
+    </SettingContainer>
+    <SettingContainer
+      name="Direction arrows"
+      desc="Show arrows for directed wiki links"
+      compact
+    >
+      <Toggle
+        checked={settings.directedWikiEdges}
+        onchange={(value) => onSettingsChange({ directedWikiEdges: value })}
+      />
+    </SettingContainer>
+    <SettingContainer
+      name="Highlight isolated"
+      desc="Mark notes with no wiki links in accent color"
+      compact
+    >
+      <Toggle
+        checked={settings.highlightIsolated}
+        onchange={(value) => onSettingsChange({ highlightIsolated: value })}
+      />
+    </SettingContainer>
+    <SettingContainer
+      name="Highlight bridges"
+      desc="Mark notes that connect multiple topics in accent color"
+      compact
+    >
+      <Toggle
+        checked={settings.highlightBridges}
+        onchange={(value) => onSettingsChange({ highlightBridges: value })}
+      />
+    </SettingContainer>
+  </div>
+{/snippet}
+
+{#if onMobile}
+  <!--
+    On a phone the popover was the wrong modality outright: it covered ~76% of
+    the viewport it floated over, hung from the least reachable edge, and gave
+    a drag-and-watch control (granularity) nothing to watch. The sheet keeps
+    the graph visible above it and puts the controls under the thumb.
+
+    Opens at the peek detent, where Topics — the granularity slider and
+    inferred links — is what you get; drag up for the topic list and the rest.
+  -->
+  <BottomSheet
+    open={!isCollapsed}
+    onClose={() => (isCollapsed = true)}
+    ariaLabel="Graph settings"
+  >
+    {@render panelBody()}
+  </BottomSheet>
+{:else}
+  <div class="graph-controls" class:collapsed={isCollapsed} bind:clientHeight={mainPanelHeight}>
+    {#if !isCollapsed}
+      {@render panelBody()}
+    {/if}
+  </div>
+{/if}
 
 <!-- Dev panel (dev build only) -->
 {#if import.meta.env.DEV}
@@ -692,7 +727,11 @@ $effect(() => {
     display: flex;
     flex-direction: column;
     gap: 6px;
-    z-index: 11;
+    /* Above the sheet's dismiss layer, so fit / lasso / topics stay reachable
+       while a sheet is open — the sheet leaves the graph visible on purpose,
+       and a toolbar you can see but not press would undercut that. The sliders
+       button in particular has to keep working as the sheet's own toggle. */
+    z-index: 15;
   }
 
   /* Sized here rather than via Button's `iconSize` prop: for an icon-only button
@@ -747,9 +786,10 @@ $effect(() => {
     box-shadow: none;
   }
 
-  /* On a phone a fixed 300px panel + 52px offset overflows and occludes the
-     canvas — fit it to the viewport instead. */
-  :global(.is-mobile) .graph-controls {
+  /* Only the dev panel still uses this popover on mobile — the shipped settings
+     panel is a bottom sheet there, which owns its own width. A fixed 300px box
+     plus the 52px toolbar offset overflows a phone, so fit it to the viewport. */
+  :global(.is-mobile) .graph-controls--dev {
     width: min(300px, calc(100vw - 68px));
   }
 
@@ -780,6 +820,14 @@ $effect(() => {
     display: flex;
     flex-direction: column;
     gap: 4px;
+  }
+
+  /* The sheet supplies its own horizontal padding and safe-area bottom, so the
+     popover's would double it. Scoped to the sheet rather than to `.is-mobile`,
+     because the dev panel shares this class and still renders as a popover
+     there — it needs to keep its own padding. */
+  :global(.s2b-bottom-sheet) .graph-controls-body {
+    padding: 0;
   }
 
   .stats-row {
@@ -871,6 +919,15 @@ $effect(() => {
     overscroll-behavior: contain;
   }
 
+  /* Inside the sheet the cap is not only unnecessary but actively wrong: the
+     full detent exists so the topic list can use the height, and a nested
+     scroll area within a scrolling sheet gives two overlapping scroll targets
+     under one thumb. Let the list run, and let the sheet scroll it. */
+  :global(.is-mobile) .segment-list {
+    max-height: none;
+    overflow-y: visible;
+  }
+
   .segment-row {
     display: flex;
     align-items: center;
@@ -888,6 +945,13 @@ $effect(() => {
 
   .segment-row:hover {
     background: var(--background-modifier-hover);
+  }
+
+  /* A 3px-padded row lands around 22px — half the touch floor, on the one list
+     in this panel you are meant to tap repeatedly. */
+  :global(.is-mobile) .segment-row {
+    min-height: 44px;
+    padding: 6px 8px;
   }
 
   .segment-row--active {
