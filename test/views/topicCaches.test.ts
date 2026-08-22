@@ -3,7 +3,11 @@ import type { GraphEdge } from "../../src/types/graph";
 import {
 	decodeTopicCaches,
 	encodeTopicCaches,
+	clearCachedPartitions,
+	getActiveGraphSignature,
+	getCachedGranularityLadder,
 	getCachedPartition,
+	getCachedResolution,
 	getCachedSemanticEdges,
 	setActiveGraphResolution,
 	setCachedGranularityLadder,
@@ -11,7 +15,6 @@ import {
 	setCachedSemanticEdges,
 	snapshotTopicCaches,
 	swapActiveGraphCache,
-	topicCaches,
 	type TopicCacheSnapshot,
 } from "../../src/views/smart-graph/topicCaches";
 
@@ -132,65 +135,66 @@ describe("swapActiveGraphCache", () => {
 	it("archives the outgoing graph and restores it when its signature returns", () => {
 		// Establish a "full graph" slot with content.
 		swapActiveGraphCache("swap-full");
-		topicCaches.leiden.set("7:1:fused", { "a.md": 0, "b.md": 1 });
-		topicCaches.granularityLadder = [0.5, 1.5];
+		setCachedPartition("swap-full", "7:1:fused", { "a.md": 0, "b.md": 1 });
+		setCachedGranularityLadder("swap-full", [0.5, 1.5]);
 
 		// Immerse: different signature, nothing cached for it yet.
 		expect(swapActiveGraphCache("swap-immersed")).toBe(false);
-		expect(topicCaches.leiden.size).toBe(0);
-		expect(topicCaches.granularityLadder).toBeNull();
-		topicCaches.leiden.set("7:1:fused", { "a.md": 0 });
+		expect(getCachedPartition("swap-immersed", "7:1:fused")).toBeUndefined();
+		expect(getCachedGranularityLadder("swap-immersed")).toBeNull();
+		setCachedPartition("swap-immersed", "7:1:fused", { "a.md": 0 });
 
 		// Exit immerse: the full graph's derivations come back untouched.
 		expect(swapActiveGraphCache("swap-full")).toBe(true);
-		expect(topicCaches.leiden.get("7:1:fused")).toEqual({ "a.md": 0, "b.md": 1 });
-		expect(topicCaches.granularityLadder).toEqual([0.5, 1.5]);
+		expect(getCachedPartition("swap-full", "7:1:fused")).toEqual({ "a.md": 0, "b.md": 1 });
+		expect(getCachedGranularityLadder("swap-full")).toEqual([0.5, 1.5]);
 
 		// And re-immersing restores the immersed slot too.
 		expect(swapActiveGraphCache("swap-immersed")).toBe(true);
-		expect(topicCaches.leiden.get("7:1:fused")).toEqual({ "a.md": 0 });
+		expect(getCachedPartition("swap-immersed", "7:1:fused")).toEqual({ "a.md": 0 });
 	});
 
 	it("keeps granularity per graph across an immerse round-trip", () => {
 		// Full graph viewed at γ 1.0.
 		swapActiveGraphCache("res-full");
-		topicCaches.leiden.set("7:1:fused", { "a.md": 0 });
+		setCachedPartition("res-full", "7:1:fused", { "a.md": 0 });
 		setActiveGraphResolution(1.0);
 
 		// Immerse and dial the topics finer — a statement about the subset.
 		swapActiveGraphCache("res-immersed", 1.0);
-		topicCaches.leiden.set("7:4.2:fused", { "a.md": 0 });
+		setCachedPartition("res-immersed", "7:4.2:fused", { "a.md": 0 });
 		setActiveGraphResolution(4.2);
 
 		// Exiting restores the full graph's own γ, not the immersed one.
 		expect(swapActiveGraphCache("res-full", 4.2)).toBe(true);
-		expect(topicCaches.resolution).toBe(1.0);
+		expect(getCachedResolution("res-full")).toBe(1.0);
 
 		// …and re-immersing brings the subset's γ back.
 		expect(swapActiveGraphCache("res-immersed", 1.0)).toBe(true);
-		expect(topicCaches.resolution).toBe(4.2);
+		expect(getCachedResolution("res-immersed")).toBe(4.2);
 	});
 
 	it("leaves resolution null for a graph never assigned one", () => {
 		swapActiveGraphCache("res-fresh-a");
-		topicCaches.leiden.set("7:1:fused", { "a.md": 0 });
+		setCachedPartition("res-fresh-a", "7:1:fused", { "a.md": 0 });
 		setActiveGraphResolution(2.2);
 		// A graph seen for the first time has no γ of its own — the caller keeps
 		// the current global setting rather than being moved.
 		swapActiveGraphCache("res-fresh-b", 2.2);
-		expect(topicCaches.resolution).toBeNull();
+		expect(getCachedResolution("res-fresh-b")).toBeNull();
 	});
 
 	it("treats a swap to the current signature as a restore no-op", () => {
 		swapActiveGraphCache("swap-same");
-		topicCaches.leiden.set("7:1:fused", { "a.md": 0 });
+		setCachedPartition("swap-same", "7:1:fused", { "a.md": 0 });
 		expect(swapActiveGraphCache("swap-same")).toBe(true);
-		expect(topicCaches.leiden.size).toBe(1);
+		// The no-op swap must leave the entry in place, not reset the slot.
+		expect(getCachedPartition("swap-same", "7:1:fused")).toEqual({ "a.md": 0 });
 	});
 
 	it("does not archive a slot that never derived anything", () => {
 		swapActiveGraphCache("swap-empty");
-		expect(topicCaches.leiden.size).toBe(0);
+		expect(getCachedPartition("swap-empty", "7:1:fused")).toBeUndefined();
 		swapActiveGraphCache("swap-elsewhere");
 		// Coming back finds nothing archived — the empty slot wasn't kept.
 		expect(swapActiveGraphCache("swap-empty")).toBe(false);
@@ -200,14 +204,14 @@ describe("swapActiveGraphCache", () => {
 		// Fill well past MAX_CACHED_GRAPHS with distinct non-empty graphs.
 		for (let i = 0; i < 8; i++) {
 			swapActiveGraphCache(`swap-evict-${i}`);
-			topicCaches.leiden.set("7:1:fused", { "a.md": i });
+			setCachedPartition(`swap-evict-${i}`, "7:1:fused", { "a.md": i });
 		}
 		// The earliest graphs must have been evicted…
 		expect(swapActiveGraphCache("swap-evict-0")).toBe(false);
 		// …while the most recent previous one survives. (Returning to 0 above
 		// re-keyed the slot, so the latest graph was archived, not lost.)
 		expect(swapActiveGraphCache("swap-evict-7")).toBe(true);
-		expect(topicCaches.leiden.get("7:1:fused")).toEqual({ "a.md": 7 });
+		expect(getCachedPartition("swap-evict-7", "7:1:fused")).toEqual({ "a.md": 7 });
 	});
 });
 
@@ -217,26 +221,26 @@ describe("signature-addressed partitions", () => {
 		// active slot to graph B, and the completed partition lands in B's map —
 		// where it would later be served as B's partition.
 		swapActiveGraphCache("addr-a");
-		topicCaches.leiden.set("seed", { "a.md": 0 });
+		setCachedPartition("addr-a", "seed", { "a.md": 0 });
 		swapActiveGraphCache("addr-b");
-		topicCaches.leiden.set("seed", { "b.md": 0 });
+		setCachedPartition("addr-b", "seed", { "b.md": 0 });
 
 		// Result of a run that started while A was active.
 		setCachedPartition("addr-a", "7:1:fused", { "a.md": 1 });
 
 		// B (the active slot) must be untouched…
-		expect(topicCaches.graphSignature).toBe("addr-b");
+		expect(getActiveGraphSignature()).toBe("addr-b");
 		expect(getCachedPartition("addr-b", "7:1:fused")).toBeUndefined();
 		// …and A must have it when we return.
 		expect(getCachedPartition("addr-a", "7:1:fused")).toEqual({ "a.md": 1 });
 		expect(swapActiveGraphCache("addr-a")).toBe(true);
-		expect(topicCaches.leiden.get("7:1:fused")).toEqual({ "a.md": 1 });
+		expect(getCachedPartition("addr-a", "7:1:fused")).toEqual({ "a.md": 1 });
 	});
 
 	it("writes straight through when the graph is still active", () => {
 		swapActiveGraphCache("addr-active");
 		setCachedPartition("addr-active", "7:1:fused", { "x.md": 2 });
-		expect(topicCaches.leiden.get("7:1:fused")).toEqual({ "x.md": 2 });
+		expect(getCachedPartition("addr-active", "7:1:fused")).toEqual({ "x.md": 2 });
 		expect(getCachedPartition("addr-active", "7:1:fused")).toEqual({ "x.md": 2 });
 	});
 
@@ -245,23 +249,23 @@ describe("signature-addressed partitions", () => {
 		// another leaf can take the active slot before the ladder is stored —
 		// which would give that graph's slider levels from a different topology.
 		swapActiveGraphCache("ladder-a");
-		topicCaches.leiden.set("seed", { "a.md": 0 });
+		setCachedPartition("ladder-a", "seed", { "a.md": 0 });
 		swapActiveGraphCache("ladder-b");
-		topicCaches.leiden.set("seed", { "b.md": 0 });
-		topicCaches.granularityLadder = [1, 2];
+		setCachedPartition("ladder-b", "seed", { "b.md": 0 });
+		setCachedGranularityLadder("ladder-b", [1, 2]);
 
 		setCachedGranularityLadder("ladder-a", [0.5, 1.0, 2.0]);
 
 		// The active graph keeps its own ladder…
-		expect(topicCaches.granularityLadder).toEqual([1, 2]);
+		expect(getCachedGranularityLadder("ladder-b")).toEqual([1, 2]);
 		// …and A's is waiting when we return to it.
 		expect(swapActiveGraphCache("ladder-a")).toBe(true);
-		expect(topicCaches.granularityLadder).toEqual([0.5, 1.0, 2.0]);
+		expect(getCachedGranularityLadder("ladder-a")).toEqual([0.5, 1.0, 2.0]);
 	});
 
 	it("preserves a result for a graph that is neither active nor archived", () => {
 		swapActiveGraphCache("addr-elsewhere");
-		topicCaches.leiden.set("seed", { "e.md": 0 });
+		setCachedPartition("addr-elsewhere", "seed", { "e.md": 0 });
 		setCachedPartition("addr-unknown", "7:1:fused", { "u.md": 3 });
 		// Returning to that graph finds its computation waiting.
 		expect(getCachedPartition("addr-unknown", "7:1:fused")).toEqual({ "u.md": 3 });
@@ -289,9 +293,9 @@ describe("semantic edge set cache", () => {
 describe("snapshotTopicCaches", () => {
 	it("includes the active graph and archived graphs", () => {
 		swapActiveGraphCache("snap-a");
-		topicCaches.leiden.set("7:1:fused", { "a.md": 0 });
+		setCachedPartition("snap-a", "7:1:fused", { "a.md": 0 });
 		swapActiveGraphCache("snap-b");
-		topicCaches.leiden.set("7:1:fused", { "b.md": 1 });
+		setCachedPartition("snap-b", "7:1:fused", { "b.md": 1 });
 
 		const snapshot = snapshotTopicCaches();
 		expect(snapshot.activeSignature).toBe("snap-b");

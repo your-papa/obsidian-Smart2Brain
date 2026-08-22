@@ -47,9 +47,14 @@ import {
 	voteNodeCommunity,
 } from "../../utils/liveGraphPatch";
 import {
+	clearCachedPartitions,
 	ensureActiveGraphCache,
+	getActiveGraphSignature,
+	getCachedGranularityLadder,
 	getCachedPartition,
+	getCachedResolution,
 	getCachedSemanticEdges,
+	getTopicLabelCache,
 	loadPersistedTopicCaches,
 	scheduleTopicCacheSave,
 	setActiveGraphResolution,
@@ -57,7 +62,6 @@ import {
 	setCachedPartition,
 	setCachedSemanticEdges,
 	swapActiveGraphCache,
-	topicCaches,
 } from "../../views/smart-graph/topicCaches";
 import { buildCollapsedGraph, UNSORTED_CLUSTER } from "../../utils/mergeNodes";
 import { leidenAsync } from "../../utils/computeWorkerManager";
@@ -503,7 +507,7 @@ async function buildGraph() {
 		// stale for at most the few changed notes, and replaced the moment the
 		// real segmentation lands.
 		if (Object.keys(leidenCommunities).length === 0) {
-			const cached = topicCaches.leiden.get(currentPartitionKey());
+			const cached = getCachedPartition(graphTopologySignature(wikiData), currentPartitionKey());
 			if (cached) {
 				const covered = wikiData.nodes.reduce((n, node) => (cached[node.id] !== undefined ? n + 1 : n), 0);
 				if (covered >= wikiData.nodes.length * INTERIM_TOPIC_MIN_COVERAGE) {
@@ -550,7 +554,7 @@ async function buildGraph() {
 		// changes, a filter round-trip) keeps them all, so the topics reappear
 		// from cache instantly instead of re-spending seconds of worker time.
 		const signature = graphTopologySignature(graphData);
-		if (signature !== topicCaches.graphSignature) {
+		if (signature !== getActiveGraphSignature()) {
 			// A different graph: re-key the active cache slot. The outgoing
 			// graph's derivations are archived under its signature and restored
 			// when that graph comes back (immerse exit, a filter round-trip), so
@@ -567,8 +571,9 @@ async function buildGraph() {
 			// The hierarchy is per-graph component state; recomputed by the
 			// segmentation run below (from cache when restored).
 			topicHierarchy = null;
-			if (restored && topicCaches.granularityLadder) {
-				granularityLadder = topicCaches.granularityLadder;
+			const restoredLadder = getCachedGranularityLadder(signature);
+			if (restored && restoredLadder) {
+				granularityLadder = restoredLadder;
 				hasDerivedGranularityLadder = true;
 			} else {
 				granularityLadder = [...GRANULARITY_LEVEL_RESOLUTIONS];
@@ -579,17 +584,18 @@ async function buildGraph() {
 			// describes the subset, not the vault. Restore this graph's own γ so
 			// returning to it re-segments the way the user left it rather than
 			// inheriting the granularity set on the graph in between.
-			if (topicCaches.resolution != null && topicCaches.resolution !== settings.leidenResolution) {
-				data.smartGraphSettings = { ...settings, leidenResolution: topicCaches.resolution };
+			const restoredResolution = getCachedResolution(signature);
+			if (restoredResolution != null && restoredResolution !== settings.leidenResolution) {
+				data.smartGraphSettings = { ...settings, leidenResolution: restoredResolution };
 				// Topic ids are positions in a fresh partition, so anything holding
 				// an id (folds, focus, selection) refers to a different grouping now.
 				clearTopicIndexedState();
 			}
-		} else if (topicCaches.granularityLadder) {
+		} else if (getCachedGranularityLadder(signature)) {
 			// A fresh view instance starts on the fallback ladder even though this
 			// graph has already been probed — restore the derived ladder so the
 			// slider appears immediately instead of hiding through a re-probe.
-			granularityLadder = topicCaches.granularityLadder;
+			granularityLadder = getCachedGranularityLadder(signature) ?? granularityLadder;
 			hasDerivedGranularityLadder = true;
 		}
 
@@ -913,8 +919,9 @@ function maybeReclusterAfterDrift() {
 	// slot currently holds — another leaf's partitions, if it owns the slot.
 	// The swap archives that graph first, then hands us an empty map keyed to
 	// ours (or this graph's own archived entry, if it has been seen before).
-	swapActiveGraphCache(graphTopologySignature(graphData));
-	topicCaches.leiden.clear();
+	const signature = graphTopologySignature(graphData);
+	swapActiveGraphCache(signature);
+	clearCachedPartitions(signature);
 	topicHierarchy = null;
 	void runLeidenSegmentation();
 }
@@ -1330,10 +1337,15 @@ function currentPartitionKey(): string {
 
 async function runLeidenSegmentation() {
 	const localBuildVersion = buildVersion;
-	// Another graph leaf (a split or duplicated tab showing a different filter or
-	// immersion) may have re-keyed the shared active cache slot since this leaf
-	// last touched it. Re-assert our own graph before reading partitions from it.
-	ensureActiveGraphCache(graphTopologySignature(graphData));
+	// The graph this run describes, captured before any await. A live vault patch
+	// changes the node set without bumping buildVersion or the partition key, so
+	// neither of those guards would notice — the result would be applied over,
+	// and cached against, a graph it was never computed for. It also addresses
+	// every cache access below, so another leaf owning the shared active slot
+	// cannot divert them.
+	const runSignature = graphTopologySignature(graphData);
+	// Re-assert our own graph in the active slot before reading from it.
+	ensureActiveGraphCache(runSignature);
 	const topicEdges = getTopicEdges();
 	if (topicEdges.length === 0) {
 		// Link-only mode on a vault with no links at all: clear stale communities so
@@ -1346,7 +1358,7 @@ async function runLeidenSegmentation() {
 	}
 
 	const cacheKey = currentPartitionKey();
-	const cached = topicCaches.leiden.get(cacheKey);
+	const cached = getCachedPartition(runSignature, cacheKey);
 	if (cached) {
 		Logger.info(`[SmartGraph] Leiden cache hit (γ=${settings.leidenResolution.toFixed(2)})`);
 		leidenCommunities = cached;
@@ -1362,11 +1374,6 @@ async function runLeidenSegmentation() {
 	const sources = topicEdges.map((e) => e.source);
 	const targets = topicEdges.map((e) => e.target);
 	const weights = topicEdges.map(leidenWeight);
-	// The graph this run describes. A live vault patch changes the node set
-	// without bumping buildVersion or the partition key, so neither of those
-	// guards would notice — the result would be applied over, and cached
-	// against, a graph it was never computed for.
-	const runSignature = graphTopologySignature(graphData);
 	const start = performance.now();
 	isLeidenRunning = true;
 	let result: Awaited<ReturnType<typeof leidenAsync>>;
@@ -1594,8 +1601,9 @@ async function handleSeedChange() {
 	// Claim the slot for this graph before clearing it: with a second graph leaf
 	// open, the active map may be that leaf's, and its partitions are still
 	// valid under the seed *it* is using.
-	ensureActiveGraphCache(graphTopologySignature(graphData));
-	topicCaches.leiden.clear();
+	const signature = graphTopologySignature(graphData);
+	ensureActiveGraphCache(signature);
+	clearCachedPartitions(signature);
 	hasDerivedGranularityLadder = false;
 	await runLeidenSegmentation();
 }
@@ -1813,7 +1821,7 @@ async function runTopicLabeling() {
 	try {
 		const labels = await labelTopics(topics, settings.graphChatModel, {
 			signal: controller.signal,
-			cache: topicCaches.topicLabels,
+			cache: getTopicLabelCache(),
 		});
 		// A rebuild (or unmount) landed while we were waiting — these labels are
 		// keyed to topic ids that may no longer mean the same thing.
@@ -1980,7 +1988,7 @@ function handleGranularityChange(level: number) {
 	const resolution = granularityToResolution(level, granularityLadder);
 	if (resolution === settings.leidenResolution) return;
 
-	const cached = topicCaches.leiden.get(partitionKey(resolution));
+	const cached = getCachedPartition(graphTopologySignature(graphData), partitionKey(resolution));
 	if (!cached) return;
 
 	handleSettingsChange({ leidenResolution: resolution });

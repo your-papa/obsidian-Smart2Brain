@@ -36,7 +36,7 @@ import { GRANULARITY_LADDER_RULES_KEY } from "../../utils/topicHierarchy";
 import { getData } from "../../stores/dataStore.svelte";
 import { Logger } from "../../utils/logging";
 
-export interface TopicCaches {
+interface TopicCaches {
 	/**
 	 * Leiden partitions keyed by `${seed}:${resolution}:${edge mode}`, valid for
 	 * the graph whose topology signature is {@link TopicCaches.graphSignature}.
@@ -70,8 +70,22 @@ export interface TopicCaches {
 	topicLabels: Map<string, string>;
 }
 
-/** The active graph's caches. Mutated in place so persistence sees live state. */
-export const topicCaches: TopicCaches = {
+/**
+ * The active graph's caches.
+ *
+ * **Module-private on purpose.** Every derivation here is produced by async
+ * work — a Leiden run, a probe sweep, a labeling pass — that starts while one
+ * graph is active and finishes an arbitrary time later, by which point another
+ * graph leaf may own this slot. Four separate bugs came from code reaching in
+ * and reading or writing it directly, each one a variation of "the slot I
+ * assumed was mine belongs to someone else now".
+ *
+ * The exported API is signature-addressed instead: callers say *which graph*
+ * they mean, and the accessors route to the active slot or the archive
+ * accordingly. That makes the unsafe pattern unavailable rather than merely
+ * discouraged, so a future derivation cannot repeat the mistake.
+ */
+const topicCaches: TopicCaches = {
 	leiden: new Map(),
 	graphSignature: "",
 	granularityLadder: null,
@@ -218,6 +232,50 @@ export function setCachedPartition(signature: string, key: string, communities: 
 export function getCachedPartition(signature: string, key: string): Record<string, number> | undefined {
 	if (signature === topicCaches.graphSignature) return topicCaches.leiden.get(key);
 	return archivedGraphs.get(signature)?.leiden.get(key);
+}
+
+/**
+ * Drop every cached partition for a graph, keeping its other derivations.
+ *
+ * Used when the seed changes, or when accumulated live-update drift makes the
+ * incremental votes untrustworthy: the partitions are invalid but the ladder
+ * and γ still describe the same graph.
+ */
+export function clearCachedPartitions(signature: string): void {
+	if (signature === topicCaches.graphSignature) {
+		topicCaches.leiden.clear();
+		return;
+	}
+	archivedGraphs.get(signature)?.leiden.clear();
+}
+
+/** The granularity ladder derived for a graph, if one has been. */
+export function getCachedGranularityLadder(signature: string): number[] | null {
+	if (signature === topicCaches.graphSignature) return topicCaches.granularityLadder;
+	return archivedGraphs.get(signature)?.granularityLadder ?? null;
+}
+
+/** The γ a graph was last viewed at, or null if the user never chose one. */
+export function getCachedResolution(signature: string): number | null {
+	if (signature === topicCaches.graphSignature) return topicCaches.resolution;
+	return archivedGraphs.get(signature)?.resolution ?? null;
+}
+
+/**
+ * The membership-keyed topic label cache.
+ *
+ * Deliberately global rather than per-graph — a topic present in both the full
+ * and an immersed graph is the same topic and shares its name — so handing out
+ * the map directly is safe here in a way it is not for the graph-scoped
+ * derivations.
+ */
+export function getTopicLabelCache(): Map<string, string> {
+	return topicCaches.topicLabels;
+}
+
+/** Signature of the graph currently occupying the active slot. */
+export function getActiveGraphSignature(): string {
+	return topicCaches.graphSignature;
 }
 
 /**
