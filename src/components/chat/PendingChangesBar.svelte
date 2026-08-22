@@ -127,8 +127,17 @@ async function handleAcceptAll() {
 
 async function handleRejectAll() {
 	if (!threadId) return;
-	await store.rejectAll(threadId);
-	new Notice("Rejected all pending changes");
+	const skipped = await store.rejectAll(threadId);
+	if (skipped.length === 0) {
+		new Notice("Rejected all pending changes");
+	} else {
+		// A partially-accepted note that changed on disk since is left alone rather
+		// than overwritten. Say so — otherwise "Rejected all" reads as "everything
+		// was undone" while those files still hold the accepted groups.
+		new Notice(
+			`Rejected all pending changes. ${skipped.length} note(s) were left as-is because they changed after being partially applied: ${skipped.join(", ")}`,
+		);
+	}
 }
 
 /** Jump to this change's position in the target note (its first changed line).

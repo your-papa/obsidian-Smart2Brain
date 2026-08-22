@@ -38,6 +38,14 @@ import {
 } from "./summarization";
 import type { Telemetry } from "./telemetry/Telemetry";
 
+/**
+ * Upper bound on memoized runnables. Sized well above the number of agent configs a
+ * vault realistically runs concurrently (each open chat pins at most one), so steady-state
+ * hit rate is unaffected — it only trims the trail of superseded entries left behind by
+ * prompt/tool edits.
+ */
+const RUNNABLE_CACHE_MAX = 16;
+
 const MAX_IMAGE_ATTACHMENT_BYTES = 15 * 1024 * 1024;
 const MAX_TEXT_ATTACHMENT_CHARS = 120_000;
 const MAX_PDF_EXTRACT_CHARS = 180_000;
@@ -279,7 +287,8 @@ export class Agent {
 	private readonly threadStore?: ThreadStore;
 	private readonly registry: ProviderRegistry;
 	private readonly defaultPrompt: string;
-	/** Runnables memoized by agent-config cacheKey (built by AgentManager). */
+	/** Runnables memoized by agent-config cacheKey (built by AgentManager).
+	 *  Insertion-ordered, and used as an LRU — see {@link RUNNABLE_CACHE_MAX}. */
 	private readonly runnableCache = new Map<string, AgentRunnable>();
 
 	constructor(options: AgentOptions) {
@@ -312,6 +321,57 @@ export class Agent {
 	 *  (e.g. the set of loaded skills) changes and can affect any agent's prompt. */
 	invalidateAllRunnables(): void {
 		this.runnableCache.clear();
+	}
+
+	/**
+	 * Drops cache entries whose credential generation is stale.
+	 *
+	 * The cacheKey carries an `authGen` term (see `AgentManager.buildRunnableCacheKey`)
+	 * so a credential change can't be served a runnable holding the old key. That alone
+	 * is correct but leaky: superseded entries would never be read again, yet each pins
+	 * a LangGraph agent, a model instance, and a full tool array. Pruning on insert
+	 * keeps the cache bounded by the number of live agent configs rather than by how
+	 * many times the user has edited a key.
+	 */
+	private pruneStaleAuthGenerations(currentKey: string): void {
+		const match = /"authGen":(\d+)/.exec(currentKey);
+		if (!match) return;
+		const currentGen = match[1];
+		for (const key of this.runnableCache.keys()) {
+			const keyGen = /"authGen":(\d+)/.exec(key)?.[1];
+			if (keyGen !== undefined && keyGen !== currentGen) this.runnableCache.delete(key);
+		}
+	}
+
+	/** Reads a cached runnable, marking it most-recently-used. */
+	private getCachedRunnable(cacheKey: string): AgentRunnable | undefined {
+		const cached = this.runnableCache.get(cacheKey);
+		if (!cached) return undefined;
+		// Map iterates in insertion order, so re-inserting moves this key to the end
+		// (the MRU position) and keeps `evictLeastRecentlyUsed` honest.
+		this.runnableCache.delete(cacheKey);
+		this.runnableCache.set(cacheKey, cached);
+		return cached;
+	}
+
+	/**
+	 * Stores a runnable, evicting the least-recently-used entries past the cap.
+	 *
+	 * The cacheKey covers the whole agent config — system prompt, skills, per-tool
+	 * overrides, subagent revisions — so every prompt edit or tool toggle mints a new
+	 * key while the superseded entry stays resident, each pinning a LangGraph agent, a
+	 * model instance and a full tool array. Nothing evicted it: `invalidateRunnable`
+	 * only fires on explicit config-change hooks. An LRU bound is the cheap fix; a
+	 * wrongly-evicted entry costs one rebuild, not a correctness bug.
+	 */
+	private setCachedRunnable(cacheKey: string, runnable: AgentRunnable): void {
+		this.runnableCache.set(cacheKey, runnable);
+		while (this.runnableCache.size > RUNNABLE_CACHE_MAX) {
+			const oldest = this.runnableCache.keys().next();
+			if (oldest.done) break;
+			this.runnableCache.delete(oldest.value);
+			Logger.debug("agent.runnableCache.evict", { evicted: oldest.value, size: this.runnableCache.size });
+		}
 	}
 	/**
 	 * Builds the message content for a HumanMessage, supporting multimodal attachments.
@@ -513,7 +573,7 @@ export class Agent {
 				}
 			: undefined;
 
-		let runnable = this.runnableCache.get(cacheKey);
+		let runnable = this.getCachedRunnable(cacheKey);
 		if (!runnable) {
 			runnable = createAgent({
 				model: selectedModel.instance,
@@ -525,7 +585,8 @@ export class Agent {
 					...this.buildSubAgentMiddleware(selectedModel, subAgents, tools),
 				] as never,
 			});
-			this.runnableCache.set(cacheKey, runnable);
+			this.pruneStaleAuthGenerations(cacheKey);
+			this.setCachedRunnable(cacheKey, runnable);
 			Logger.debug("agent.resolveRun.build", { provider, chatModel, cacheKey });
 		}
 
@@ -763,8 +824,7 @@ export class Agent {
 
 		const finishedAt = new Date();
 		const messages = this.extractMessagesFromResult(rawResult);
-		await this.persistThreadMetadata(threadId, runId, messages, selectedModel.name);
-		await this.flushThreadPersistence(threadId);
+		await this.finalizeThreadPersistence(threadId, runId, messages, selectedModel.name);
 
 		const result: AgentResult = {
 			runId,
@@ -786,55 +846,53 @@ export class Agent {
 		return result;
 	}
 
-	async *streamTokens(options: AgentStreamOptions): AsyncGenerator<AgentStreamChunk> {
-		const { query, resolved } = options;
+	/**
+	 * The one streaming implementation behind {@link streamTokens},
+	 * {@link editFromCheckpoint} and {@link regenerateFromCheckpoint}.
+	 *
+	 * Those three used to carry a verbatim copy of this ~200-line loop each. The
+	 * copies were not free: `regenerateFromCheckpoint` silently lost its
+	 * `flushThreadPersistence` call (a run's thread metadata could be dropped on
+	 * quit), and two other cosmetic divergences accumulated. The methods differ in
+	 * only three real ways, all parameters here:
+	 *
+	 *  - `input` — a fresh `{ messages: [humanMessage] }` for a query/edit, or `null`
+	 *    to continue from a checkpoint without adding a message (regenerate);
+	 *  - `checkpointId` — present to fork from a checkpoint, absent to append;
+	 *  - `label` — the `agent.*` prefix for this run's debug logs, and the wording of
+	 *    the "no final output" error.
+	 */
+	private async *runStream(params: {
+		options: {
+			resolved: ResolvedRun;
+			signal?: AbortSignal;
+			metadata?: Record<string, unknown>;
+			configurable?: Record<string, unknown>;
+		};
+		threadId: string;
+		runId: string;
+		input: { messages: BaseMessage[] } | null;
+		checkpointId?: string;
+		label: string;
+		noOutputError: string;
+		logStart: Record<string, unknown>;
+	}): AsyncGenerator<AgentStreamChunk> {
+		const { options, threadId, runId, input, checkpointId, label, noOutputError, logStart } = params;
+		const { resolved } = options;
 		const { runnable: agent, selectedModel } = resolved;
-		const hasAttachments = Boolean(options.attachments?.length);
-
-		if ((!query || query.trim().length === 0) && !hasAttachments) {
-			throw new Error("Query must be a non-empty string when no attachments are provided.");
-		}
-
-		const runId = this.generateId();
-		const threadId = options.threadId;
-		if (!threadId) throw new Error("threadId is required");
 		const startedAt = new Date();
-		Logger.debug("agent.streamTokens.start", {
-			runId,
-			threadId,
-			provider: selectedModel.provider,
-			model: selectedModel.name,
-			queryPreview: query.slice(0, 200),
-		});
 
-		const invokeConfig = this.buildRunnableConfig(options, threadId);
+		Logger.debug(`${label}.start`, { runId, threadId, ...logStart });
 
-		const normalizedQuery = query.trim().length > 0 ? query : "Please analyze the attached files.";
-		const messageContent = await this.buildMessageContent(
-			normalizedQuery,
-			resolved.supportsVision,
-			resolved.currentProvider,
-			options.attachments,
-		);
-		const humanMessage = this.createHumanMessage(
-			messageContent,
-			options.attachments,
-			options.visibleNotes,
-			options.selection,
-			options.graphNotes,
-			options.lcSource,
-		);
+		const invokeConfig = this.buildRunnableConfig(options, threadId, checkpointId);
+		const transportContext = createAiTransportContext("default", `${label}:${runId}`);
 
-		const transportLabel = `agent.streamTokens:${runId}`;
-		const transportContext = createAiTransportContext("default", transportLabel);
-
-		const streamInput = { messages: [humanMessage] };
 		// Bind the LangChain stream so each pull runs inside this run's transport
 		// context (run()-scoped, concurrency-safe). Without this the fetch issued
 		// deep inside the stream would read whichever context another concurrent
 		// run last set.
 		const stream = bindAsyncIterableToTransportContext(
-			await agent.stream(streamInput, {
+			await agent.stream(input, {
 				...invokeConfig,
 				streamMode: ["messages", "tools", "values"] as const,
 			}),
@@ -866,7 +924,7 @@ export class Agent {
 			for await (const chunk of stream) {
 				// Check if aborted before processing
 				if (options.signal?.aborted) {
-					Logger.debug("agent.streamTokens.aborted", { runId, threadId });
+					Logger.debug(`${label}.aborted`, { runId, threadId });
 					break;
 				}
 
@@ -881,11 +939,11 @@ export class Agent {
 					if (tp.event === "on_tool_start") {
 						const toolCallId = tp.toolCallId ?? "";
 						const toolName = tp.name;
-						const toolInput = (tp as { event: "on_tool_start"; input: unknown }).input;
-						const input = this.normalizeStreamToolInput(toolInput);
+						const rawToolInput = (tp as { event: "on_tool_start"; input: unknown }).input;
+						const toolInput = this.normalizeStreamToolInput(rawToolInput);
 						const attribution = this.resolveToolAttribution(
 							"on_tool_start",
-							input,
+							toolInput,
 							toolName,
 							toolCallId,
 							taskCallStack,
@@ -896,13 +954,13 @@ export class Agent {
 						);
 						const preamble = toolCallPreambles.get(toolCallId);
 						toolCallPreambles.delete(toolCallId);
-						pendingToolCalls.set(toolCallId, { name: toolName, input });
-						Logger.debug("agent.streamTokens.tool_start", { runId, toolCallId, toolName });
+						pendingToolCalls.set(toolCallId, { name: toolName, input: toolInput });
+						Logger.debug(`${label}.tool_start`, { runId, toolCallId, toolName });
 						yield {
 							type: "tool_start",
 							toolCallId,
 							toolName,
-							input,
+							input: toolInput,
 							preamble,
 							...attribution,
 							runId,
@@ -930,7 +988,7 @@ export class Agent {
 							lastAiMessageId,
 						);
 						pendingToolCalls.delete(toolCallId);
-						Logger.debug("agent.streamTokens.tool_end", { runId, toolCallId, toolName });
+						Logger.debug(`${label}.tool_end`, { runId, toolCallId, toolName });
 						yield {
 							type: "tool_end",
 							toolCallId,
@@ -998,7 +1056,7 @@ export class Agent {
 		} catch (error) {
 			// Don't log or rethrow abort errors - they're expected during cancellation
 			if (error instanceof Error && error.name === "AbortError") {
-				Logger.debug("agent.streamTokens.aborted", { runId, threadId });
+				Logger.debug(`${label}.aborted`, { runId, threadId });
 				return;
 			}
 
@@ -1006,29 +1064,29 @@ export class Agent {
 			if (downgradeError) {
 				rawResult = await this.invokeBufferedFallback(
 					agent,
-					streamInput,
+					input,
 					invokeConfig,
 					runId,
 					threadId,
-					"agent.streamTokens",
+					label,
 					downgradeError,
 				);
 			} else {
 				// Wrap connection errors in ProviderEndpointError for consistent handling
 				if (error instanceof TypeError && error.message.includes("fetch")) {
 					const provider = selectedModel.provider;
-					Logger.debug("agent.streamTokens.error", { runId, message: `Connection failed to ${provider}` });
+					Logger.debug(`${label}.error`, { runId, message: `Connection failed to ${provider}` });
 					throw new ProviderEndpointError(provider, "Connection refused - service may not be running");
 				}
 
-				Logger.debug("agent.streamTokens.error", {
+				Logger.debug(`${label}.error`, {
 					runId,
 					message: error instanceof Error ? error.message : String(error),
 				});
 				throw error;
 			}
 		} finally {
-			Logger.debug("agent.streamTokens.cleanup", { runId, threadId });
+			Logger.debug(`${label}.cleanup`, { runId, threadId });
 		}
 
 		// If aborted, don't process final result
@@ -1037,13 +1095,12 @@ export class Agent {
 		}
 
 		if (!rawResult) {
-			throw new Error("Agent streaming completed without producing a final output.");
+			throw new Error(noOutputError);
 		}
 
 		const finishedAt = new Date();
 		const messages = this.extractMessagesFromResult(rawResult);
-		await this.persistThreadMetadata(threadId, runId, messages, selectedModel.name);
-		await this.flushThreadPersistence(threadId);
+		await this.finalizeThreadPersistence(threadId, runId, messages, selectedModel.name);
 
 		const result: AgentResult = {
 			runId,
@@ -1055,7 +1112,7 @@ export class Agent {
 		};
 
 		await this.telemetry?.onRunComplete?.(result);
-		Logger.debug("agent.streamTokens.complete", {
+		Logger.debug(`${label}.complete`, {
 			runId,
 			durationMs: result.durationMs,
 			responsePreview:
@@ -1073,7 +1130,7 @@ export class Agent {
 		// This ensures UI stays in sync with the database
 		const checkpointMessage = await this.getLastAssistantMessageFromCheckpoint(threadId);
 		if (checkpointMessage) {
-			Logger.debug("agent.streamTokens.checkpoint_message", {
+			Logger.debug(`${label}.checkpoint_message`, {
 				runId,
 				threadId,
 				messageId: checkpointMessage.id,
@@ -1087,13 +1144,54 @@ export class Agent {
 		}
 	}
 
+	async *streamTokens(options: AgentStreamOptions): AsyncGenerator<AgentStreamChunk> {
+		const { query, resolved } = options;
+		const hasAttachments = Boolean(options.attachments?.length);
+
+		if ((!query || query.trim().length === 0) && !hasAttachments) {
+			throw new Error("Query must be a non-empty string when no attachments are provided.");
+		}
+
+		const threadId = options.threadId;
+		if (!threadId) throw new Error("threadId is required");
+
+		const normalizedQuery = query.trim().length > 0 ? query : "Please analyze the attached files.";
+		const messageContent = await this.buildMessageContent(
+			normalizedQuery,
+			resolved.supportsVision,
+			resolved.currentProvider,
+			options.attachments,
+		);
+		const humanMessage = this.createHumanMessage(
+			messageContent,
+			options.attachments,
+			options.visibleNotes,
+			options.selection,
+			options.graphNotes,
+			options.lcSource,
+		);
+
+		yield* this.runStream({
+			options,
+			threadId,
+			runId: this.generateId(),
+			input: { messages: [humanMessage] },
+			label: "agent.streamTokens",
+			noOutputError: "Agent streaming completed without producing a final output.",
+			logStart: {
+				provider: resolved.selectedModel.provider,
+				model: resolved.selectedModel.name,
+				queryPreview: query.slice(0, 200),
+			},
+		});
+	}
+
 	/**
 	 * Edit a message by forking from a checkpoint with a new user message.
 	 * This creates a new branch from the given checkpoint.
 	 */
 	async *editFromCheckpoint(options: AgentEditOptions): AsyncGenerator<AgentStreamChunk> {
 		const { query, threadId, checkpointId, resolved } = options;
-		const { runnable: agent, selectedModel } = resolved;
 
 		if (!query || query.trim().length === 0) {
 			throw new Error("Query must be a non-empty string.");
@@ -1102,19 +1200,6 @@ export class Agent {
 		if (!checkpointId) {
 			throw new Error("checkpointId is required for editing.");
 		}
-
-		const runId = this.generateId();
-		const startedAt = new Date();
-		Logger.debug("agent.editFromCheckpoint.start", {
-			runId,
-			threadId,
-			checkpointId,
-			provider: selectedModel.provider,
-			model: selectedModel.name,
-			queryPreview: query.slice(0, 200),
-		});
-
-		const invokeConfig = this.buildRunnableConfig(options, threadId, checkpointId);
 
 		const messageContent = await this.buildMessageContent(
 			query,
@@ -1131,241 +1216,21 @@ export class Agent {
 			options.lcSource,
 		);
 
-		const input = {
-			messages: [humanMessage],
-		};
-
-		const transportLabel = `agent.editFromCheckpoint:${runId}`;
-		const transportContext = createAiTransportContext("default", transportLabel);
-
-		const stream = bindAsyncIterableToTransportContext(
-			await agent.stream(input, {
-				...invokeConfig,
-				streamMode: ["messages", "tools", "values"] as const,
-			}),
-			transportContext,
-		);
-
-		let rawResult: unknown;
-		const pendingToolCalls = new Map<string, { name: string; input: unknown }>();
-		const taskCallStack: string[] = [];
-		const taskAiMessageIds = new Map<string, string | undefined>();
-		const taskSubAgentNames = new Map<string, string | undefined>();
-		const taskChildCounts = new Map<string, number>();
-		let lastAiMessageId: string | undefined;
-		const toolCallPreambles = new Map<string, string>();
-		let preambleAccumulator = "";
-		try {
-			for await (const chunk of stream) {
-				if (options.signal?.aborted) {
-					Logger.debug("agent.editFromCheckpoint.aborted", { runId, threadId });
-					break;
-				}
-
-				const [mode, payload] = chunk as ["messages" | "tools" | "values", unknown];
-
-				if (mode === "tools") {
-					const tp = payload as
-						| { event: "on_tool_start"; toolCallId?: string; name: string; input: unknown }
-						| { event: "on_tool_end"; toolCallId?: string; name: string; output: unknown }
-						| { event: string; toolCallId?: string; name: string };
-
-					if (tp.event === "on_tool_start") {
-						const toolCallId = tp.toolCallId ?? "";
-						const toolName = tp.name;
-						const toolInput = (tp as { event: "on_tool_start"; input: unknown }).input;
-						const toolInputNorm = this.normalizeStreamToolInput(toolInput);
-						const attribution = this.resolveToolAttribution(
-							"on_tool_start",
-							toolInputNorm,
-							toolName,
-							toolCallId,
-							taskCallStack,
-							taskAiMessageIds,
-							taskSubAgentNames,
-							taskChildCounts,
-							lastAiMessageId,
-						);
-						const preamble = toolCallPreambles.get(toolCallId);
-						toolCallPreambles.delete(toolCallId);
-						pendingToolCalls.set(toolCallId, { name: toolName, input: toolInputNorm });
-						Logger.debug("agent.editFromCheckpoint.tool_start", { runId, toolCallId, toolName });
-						yield {
-							type: "tool_start",
-							toolCallId,
-							toolName,
-							input: toolInputNorm,
-							preamble,
-							...attribution,
-							runId,
-							threadId,
-						};
-						continue;
-					}
-
-					if (tp.event === "on_tool_end") {
-						const toolCallId = tp.toolCallId ?? "";
-						const pending = pendingToolCalls.get(toolCallId);
-						const toolName = pending?.name ?? tp.name;
-						const output = this.normalizeStreamToolOutput(
-							(tp as { event: "on_tool_end"; output: unknown }).output,
-						);
-						const attribution = this.resolveToolAttribution(
-							"on_tool_end",
-							undefined,
-							toolName,
-							toolCallId,
-							taskCallStack,
-							taskAiMessageIds,
-							taskSubAgentNames,
-							taskChildCounts,
-							lastAiMessageId,
-						);
-						pendingToolCalls.delete(toolCallId);
-						Logger.debug("agent.editFromCheckpoint.tool_end", { runId, toolCallId, toolName });
-						yield {
-							type: "tool_end",
-							toolCallId,
-							toolName,
-							output,
-							...attribution,
-							runId,
-							threadId,
-						};
-						continue;
-					}
-
-					continue;
-				}
-
-				if (mode === "messages") {
-					const [message, msgMeta] = payload as [BaseMessage, Record<string, unknown>];
-					if (message.getType() === "ai") {
-						// Subagent tokens carry `lc_agent_name` — suppress them from the parent's
-						// main content (they're delivered via the `task` ToolMessage). See the
-						// streamTokens loop for the full rationale.
-						if (typeof msgMeta?.lc_agent_name === "string") continue;
-						if (message.id && message.id !== lastAiMessageId) {
-							lastAiMessageId = message.id;
-							preambleAccumulator = "";
-						}
-						const token = this.normalizeContentToString(message.content);
-						if (token && token.length > 0) {
-							preambleAccumulator += token;
-							yield {
-								type: "token",
-								token,
-								aiMessageId: lastAiMessageId,
-								runId,
-								threadId,
-							};
-						}
-						const msgToolCalls = (message as { tool_calls?: { id?: string }[] }).tool_calls;
-						if (Array.isArray(msgToolCalls) && msgToolCalls.length > 0 && preambleAccumulator) {
-							for (const tc of msgToolCalls) {
-								if (tc.id && !toolCallPreambles.has(tc.id)) {
-									toolCallPreambles.set(tc.id, preambleAccumulator);
-								}
-							}
-						}
-					}
-					continue;
-				}
-
-				if (mode === "values") {
-					if (this.isAgentOutputCandidate(payload)) {
-						rawResult = payload;
-					}
-				}
-			}
-		} catch (error) {
-			if (error instanceof Error && error.name === "AbortError") {
-				Logger.debug("agent.editFromCheckpoint.aborted", { runId, threadId });
-				return;
-			}
-
-			const downgradeError = findAiTransportDowngradeRequiredError(error);
-			if (downgradeError) {
-				rawResult = await this.invokeBufferedFallback(
-					agent,
-					input,
-					invokeConfig,
-					runId,
-					threadId,
-					"agent.editFromCheckpoint",
-					downgradeError,
-				);
-			} else {
-				if (error instanceof TypeError && error.message.includes("fetch")) {
-					const provider = selectedModel.provider;
-					Logger.debug("agent.editFromCheckpoint.error", {
-						runId,
-						message: `Connection failed to ${provider}`,
-					});
-					throw new ProviderEndpointError(provider, "Connection refused - service may not be running");
-				}
-
-				Logger.debug("agent.editFromCheckpoint.error", {
-					runId,
-					message: error instanceof Error ? error.message : String(error),
-				});
-				throw error;
-			}
-		} finally {
-			Logger.debug("agent.editFromCheckpoint.cleanup", { runId, threadId });
-		}
-
-		if (options.signal?.aborted) {
-			return;
-		}
-
-		if (!rawResult) {
-			throw new Error("Agent edit completed without producing a final output.");
-		}
-
-		const finishedAt = new Date();
-		const messages = this.extractMessagesFromResult(rawResult);
-		await this.persistThreadMetadata(threadId, runId, messages, selectedModel.name);
-		await this.flushThreadPersistence(threadId);
-
-		const result: AgentResult = {
-			runId,
+		yield* this.runStream({
+			options,
 			threadId,
-			durationMs: finishedAt.getTime() - startedAt.getTime(),
-			messages,
-			response: this.extractResponse(messages),
-			raw: rawResult,
-		};
-
-		await this.telemetry?.onRunComplete?.(result);
-		Logger.debug("agent.editFromCheckpoint.complete", {
-			runId,
-			durationMs: result.durationMs,
-			responsePreview:
-				typeof result.response === "string" ? (result.response as string).slice(0, 200) : undefined,
+			runId: this.generateId(),
+			input: { messages: [humanMessage] },
+			checkpointId,
+			label: "agent.editFromCheckpoint",
+			noOutputError: "Agent edit completed without producing a final output.",
+			logStart: {
+				checkpointId,
+				provider: resolved.selectedModel.provider,
+				model: resolved.selectedModel.name,
+				queryPreview: query.slice(0, 200),
+			},
 		});
-
-		yield {
-			type: "result",
-			result,
-			runId,
-			threadId,
-		};
-
-		const checkpointMessage = await this.getLastAssistantMessageFromCheckpoint(threadId);
-		if (checkpointMessage) {
-			Logger.debug("agent.editFromCheckpoint.checkpoint_message", {
-				runId,
-				threadId,
-				messageId: checkpointMessage.id,
-			});
-			yield {
-				type: "checkpoint_message",
-				message: checkpointMessage,
-				runId,
-				threadId,
-			};
-		}
 	}
 
 	/**
@@ -1374,257 +1239,26 @@ export class Agent {
 	 */
 	async *regenerateFromCheckpoint(options: AgentRegenerateOptions): AsyncGenerator<AgentStreamChunk> {
 		const { threadId, checkpointId, resolved } = options;
-		const { runnable: agent, selectedModel } = resolved;
 
 		if (!checkpointId) {
 			throw new Error("checkpointId is required for regeneration.");
 		}
 
-		const runId = this.generateId();
-		const startedAt = new Date();
-		Logger.debug("agent.regenerateFromCheckpoint.start", {
-			runId,
+		yield* this.runStream({
+			options,
 			threadId,
+			runId: this.generateId(),
+			// null → continue from the checkpoint without adding a new message.
+			input: null,
 			checkpointId,
-			provider: selectedModel.provider,
-			model: selectedModel.name,
+			label: "agent.regenerateFromCheckpoint",
+			noOutputError: "Agent regeneration completed without producing a final output.",
+			logStart: {
+				checkpointId,
+				provider: resolved.selectedModel.provider,
+				model: resolved.selectedModel.name,
+			},
 		});
-
-		const invokeConfig = this.buildRunnableConfig(options, threadId, checkpointId);
-
-		// Pass null to continue from checkpoint without adding a new message
-		const input = null;
-
-		const transportLabel = `agent.regenerateFromCheckpoint:${runId}`;
-		const transportContext = createAiTransportContext("default", transportLabel);
-
-		const stream = bindAsyncIterableToTransportContext(
-			await agent.stream(input, {
-				...invokeConfig,
-				streamMode: ["messages", "tools", "values"] as const,
-			}),
-			transportContext,
-		);
-
-		let rawResult: unknown;
-		const pendingToolCalls = new Map<string, { name: string; input: unknown }>();
-		const taskCallStack: string[] = [];
-		const taskAiMessageIds = new Map<string, string | undefined>();
-		const taskSubAgentNames = new Map<string, string | undefined>();
-		const taskChildCounts = new Map<string, number>();
-		let lastAiMessageId: string | undefined;
-		const toolCallPreambles = new Map<string, string>();
-		let preambleAccumulator = "";
-		try {
-			for await (const chunk of stream) {
-				if (options.signal?.aborted) {
-					Logger.debug("agent.regenerateFromCheckpoint.aborted", { runId, threadId });
-					break;
-				}
-
-				const [mode, payload] = chunk as ["messages" | "tools" | "values", unknown];
-
-				if (mode === "tools") {
-					const tp = payload as
-						| { event: "on_tool_start"; toolCallId?: string; name: string; input: unknown }
-						| { event: "on_tool_end"; toolCallId?: string; name: string; output: unknown }
-						| { event: string; toolCallId?: string; name: string };
-
-					if (tp.event === "on_tool_start") {
-						const toolCallId = tp.toolCallId ?? "";
-						const toolName = tp.name;
-						const toolInput = (tp as { event: "on_tool_start"; input: unknown }).input;
-						const toolInputNorm = this.normalizeStreamToolInput(toolInput);
-						const attribution = this.resolveToolAttribution(
-							"on_tool_start",
-							toolInputNorm,
-							toolName,
-							toolCallId,
-							taskCallStack,
-							taskAiMessageIds,
-							taskSubAgentNames,
-							taskChildCounts,
-							lastAiMessageId,
-						);
-						pendingToolCalls.set(toolCallId, { name: toolName, input: toolInputNorm });
-						const preamble = toolCallPreambles.get(toolCallId);
-						toolCallPreambles.delete(toolCallId);
-						Logger.debug("agent.regenerateFromCheckpoint.tool_start", { runId, toolCallId, toolName });
-						yield {
-							type: "tool_start",
-							toolCallId,
-							toolName,
-							input: toolInputNorm,
-							preamble,
-							...attribution,
-							runId,
-							threadId,
-						};
-						continue;
-					}
-
-					if (tp.event === "on_tool_end") {
-						const toolCallId = tp.toolCallId ?? "";
-						const pending = pendingToolCalls.get(toolCallId);
-						const toolName = pending?.name ?? tp.name;
-						const output = this.normalizeStreamToolOutput(
-							(tp as { event: "on_tool_end"; output: unknown }).output,
-						);
-						const attribution = this.resolveToolAttribution(
-							"on_tool_end",
-							undefined,
-							toolName,
-							toolCallId,
-							taskCallStack,
-							taskAiMessageIds,
-							taskSubAgentNames,
-							taskChildCounts,
-							lastAiMessageId,
-						);
-						pendingToolCalls.delete(toolCallId);
-						Logger.debug("agent.regenerateFromCheckpoint.tool_end", { runId, toolCallId, toolName });
-						yield {
-							type: "tool_end",
-							toolCallId,
-							toolName,
-							output,
-							...attribution,
-							runId,
-							threadId,
-						};
-						continue;
-					}
-
-					continue;
-				}
-
-				if (mode === "messages") {
-					const [message, msgMeta] = payload as [BaseMessage, Record<string, unknown>];
-					if (message.getType() === "ai") {
-						// Subagent tokens carry `lc_agent_name` — suppress them from the parent's
-						// main content (they're delivered via the `task` ToolMessage). See the
-						// streamTokens loop for the full rationale.
-						if (typeof msgMeta?.lc_agent_name === "string") continue;
-						if (message.id && message.id !== lastAiMessageId) {
-							lastAiMessageId = message.id;
-							preambleAccumulator = "";
-						}
-						const token = this.normalizeContentToString(message.content);
-						if (token && token.length > 0) {
-							preambleAccumulator += token;
-							yield {
-								type: "token",
-								token,
-								aiMessageId: lastAiMessageId,
-								runId,
-								threadId,
-							};
-						}
-						const msgToolCalls = (message as { tool_calls?: { id?: string }[] }).tool_calls;
-						if (Array.isArray(msgToolCalls) && msgToolCalls.length > 0 && preambleAccumulator) {
-							for (const tc of msgToolCalls) {
-								if (tc.id && !toolCallPreambles.has(tc.id)) {
-									toolCallPreambles.set(tc.id, preambleAccumulator);
-								}
-							}
-						}
-					}
-					continue;
-				}
-
-				if (mode === "values") {
-					if (this.isAgentOutputCandidate(payload)) {
-						rawResult = payload;
-					}
-				}
-			}
-		} catch (error) {
-			if (error instanceof Error && error.name === "AbortError") {
-				Logger.debug("agent.regenerateFromCheckpoint.aborted", { runId, threadId });
-				return;
-			}
-
-			const downgradeError = findAiTransportDowngradeRequiredError(error);
-			if (downgradeError) {
-				rawResult = await this.invokeBufferedFallback(
-					agent,
-					input,
-					invokeConfig,
-					runId,
-					threadId,
-					"agent.regenerateFromCheckpoint",
-					downgradeError,
-				);
-			} else {
-				if (error instanceof TypeError && error.message.includes("fetch")) {
-					const provider = selectedModel.provider;
-					Logger.debug("agent.regenerateFromCheckpoint.error", {
-						runId,
-						message: `Connection failed to ${provider}`,
-					});
-					throw new ProviderEndpointError(provider, "Connection refused - service may not be running");
-				}
-
-				Logger.debug("agent.regenerateFromCheckpoint.error", {
-					runId,
-					message: error instanceof Error ? error.message : String(error),
-				});
-				throw error;
-			}
-		} finally {
-			Logger.debug("agent.regenerateFromCheckpoint.cleanup", { runId, threadId });
-		}
-
-		if (options.signal?.aborted) {
-			return;
-		}
-
-		if (!rawResult) {
-			throw new Error("Agent regeneration completed without producing a final output.");
-		}
-
-		const finishedAt = new Date();
-		const messages = this.extractMessagesFromResult(rawResult);
-		await this.persistThreadMetadata(threadId, runId, messages, selectedModel.name);
-
-		const result: AgentResult = {
-			runId,
-			threadId,
-			durationMs: finishedAt.getTime() - startedAt.getTime(),
-			messages,
-			response: this.extractResponse(messages),
-			raw: rawResult,
-		};
-
-		await this.telemetry?.onRunComplete?.(result);
-		Logger.debug("agent.regenerateFromCheckpoint.complete", {
-			runId,
-			durationMs: result.durationMs,
-			responsePreview:
-				typeof result.response === "string" ? (result.response as string).slice(0, 200) : undefined,
-		});
-
-		yield {
-			type: "result",
-			result,
-			runId,
-			threadId,
-		};
-
-		const checkpointMessage = await this.getLastAssistantMessageFromCheckpoint(threadId);
-		if (checkpointMessage) {
-			Logger.debug("agent.regenerateFromCheckpoint.checkpoint_message", {
-				runId,
-				threadId,
-				messageId: checkpointMessage.id,
-			});
-			yield {
-				type: "checkpoint_message",
-				message: checkpointMessage,
-				runId,
-				threadId,
-			};
-		}
 	}
 
 	async getThreadHistory(threadId: string): Promise<ThreadHistory | undefined> {
@@ -2117,6 +1751,26 @@ export class Agent {
 			return;
 		}
 		await this.threadStore.flush(threadId);
+	}
+
+	/**
+	 * Records this run's thread metadata and forces it to disk.
+	 *
+	 * The two must stay paired: `threadStore.write` only marks the thread dirty and
+	 * schedules a 2s debounced save, so without the flush a quit or crash inside that
+	 * window loses the run's metadata. Every run-completion path calls this rather than
+	 * the two methods separately — `regenerateFromCheckpoint` previously called only
+	 * `persistThreadMetadata`, which is the kind of drift three near-identical
+	 * stream loops invite.
+	 */
+	private async finalizeThreadPersistence(
+		threadId: string,
+		runId: string,
+		messages: BaseMessage[],
+		modelName?: string,
+	): Promise<void> {
+		await this.persistThreadMetadata(threadId, runId, messages, modelName);
+		await this.flushThreadPersistence(threadId);
 	}
 
 	async generateTitle(userMessage: string, resolved: ResolvedRun): Promise<string | undefined> {

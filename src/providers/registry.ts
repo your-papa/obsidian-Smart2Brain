@@ -42,6 +42,21 @@ class ProviderRegistry {
 	/** Configured providers with their definition and auth */
 	private readonly providers = new Map<string, RegisteredProvider>();
 
+	/**
+	 * Monotonic counter bumped on every mutation of a provider's credentials
+	 * (register / updateAuth / unregister). Consumers that *cache artifacts built
+	 * from* an auth state — most importantly `Agent`'s runnable cache, whose cached
+	 * runnable holds a model instance with the credentials baked in — mix
+	 * {@link authGeneration} into their cache key so a rotated API key or an edited
+	 * baseUrl produces a fresh key instead of a stale hit.
+	 *
+	 * A counter rather than a hash of the auth object: the value ends up inside
+	 * long-lived in-memory cache keys, and a counter cannot leak anything about the
+	 * secret even if such a key is logged. Over-invalidation (a no-op re-register
+	 * still bumps) is harmless — the cost is one rebuilt runnable.
+	 */
+	private authGeneration = 0;
+
 	private constructor() {
 		// Private constructor for singleton
 	}
@@ -76,19 +91,25 @@ class ProviderRegistry {
 	 */
 	register(id: string, definition: BaseProviderDefinition, auth: AuthObject): void {
 		this.providers.set(id, { definition, auth });
+		this.authGeneration++;
 	}
 
 	/**
 	 * Unregisters a provider.
 	 */
 	unregister(id: string): void {
-		this.providers.delete(id);
+		if (this.providers.delete(id)) {
+			this.authGeneration++;
+		}
 	}
 
 	/**
 	 * Clears all registered providers.
 	 */
 	clear(): void {
+		if (this.providers.size > 0) {
+			this.authGeneration++;
+		}
 		this.providers.clear();
 	}
 
@@ -127,6 +148,7 @@ class ProviderRegistry {
 		const entry = this.providers.get(id);
 		if (entry) {
 			entry.auth = auth;
+			this.authGeneration++;
 		}
 	}
 
@@ -135,6 +157,14 @@ class ProviderRegistry {
 	 */
 	list(): string[] {
 		return Array.from(this.providers.keys());
+	}
+
+	/**
+	 * Current credential generation — see {@link authGeneration}. Include this in any
+	 * cache key whose cached value embeds resolved provider credentials.
+	 */
+	getAuthGeneration(): number {
+		return this.authGeneration;
 	}
 
 	// =========================================================================

@@ -11,6 +11,7 @@ import { normalizeVaultPath } from "../../utils/pathUtils";
 import { getVectorStoreService, type SearchFilter, type SearchResult, waitForVectorStore } from "../../vectorstore";
 import type { SearchMatchBadge, SearchMatchExplanation } from "../../vectorstore/types";
 import { Logger } from "../../utils/logging";
+import { resolveToolAgent, resolveToolProvider } from "./toolAgentContext";
 
 export type { SearchResult } from "../../vectorstore/types";
 
@@ -358,9 +359,9 @@ async function browseWithFilter(filter: SearchFilter): Promise<SearchResult[]> {
  * Tool for searching through Obsidian notes
  * Uses the search algorithm configured in plugin settings
  */
-export function createSearchNotesTool(app: App) {
+export function createSearchNotesTool(app: App, agentId = "") {
 	const pluginData = getData();
-	const getSearchNotesConfig = () => pluginData.getSelectedAgent().toolsConfig.search_notes;
+	const getSearchNotesConfig = () => resolveToolAgent(agentId).toolsConfig.search_notes;
 	const toolConfig = getSearchNotesConfig();
 	/**
 	 * The four display flags are hardcoded on for the agent.
@@ -432,7 +433,7 @@ export function createSearchNotesTool(app: App) {
 		const results = recentOnly
 			? getRecentNotes(app, filter)
 			: await performSearch(app, query, algorithm ?? "lexical", filter);
-		const currentProvider = pluginData.getSelectedAgent().chatModel?.provider;
+		const currentProvider = resolveToolProvider(agentId);
 		const store = getPendingChangesStore();
 
 		let skippedPrivateFiles = 0;

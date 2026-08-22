@@ -441,13 +441,16 @@ export async function stageNoteOperations(
 			continue;
 		}
 
-		if (!settings.allowDelete) {
-			if (operation.type === "delete") {
+		if (operation.type === "delete") {
+			// Permission check inside the type branch, matching create/update/move below.
+			// This used to be an outer `if (!settings.allowDelete)` wrapping an inner
+			// `if (operation.type === "delete")` — correct, but only because the inner
+			// condition carried all the logic; hoisting the outer branch during a later
+			// edit would have silently blocked move/replace too.
+			if (!settings.allowDelete) {
 				return `Error in operation ${operationNumber}: Delete operations are disabled for this agent.`;
 			}
-		}
 
-		if (operation.type === "delete") {
 			const result = validateExistingMarkdownFile(app, operation.path, operationNumber, "delete", agentId);
 			if ("error" in result) return result.error;
 

@@ -33,6 +33,14 @@ const ID_MAPPING_STORE = "id_mapping";
 const DB_VERSION = 2; // Bumped for ID mapping store
 
 /**
+ * How long to wait on a blocked `indexedDB.open` before failing with a real error.
+ * A blocked open fires neither `success` nor `error`, so without a bound it hangs
+ * forever. Generous enough that the normal case — the other connection yielding via
+ * its `versionchange` handler — always wins the race.
+ */
+const OPEN_BLOCKED_TIMEOUT_MS = 10_000;
+
+/**
  * Internal representation stored in IndexedDB.
  * Uses number[] since IndexedDB doesn't efficiently store Float32Array.
  */
@@ -66,6 +74,81 @@ interface StoredMetadata {
 interface IdMapping {
 	numericId: number;
 	stringId: string;
+}
+
+/**
+ * Runs a single read request inside `tx` and settles a promise on it, covering the
+ * transaction-level failures a bare `request.onerror` misses.
+ *
+ * An IndexedDB transaction can abort without ever firing `error` on its request —
+ * the connection being force-closed (which our `versionchange` handler now does),
+ * storage eviction, or the browser tearing the tx down. In those cases only
+ * `tx.onabort` fires, so a promise wired solely to `request.onerror`/`onsuccess`
+ * never settles and its caller hangs indefinitely with no error surfaced.
+ *
+ * For the read paths only; the write paths already settle on `tx.oncomplete` /
+ * `tx.onerror`, which covers them. `map` turns the raw request result into the
+ * caller's shape, and may be called more than once for cursor-driven reads —
+ * return a value only when the read is complete (see `awaitCursor`).
+ */
+function awaitRequest<T>(tx: IDBTransaction, request: IDBRequest, map: (result: never) => T): Promise<T> {
+	return new Promise<T>((resolve, reject) => {
+		let settled = false;
+		const fail = (reason: unknown) => {
+			if (settled) return;
+			settled = true;
+			reject(reason);
+		};
+
+		request.onerror = () => fail(request.error);
+		tx.onerror = () => fail(tx.error);
+		tx.onabort = () => fail(tx.error ?? new Error("IndexedDB transaction aborted before the request completed."));
+		request.onsuccess = () => {
+			if (settled) return;
+			settled = true;
+			try {
+				resolve(map(request.result as never));
+			} catch (error) {
+				reject(error);
+			}
+		};
+	});
+}
+
+/**
+ * Cursor variant of {@link awaitRequest}: `step` runs on every `onsuccess` and
+ * resolves the promise by returning a value once the cursor is exhausted
+ * (returning `undefined` keeps iterating). Same transaction-abort guards.
+ */
+function awaitCursor<T>(
+	tx: IDBTransaction,
+	request: IDBRequest,
+	step: (cursor: IDBCursor | null) => { done: true; value: T } | undefined,
+): Promise<T> {
+	return new Promise<T>((resolve, reject) => {
+		let settled = false;
+		const fail = (reason: unknown) => {
+			if (settled) return;
+			settled = true;
+			reject(reason);
+		};
+
+		request.onerror = () => fail(request.error);
+		tx.onerror = () => fail(tx.error);
+		tx.onabort = () => fail(tx.error ?? new Error("IndexedDB transaction aborted before the cursor completed."));
+		request.onsuccess = () => {
+			if (settled) return;
+			try {
+				const outcome = step((request.result as IDBCursor | null) ?? null);
+				if (outcome) {
+					settled = true;
+					resolve(outcome.value);
+				}
+			} catch (error) {
+				fail(error);
+			}
+		};
+	});
 }
 
 /**
@@ -140,8 +223,44 @@ export class HNSWVectorStore implements VectorStore {
 	private async openIndexedDB(): Promise<void> {
 		return new Promise((resolve, reject) => {
 			const request = indexedDB.open(this.dbName, DB_VERSION);
+			let settled = false;
+			let blockedTimer: ReturnType<typeof setTimeout> | null = null;
 
-			request.onerror = () => reject(request.error);
+			const finish = (fn: () => void) => {
+				if (settled) return;
+				settled = true;
+				if (blockedTimer !== null) clearTimeout(blockedTimer);
+				fn();
+			};
+
+			request.onerror = () => finish(() => reject(request.error));
+
+			// The DB name is per-vault, so a second Obsidian window on the same vault
+			// opens the *same* database. When this open needs a version upgrade and
+			// that other connection is still open, IndexedDB fires `blocked` and then
+			// fires NEITHER `success` NOR `error` — the promise would hang forever, and
+			// with it the whole VectorStoreService init, with no error surfaced anywhere.
+			//
+			// The other window normally yields via the `versionchange` handler installed
+			// below (added in the same change), so `blocked` should resolve on its own
+			// within a moment. Time-bounded rather than rejecting immediately so that
+			// normal case still succeeds; if the wait elapses, fail loudly with an
+			// actionable message instead of hanging.
+			request.onblocked = () => {
+				Logger.warn(
+					`${LOG_PREFIX} open blocked on "${this.dbName}" — another connection is still open (a second Obsidian window on this vault?). Waiting ${OPEN_BLOCKED_TIMEOUT_MS}ms for it to close.`,
+				);
+				if (blockedTimer !== null) clearTimeout(blockedTimer);
+				blockedTimer = setTimeout(() => {
+					finish(() =>
+						reject(
+							new Error(
+								`Timed out opening the vector index database "${this.dbName}": another Obsidian window has it open with an older version. Close the other window and reload.`,
+							),
+						),
+					);
+				}, OPEN_BLOCKED_TIMEOUT_MS);
+			};
 
 			request.onupgradeneeded = (event) => {
 				const db = (event.target as IDBOpenDBRequest).result;
@@ -167,8 +286,23 @@ export class HNSWVectorStore implements VectorStore {
 			};
 
 			request.onsuccess = (event) => {
-				this.db = (event.target as IDBOpenDBRequest).result;
-				resolve();
+				const db = (event.target as IDBOpenDBRequest).result;
+				// The other half of the deadlock: if a *future* connection (another
+				// window, or this plugin after an update) needs a version upgrade, it
+				// blocks until every existing connection closes. Without this handler
+				// we would be the connection that never yields, hanging the other side
+				// exactly the way `onblocked` above guards against.
+				db.onversionchange = () => {
+					Logger.warn(
+						`${LOG_PREFIX} another connection requested a version upgrade of "${this.dbName}" — closing ours to let it proceed.`,
+					);
+					db.close();
+					if (this.db === db) this.db = null;
+				};
+				finish(() => {
+					this.db = db;
+					resolve();
+				});
 			};
 		});
 	}
@@ -177,22 +311,15 @@ export class HNSWVectorStore implements VectorStore {
 		if (!this.db) return;
 		const db = this.db;
 
-		return new Promise((resolve, reject) => {
-			const tx = db.transaction(ID_MAPPING_STORE, "readonly");
-			const store = tx.objectStore(ID_MAPPING_STORE);
-			const request = store.getAll();
-
-			request.onerror = () => reject(request.error);
-			request.onsuccess = () => {
-				const mappings = request.result as IdMapping[];
-				this.idToNumeric.clear();
-				this.numericToId.clear();
-				for (const mapping of mappings) {
-					this.idToNumeric.set(mapping.stringId, mapping.numericId);
-					this.numericToId.set(mapping.numericId, mapping.stringId);
-				}
-				resolve();
-			};
+		const tx = db.transaction(ID_MAPPING_STORE, "readonly");
+		const request = tx.objectStore(ID_MAPPING_STORE).getAll();
+		return awaitRequest<void>(tx, request, (mappings: IdMapping[]) => {
+			this.idToNumeric.clear();
+			this.numericToId.clear();
+			for (const mapping of mappings) {
+				this.idToNumeric.set(mapping.stringId, mapping.numericId);
+				this.numericToId.set(mapping.numericId, mapping.stringId);
+			}
 		});
 	}
 
@@ -449,22 +576,11 @@ export class HNSWVectorStore implements VectorStore {
 	async getByPath(path: string): Promise<DocumentVector | undefined> {
 		const db = this.requireDb();
 
-		return new Promise((resolve, reject) => {
-			const tx = db.transaction(DOCUMENTS_STORE, "readonly");
-			const store = tx.objectStore(DOCUMENTS_STORE);
-			const index = store.index("path");
-			const request = index.get(path);
-
-			request.onerror = () => reject(request.error);
-			request.onsuccess = () => {
-				const stored = request.result as StoredDocument | undefined;
-				if (!stored) {
-					resolve(undefined);
-				} else {
-					resolve(this.toDocumentVector(stored));
-				}
-			};
-		});
+		const tx = db.transaction(DOCUMENTS_STORE, "readonly");
+		const request = tx.objectStore(DOCUMENTS_STORE).index("path").get(path);
+		return awaitRequest(tx, request, (stored: StoredDocument | undefined) =>
+			stored ? this.toDocumentVector(stored) : undefined,
+		);
 	}
 
 	/**
@@ -627,14 +743,9 @@ export class HNSWVectorStore implements VectorStore {
 	async count(): Promise<number> {
 		const db = this.requireDb();
 
-		return new Promise((resolve, reject) => {
-			const tx = db.transaction(DOCUMENTS_STORE, "readonly");
-			const store = tx.objectStore(DOCUMENTS_STORE);
-			const request = store.count();
-
-			request.onerror = () => reject(request.error);
-			request.onsuccess = () => resolve(request.result);
-		});
+		const tx = db.transaction(DOCUMENTS_STORE, "readonly");
+		const request = tx.objectStore(DOCUMENTS_STORE).count();
+		return awaitRequest(tx, request, (n: number) => n);
 	}
 
 	/**
@@ -644,23 +755,15 @@ export class HNSWVectorStore implements VectorStore {
 	async countNotes(): Promise<number> {
 		const db = this.requireDb();
 
-		return new Promise((resolve, reject) => {
-			const tx = db.transaction(DOCUMENTS_STORE, "readonly");
-			const store = tx.objectStore(DOCUMENTS_STORE);
-			const index = store.index("path");
-			const request = index.openKeyCursor(null, "nextunique");
+		const tx = db.transaction(DOCUMENTS_STORE, "readonly");
+		const request = tx.objectStore(DOCUMENTS_STORE).index("path").openKeyCursor(null, "nextunique");
 
-			let notes = 0;
-			request.onerror = () => reject(request.error);
-			request.onsuccess = () => {
-				const cursor = request.result;
-				if (cursor) {
-					notes++;
-					cursor.continue();
-				} else {
-					resolve(notes);
-				}
-			};
+		let notes = 0;
+		return awaitCursor(tx, request, (cursor) => {
+			if (!cursor) return { done: true, value: notes };
+			notes++;
+			cursor.continue();
+			return undefined;
 		});
 	}
 
@@ -738,27 +841,17 @@ export class HNSWVectorStore implements VectorStore {
 		if (!this.db) return null;
 		const db = this.db;
 
-		return new Promise((resolve, reject) => {
-			const tx = db.transaction(DOCUMENTS_STORE, "readonly");
-			const store = tx.objectStore(DOCUMENTS_STORE);
-			const request = store.get(id);
-
-			request.onerror = () => reject(request.error);
-			request.onsuccess = () => resolve(request.result ?? null);
-		});
+		const tx = db.transaction(DOCUMENTS_STORE, "readonly");
+		const request = tx.objectStore(DOCUMENTS_STORE).get(id);
+		return awaitRequest(tx, request, (doc: StoredDocument | undefined) => doc ?? null);
 	}
 
 	private async getMetadataInternal(): Promise<StoredMetadata | null> {
 		const db = this.requireDb();
 
-		return new Promise((resolve, reject) => {
-			const tx = db.transaction(METADATA_STORE, "readonly");
-			const store = tx.objectStore(METADATA_STORE);
-			const request = store.get("metadata");
-
-			request.onerror = () => reject(request.error);
-			request.onsuccess = () => resolve((request.result as StoredMetadata) ?? null);
-		});
+		const tx = db.transaction(METADATA_STORE, "readonly");
+		const request = tx.objectStore(METADATA_STORE).get("metadata");
+		return awaitRequest(tx, request, (meta: StoredMetadata | undefined) => meta ?? null);
 	}
 
 	private async putInStore<T>(storeName: string, value: T): Promise<void> {
@@ -778,29 +871,18 @@ export class HNSWVectorStore implements VectorStore {
 	private async getAllStored(): Promise<StoredDocument[]> {
 		const db = this.requireDb();
 
-		return new Promise((resolve, reject) => {
-			const tx = db.transaction(DOCUMENTS_STORE, "readonly");
-			const store = tx.objectStore(DOCUMENTS_STORE);
-			const request = store.getAll();
-
-			request.onerror = () => reject(request.error);
-			request.onsuccess = () => resolve(request.result as StoredDocument[]);
-		});
+		const tx = db.transaction(DOCUMENTS_STORE, "readonly");
+		const request = tx.objectStore(DOCUMENTS_STORE).getAll();
+		return awaitRequest(tx, request, (docs: StoredDocument[]) => docs);
 	}
 
 	/** Get every stored chunk row for a given note path. */
 	private async getAllStoredForPath(path: string): Promise<StoredDocument[]> {
 		const db = this.requireDb();
 
-		return new Promise((resolve, reject) => {
-			const tx = db.transaction(DOCUMENTS_STORE, "readonly");
-			const store = tx.objectStore(DOCUMENTS_STORE);
-			const index = store.index("path");
-			const request = index.getAll(IDBKeyRange.only(path));
-
-			request.onerror = () => reject(request.error);
-			request.onsuccess = () => resolve(request.result as StoredDocument[]);
-		});
+		const tx = db.transaction(DOCUMENTS_STORE, "readonly");
+		const request = tx.objectStore(DOCUMENTS_STORE).index("path").getAll(IDBKeyRange.only(path));
+		return awaitRequest(tx, request, (docs: StoredDocument[]) => docs);
 	}
 
 	private async clearStore(storeName: string): Promise<void> {

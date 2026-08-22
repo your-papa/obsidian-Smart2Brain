@@ -380,6 +380,95 @@ describe("PendingChangesStore", () => {
 
 			expect(store.getEntry(id2)?.status).toBe("pending");
 		});
+
+		/**
+		 * `rejectAll` restores a note that had groups partially accepted. That restore
+		 * used to be an unconditional `vault.modify`, which silently destroyed any edit
+		 * the user made by hand in between — `modify` doesn't go through trash, so the
+		 * work was unrecoverable.
+		 */
+		describe("rejectAll revert of partially-accepted groups", () => {
+			/** Stage a 2-group update and accept the first group, leaving the file
+			 *  partially applied (the state that arms the revert path). */
+			async function stagePartiallyAccepted() {
+				const original = "line1\nline2\nline3\n";
+				const proposed = "CHANGED1\nline2\nCHANGED3\n";
+				const file = makeTFile("note.md");
+				plugin.app.vault.getAbstractFileByPath = vi.fn().mockReturnValue(file);
+				plugin.app.vault.read = vi.fn().mockResolvedValue(original);
+
+				const [id] = store.addChanges(
+					[{ type: "update", path: "note.md", originalContent: original, newContent: proposed }],
+					"tc-1",
+					"thread-1",
+				);
+
+				await store.acceptChangeGroup(id, 0);
+
+				const afterGroupAccept = (plugin.app.vault.modify as ReturnType<typeof vi.fn>).mock.calls[0][1];
+				return { id, original, afterGroupAccept, file };
+			}
+
+			it("reverts to the pre-proposal content when the file is untouched since", async () => {
+				const { id, original, afterGroupAccept } = await stagePartiallyAccepted();
+
+				// File still holds exactly what the group accept wrote.
+				plugin.app.vault.read = vi.fn().mockResolvedValue(afterGroupAccept);
+				(plugin.app.vault.modify as ReturnType<typeof vi.fn>).mockClear();
+
+				const skipped = await store.rejectAll("thread-1");
+
+				expect(skipped).toEqual([]);
+				expect(plugin.app.vault.modify).toHaveBeenCalledWith(expect.anything(), original);
+				expect(store.getEntry(id)?.status).toBe("rejected");
+			});
+
+			it("does NOT overwrite a note the user edited after the group accept", async () => {
+				const { id } = await stagePartiallyAccepted();
+
+				// User hand-edits the note in the editor after accepting the group.
+				plugin.app.vault.read = vi.fn().mockResolvedValue("my own precious edits\n");
+				(plugin.app.vault.modify as ReturnType<typeof vi.fn>).mockClear();
+
+				const skipped = await store.rejectAll("thread-1");
+
+				// Regression: this used to unconditionally modify() back to the
+				// pre-proposal content, destroying the user's edits.
+				expect(plugin.app.vault.modify).not.toHaveBeenCalled();
+				expect(skipped).toEqual(["note.md"]);
+				// The proposal is still dead either way.
+				expect(store.getEntry(id)?.status).toBe("rejected");
+			});
+
+			it("rejects every entry even when one revert is skipped", async () => {
+				const { id } = await stagePartiallyAccepted();
+				const [plainId] = store.addChanges(
+					[{ type: "create", path: "other.md", content: "X" }],
+					"tc-2",
+					"thread-1",
+				);
+
+				plugin.app.vault.read = vi.fn().mockResolvedValue("conflicting content\n");
+
+				const skipped = await store.rejectAll("thread-1");
+
+				expect(skipped).toEqual(["note.md"]);
+				expect(store.getEntry(id)?.status).toBe("rejected");
+				expect(store.getEntry(plainId)?.status).toBe("rejected");
+				expect(store.getPendingCount("thread-1")).toBe(0);
+			});
+
+			it("reports the path when the revert write itself throws", async () => {
+				const { afterGroupAccept } = await stagePartiallyAccepted();
+
+				plugin.app.vault.read = vi.fn().mockResolvedValue(afterGroupAccept);
+				plugin.app.vault.modify = vi.fn().mockRejectedValue(new Error("disk full"));
+
+				const skipped = await store.rejectAll("thread-1");
+
+				expect(skipped).toEqual(["note.md"]);
+			});
+		});
 	});
 
 	/* --------------------------------------------------------------------------

@@ -328,8 +328,16 @@ export class PendingChangesStore {
 	 * note could interleave read→modify and clobber each other.) The stored
 	 * promise is the tail of the chain; the map entry is cleared only when this
 	 * op is still the tail, so a later arrival that already chained onto us keeps
-	 * the entry alive. */
-	private async withFileLock<T>(filePath: string, fn: () => Promise<T>): Promise<T> {
+	 * the entry alive.
+	 *
+	 * The key is normalized here rather than at the call sites: `#fileLocks` is a
+	 * plain string map, so `"a//b.md"` and `"a/b.md"` would occupy *different*
+	 * chains for one file and let two ops interleave read→modify — exactly the
+	 * clobbering the queue exists to prevent. Callers pass whatever path they hold;
+	 * making the invariant structural means a future call site can't reintroduce
+	 * the split by forgetting to normalize. */
+	private async withFileLock<T>(rawPath: string, fn: () => Promise<T>): Promise<T> {
+		const filePath = normalizePath(rawPath);
 		const previous = this.#fileLocks.get(filePath) ?? Promise.resolve();
 
 		// Run only after everything already queued for this path settles. Swallow
@@ -442,9 +450,15 @@ export class PendingChangesStore {
 		}
 	}
 
-	/** Reject all pending changes for a thread, reverting any partially-applied group writes. */
-	async rejectAll(threadId: string): Promise<void> {
+	/** Reject all pending changes for a thread, reverting any partially-applied group writes.
+	 *
+	 *  Returns the paths whose revert was skipped because the file no longer matched what
+	 *  we wrote — the entries are still rejected (the proposal is dead either way), but the
+	 *  file keeps its current content. Callers should surface these: a silent skip reads as
+	 *  "everything was undone" when it wasn't. */
+	async rejectAll(threadId: string): Promise<string[]> {
 		const pending = this.#entries.filter((e) => e.threadId === threadId && e.status === "pending");
+		const skippedReverts: string[] = [];
 		for (const entry of pending) {
 			// Revert vault file if groups were partially accepted
 			if (entry.change.type === "update" && entry.change.initialOriginalContent !== undefined) {
@@ -452,20 +466,45 @@ export class PendingChangesStore {
 				const initialOriginalContent = change.initialOriginalContent;
 				if (initialOriginalContent === undefined) continue;
 				try {
-					await this.withFileLock(change.path, async () => {
+					const skippedPath = await this.withFileLock(change.path, async () => {
 						const file = this.#plugin.app.vault.getAbstractFileByPath(change.path);
-						if (file instanceof TFile) {
-							await this.#plugin.app.vault.modify(file, initialOriginalContent);
+						if (!(file instanceof TFile)) return undefined;
+
+						// Conflict check, matching acceptChange/acceptChangeGroup. Rejecting
+						// is not a licence to discard the user's own work: between the group
+						// accept and this reject they may have edited the note by hand, and
+						// `vault.modify` does not go through trash, so an unconditional
+						// overwrite destroys those edits with no way back.
+						//
+						// `originalContent` is the right baseline, not `initialOriginalContent`:
+						// acceptChangeGroup advances `originalContent` to exactly what it wrote
+						// (see its `change.originalContent = newVaultContent`), so it tracks what
+						// we last put on disk. If the file still matches it, our writes are the
+						// only ones there and undoing them is safe.
+						const currentContent = await this.#plugin.app.vault.read(file);
+						if (currentContent !== change.originalContent) {
+							return change.path;
 						}
+
+						await this.#plugin.app.vault.modify(file, initialOriginalContent);
+						return undefined;
 					});
+					if (skippedPath) {
+						Logger.warn(
+							`[PendingChanges] Skipped reverting "${skippedPath}" — it was modified after the group accept; leaving the file as-is.`,
+						);
+						skippedReverts.push(skippedPath);
+					}
 				} catch (e) {
 					Logger.error(`[PendingChanges] Failed to revert ${entry.change.path}:`, e);
+					skippedReverts.push(entry.change.path);
 				}
 			}
 			entry.status = "rejected";
 		}
 		this.scheduleSave();
 		this.notifyChange();
+		return skippedReverts;
 	}
 
 	/** Get all entries for a thread. */

@@ -48,6 +48,13 @@ const LEXICAL_PATH_MAX = 35;
 const DB_NAME_PREFIX = "s2b-minisearch";
 const DB_VERSION = 5;
 const STORE_NAME = "index";
+
+/**
+ * How long to wait on a blocked `indexedDB.open` before failing with a real error.
+ * A blocked open fires neither `success` nor `error`, so without a bound it hangs
+ * forever. Mirrors the same constant in HNSWVectorStore.
+ */
+const OPEN_BLOCKED_TIMEOUT_MS = 10_000;
 const INDEX_KEY = "main";
 /** Bump whenever the indexed file set or field schema changes to force a full reindex. */
 const STORAGE_SCHEMA_VERSION = 7;
@@ -283,15 +290,57 @@ export class MiniSearchService {
 	async open(): Promise<void> {
 		return new Promise((resolve, reject) => {
 			const request = indexedDB.open(this.dbName, DB_VERSION);
+			let settled = false;
+			let blockedTimer: ReturnType<typeof setTimeout> | null = null;
+
+			const finish = (fn: () => void) => {
+				if (settled) return;
+				settled = true;
+				if (blockedTimer !== null) clearTimeout(blockedTimer);
+				fn();
+			};
 
 			request.onerror = () => {
 				Logger.error("[MiniSearch] Failed to open database:", request.error);
-				reject(request.error);
+				finish(() => reject(request.error));
+			};
+
+			// A blocked open (another connection holds an older version of this
+			// per-vault DB — e.g. a second Obsidian window) fires neither `success`
+			// nor `error`, so without this the promise hangs forever and takes the
+			// lexical-search init with it, silently. See the matching guard in
+			// HNSWVectorStore.openIndexedDB.
+			request.onblocked = () => {
+				Logger.warn(
+					`[MiniSearch] open blocked on "${this.dbName}" — another connection is still open (a second Obsidian window on this vault?). Waiting ${OPEN_BLOCKED_TIMEOUT_MS}ms for it to close.`,
+				);
+				if (blockedTimer !== null) clearTimeout(blockedTimer);
+				blockedTimer = setTimeout(() => {
+					finish(() =>
+						reject(
+							new Error(
+								`Timed out opening the lexical index database "${this.dbName}": another Obsidian window has it open with an older version. Close the other window and reload.`,
+							),
+						),
+					);
+				}, OPEN_BLOCKED_TIMEOUT_MS);
 			};
 
 			request.onsuccess = () => {
-				this.db = request.result;
-				resolve();
+				const db = request.result;
+				// Yield to a future upgrade from another connection rather than being
+				// the connection that blocks it indefinitely.
+				db.onversionchange = () => {
+					Logger.warn(
+						`[MiniSearch] another connection requested a version upgrade of "${this.dbName}" — closing ours to let it proceed.`,
+					);
+					db.close();
+					if (this.db === db) this.db = null;
+				};
+				finish(() => {
+					this.db = db;
+					resolve();
+				});
 			};
 
 			request.onupgradeneeded = (event) => {

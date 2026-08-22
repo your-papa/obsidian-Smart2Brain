@@ -1913,8 +1913,7 @@ async function runTopicLabeling(options: { force?: boolean } = {}) {
 		).length;
 		if (withheld > 0) {
 			new Notice(
-				`Private note titles were withheld from ${withheld} ${withheld === 1 ? "topic" : "topics"}. ` +
-					"Trust the graph model's provider in Settings to include them.",
+				`Private note titles were withheld from ${withheld} ${withheld === 1 ? "topic" : "topics"}. Trust the graph model's provider in Settings to include them.`,
 			);
 		}
 	}

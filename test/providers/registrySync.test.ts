@@ -184,4 +184,41 @@ describe("registrySync", () => {
 			expect(getRegistry().has("openai")).toBe(false);
 		});
 	});
+
+	/**
+	 * The generation counter is what lets caches whose entries embed resolved
+	 * credentials (notably `Agent`'s runnable cache) notice a key rotation. Without
+	 * it, editing an API key produced an unchanged cache key, a cache hit, and
+	 * requests that kept using the old credential until Obsidian restarted.
+	 */
+	describe("auth generation", () => {
+		it("bumps when a provider's credentials are edited", () => {
+			data.add("openai", { apiKey: "sk-old" });
+			syncProvider(data, "openai");
+			const before = getRegistry().getAuthGeneration();
+
+			// What `setProviderAuthField` does after writing the new secret.
+			data.auth.set("openai", { apiKey: "sk-new" });
+			syncProvider(data, "openai");
+
+			expect(getRegistry().getAuthGeneration()).toBeGreaterThan(before);
+			expect(getRegistry().getAuth("openai")).toEqual({ apiKey: "sk-new" });
+		});
+
+		it("bumps when a provider is removed", () => {
+			data.add("openai");
+			syncProvider(data, "openai");
+			const before = getRegistry().getAuthGeneration();
+
+			unsyncProvider("openai");
+
+			expect(getRegistry().getAuthGeneration()).toBeGreaterThan(before);
+		});
+
+		it("does not bump when unregistering a provider that was never registered", () => {
+			const before = getRegistry().getAuthGeneration();
+			unsyncProvider("never-registered");
+			expect(getRegistry().getAuthGeneration()).toBe(before);
+		});
+	});
 });

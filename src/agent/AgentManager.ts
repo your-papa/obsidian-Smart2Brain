@@ -837,16 +837,16 @@ export class AgentManager {
 
 		// Built-in tool registry: maps tool IDs to their factory functions
 		const builtInTools: [BuiltInToolId, () => StructuredToolInterface][] = [
-			["search_notes", () => createSearchNotesTool(this.plugin.app)],
-			["list_directory", () => createListDirectoryTool(this.plugin.app)],
-			["get_all_tags", () => createGetAllTagsTool(this.plugin.app)],
-			["execute_javascript", () => createExecuteJavaScriptTool()],
-			["get_properties", () => createGetPropertiesTool(this.plugin.app)],
+			["search_notes", () => createSearchNotesTool(this.plugin.app, agentCfg.id)],
+			["list_directory", () => createListDirectoryTool(this.plugin.app, agentCfg.id)],
+			["get_all_tags", () => createGetAllTagsTool(this.plugin.app, agentCfg.id)],
+			["execute_javascript", () => createExecuteJavaScriptTool(agentCfg.id)],
+			["get_properties", () => createGetPropertiesTool(this.plugin.app, agentCfg.id)],
 			[
 				"read_content",
-				() => createReadContentTool(this.plugin.app, imageProcessorInstance, pdfProcessorInstance),
+				() => createReadContentTool(this.plugin.app, imageProcessorInstance, pdfProcessorInstance, agentCfg.id),
 			],
-			["grep_notes", () => createGrepNotesTool(this.plugin.app)],
+			["grep_notes", () => createGrepNotesTool(this.plugin.app, agentCfg.id)],
 			["manage_notes", () => createManageNotesTool(this.plugin.app, agentCfg.id)],
 			["fetch_url", () => createFetchUrlTool()],
 			["web_search", () => createWebSearchTool()],
@@ -1395,6 +1395,16 @@ export class AgentManager {
 			summ: `${summarizationModel.provider}:${summarizationModel.model}`,
 			agentId: agent.id,
 			agentRev: this.agentConfigRevision(agent),
+			// A cached runnable holds the model instance it was BUILT with, and that
+			// instance has the resolved credentials baked in — `resolveRun` mints a fresh
+			// instance every call but only uses it on a cache miss. Without this term,
+			// rotating an API key (or editing a baseUrl) leaves the key unchanged, hits
+			// the cache, and keeps issuing requests with the OLD credential until
+			// Obsidian restarts — silently, with no error. The data store already
+			// re-registers the provider on such an edit (see `setProviderAuthField`),
+			// which bumps this counter. Not the auth itself: a counter can't leak a
+			// secret if a cache key is ever logged.
+			authGen: this.registry.getAuthGeneration(),
 		});
 	}
 
