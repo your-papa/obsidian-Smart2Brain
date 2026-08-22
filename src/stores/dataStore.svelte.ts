@@ -36,6 +36,7 @@ import type {
 	ToolConfig,
 	ToolsConfig,
 } from "../types/plugin";
+import { RECENT_NOTE_WINDOW_MS } from "../types/plugin";
 import { getDefaultEmbeddingBatchSize, normalizeEmbeddingBatchSize } from "../vectorstore/batchSize";
 import { genUUIDv7, type UUIDv7 } from "../utils/uuid7Validator";
 
@@ -365,7 +366,14 @@ export const DEFAULT_TOOLS_CONFIG: ToolsConfig = {
 	},
 };
 
-const MAX_RECENT_NOTES = 20;
+/**
+ * Safety cap only — it bounds the size of the plugin data file. What actually
+ * decides whether a note counts as recent is its age (`RECENT_NOTE_WINDOW_MS`),
+ * applied at read time in `search/recentNotes.ts`. The cap is deliberately far
+ * above a normal week of note-opening so that a heavy day cannot evict notes
+ * that are still inside the window.
+ */
+const MAX_RECENT_NOTES = 200;
 
 /**
  * Creates a new agent configuration with default values.
@@ -1568,11 +1576,14 @@ export class PluginDataStore {
 
 	recordRecentlyOpenedNote(path: string): void {
 		const normalizedPath = normalizePath(path);
-		const existing = (this.#data.recentNotes ?? []).filter((entry) => entry.path !== normalizedPath);
-		this.#data.recentNotes = [{ path: normalizedPath, lastOpenedAt: Date.now() }, ...existing].slice(
-			0,
-			MAX_RECENT_NOTES,
+		const now = Date.now();
+		const existing = (this.#data.recentNotes ?? []).filter(
+			// Drop the re-opened note (it is re-added at the front with a fresh
+			// timestamp) and anything that has aged out of the recency window, so
+			// the persisted list does not accumulate entries no reader can use.
+			(entry) => entry.path !== normalizedPath && now - entry.lastOpenedAt < RECENT_NOTE_WINDOW_MS,
 		);
+		this.#data.recentNotes = [{ path: normalizedPath, lastOpenedAt: now }, ...existing].slice(0, MAX_RECENT_NOTES);
 		this.saveSettings();
 	}
 

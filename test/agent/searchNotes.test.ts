@@ -9,6 +9,24 @@ const mockWaitForLexicalSearch = vi.fn();
 const mockWaitForVectorStore = vi.fn();
 const mockShouldBlockFile = vi.fn();
 const mockRecentNotes: Array<{ path: string; lastOpenedAt: number }> = [];
+
+/**
+ * Recency is now scored by a note's age against a 7-day window, not by its
+ * position in the history list. These fixtures only ever encoded *ordering*
+ * (5_000 is "more recent than" 4_000), and as literal epoch timestamps they
+ * would all read as decades stale and score zero boost.
+ *
+ * `recentAt` keeps the ordering the cases were written around while placing
+ * every fixture inside the window: a larger value is more recent, and the
+ * spacing (minutes) is small enough that all of them sit in the full-strength
+ * plateau, which is what the pre-existing assertions assumed.
+ */
+function recentAt(order: number): number {
+	// Anchored a minute back and spaced by seconds: a higher `order` is more
+	// recent, and the whole spread stays well inside the full-strength plateau
+	// so these cases keep exercising ranking rather than recency decay.
+	return Date.now() - 60_000 + order;
+}
 const mockToolSettings: {
 	showPath?: boolean;
 	showTags?: boolean;
@@ -179,7 +197,7 @@ describe("performSearch lexical startup behavior", () => {
 	});
 
 	it("boosts recently opened notes higher in typed search results", async () => {
-		mockRecentNotes.push({ path: "Notes/recent.md", lastOpenedAt: 2_000 });
+		mockRecentNotes.push({ path: "Notes/recent.md", lastOpenedAt: recentAt(2000) });
 		mockLexicalSearch.mockResolvedValue([
 			{
 				path: "Notes/older.md",
@@ -231,9 +249,9 @@ describe("performSearch lexical startup behavior", () => {
 	// enough lift to overtake the lexical leader", which still passes.
 	it("does not let one of several equally-recent results climb on recency alone", async () => {
 		mockRecentNotes.push(
-			{ path: "Notes/top-recent.md", lastOpenedAt: 3_000 },
-			{ path: "Notes/mid-recent.md", lastOpenedAt: 2_000 },
-			{ path: "Notes/edge-recent.md", lastOpenedAt: 1_000 },
+			{ path: "Notes/top-recent.md", lastOpenedAt: recentAt(3000) },
+			{ path: "Notes/mid-recent.md", lastOpenedAt: recentAt(2000) },
+			{ path: "Notes/edge-recent.md", lastOpenedAt: recentAt(1000) },
 		);
 		mockLexicalSearch.mockResolvedValue([
 			{
@@ -293,9 +311,9 @@ describe("performSearch lexical startup behavior", () => {
 
 	it("keeps a much stronger lexical leader ahead of a recent note", async () => {
 		mockRecentNotes.push(
-			{ path: "Notes/r1.md", lastOpenedAt: 5_000 },
-			{ path: "Notes/r2.md", lastOpenedAt: 4_000 },
-			{ path: "Notes/recent-lower.md", lastOpenedAt: 3_000 },
+			{ path: "Notes/r1.md", lastOpenedAt: recentAt(5000) },
+			{ path: "Notes/r2.md", lastOpenedAt: recentAt(4000) },
+			{ path: "Notes/recent-lower.md", lastOpenedAt: recentAt(3000) },
 		);
 		mockLexicalSearch.mockResolvedValue([
 			{
@@ -341,11 +359,11 @@ describe("performSearch lexical startup behavior", () => {
 
 	it("gives the fifth recent result enough lift to overtake the lexical leader", async () => {
 		mockRecentNotes.push(
-			{ path: "Notes/r1.md", lastOpenedAt: 5_000 },
-			{ path: "Notes/r2.md", lastOpenedAt: 4_000 },
-			{ path: "Notes/r3.md", lastOpenedAt: 3_000 },
-			{ path: "Notes/r4.md", lastOpenedAt: 2_000 },
-			{ path: "Notes/recent-five.md", lastOpenedAt: 1_000 },
+			{ path: "Notes/r1.md", lastOpenedAt: recentAt(5000) },
+			{ path: "Notes/r2.md", lastOpenedAt: recentAt(4000) },
+			{ path: "Notes/r3.md", lastOpenedAt: recentAt(3000) },
+			{ path: "Notes/r4.md", lastOpenedAt: recentAt(2000) },
+			{ path: "Notes/recent-five.md", lastOpenedAt: recentAt(1000) },
 		);
 		mockLexicalSearch.mockResolvedValue([
 			{
@@ -386,9 +404,12 @@ describe("performSearch lexical startup behavior", () => {
 	});
 
 	it("returns recently opened notes when recentOnly is true", async () => {
+		// Spread across days rather than seconds: the boost is a function of age, so
+		// two notes opened moments apart now score identically. Separating them is
+		// what makes the second note's lower score meaningful.
 		mockRecentNotes.push(
-			{ path: "Notes/recent-one.md", lastOpenedAt: 3_000 },
-			{ path: "Notes/recent-two.md", lastOpenedAt: 2_000 },
+			{ path: "Notes/recent-one.md", lastOpenedAt: Date.now() - 60_000 },
+			{ path: "Notes/recent-two.md", lastOpenedAt: Date.now() - 3 * 24 * 60 * 60 * 1000 },
 		);
 		const app = {
 			vault: {
@@ -414,7 +435,7 @@ describe("performSearch lexical startup behavior", () => {
 		expect(parsed.recentOnly).toBe(true);
 		expect(parsed.query).toBe("");
 		expect(parsed.totalResults).toBe(2);
-		expect(parsed.results).toEqual([
+		expect(parsed.results).toMatchObject([
 			{
 				rank: 1,
 				name: "recent-one",
@@ -428,15 +449,20 @@ describe("performSearch lexical startup behavior", () => {
 				rank: 2,
 				name: "recent-two",
 				path: "Notes/recent-two.md",
-				score: 3.75,
 				tags: ["#two"],
 				matchBadges: ["recent"],
 			},
 		]);
+		// Three days old: still recent, but measurably weaker than the fresh note.
+		// Asserted as a range because the value is a continuous function of age.
+		const olderScore = parsed.results[1]?.score ?? 0;
+		expect(olderScore).toBeGreaterThan(0);
+		expect(olderScore).toBeLessThan(4.5);
+		expect(parsed.results[1]).not.toHaveProperty("frontmatter");
 	});
 
 	it("returns recently opened non-markdown vault files when recentOnly is true", async () => {
-		mockRecentNotes.push({ path: "Assets/recent-diagram.canvas", lastOpenedAt: 3_000 });
+		mockRecentNotes.push({ path: "Assets/recent-diagram.canvas", lastOpenedAt: recentAt(3000) });
 		const app = {
 			vault: {
 				getAbstractFileByPath(path: string) {
@@ -467,7 +493,7 @@ describe("performSearch lexical startup behavior", () => {
 	});
 
 	it("includes frontmatter tags on recent results", async () => {
-		mockRecentNotes.push({ path: "Notes/frontmatter-tags.md", lastOpenedAt: 3_000 });
+		mockRecentNotes.push({ path: "Notes/frontmatter-tags.md", lastOpenedAt: recentAt(3000) });
 		const app = {
 			vault: {
 				getAbstractFileByPath(path: string) {
@@ -714,7 +740,7 @@ describe("performSearch lexical startup behavior", () => {
 	});
 
 	it("prefers recent alias-token matches over plain title-prefix matches in lexical ranking", async () => {
-		mockRecentNotes.push({ path: "Notes/sap-ekx.md", lastOpenedAt: 3_000 });
+		mockRecentNotes.push({ path: "Notes/sap-ekx.md", lastOpenedAt: recentAt(3000) });
 		mockLexicalSearch.mockResolvedValue([
 			{
 				path: "Notes/ekx-one.md",

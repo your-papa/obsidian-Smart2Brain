@@ -9,12 +9,25 @@ import { getAllTags } from "obsidian";
 import type { App, TFile } from "obsidian";
 import { compileFilter, matchesSearchFilter } from "./searchFilters";
 import { getData } from "../stores/dataStore.svelte";
+import { RECENT_NOTE_WINDOW_MS } from "../types/plugin";
 import type { SearchFilter, SearchResult } from "../vectorstore/types";
 
-const RECENT_RANK_BOOST = 4.5;
-const RECENT_RANK_DECAY = 0.75;
-const MIN_RECENT_RANK_BOOST = 0.5;
+/**
+ * Boost range is unchanged from the previous rank-based scheme on purpose: the
+ * downstream ranking in `finalSearchRanking` is tuned against these magnitudes
+ * (and divides by MAX_RECENT_BOOST to recover a 0-1 strength), so only the
+ * mapping from note to boost changes here, not the scale it produces.
+ */
+export const MAX_RECENT_BOOST = 4.5;
+const MIN_RECENT_BOOST = 0.5;
 const RECENT_SCORE_WEIGHT = 0.6;
+
+/**
+ * Fraction of the window over which a note holds full strength. Re-opening a
+ * note is a strong signal for the rest of the working day; the decay should
+ * describe "this has gone cold", not punish a note for being three hours old.
+ */
+const RECENT_FULL_STRENGTH_FRACTION = 1 / 7;
 
 export interface RecentBoostInfo {
 	boost: number;
@@ -22,7 +35,7 @@ export interface RecentBoostInfo {
 }
 
 function getRecentStrength(recentBoost: number): number {
-	return recentBoost / RECENT_RANK_BOOST;
+	return recentBoost / MAX_RECENT_BOOST;
 }
 
 export function getRecentRerankScore(baseScore: number, recentBoost: number): number {
@@ -48,8 +61,24 @@ function isRecentNoteFile(file: unknown): file is Pick<TFile, "path" | "extensio
 	);
 }
 
-function getRecentNoteBoost(recentIndex: number): number {
-	return Math.max(RECENT_RANK_BOOST - recentIndex * RECENT_RANK_DECAY, MIN_RECENT_RANK_BOOST);
+/**
+ * Map a note's age to its boost. Returns 0 outside the window, which is the
+ * signal callers use to drop the note from the recent set entirely.
+ *
+ * Within the window the curve is flat at full strength for the first day, then
+ * decays linearly to the floor at the far edge, so the boost degrades smoothly
+ * instead of falling off a cliff the moment a note turns seven days old.
+ */
+export function getRecentNoteBoost(ageMs: number): number {
+	if (!Number.isFinite(ageMs) || ageMs >= RECENT_NOTE_WINDOW_MS) return 0;
+	// A clock change (or a fixture stamped in the future) must not read as stale.
+	const age = Math.max(0, ageMs);
+
+	const fullStrengthMs = RECENT_NOTE_WINDOW_MS * RECENT_FULL_STRENGTH_FRACTION;
+	if (age <= fullStrengthMs) return MAX_RECENT_BOOST;
+
+	const decayProgress = (age - fullStrengthMs) / (RECENT_NOTE_WINDOW_MS - fullStrengthMs);
+	return MAX_RECENT_BOOST - decayProgress * (MAX_RECENT_BOOST - MIN_RECENT_BOOST);
 }
 
 export function getRecentlyOpenedNotes(app: App, filter?: SearchFilter): SearchResult[] {
@@ -59,14 +88,21 @@ export function getRecentlyOpenedNotes(app: App, filter?: SearchFilter): SearchR
 
 	const compiled = filter ? compileFilter(filter) : undefined;
 	const results: SearchResult[] = [];
+	const now = Date.now();
+	// `recentNotes` is sorted most-recent-first, so `index` still describes the
+	// note's position in the history — it is reported for debugging, but no
+	// longer determines the boost.
 	for (const [index, entry] of pluginData.recentNotes.entries()) {
+		const recentBoost = getRecentNoteBoost(now - entry.lastOpenedAt);
+		// Outside the window: not recent, regardless of how few notes precede it.
+		if (recentBoost <= 0) continue;
+
 		const file = getAbstractFileByPath.call(app.vault, entry.path);
 		if (!isRecentNoteFile(file)) continue;
 
 		const cache = app.metadataCache.getFileCache(file as TFile);
 		const docTags = getCachedTags(cache);
 		if (!matchesSearchFilter(file.path, docTags, compiled ?? filter)) continue;
-		const recentBoost = getRecentNoteBoost(index);
 
 		results.push({
 			path: file.path,

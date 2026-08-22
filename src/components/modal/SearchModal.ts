@@ -1406,6 +1406,9 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 
 		const activeFilePath = this.app.workspace.getActiveFile()?.path;
 		const filter = this.buildActiveFilter();
+		// `getRecentNotes` already bounds this by age; the slice is purely a display
+		// limit so the empty-state list stays scannable when a week's worth of notes
+		// qualifies.
 		return getRecentNotes(this.app, filter)
 			.filter((result) => result.path !== activeFilePath)
 			.slice(0, 20);
