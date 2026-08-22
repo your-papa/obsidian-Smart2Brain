@@ -1385,6 +1385,10 @@ async function deriveGranularityLevels(topicEdges: GraphEdge[]) {
 
 	const probes: Array<{ resolution: number; topicCount: number; isFragmented: boolean }> = [];
 	const start = performance.now();
+	// Count only what the view will actually render: Leiden runs over topic
+	// edges, so its map covers just connected nodes, and segment resolution
+	// drops communities whose members aren't on screen.
+	const visibleNodeIds = new Set(graphData.nodes.map((node) => node.id));
 
 	try {
 		for (const resolution of GRANULARITY_PROBE_RESOLUTIONS) {
@@ -1404,7 +1408,7 @@ async function deriveGranularityLevels(topicEdges: GraphEdge[]) {
 					continue;
 				}
 			}
-			probes.push({ resolution, ...summarizePartition(communities) });
+			probes.push({ resolution, ...summarizePartition(communities, visibleNodeIds) });
 		}
 
 		if (localBuildVersion !== buildVersion) return;

@@ -5,10 +5,13 @@ import { forceSimulation, type SimulationNodeDatum, type SimulationLinkDatum } f
 import type { GraphData, GraphNode, EdgeType } from "../../types/graph";
 import { deriveClusterRepresentativesFromGraph } from "../../views/smart-graph/graphDataBuilder";
 import {
+	computeCoreNodeBounds,
 	computeNodeBounds,
 	easeOutCubic,
+	framingFocus,
 	framingTransform,
 	GRAPH_FIT_MAX_SCALE,
+	type BoundingBox,
 	type FramingPadding,
 } from "../../utils/graphAnimation";
 import { buildTopicRegion, centroid } from "../../utils/convexHull";
@@ -2125,14 +2128,16 @@ function setupForceSimulation(
 				if (forceTickCount % refitEvery === 0) {
 					const bounds = computeNodeBounds(simNodes);
 					if (bounds) {
-						const frame = framingTransform(
+						// Centre on the core (so unsorted strays don't drag the view
+						// off to one side) while the scale still fits every node.
+						const frame = framingFocus(
 							bounds,
 							{ width: pixi.width, height: pixi.height },
 							GRAPH_FIT_PADDING,
+							GRAPH_FIT_MAX_SCALE,
+							computeCoreNodeBounds(simNodes),
 						);
-						const cx = (bounds.minX + bounds.maxX) / 2;
-						const cy = (bounds.minY + bounds.maxY) / 2;
-						pixi.animateToFrame(cx, cy, frame.scale, isReclustering ? 400 : 150);
+						pixi.animateToFrame(frame.centerX, frame.centerY, frame.scale, isReclustering ? 400 : 150);
 					}
 				}
 				// Once settled, do one final smooth fit and stop tracking.
@@ -2143,11 +2148,17 @@ function setupForceSimulation(
 					// The layout can still creep after alpha drops below the tracking
 					// threshold — clusters keep spreading for a while — so that "final"
 					// fit is often already stale. Take one more measurement after the
-					// drift has actually stopped.
+					// drift has actually stopped, but only *apply* it if the framing
+					// really went stale: on a collapse the graph is already settled
+					// and framed, and an unconditional refit reads as the camera
+					// lurching out for no reason a second after it arrived.
+					const settledBounds = computeNodeBounds(simNodes);
 					if (settleFitTimer != null) clearTimeout(settleFitTimer);
 					settleFitTimer = setTimeout(() => {
 						settleFitTimer = null;
-						animateCameraToNodes(undefined, GRAPH_FIT_PADDING, 500);
+						if (driftedSince(settledBounds)) {
+							animateCameraToNodes(undefined, GRAPH_FIT_PADDING, 500);
+						}
 					}, SETTLE_FIT_DELAY_MS);
 				}
 			}
@@ -2453,14 +2464,14 @@ onMount(() => {
 			if (alpha < 0.05) {
 				const bounds = computeNodeBounds(simNodes);
 				if (bounds) {
-					const frame = framingTransform(
+					const frame = framingFocus(
 						bounds,
 						{ width: renderer.width, height: renderer.height },
 						GRAPH_FIT_PADDING,
+						GRAPH_FIT_MAX_SCALE,
+						computeCoreNodeBounds(simNodes),
 					);
-					const cx = (bounds.minX + bounds.maxX) / 2;
-					const cy = (bounds.minY + bounds.maxY) / 2;
-					renderer.snapToFrame(cx, cy, frame.scale);
+					renderer.snapToFrame(frame.centerX, frame.centerY, frame.scale);
 				}
 			} else {
 				// Simulation still running — tick loop will handle fitting.
@@ -2526,6 +2537,32 @@ onMount(() => {
 	};
 });
 
+/**
+ * How much the layout's extent must change after the settle before a
+ * corrective refit is worth it. Below this the framing is still essentially
+ * right, and re-running it just moves the camera under the user.
+ */
+const SETTLE_REFIT_DRIFT_THRESHOLD = 0.12;
+
+/**
+ * Whether the layout has drifted enough since `previous` to justify refitting.
+ *
+ * A fresh build keeps spreading after alpha decays, so its first "final" fit
+ * really is stale. A collapse settles almost immediately at a layout the
+ * camera already framed — there the delayed refit had nothing to correct and
+ * only read as an unexplained zoom-out a second later.
+ */
+function driftedSince(previous: BoundingBox | null): boolean {
+	if (!previous) return false;
+	const current = computeNodeBounds(simNodes);
+	if (!current) return false;
+	const previousWidth = Math.max(previous.maxX - previous.minX, 1);
+	const previousHeight = Math.max(previous.maxY - previous.minY, 1);
+	const widthDrift = Math.abs(current.maxX - current.minX - previousWidth) / previousWidth;
+	const heightDrift = Math.abs(current.maxY - current.minY - previousHeight) / previousHeight;
+	return Math.max(widthDrift, heightDrift) > SETTLE_REFIT_DRIFT_THRESHOLD;
+}
+
 /** Animate the camera to frame the given nodes with the specified padding and duration. */
 function animateCameraToNodes(
 	filter?: (node: SimNode) => boolean,
@@ -2543,10 +2580,12 @@ function animateCameraToNodes(
 	// sparse spread), not the camera's.
 	const bounds = computeNodeBounds(simNodes, filter);
 	if (!bounds) return;
-	const target = framingTransform(bounds, { width: pixi.width, height: pixi.height }, padding, maxScale);
-	const centerX = (bounds.minX + bounds.maxX) / 2;
-	const centerY = (bounds.minY + bounds.maxY) / 2;
-	pixi.animateToFrame(centerX, centerY, target.scale, duration);
+	// Whole-graph framings centre on the core so a lopsided ring of unsorted
+	// notes doesn't shove the main graph aside; an explicit selection is
+	// centred on exactly what was selected.
+	const centreBounds = filter ? null : computeCoreNodeBounds(simNodes);
+	const target = framingFocus(bounds, { width: pixi.width, height: pixi.height }, padding, maxScale, centreBounds);
+	pixi.animateToFrame(target.centerX, target.centerY, target.scale, duration);
 }
 
 /**

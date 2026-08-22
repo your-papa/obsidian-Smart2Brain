@@ -202,9 +202,21 @@ export const MAX_SINGLETON_SHARE = 0.5;
  *
  * Takes the community map directly so callers don't each re-derive group sizes.
  */
-export function summarizePartition(communities: CommunityMap): { topicCount: number; isFragmented: boolean } {
+export function summarizePartition(
+	communities: CommunityMap,
+	/**
+	 * Node ids present in the rendered graph. Leiden runs over *topic edges*
+	 * only, so its map covers just the connected nodes — while the graph shows
+	 * every node, and `resolveSegmentsByLeiden` discards communities whose
+	 * members aren't on screen. Counting without this filter produced ladder
+	 * rungs labelled with topic counts the view never displays, which is how a
+	 * ladder ended up going 4 topics → 3 topics as granularity increased.
+	 */
+	visibleNodeIds?: ReadonlySet<string>,
+): { topicCount: number; isFragmented: boolean } {
 	const sizes = new Map<number, number>();
-	for (const community of Object.values(communities)) {
+	for (const [nodeId, community] of Object.entries(communities)) {
+		if (visibleNodeIds && !visibleNodeIds.has(nodeId)) continue;
 		sizes.set(community, (sizes.get(community) ?? 0) + 1);
 	}
 	if (sizes.size === 0) return { topicCount: 0, isFragmented: false };
@@ -231,9 +243,11 @@ export function summarizePartition(communities: CommunityMap): { topicCount: num
  * - counts above {@link MAX_USEFUL_TOPICS} are dropped — the finest rungs were
  *   "more topics", not "more insight" (waived if the cap would leave fewer
  *   than two rungs, so a huge vault still gets a ladder);
- * - each surviving rung must have at least {@link MIN_RUNG_TOPIC_RATIO}× the
- *   previous rung's topics, so every slider step is a visible regrouping
- *   rather than a near-duplicate.
+ * - walking in γ order, each surviving rung must have at least
+ *   {@link MIN_RUNG_TOPIC_RATIO}× the previous rung's topics — so every slider
+ *   step is a visible regrouping rather than a near-duplicate, and a γ that
+ *   happens to yield *fewer* topics than a lower one is skipped rather than
+ *   producing a slider that walks backwards.
  *
  * Probes that found no topics (γ too low, or an edgeless graph) and those
  * flagged as fragmented (mostly one-note groups) are discarded outright.
@@ -252,16 +266,29 @@ export function deriveGranularityLadder(
 		if (!byCount.has(probe.topicCount)) byCount.set(probe.topicCount, probe.resolution);
 	}
 
+	/**
+	 * Walk the probes in γ order, keeping only rungs that also increase the
+	 * topic count.
+	 *
+	 * Leiden's topic count trends upward with γ but is not guaranteed monotonic
+	 * — it is a stochastic heuristic, and a higher γ can land on a partition
+	 * with *fewer* real topics. Ordering rungs by count and their resolutions
+	 * separately let those two orderings disagree, so the slider could go 4
+	 * topics at level 2 → 3 topics at level 3. Requiring both to rise together
+	 * keeps every step a genuine refinement; a γ that dips is simply skipped.
+	 */
 	const buildLadder = (maxTopics: number): number[] => {
-		const ascending = [...byCount.entries()].sort((a, b) => a[0] - b[0]);
+		const byResolution = [...byCount.entries()]
+			.map(([count, resolution]) => ({ count, resolution }))
+			.sort((a, b) => a.resolution - b.resolution);
 		const rungs: Array<{ count: number; resolution: number }> = [];
-		for (const [count, resolution] of ascending) {
-			if (count > maxTopics) continue;
+		for (const rung of byResolution) {
+			if (rung.count > maxTopics) continue;
 			const previous = rungs[rungs.length - 1];
-			if (previous && count < previous.count * MIN_RUNG_TOPIC_RATIO) continue;
-			rungs.push({ count, resolution });
+			if (previous && rung.count < previous.count * MIN_RUNG_TOPIC_RATIO) continue;
+			rungs.push(rung);
 		}
-		return rungs.map((rung) => rung.resolution).sort((a, b) => a - b);
+		return rungs.map((rung) => rung.resolution);
 	};
 
 	let ladder = buildLadder(MAX_USEFUL_TOPICS);
@@ -297,6 +324,12 @@ export const MIN_GRANULARITY_LEVEL = 1;
  * someone remembering to bump a schema version.
  */
 export const GRANULARITY_LADDER_RULES_KEY = [
+	// Bump when the *algorithm* changes in a way the constants below don't
+	// capture. v2: rungs are selected in γ order and must increase the topic
+	// count (was: sorted by count and by resolution independently, which let a
+	// non-monotonic Leiden result produce a slider that walked backwards), and
+	// probe counts are filtered to nodes the view actually renders.
+	"v2",
 	MAX_DERIVED_GRANULARITY_LEVELS,
 	MAX_USEFUL_TOPICS,
 	MIN_RUNG_TOPIC_RATIO,

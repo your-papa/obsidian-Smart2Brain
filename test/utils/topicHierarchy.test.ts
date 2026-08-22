@@ -277,6 +277,35 @@ describe("deriveGranularityLadder", () => {
 		expect(ladder).toEqual([0.5, 2.0]);
 	});
 
+	it("skips a γ that yields fewer topics than a lower one", () => {
+		// Leiden is a stochastic heuristic: its topic count trends upward with γ
+		// but can dip. Sorting rungs by count and by resolution independently let
+		// those orders disagree, so the slider showed 4 topics at one level and 3
+		// at the next.
+		const ladder = deriveGranularityLadder([
+			{ resolution: 0.5, topicCount: 3 },
+			{ resolution: 1.0, topicCount: 8 },
+			{ resolution: 2.0, topicCount: 4 },
+			{ resolution: 4.0, topicCount: 14 },
+		]);
+		// γ 2.0 dips back to 4 topics — dropped, not reordered ahead of γ 1.0.
+		expect(ladder).toEqual([0.5, 1.0, 4.0]);
+	});
+
+	it("keeps topic counts rising in step with the resolutions", () => {
+		const probes = [
+			{ resolution: 0.2, topicCount: 2 },
+			{ resolution: 0.6, topicCount: 5 },
+			{ resolution: 1.2, topicCount: 3 },
+			{ resolution: 2.5, topicCount: 9 },
+			{ resolution: 5.0, topicCount: 7 },
+		];
+		const ladder = deriveGranularityLadder(probes)!;
+		const counts = ladder.map((r) => probes.find((p) => p.resolution === r)!.topicCount);
+		expect([...ladder]).toEqual([...ladder].sort((a, b) => a - b));
+		expect([...counts]).toEqual([...counts].sort((a, b) => a - b));
+	});
+
 	it("waives the readability cap when every grouping exceeds it", () => {
 		// A huge vault whose coarsest partition is already past the cap still
 		// deserves a slider — capped-only filtering would return nothing.
@@ -294,6 +323,24 @@ describe("summarizePartition", () => {
 		// Two real topics (a/b and c/d) plus two loners.
 		const communities = { a: 0, b: 0, c: 1, d: 1, e: 2, f: 3 };
 		expect(summarizePartition(communities).topicCount).toBe(2);
+	});
+
+	it("counts only communities the view will actually render", () => {
+		// Leiden runs over topic edges, so its map can hold nodes the graph
+		// isn't showing; segment resolution drops those communities. Counting
+		// them anyway labelled ladder rungs with topic counts never displayed.
+		const communities = { a: 0, b: 0, c: 1, d: 1 };
+		expect(summarizePartition(communities).topicCount).toBe(2);
+		// Only the first community's nodes are on screen.
+		const visible = new Set(["a", "b"]);
+		expect(summarizePartition(communities, visible).topicCount).toBe(1);
+	});
+
+	it("drops a community left below the topic threshold by filtering", () => {
+		// c/d is a real topic in the partition, but only c is rendered — a lone
+		// note is not a topic, exactly as resolveSegmentsByLeiden decides.
+		const communities = { a: 0, b: 0, c: 1, d: 1 };
+		expect(summarizePartition(communities, new Set(["a", "b", "c"])).topicCount).toBe(1);
 	});
 
 	it("flags a partition that has shattered into singletons", () => {

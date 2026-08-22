@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeCoreNodeBounds, computeNodeBounds } from "../../src/utils/graphAnimation";
+import { computeCoreNodeBounds, computeNodeBounds, framingFocus } from "../../src/utils/graphAnimation";
 
 /** A tight knot of connected nodes plus far-flung unlinked ones. */
 function knotWithOutliers(knotSize: number, outliers: Array<{ x: number; y: number }>) {
@@ -61,5 +61,57 @@ describe("computeCoreNodeBounds", () => {
 		const nodes = knotWithOutliers(20, [{ x: 9999, y: 9999 }]);
 		expect(computeCoreNodeBounds(nodes, (n) => n.x < 0)).toBeNull();
 		expect(computeCoreNodeBounds([])).toBeNull();
+	});
+});
+
+describe("framingFocus", () => {
+	const viewport = { width: 1000, height: 1000 };
+
+	// Small enough that the 1.3x zoom cap binds instead of the extent, which is
+	// what leaves slack for the centre to move within.
+	const bounds = { minX: -100, maxX: 300, minY: -100, maxY: 100 };
+	const core = { minX: -100, maxX: 100, minY: -100, maxY: 100 };
+
+	it("centres on the core rather than the full extent", () => {
+		// Main graph around the origin, one stray off to the right: centring on
+		// the full box would shove the graph to the left of the viewport.
+		const focus = framingFocus(bounds, viewport, 40, 1.3, core);
+		const fullCentre = (bounds.minX + bounds.maxX) / 2;
+		expect(focus.centerX).toBeLessThan(fullCentre);
+		expect(focus.centerX).toBeCloseTo(0, 6);
+	});
+
+	it("keeps every node in bounds visible despite the recentring", () => {
+		const focus = framingFocus(bounds, viewport, 40, 1.3, core);
+		const halfW = (viewport.width - 80) / (2 * focus.scale);
+		// The clamp is what stops the stray being pushed off-screen.
+		expect(focus.centerX + halfW).toBeGreaterThanOrEqual(bounds.maxX - 1e-6);
+		expect(focus.centerX - halfW).toBeLessThanOrEqual(bounds.minX + 1e-6);
+	});
+
+	it("clamps the recentring when the core sits too far from the extent's edge", () => {
+		// Core hard against the left of a wide extent: centring fully on it
+		// would push the right-hand nodes out, so the clamp pulls it back.
+		const wide = { minX: -100, maxX: 800, minY: -100, maxY: 100 };
+		const focus = framingFocus(wide, viewport, 40, 1.3, core);
+		const halfW = (viewport.width - 80) / (2 * focus.scale);
+		expect(focus.centerX).toBeGreaterThan(0);
+		expect(focus.centerX + halfW).toBeGreaterThanOrEqual(wide.maxX - 1e-6);
+	});
+
+	it("falls back to the full centre when the graph exceeds the viewport", () => {
+		// No slack: the scale is set by the extent, so the centre cannot move.
+		const bounds = { minX: -5000, maxX: 5000, minY: -5000, maxY: 5000 };
+		const core = { minX: -100, maxX: 100, minY: -100, maxY: 100 };
+		const focus = framingFocus(bounds, viewport, 40, 1.3, core);
+		expect(focus.centerX).toBeCloseTo(0, 6);
+		expect(focus.centerY).toBeCloseTo(0, 6);
+	});
+
+	it("matches the plain centre when no core bounds are given", () => {
+		const bounds = { minX: 0, maxX: 200, minY: 0, maxY: 200 };
+		const focus = framingFocus(bounds, viewport, 40, 1.3);
+		expect(focus.centerX).toBeCloseTo(100, 6);
+		expect(focus.centerY).toBeCloseTo(100, 6);
 	});
 });
