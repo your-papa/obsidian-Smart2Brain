@@ -409,6 +409,52 @@ describe("PendingChangesStore", () => {
 				return { id, original, afterGroupAccept, file };
 			}
 
+			/**
+			 * Regression (review of PR #411): accepting one group and then rejecting the
+			 * remaining ones drives `newContent` back to `originalContent`, so
+			 * `rejectChangeGroup` flips the entry to `rejected` — while the accepted group
+			 * is still written to the note. `rejectAll` filtered on `status === "pending"`
+			 * and therefore skipped exactly those entries, stranding the applied text on
+			 * disk while reporting that everything had been rejected.
+			 */
+			it("reverts an entry already marked rejected by group-level rejections", async () => {
+				const { id, original, afterGroupAccept } = await stagePartiallyAccepted();
+
+				// Reject the one remaining group. Groups are recomputed from the advanced
+				// originalContent, so the remaining change is index 0.
+				store.rejectChangeGroup(id, 0);
+				expect(store.getEntry(id)?.status).toBe("rejected");
+				expect(store.getPendingCount("thread-1")).toBe(0);
+
+				// The accepted group is still on disk at this point.
+				plugin.app.vault.read = vi.fn().mockResolvedValue(afterGroupAccept);
+				(plugin.app.vault.modify as ReturnType<typeof vi.fn>).mockClear();
+
+				const skipped = await store.rejectAll("thread-1");
+
+				expect(skipped).toEqual([]);
+				expect(plugin.app.vault.modify).toHaveBeenCalledWith(expect.anything(), original);
+			});
+
+			it("does not re-revert on a second rejectAll", async () => {
+				const { id, original, afterGroupAccept } = await stagePartiallyAccepted();
+				store.rejectChangeGroup(id, 0);
+
+				plugin.app.vault.read = vi.fn().mockResolvedValue(afterGroupAccept);
+				await store.rejectAll("thread-1");
+
+				// The user edits the note after the revert. A second rejectAll must not
+				// clobber that with the now-stale pre-proposal snapshot.
+				plugin.app.vault.read = vi.fn().mockResolvedValue("my own later edits\n");
+				(plugin.app.vault.modify as ReturnType<typeof vi.fn>).mockClear();
+
+				const skipped = await store.rejectAll("thread-1");
+
+				expect(plugin.app.vault.modify).not.toHaveBeenCalled();
+				expect(skipped).toEqual([]);
+				void original;
+			});
+
 			it("reverts to the pre-proposal content when the file is untouched since", async () => {
 				const { id, original, afterGroupAccept } = await stagePartiallyAccepted();
 

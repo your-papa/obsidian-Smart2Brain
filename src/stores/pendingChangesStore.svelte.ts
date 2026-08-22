@@ -457,9 +457,26 @@ export class PendingChangesStore {
 	 *  file keeps its current content. Callers should surface these: a silent skip reads as
 	 *  "everything was undone" when it wasn't. */
 	async rejectAll(threadId: string): Promise<string[]> {
-		const pending = this.#entries.filter((e) => e.threadId === threadId && e.status === "pending");
+		// Two distinct sets, deliberately:
+		//
+		//  - anything still `pending`, which must be marked rejected; and
+		//  - anything with `initialOriginalContent` set, which has partially-applied
+		//    content ON DISK that must be undone regardless of its status.
+		//
+		// The second set is not a subset of the first. Accepting one diff group and
+		// then rejecting the remaining ones drives `newContent` back to
+		// `originalContent`, so `rejectChangeGroup` already flipped the entry to
+		// `rejected` — while the accepted group is still written to the note. Filtering
+		// on `pending` alone skipped exactly those entries, leaving the applied text in
+		// the vault while the UI reported that everything had been rejected.
+		const targets = this.#entries.filter(
+			(e) =>
+				e.threadId === threadId &&
+				(e.status === "pending" ||
+					(e.change.type === "update" && e.change.initialOriginalContent !== undefined)),
+		);
 		const skippedReverts: string[] = [];
-		for (const entry of pending) {
+		for (const entry of targets) {
 			// Revert vault file if groups were partially accepted
 			if (entry.change.type === "update" && entry.change.initialOriginalContent !== undefined) {
 				const change = entry.change;
@@ -487,6 +504,12 @@ export class PendingChangesStore {
 						}
 
 						await this.#plugin.app.vault.modify(file, initialOriginalContent);
+						// The note is back to its pre-proposal state, so there is nothing
+						// left to undo. Clearing this makes the revert idempotent: a second
+						// rejectAll (or one after the user edits the note again) must not
+						// re-apply this stale snapshot over their newer content.
+						change.originalContent = initialOriginalContent;
+						change.initialOriginalContent = undefined;
 						return undefined;
 					});
 					if (skippedPath) {
