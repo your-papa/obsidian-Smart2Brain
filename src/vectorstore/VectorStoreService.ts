@@ -211,6 +211,16 @@ interface IndexInstance {
 	embeddings: EmbeddingsInterface | null;
 	currentProviderId: string | null;
 	currentModelId: string | null;
+	/**
+	 * Registry credential generation the cached `embeddings` was built at.
+	 *
+	 * The instance snapshots its resolved auth at construction, so provider/model id
+	 * equality is not enough to reuse it — an edited API key or baseUrl produces the
+	 * same ids while invalidating the instance. Mirrors the `authGen` term in
+	 * `AgentManager.buildRunnableCacheKey`, which fixed the identical staleness on
+	 * the chat side.
+	 */
+	currentAuthGeneration: number | null;
 	hasValidatedThisSession: boolean;
 	isIndexing: boolean;
 	progress: IndexingProgress;
@@ -242,6 +252,44 @@ export function formatEta(ms: number): string {
 	const hours = Math.floor(totalMinutes / 60);
 	const minutes = totalMinutes % 60;
 	return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
+}
+
+/**
+ * The subset of a cached embeddings instance's identity that decides reuse.
+ * Structural so the predicate below can be exercised without an IndexInstance.
+ */
+export interface CachedEmbeddingsIdentity {
+	providerId: string | null;
+	modelId: string | null;
+	/** Registry credential generation the instance was built at. */
+	authGeneration: number | null;
+}
+
+/**
+ * Whether a cached embeddings instance can be reused for `want`.
+ *
+ * Extracted from `getEmbeddingsForInstance` so the rule is directly testable:
+ * the method itself is private and reachable only through index initialization,
+ * which made the credential check unverifiable by mutation — the guard could be
+ * deleted without failing a single test.
+ *
+ * The `authGeneration` term is the load-bearing one. An embeddings instance
+ * snapshots its resolved auth at construction, and index instances live for the
+ * whole plugin session, so provider/model equality alone would keep serving an
+ * instance built with a rotated-away API key or a stale baseUrl. That fails
+ * silently — an embed call just 401s or returns nothing — until Obsidian
+ * restarts. Same defect the `authGen` term fixed in the agent's runnable cache.
+ */
+export function canReuseCachedEmbeddings(
+	cached: CachedEmbeddingsIdentity,
+	want: { provider: string; model: string },
+	currentAuthGeneration: number,
+): boolean {
+	return (
+		cached.providerId === want.provider &&
+		cached.modelId === want.model &&
+		cached.authGeneration === currentAuthGeneration
+	);
 }
 
 export interface ValidationProgressCountsInput {
@@ -299,6 +347,7 @@ export class VectorStoreService {
 			embeddings: null,
 			currentProviderId: null,
 			currentModelId: null,
+			currentAuthGeneration: null,
 			hasValidatedThisSession: false,
 			isIndexing: false,
 			progress: {
@@ -593,15 +642,30 @@ export class VectorStoreService {
 	 * Get or create embeddings for a specific instance.
 	 */
 	private getEmbeddingsForInstance(inst: IndexInstance, model: DefaultEmbedModel): EmbeddingsInterface | null {
-		if (inst.embeddings && inst.currentProviderId === model.provider && inst.currentModelId === model.model) {
+		const registry = getRegistry();
+		const authGeneration = registry.getAuthGeneration();
+		// Reuse rule lives in `canReuseCachedEmbeddings` — see there for why the
+		// credential generation has to participate.
+		if (
+			inst.embeddings &&
+			canReuseCachedEmbeddings(
+				{
+					providerId: inst.currentProviderId,
+					modelId: inst.currentModelId,
+					authGeneration: inst.currentAuthGeneration,
+				},
+				model,
+				authGeneration,
+			)
+		) {
 			return inst.embeddings;
 		}
 
 		try {
-			const registry = getRegistry();
 			inst.embeddings = registry.createEmbeddingInstance(model.provider, model.model);
 			inst.currentProviderId = model.provider;
 			inst.currentModelId = model.model;
+			inst.currentAuthGeneration = authGeneration;
 			return inst.embeddings;
 		} catch (error) {
 			Logger.error(`[VectorStore] Failed to create embeddings for ${inst.indexId}:`, error);
