@@ -2,8 +2,8 @@
  * View Filter Types
  *
  * A recursive filter tree that describes a re-resolvable set of vault files.
- * Used by the privacy list and by Spaces membership rules — not by the graph,
- * despite having originally lived in `types/graph.ts` alongside saved views.
+ * Used by the privacy list's membership rules — not by the graph, despite
+ * having originally lived in `types/graph.ts` alongside saved views.
  *
  * Resolution lives in `lib/views.ts`; the editor UI is
  * `components/settings/ViewFilterBuilder.svelte`.

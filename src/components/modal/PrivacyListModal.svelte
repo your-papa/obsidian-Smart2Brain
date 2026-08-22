@@ -2,15 +2,15 @@
 import { getAllTags, type App } from "obsidian";
 import type { ViewFilter } from "../../types/viewFilter";
 import {
-	buildSpaceMembershipRulesEditorFilter,
-	cloneSpaceMembershipDraft,
+	buildPrivacyMembershipRulesEditorFilter,
+	clonePrivacyMembershipDraft,
 	cloneViewFilter,
-	compileSpaceMembershipDraft,
-	createEmptySpaceFilter,
-	extractSpaceMembershipRulesFilter,
-	parseSpaceMembershipFilter,
+	compilePrivacyMembershipDraft,
+	createEmptyPrivacyFilter,
+	extractPrivacyMembershipRulesFilter,
+	parsePrivacyMembershipFilter,
 	resolveViewFilter,
-	resolveSpaceMembershipDraft,
+	resolvePrivacyMembershipDraft,
 	rewriteViewFilterForRename,
 } from "../../lib/views";
 import { getData } from "../../stores/dataStore.svelte";
@@ -81,8 +81,8 @@ function ensureGroup(filter: ViewFilter): ViewFilter {
 	return { type: "all", conditions: [filter] };
 }
 
-const initialParsed = parseSpaceMembershipFilter(data.privacyFilter);
-let privacyFilter = $state<ViewFilter>(ensureGroup(data.privacyFilter ?? createEmptySpaceFilter()));
+const initialParsed = parsePrivacyMembershipFilter(data.privacyFilter);
+let privacyFilter = $state<ViewFilter>(ensureGroup(data.privacyFilter ?? createEmptyPrivacyFilter()));
 let showFilters = $state(initialParsed.draft.autoIncludeRules.length > 0);
 /** Whether the mode explanation + path-visibility caveat are expanded. */
 let showModeDetails = $state(false);
@@ -118,7 +118,7 @@ $effect(() => {
 	});
 	return () => app.vault.offref(ref);
 });
-const parsedMembership = $derived.by(() => parseSpaceMembershipFilter(privacyFilter));
+const parsedMembership = $derived.by(() => parsePrivacyMembershipFilter(privacyFilter));
 const privacyUniverse = $derived.by(
 	() =>
 		new Set(
@@ -135,7 +135,7 @@ const resolvedPrivacy = $derived.by(() =>
 				provenance: new Map<string, string[]>(),
 				excludedPaths: new Set<string>(),
 			}
-		: resolveSpaceMembershipDraft(app, parsedMembership.draft, privacyUniverse),
+		: resolvePrivacyMembershipDraft(app, parsedMembership.draft, privacyUniverse),
 );
 const includedFiles = $derived.by(() => [...resolvedPrivacy.paths].sort((left, right) => left.localeCompare(right)));
 const excludedFiles = $derived.by(() =>
@@ -213,12 +213,12 @@ function saveChanges() {
 	modal.close();
 }
 
-function updateDraft(mutator: (draft: ReturnType<typeof cloneSpaceMembershipDraft>) => void) {
-	const currentParsedMembership = parseSpaceMembershipFilter(privacyFilter);
-	const draft = cloneSpaceMembershipDraft(currentParsedMembership.draft);
+function updateDraft(mutator: (draft: ReturnType<typeof clonePrivacyMembershipDraft>) => void) {
+	const currentParsedMembership = parsePrivacyMembershipFilter(privacyFilter);
+	const draft = clonePrivacyMembershipDraft(currentParsedMembership.draft);
 	mutator(draft);
 	showFilters = showFilters || draft.autoIncludeRules.length > 0;
-	updatePrivacyFilter(compileSpaceMembershipDraft(draft));
+	updatePrivacyFilter(compilePrivacyMembershipDraft(draft));
 }
 
 function getParentPath(path: string): string {
@@ -248,7 +248,7 @@ function restoreExcludedPath(path: string) {
 }
 
 function handleRulesFilterChange(nextFilter: ViewFilter) {
-	const simpleRules = extractSpaceMembershipRulesFilter(nextFilter);
+	const simpleRules = extractPrivacyMembershipRulesFilter(nextFilter);
 	if (!simpleRules) {
 		showFilters = true;
 		updatePrivacyFilter(cloneViewFilter(nextFilter));
@@ -465,7 +465,7 @@ const excludedTitle = $derived.by(() => (privacyMode === "private-by-default" ? 
       filterPanelLabel="Filters"
       filterBuilderFilter={parsedMembership.isAdvanced
   		? ensureGroup(cloneViewFilter(privacyFilter))
-  		: buildSpaceMembershipRulesEditorFilter(parsedMembership.draft.autoIncludeRules)}
+  		: buildPrivacyMembershipRulesEditorFilter(parsedMembership.draft.autoIncludeRules)}
       {availableFolders}
       {availableTags}
       {availableProperties}

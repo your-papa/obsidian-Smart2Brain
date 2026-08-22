@@ -27,25 +27,25 @@ export interface ResolvedView {
 	stalePaths: string[];
 }
 
-export type SpaceMembershipRule =
+export type PrivacyMembershipRule =
 	| { type: "folder"; value: string }
 	| { type: "tag"; value: string }
 	| { type: "extension"; value: string }
 	| { type: "query"; value: string; algorithm: "lexical" | "semantic" | "hybrid" }
 	| { type: "property"; value: string; values?: string[] };
 
-export interface SpaceMembershipDraft {
+export interface PrivacyMembershipDraft {
 	manualPaths: string[];
-	autoIncludeRules: SpaceMembershipRule[];
+	autoIncludeRules: PrivacyMembershipRule[];
 	excludedPaths: string[];
 }
 
-export interface ParsedSpaceMembershipDraft {
-	draft: SpaceMembershipDraft;
+export interface ParsedPrivacyMembershipDraft {
+	draft: PrivacyMembershipDraft;
 	isAdvanced: boolean;
 }
 
-export interface ResolvedSpaceMembership extends ResolvedView {
+export interface ResolvedPrivacyMembership extends ResolvedView {
 	provenance: Map<string, string[]>;
 	excludedPaths: Set<string>;
 }
@@ -189,10 +189,10 @@ export function rewriteViewFilterForRename(filter: ViewFilter, oldPath: string, 
 	return changed ? { type: filter.type, conditions } : filter;
 }
 
-export function cloneSpaceMembershipDraft(draft: SpaceMembershipDraft): SpaceMembershipDraft {
+export function clonePrivacyMembershipDraft(draft: PrivacyMembershipDraft): PrivacyMembershipDraft {
 	return {
 		manualPaths: [...draft.manualPaths],
-		autoIncludeRules: draft.autoIncludeRules.map((rule) => cloneSpaceMembershipRule(rule)),
+		autoIncludeRules: draft.autoIncludeRules.map((rule) => clonePrivacyMembershipRule(rule)),
 		excludedPaths: [...draft.excludedPaths],
 	};
 }
@@ -212,12 +212,12 @@ export function resolveViewFilter(app: App, filter: ViewFilter, universe?: Set<s
 	return resolveNode(app, filter, allPaths);
 }
 
-export function createEmptySpaceFilter(): ViewFilter {
+export function createEmptyPrivacyFilter(): ViewFilter {
 	return { type: "paths", value: [] };
 }
 
-export function compileSpaceMembershipDraft(draft: SpaceMembershipDraft): ViewFilter {
-	const normalized = normalizeSpaceMembershipDraft(draft);
+export function compilePrivacyMembershipDraft(draft: PrivacyMembershipDraft): ViewFilter {
+	const normalized = normalizePrivacyMembershipDraft(draft);
 	const includeLeaves: ViewFilterLeaf[] = [];
 
 	if (normalized.manualPaths.length > 0) {
@@ -225,11 +225,11 @@ export function compileSpaceMembershipDraft(draft: SpaceMembershipDraft): ViewFi
 	}
 
 	for (const rule of normalized.autoIncludeRules) {
-		includeLeaves.push(cloneSpaceMembershipRule(rule));
+		includeLeaves.push(clonePrivacyMembershipRule(rule));
 	}
 
 	if (includeLeaves.length === 0) {
-		return createEmptySpaceFilter();
+		return createEmptyPrivacyFilter();
 	}
 
 	const includeNode: ViewFilter =
@@ -245,41 +245,41 @@ export function compileSpaceMembershipDraft(draft: SpaceMembershipDraft): ViewFi
 	};
 }
 
-export function buildSpaceMembershipRulesEditorFilter(rules: SpaceMembershipRule[]): ViewFilter {
+export function buildPrivacyMembershipRulesEditorFilter(rules: PrivacyMembershipRule[]): ViewFilter {
 	return {
 		type: "any",
-		conditions: rules.map((rule) => cloneSpaceMembershipRule(rule)),
+		conditions: rules.map((rule) => clonePrivacyMembershipRule(rule)),
 	};
 }
 
-export function extractSpaceMembershipRulesFilter(filter: ViewFilter): SpaceMembershipRule[] | null {
+export function extractPrivacyMembershipRulesFilter(filter: ViewFilter): PrivacyMembershipRule[] | null {
 	if (isLeaf(filter)) {
-		return isSpaceMembershipRule(filter) ? [cloneSpaceMembershipRule(filter)] : null;
+		return isPrivacyMembershipRule(filter) ? [clonePrivacyMembershipRule(filter)] : null;
 	}
 
 	if (filter.type !== "any") {
 		return null;
 	}
 
-	const rules: SpaceMembershipRule[] = [];
+	const rules: PrivacyMembershipRule[] = [];
 	for (const condition of filter.conditions) {
-		if (!isLeaf(condition) || !isSpaceMembershipRule(condition)) {
+		if (!isLeaf(condition) || !isPrivacyMembershipRule(condition)) {
 			return null;
 		}
-		rules.push(cloneSpaceMembershipRule(condition));
+		rules.push(clonePrivacyMembershipRule(condition));
 	}
 
 	return rules;
 }
 
-export function parseSpaceMembershipFilter(filter: ViewFilter): ParsedSpaceMembershipDraft {
-	const draft: SpaceMembershipDraft = {
+export function parsePrivacyMembershipFilter(filter: ViewFilter): ParsedPrivacyMembershipDraft {
+	const draft: PrivacyMembershipDraft = {
 		manualPaths: [],
 		autoIncludeRules: [],
 		excludedPaths: [],
 	};
 
-	if (!extractSimpleSpaceMembership(filter, draft)) {
+	if (!extractSimplePrivacyMembership(filter, draft)) {
 		return {
 			draft: {
 				manualPaths: [],
@@ -291,17 +291,17 @@ export function parseSpaceMembershipFilter(filter: ViewFilter): ParsedSpaceMembe
 	}
 
 	return {
-		draft: normalizeSpaceMembershipDraft(draft),
+		draft: normalizePrivacyMembershipDraft(draft),
 		isAdvanced: false,
 	};
 }
 
-export function resolveSpaceMembershipDraft(
+export function resolvePrivacyMembershipDraft(
 	app: App,
-	draft: SpaceMembershipDraft,
+	draft: PrivacyMembershipDraft,
 	universe?: Set<string>,
-): ResolvedSpaceMembership {
-	const normalized = normalizeSpaceMembershipDraft(draft);
+): ResolvedPrivacyMembership {
+	const normalized = normalizePrivacyMembershipDraft(draft);
 	const resolvedPaths = new Set<string>();
 	const provenance = new Map<string, string[]>();
 	const stalePaths = new Set<string>();
@@ -339,8 +339,8 @@ export function resolveSpaceMembershipDraft(
 	};
 }
 
-export function matchesSpaceMembershipDraftPath(app: App, draft: SpaceMembershipDraft, filePath: string): boolean {
-	const normalized = normalizeSpaceMembershipDraft(draft);
+export function matchesPrivacyMembershipDraftPath(app: App, draft: PrivacyMembershipDraft, filePath: string): boolean {
+	const normalized = normalizePrivacyMembershipDraft(draft);
 
 	if (normalized.excludedPaths.includes(filePath)) {
 		return false;
@@ -350,7 +350,7 @@ export function matchesSpaceMembershipDraftPath(app: App, draft: SpaceMembership
 		return true;
 	}
 
-	return normalized.autoIncludeRules.some((rule) => matchesSpaceMembershipRulePath(app, rule, filePath));
+	return normalized.autoIncludeRules.some((rule) => matchesPrivacyMembershipRulePath(app, rule, filePath));
 }
 
 /**
@@ -402,15 +402,15 @@ export function describeViewFilter(filter: ViewFilter): string {
 	return `${filter.type}(${inner})`;
 }
 
-function normalizeSpaceMembershipDraft(draft: SpaceMembershipDraft): SpaceMembershipDraft {
+function normalizePrivacyMembershipDraft(draft: PrivacyMembershipDraft): PrivacyMembershipDraft {
 	return {
 		manualPaths: dedupeStrings(draft.manualPaths),
-		autoIncludeRules: draft.autoIncludeRules.map((rule) => cloneSpaceMembershipRule(rule)),
+		autoIncludeRules: draft.autoIncludeRules.map((rule) => clonePrivacyMembershipRule(rule)),
 		excludedPaths: dedupeStrings(draft.excludedPaths),
 	};
 }
 
-function extractSimpleSpaceMembership(filter: ViewFilter, draft: SpaceMembershipDraft): boolean {
+function extractSimplePrivacyMembership(filter: ViewFilter, draft: PrivacyMembershipDraft): boolean {
 	if (isLeaf(filter)) {
 		return extractSimpleIncludeNode(filter, draft);
 	}
@@ -443,15 +443,15 @@ function extractSimpleSpaceMembership(filter: ViewFilter, draft: SpaceMembership
 	return includeCount === 1;
 }
 
-function extractSimpleIncludeNode(filter: ViewFilter, draft: SpaceMembershipDraft): boolean {
+function extractSimpleIncludeNode(filter: ViewFilter, draft: PrivacyMembershipDraft): boolean {
 	if (isLeaf(filter)) {
 		if (filter.type === "paths") {
 			draft.manualPaths.push(...filter.value);
 			return true;
 		}
 
-		if (isSpaceMembershipRule(filter)) {
-			draft.autoIncludeRules.push(cloneSpaceMembershipRule(filter));
+		if (isPrivacyMembershipRule(filter)) {
+			draft.autoIncludeRules.push(clonePrivacyMembershipRule(filter));
 			return true;
 		}
 
@@ -482,7 +482,7 @@ function collectExcludedPaths(filter: ViewFilterGroup): string[] {
 	return paths;
 }
 
-function isSpaceMembershipRule(filter: ViewFilter): filter is SpaceMembershipRule {
+function isPrivacyMembershipRule(filter: ViewFilter): filter is PrivacyMembershipRule {
 	return (
 		filter.type === "folder" ||
 		filter.type === "tag" ||
@@ -512,7 +512,7 @@ function mergeResolvedMembership(
 	}
 }
 
-function describeMembershipRule(rule: SpaceMembershipRule): string {
+function describeMembershipRule(rule: PrivacyMembershipRule): string {
 	switch (rule.type) {
 		case "folder":
 			return `Folder: ${rule.value}`;
@@ -529,7 +529,7 @@ function describeMembershipRule(rule: SpaceMembershipRule): string {
 	}
 }
 
-function matchesSpaceMembershipRulePath(app: App, rule: SpaceMembershipRule, filePath: string): boolean {
+function matchesPrivacyMembershipRulePath(app: App, rule: PrivacyMembershipRule, filePath: string): boolean {
 	switch (rule.type) {
 		case "folder":
 			// See `resolveFolder`: a blank folder is an unfinished condition and
@@ -560,7 +560,7 @@ function matchesSpaceMembershipRulePath(app: App, rule: SpaceMembershipRule, fil
 	}
 }
 
-function cloneSpaceMembershipRule(rule: SpaceMembershipRule): SpaceMembershipRule {
+function clonePrivacyMembershipRule(rule: PrivacyMembershipRule): PrivacyMembershipRule {
 	switch (rule.type) {
 		case "folder":
 			return { type: "folder", value: rule.value };

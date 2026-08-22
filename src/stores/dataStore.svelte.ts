@@ -1,9 +1,9 @@
 import { normalizePath } from "obsidian";
 import { SHIPPED_BASE_PROMPTS, SHIPPED_MEMORY_PROMPTS } from "../agent/prompts";
 import {
-	createEmptySpaceFilter,
-	matchesSpaceMembershipDraftPath,
-	parseSpaceMembershipFilter,
+	createEmptyPrivacyFilter,
+	matchesPrivacyMembershipDraftPath,
+	parsePrivacyMembershipFilter,
 	resolveViewFilter,
 	rewriteViewFilterForRename,
 } from "../lib/views";
@@ -588,7 +588,7 @@ export const DEFAULT_SETTINGS: PluginData = {
 
 	// Privacy
 	privacyMode: "private-by-default",
-	privacyFilter: createEmptySpaceFilter(),
+	privacyFilter: createEmptyPrivacyFilter(),
 
 	// UI state
 	isVerbose: false,
@@ -770,13 +770,13 @@ export class PluginDataStore {
 	}
 
 	private isFileListedInPrivacyFilter(filePath: string): boolean {
-		const parsed = parseSpaceMembershipFilter(this.#data.privacyFilter);
+		const parsed = parsePrivacyMembershipFilter(this.#data.privacyFilter);
 		if (parsed.isAdvanced) {
 			return resolveViewFilter(this._plugin.app, this.#data.privacyFilter, this.getAllVaultPaths()).paths.has(
 				filePath,
 			);
 		}
-		return matchesSpaceMembershipDraftPath(this._plugin.app, parsed.draft, filePath);
+		return matchesPrivacyMembershipDraftPath(this._plugin.app, parsed.draft, filePath);
 	}
 
 	/** Check whether a provider is trusted to process private/sensitive files. */
