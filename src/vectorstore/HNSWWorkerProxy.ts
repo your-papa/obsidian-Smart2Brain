@@ -93,6 +93,10 @@ export class HNSWWorkerProxy implements VectorStore {
 		return (result as DocumentVector) ?? undefined;
 	}
 
+	async getAllByPath(path: string): Promise<DocumentVector[]> {
+		return (await this.call("getAllByPath", path)) as DocumentVector[];
+	}
+
 	async getDocumentMtime(path: string): Promise<number | undefined> {
 		const result = await this.call("getDocumentMtime", path);
 		return (result as number) ?? undefined;

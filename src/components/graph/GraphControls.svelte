@@ -84,10 +84,18 @@ let {
 let isCollapsed = $state(true);
 let isDevCollapsed = $state(true);
 
+/**
+ * Live height of the main panel, so the dev panel can stack directly beneath
+ * it. Measured rather than assumed: the panel grows and shrinks as sections
+ * are opened and as the topic list fills.
+ */
+let mainPanelHeight = $state(0);
+
 let sectionOpen: Record<string, boolean> = $state({
 	devLayout: false,
 	devSemantic: false,
 	devLeiden: false,
+	devAppearance: false,
 });
 
 let graphStats = $derived.by(() => {
@@ -163,6 +171,65 @@ function handleClusterCohesionStrengthChange(val: number) {
 	onSettingsChange({ clusterCohesionStrength: val / 100 });
 }
 
+/**
+ * Set γ directly, bypassing the granularity ladder.
+ *
+ * The user-facing slider snaps to the vault's derived rungs; this one is
+ * deliberately continuous so a dev can probe values between them. Reuses the
+ * seed callback because both change the Leiden partition identity, which is
+ * exactly what needs recomputing.
+ */
+function handleResolutionChange(resolution: number) {
+	onSettingsChange({ leidenResolution: resolution });
+	onSeedChange?.();
+}
+
+/**
+ * Every knob this panel exposes, so "reset" restores exactly what it can change
+ * — and nothing else. Listing the keys explicitly (rather than spreading the
+ * whole defaults object) keeps the user's model choice, colour groups and
+ * filters untouched, and makes a newly added control's absence here obvious.
+ */
+const DEV_TUNABLE_KEYS = [
+	"linkDistance",
+	"chargeStrength",
+	"centerStrength",
+	"linkStrength",
+	"clusterCohesionStrength",
+	"semanticNeighborCount",
+	"semanticThreshold",
+	"leidenSeed",
+	"leidenResolution",
+	"bridgeThreshold",
+	"minClusterSize",
+	"linkOnlyTopics",
+	"directedWikiEdges",
+	"showTopicHulls",
+	"showClusterLabels",
+	"highlightBridges",
+	"highlightIsolated",
+	"markdownOnly",
+] as const satisfies ReadonlyArray<keyof SmartGraphSettings>;
+
+/**
+ * Restore every tuning value in this panel to its shipped default.
+ *
+ * Fires the same follow-ups the individual controls do: the seed and γ change
+ * the Leiden partition, and the semantic values change which edges exist, so
+ * both need their recompute rather than just a settings write.
+ */
+function handleResetDevSettings() {
+	const patch: Partial<SmartGraphSettings> = {};
+	for (const key of DEV_TUNABLE_KEYS) {
+		(patch as Record<string, unknown>)[key] = DEFAULT_SMART_GRAPH_SETTINGS[key];
+	}
+	onSettingsChange(patch);
+	// Re-runs community detection at the restored seed/γ. The semantic values are
+	// part of the parent's rebuild signature, so its own effect handles those.
+	onSeedChange?.();
+	onReapplySegments?.();
+}
+
 // Touch devices have no keyboard modifiers or hover, so the desktop shortcut
 // hints ("F", "hold Shift + drag", "shift/⌘ multi-select") describe gestures
 // the user cannot perform. Drop them on mobile rather than advertise a
@@ -213,7 +280,7 @@ const lassoTooltip = onMobile ? "Lasso selection" : "Lasso selection (or hold Sh
 </div>
 
 <!-- Main settings panel -->
-<div class="graph-controls" class:collapsed={isCollapsed}>
+<div class="graph-controls" class:collapsed={isCollapsed} bind:clientHeight={mainPanelHeight}>
   {#if !isCollapsed}
     <div class="graph-controls-body">
       <!-- ── Stats row ──────────────────────────── -->
@@ -377,7 +444,12 @@ const lassoTooltip = onMobile ? "Lasso selection" : "Lasso selection (or hold Sh
 
 <!-- Dev panel (dev build only) -->
 {#if import.meta.env.DEV}
-  <div class="graph-controls graph-controls--dev" class:collapsed={isDevCollapsed}>
+  <div
+    class="graph-controls graph-controls--dev"
+    class:collapsed={isDevCollapsed}
+    class:graph-controls--main-open={!isCollapsed}
+    style="--s2b-graph-main-panel-height: {mainPanelHeight}px"
+  >
     {#if !isDevCollapsed}
       <div class="graph-controls-body">
         <button
@@ -403,6 +475,35 @@ const lassoTooltip = onMobile ? "Lasso selection" : "Lasso selection (or hold Sh
           </SettingContainer>
           <SettingContainer name="Cluster cohesion" desc="How strongly nodes are pulled toward their cluster center" compact>
             <RangeSlider value={Math.round((settings.clusterCohesionStrength ?? 0.15) * 100)} min={0} max={100} step={1} showValue={true} oncommit={handleClusterCohesionStrengthChange} />
+          </SettingContainer>
+        {/if}
+
+        <button
+          type="button"
+          class="section-label section-label--collapsible"
+          onclick={() => (sectionOpen.devAppearance = !sectionOpen.devAppearance)}
+        >
+          <span>Appearance</span>
+          <svg class="section-chevron" class:open={sectionOpen.devAppearance} xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+        </button>
+        {#if sectionOpen.devAppearance}
+          <SettingContainer name="Directed links" desc="Draw arrowheads on authored wiki links" compact>
+            <Toggle checked={settings.directedWikiEdges ?? true} onchange={(v) => onSettingsChange({ directedWikiEdges: v })} />
+          </SettingContainer>
+          <SettingContainer name="Topic regions" desc="Tinted area behind each topic's notes" compact>
+            <Toggle checked={settings.showTopicHulls ?? true} onchange={(v) => onSettingsChange({ showTopicHulls: v })} />
+          </SettingContainer>
+          <SettingContainer name="Topic labels" desc="Name pills drawn over each topic" compact>
+            <Toggle checked={settings.showClusterLabels ?? true} onchange={(v) => onSettingsChange({ showClusterLabels: v })} />
+          </SettingContainer>
+          <SettingContainer name="Highlight bridges" desc="Ring notes whose neighbors are mostly in other topics" compact>
+            <Toggle checked={settings.highlightBridges ?? false} onchange={(v) => { onSettingsChange({ highlightBridges: v }); onReapplySegments?.(); }} />
+          </SettingContainer>
+          <SettingContainer name="Highlight unlinked" desc="Ring notes with no authored links" compact>
+            <Toggle checked={settings.highlightIsolated ?? false} onchange={(v) => { onSettingsChange({ highlightIsolated: v }); onReapplySegments?.(); }} />
+          </SettingContainer>
+          <SettingContainer name="Markdown only" desc="Exclude non-markdown files from the graph" compact>
+            <Toggle checked={settings.markdownOnly ?? false} onchange={(v) => onSettingsChange({ markdownOnly: v })} />
           </SettingContainer>
         {/if}
 
@@ -458,13 +559,29 @@ const lassoTooltip = onMobile ? "Lasso selection" : "Lasso selection (or hold Sh
               }}
             />
           </SettingContainer>
+          <SettingContainer name="Resolution (γ)" desc="Higher → more, smaller topics. The granularity slider's underlying value" compact>
+            <RangeSlider
+              value={Math.round((settings.leidenResolution ?? 1) * 100)}
+              min={10}
+              max={600}
+              step={5}
+              showValue={true}
+              oncommit={(v) => handleResolutionChange(v / 100)}
+            />
+          </SettingContainer>
           <SettingContainer name="Bridge threshold" desc="Min fraction of foreign-topic neighbors to qualify as a bridge" compact>
             <RangeSlider value={Math.round((settings.bridgeThreshold ?? 0.4) * 100)} min={0} max={100} step={5} showValue={true} oncommit={(v) => { onSettingsChange({ bridgeThreshold: v / 100 }); onReapplySegments?.(); }} />
+          </SettingContainer>
+          <SettingContainer name="Link-only topics" desc="Detect topics from authored links alone, ignoring inferred edges" compact>
+            <Toggle checked={settings.linkOnlyTopics ?? false} onchange={(v) => onSettingsChange({ linkOnlyTopics: v })} />
+          </SettingContainer>
+          <SettingContainer name="Min cluster size" desc="Groups smaller than this aren't treated as topics" compact>
+            <RangeSlider value={settings.minClusterSize ?? 5} min={2} max={30} step={1} showValue={true} oncommit={(v) => onSettingsChange({ minClusterSize: v })} />
           </SettingContainer>
         {/if}
 
         <div class="dev-actions">
-          <Button iconId="refresh-cw" onClick={onRefresh} tooltip="Rebuild graph" />
+          <Button iconId="rotate-ccw" onClick={handleResetDevSettings} tooltip="Reset tuning to defaults" />
         </div>
       </div>
     {/if}
@@ -521,9 +638,22 @@ const lassoTooltip = onMobile ? "Lasso selection" : "Lasso selection (or hold Sh
     display: none;
   }
 
+  /* Same column as the main panel rather than offset to its left: the two are
+     toggled independently, so a fixed sideways offset left the dev panel
+     floating over open canvas whenever the main panel was closed. Stacking
+     below it keeps both anchored to the toolbar they belong to; when the main
+     panel is closed this is the only thing in the column and sits right under
+     the toolbar. */
   .graph-controls--dev {
     top: 8px;
-    right: 356px;
+    right: 52px;
+  }
+
+  /* Clear the main panel when both are open. It is 300px wide with a 16px
+     viewport allowance, so cap the dev panel's own height to what is left. */
+  .graph-controls--main-open {
+    top: calc(8px + var(--s2b-graph-main-panel-height, 0px) + 8px);
+    max-height: calc(100% - 24px - var(--s2b-graph-main-panel-height, 0px));
   }
 
   .graph-controls-body {

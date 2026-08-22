@@ -319,6 +319,12 @@ export interface VectorStore {
 	getByPath(path: string): Promise<DocumentVector | undefined>;
 
 	/**
+	 * Get every chunk vector of a note (a large note is stored as several
+	 * chunk rows; `getByPath` returns only one of them).
+	 */
+	getAllByPath(path: string): Promise<DocumentVector[]>;
+
+	/**
 	 * Check if a document exists and get its mtime.
 	 */
 	getDocumentMtime(path: string): Promise<number | undefined>;

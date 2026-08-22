@@ -20,6 +20,7 @@ import {
 	type PointData,
 } from "pixi.js";
 import { Viewport } from "pixi-viewport";
+import { edgeAlphaZoomLift, nodeDrawRadius, zoomNodeScale } from "../../utils/graphUtils";
 
 // ── Helpers ──────────────────────────────────────────────────
 
@@ -622,6 +623,8 @@ export class PixiRenderer {
 			color?: string;
 			degree?: number;
 			highlighted?: boolean;
+			/** "topic" for a collapsed topic node — sized on its own curve. */
+			kind?: string;
 		}>,
 		nodeSize: number,
 		opts: {
@@ -632,6 +635,11 @@ export class PixiRenderer {
 			isForceMode: boolean;
 			hoverAlphas: Map<string, number>;
 			nodeClusterMap: Map<string, number | undefined>;
+			/**
+			 * Per-node radius multiplier for spawn animations (grow-in on
+			 * collapse/expand and live additions). Absent or 1 = full size.
+			 */
+			spawnScales?: Map<string, number> | null;
 		},
 	): void {
 		const nodeIds = new Set(nodes.map((n) => n.id));
@@ -672,9 +680,12 @@ export class PixiRenderer {
 			}
 
 			const alpha = opts.hoverAlphas.get(node.id) ?? 0.85;
-			const base = Math.max(1, nodeSize);
-			const degree = node.degree ?? 0;
-			const radius = base + Math.min(Math.log1p(degree) * 2.5, base * 5);
+			const spawnScale = opts.spawnScales?.get(node.id) ?? 1;
+			// Shared formula — must agree with GraphCanvas's getNodeRadius or hover
+			// targets drift off the drawn circles. The zoom counter-scale keeps
+			// nodes visible when the camera is far out (GraphCanvas applies the
+			// same factor to hit-testing and label anchoring).
+			const radius = nodeDrawRadius(node, nodeSize) * spawnScale * zoomNodeScale(scale);
 			const rawFill = node.highlighted ? c.accent : (node.color ?? c.graphNode);
 			// Resolve hsl()/calc() colors to hex so Pixi.js can parse them
 			const resolvedFillColor = rawFill.startsWith("#") ? rawFill : resolveColor(rawFill, c.graphNode);
@@ -814,6 +825,12 @@ export class PixiRenderer {
 			target: { id: string; x: number; y: number; kind?: string };
 			type: string;
 			weight?: number;
+			/**
+			 * True when this edge appeared in the latest data change. Only new
+			 * edges take the fade-in (`edgeFadeAlpha`) — fading the whole graph on
+			 * every change made a one-topic fold flash every edge on screen.
+			 */
+			isNew?: boolean;
 		}>,
 		opts: {
 			showWikiLinks: boolean;
@@ -857,6 +874,10 @@ export class PixiRenderer {
 		// Dashed segments can't share the batched line buckets (each needs its own
 		// sub-path walk), so they collect separately and draw underneath.
 		const semanticLineBuckets = new Map<string, Array<{ sx: number; sy: number; tx: number; ty: number }>>();
+
+		// Loop-invariant: the base alpha is tuned for the overview, lifted as the
+		// camera zooms in (where few edges are on screen to crowd each other).
+		const safeBaseEdgeAlpha = clampUnitInterval(opts.baseEdgeAlpha * edgeAlphaZoomLift(scale), 0.25);
 
 		// Batch edges by style bucket to minimize draw calls.
 		// Key: "color|width|alpha" → list of segments
@@ -920,8 +941,9 @@ export class PixiRenderer {
 						0.85,
 					)
 				: 1;
-			const safeBaseEdgeAlpha = clampUnitInterval(opts.baseEdgeAlpha, 0.25);
-			const safeEdgeFadeAlpha = clampUnitInterval(opts.edgeFadeAlpha, 1);
+			// Pre-existing edges stay at full opacity through a data change; only
+			// edges born in it fade in, so the eye is drawn to what changed.
+			const safeEdgeFadeAlpha = edge.isNew ? clampUnitInterval(opts.edgeFadeAlpha, 1) : 1;
 
 			const rawAlpha =
 				(!inFocus ? 0.05 : !inSelection ? 0.05 : isHighlighted ? 0.9 : safeBaseEdgeAlpha) *

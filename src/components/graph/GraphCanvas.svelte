@@ -1,20 +1,22 @@
 <script lang="ts">
 import { onMount, untrack } from "svelte";
 import { Menu } from "obsidian";
-import {
-	forceSimulation,
-	forceLink,
-	forceManyBody,
-	forceCollide,
-	forceX,
-	forceY,
-	type SimulationNodeDatum,
-	type SimulationLinkDatum,
-} from "d3-force";
+import { forceSimulation, type SimulationNodeDatum, type SimulationLinkDatum } from "d3-force";
 import type { GraphData, GraphNode, EdgeType } from "../../types/graph";
 import { deriveClusterRepresentativesFromGraph } from "../../views/smart-graph/graphDataBuilder";
-import { computeNodeBounds, easeOutCubic, framingTransform, type FramingPadding } from "../../utils/graphAnimation";
+import {
+	computeCoreNodeBounds,
+	computeNodeBounds,
+	easeOutCubic,
+	framingFocus,
+	framingTransform,
+	GRAPH_FIT_MAX_SCALE,
+	type BoundingBox,
+	type FramingPadding,
+} from "../../utils/graphAnimation";
 import { buildTopicRegion, centroid } from "../../utils/convexHull";
+import { autoNodeSize, densityForceProfile, nodeDrawRadius, zoomNodeScale } from "../../utils/graphUtils";
+import { applyLayoutForces, clusterCohesionForce, type LayoutPhysicsConfig } from "../../utils/graphLayout";
 import { resolveNodePaths, topicNodeId } from "../../utils/mergeNodes";
 import { PixiRenderer, readThemeColors, type ClusterPillHit } from "./pixiRenderer";
 
@@ -117,7 +119,48 @@ let pixi: PixiRenderer | null = null;
 
 // Node size auto-tuned from graph size: larger for small graphs, smaller for dense ones.
 // Uses a continuous log scale so the transition is smooth, clamped to a readable range.
-let nodeSize = $derived(Math.max(2, Math.round(7 - Math.log10(Math.max(graphData.nodes.length, 10)) * 1.8)));
+//
+// Counts the notes the graph *represents* — a collapsed topic counts as its
+// members, not as one node. The tune adapts to vault size, and reading the
+// on-screen node count instead made collapse-all jump the base (2 → 5 on a
+// large vault, with the degree cap and label font scaling along): the closer
+// camera fit already magnifies the handful of topic nodes, so re-inflating
+// their world radius on top rendered them as giant discs.
+let representedNoteCount = $derived(
+	graphData.nodes.reduce((count, node) => count + (node.kind === "topic" ? (node.memberPaths?.length ?? 1) : 1), 0),
+);
+let nodeSize = $derived(autoNodeSize(representedNoteCount));
+
+// Density-adaptive physics: unlike node size (which keys off *represented*
+// notes so folding doesn't change the sizing regime), the forces key off the
+// nodes actually on screen — that count is what decides how far out the camera
+// must sit to frame everything. Each force gets its own multiplier (see
+// densityForceProfile for the asymmetry between the intra- and inter-cluster
+// length scales). The user's slider values are the baseline at the reference
+// density, where every multiplier is exactly 1.
+let visibleNodeCount = $derived(graphData.nodes.length);
+let forceProfile = $derived(densityForceProfile(visibleNodeCount));
+/** Density-adjusted link distance — for the circle pre-layout's sizing. */
+let effectiveLinkDistance = $derived(linkDistance * forceProfile.spacing);
+/** Density-adjusted cohesion — for the color-only path's in-place strength sync. */
+let effectiveClusterCohesion = $derived(clusterCohesionStrength * forceProfile.cohesion);
+
+/**
+ * The raw physics inputs {@link applyLayoutForces} derives everything from —
+ * the density profile is applied inside it, never here, so the canvas and the
+ * headless layout benchmark cannot disagree about the effective values.
+ */
+function layoutPhysicsConfig(): LayoutPhysicsConfig {
+	return {
+		linkDistance,
+		chargeStrength,
+		centerStrength,
+		linkStrength,
+		clusterCohesionStrength,
+		nodeSize,
+		visibleNodeCount,
+	};
+}
 
 // Edge alpha auto-tuned from edge count: fade edges as the graph grows denser so
 // overlapping edges don't compound into a dark mass.  Clamped to [0.18, 0.60].
@@ -187,9 +230,6 @@ let canvasRevealTimer: ReturnType<typeof setTimeout> | null = null;
 
 // Simulation reference — $state so the hot-update $effect re-runs when simulation is (re)created
 let simulation: ReturnType<typeof forceSimulation<SimNode>> | null = $state(null);
-// D3's default link strength function, captured at simulation init so the
-// hot-update effect can reuse it (it depends on the link topology).
-let cachedDefaultLinkStrengthFn: ((link: SimLink, i: number, links: SimLink[]) => number) | null = null;
 // Last applied force parameters, so the hot-update effect can tell a real physics
 // change from a settings-object replacement that left every number untouched.
 // Cleared whenever a simulation is created so a fresh one always gets its forces.
@@ -211,7 +251,12 @@ let simPausedWhileHidden = false;
 
 // D3-compatible node/link types
 type SimNode = GraphNode & SimulationNodeDatum;
-type SimLink = SimulationLinkDatum<SimNode> & { weight: number; type: EdgeType };
+type SimLink = SimulationLinkDatum<SimNode> & {
+	weight: number;
+	type: EdgeType;
+	/** Born in the latest data change — only these take the edge fade-in. */
+	isNew?: boolean;
+};
 
 let simNodes: SimNode[] = [];
 let simLinks: SimLink[] = [];
@@ -220,34 +265,36 @@ let simLinks: SimLink[] = [];
 // Holds every drawable edge type; per-type visibility is decided in drawEdges.
 let renderableSimLinks: SimLink[] = [];
 
-// Edge fade-in: edges start invisible and fade to full opacity after each
-// setupSimulation call, providing a smooth crossfade on mode/data changes.
+// Edge fade-in: edges *born in the latest data change* start invisible and
+// fade to full opacity (see `SimLink.isNew`). Pre-existing edges are exempt,
+// so a local change — one topic folding, one note arriving — doesn't flash
+// the whole graph's edges.
 let edgeFadeAlpha = 1;
 const EDGE_FADE_RATE = 0.04; // reaches 1 in 25 ticks (~0.4s at 60fps)
 
 /** Cross-fade speed for topic regions — reaches 1 in ~15 frames (~250ms at 60fps). */
 const HULL_FADE_RATE = 0.067;
 
-/** How much each doubling of an edge's weight increases its pull. */
-const WEIGHT_PULL_SCALE = 0.35;
-/** Ceiling on weight-based pull, so one dominant pair can't collapse together. */
-const WEIGHT_PULL_MAX = 3;
-
-/**
- * Crossing-link count at which a topic pair reaches its shortest rest length.
- * Above this the distance stops shrinking, so one dominant pair can't drag two
- * topics on top of each other.
- */
-const WEIGHT_DISTANCE_SATURATION = 64;
-/** Shortest a topic link may become, as a fraction of the normal link distance. */
-const MIN_TOPIC_LINK_DISTANCE_FACTOR = 0.45;
-
 /**
  * How far a topic's notes are seeded from its collapsed position when expanding.
  * Just enough that the force sim has a gradient to push them apart — seeding
- * them all on the exact same point would leave them stuck there.
+ * them all on the exact same point would leave them stuck there. Deliberately
+ * small: the visible outward travel *is* the expand animation, and any distance
+ * covered by the seed itself is a teleport the eye can't follow.
  */
-const EXPAND_SCATTER_RADIUS = 45;
+const EXPAND_SCATTER_RADIUS = 18;
+
+/**
+ * Spawn-grow animation for nodes born in a data change (a topic node on
+ * collapse, member notes on expand, a note created while the graph is open).
+ * Growing from a fraction of the final radius at the position the change
+ * happened gives the eye a single point to follow instead of a full-size pop.
+ */
+const NODE_SPAWN_MS = 320;
+const NODE_SPAWN_START_SCALE = 0.25;
+
+/** Birth timestamps of nodes still growing in, cleared as each finishes. */
+const nodeSpawnTimes = new Map<string, number>();
 
 /**
  * Alpha held during a collapse/expand transition — matches what releasing a drag
@@ -274,6 +321,17 @@ const RETARGET_HOLD_MS = 1200;
 const RECLUSTER_ALPHA = 0.22;
 const RECLUSTER_ALPHA_DECAY = 0.012;
 const RECLUSTER_VELOCITY_DECAY = 0.55;
+/**
+ * Cohesion multiplier held during the re-cluster transition.
+ *
+ * The equilibrium cohesion is tuned gentle (base strength × density profile ×
+ * per-cluster member damping — combined ~5× weaker than it once was, so
+ * settled clusters keep breathing room). Migration across the layout to a
+ * *new* topic needs the strong pull back for a moment, or freshly split
+ * topics stay spatially interleaved with overlapping hulls. Restored to the
+ * equilibrium strength when the transition ends.
+ */
+const RECLUSTER_COHESION_BOOST = 3;
 
 /**
  * Delay before the corrective fit that runs after the layout has stopped
@@ -562,6 +620,39 @@ let simNodesVersion = 0;
 // a full force-simulation re-settle on immersion exit.
 const persistentPositionCache = new Map<string, { x: number; y: number }>();
 
+// Set by markIncrementalUpdate() and consumed by the next setupGraph: the
+// incoming data is a live vault-change patch, so the layout settles gently in
+// place and the camera stays put instead of re-framing the whole graph.
+let incrementalUpdatePending = false;
+
+/**
+ * Arm the next graph-data change as a live incremental update (issue #404).
+ *
+ * Called by the view right before it patches `graphData` in response to vault
+ * events. Without this, any node addition takes the mode-switch path — slow
+ * drift plus a camera refit — which would yank the view around every time a
+ * note is created while the graph is open.
+ */
+export function markIncrementalUpdate() {
+	incrementalUpdatePending = true;
+}
+
+/**
+ * Carry a node's layout position across a rename.
+ *
+ * Called before the renamed graph data lands: the new id inherits the old
+ * node's position (live simulation position first, cached position as
+ * fallback), so a renamed note stays where it was instead of re-scattering.
+ */
+export function transferNodePosition(oldId: string, newId: string) {
+	if (oldId === newId) return;
+	const sim = simNodeMap.get(oldId);
+	const position =
+		sim && sim.x != null && sim.y != null ? { x: sim.x, y: sim.y } : persistentPositionCache.get(oldId);
+	if (position) persistentPositionCache.set(newId, { x: position.x, y: position.y });
+	persistentPositionCache.delete(oldId);
+}
+
 // Cached cluster map for edge rendering (nodeId → cluster).
 // Rebuilt only when simNodes changes — cluster assignments are stable between renders.
 let cachedNodeClusterMap: Map<string, number | undefined> = new Map();
@@ -671,13 +762,13 @@ function buildHitGrid() {
 }
 
 /** The original linear scan — still used while the layout is in motion. */
-function findNodeLinear(x: number, y: number, hitRadius: number): GraphNode | null {
+function findNodeLinear(x: number, y: number, hitRadius: number, displayFactor: number): GraphNode | null {
 	// Search in reverse order (top-most nodes first)
 	for (let i = simNodes.length - 1; i >= 0; i--) {
 		const node = simNodes[i];
 		const dx = (node.x ?? 0) - x;
 		const dy = (node.y ?? 0) - y;
-		const reach = getNodeRadius(node) + hitRadius;
+		const reach = getNodeRadius(node) * displayFactor + hitRadius;
 		if (dx * dx + dy * dy <= reach * reach) {
 			return node;
 		}
@@ -695,16 +786,20 @@ function findNodeAt(screenX: number, screenY: number): GraphNode | null {
 	const { x, y } = screenToGraph(screenX, screenY);
 	const scale = pixi?.scale ?? 1;
 	const hitRadius = (Math.max(1, nodeSize) + 4) / scale;
+	// Nodes are drawn counter-scaled against the zoom, so the hit target must
+	// grow and shrink with them. Applied at query time only — the grid itself
+	// stores camera-independent positions and stays valid across zooms.
+	const displayFactor = zoomNodeScale(scale);
 
 	// While ticking, positions change under the grid every frame — scan instead.
 	if (hitGridDirty && simulation && simulation.alpha() > 0.03) {
-		return findNodeLinear(x, y, hitRadius);
+		return findNodeLinear(x, y, hitRadius, displayFactor);
 	}
 	if (hitGridDirty || !hitGrid) buildHitGrid();
 
 	// The zoomed-out hit slack can exceed one cell, so widen the neighbourhood
 	// to however many cells the search radius spans.
-	const searchRadius = hitGridMaxRadius + hitRadius;
+	const searchRadius = hitGridMaxRadius * displayFactor + hitRadius;
 	const span = Math.ceil(searchRadius / hitGridCellSize);
 	const cx = Math.floor(x / hitGridCellSize);
 	const cy = Math.floor(y / hitGridCellSize);
@@ -719,7 +814,7 @@ function findNodeAt(screenX: number, screenY: number): GraphNode | null {
 				if (order <= bestOrder) continue;
 				const dx = (node.x ?? 0) - x;
 				const dy = (node.y ?? 0) - y;
-				const reach = getNodeRadius(node) + hitRadius;
+				const reach = getNodeRadius(node) * displayFactor + hitRadius;
 				if (dx * dx + dy * dy <= reach * reach) {
 					best = node;
 					bestOrder = order;
@@ -815,60 +910,15 @@ function trimOutliers(points: Array<{ x: number; y: number }>): Array<{ x: numbe
 }
 
 /**
- * Extra pull applied to an edge based on its weight.
- *
- * Only collapsed topic-to-topic edges use this. Their weight is a *count* of how
- * many note-level links cross between two topics, so without it a pair joined by
- * 200 links sits exactly as far apart as one joined by 3 — the edge would encode
- * coupling without the layout ever showing it.
- *
- * Log-scaled and clamped: crossing counts are heavy-tailed, so a linear mapping
- * would let one dominant pair collapse onto each other while everything else
- * drifted apart. Note-level edges are left alone — their weights are cosine
- * scores and small link counts that already behave.
- */
-function weightPull(link: SimLink): number {
-	const source = link.source as SimNode;
-	const target = link.target as SimNode;
-	if (source?.kind !== "topic" && target?.kind !== "topic") return 1;
-
-	const weight = Math.max(1, link.weight);
-	return Math.min(WEIGHT_PULL_MAX, 1 + Math.log2(weight) * WEIGHT_PULL_SCALE);
-}
-
-/**
- * Rest length for a link, shortened for heavily-crossed topic pairs.
- *
- * Strength alone cannot express coupling: in d3-force every link is a spring
- * with a rest length and a stiffness, and stiffness only changes how *fast* a
- * pair converges — not where it settles. With one fixed distance, two topics
- * joined by 200 links come to rest exactly as far apart as two joined by 3.
- * Shortening the spring is what actually pulls coupled topics together.
- */
-function weightedLinkDistance(link: SimLink): number {
-	const source = link.source as SimNode;
-	const target = link.target as SimNode;
-	if (source?.kind !== "topic" && target?.kind !== "topic") return linkDistance;
-
-	// Same log curve as the pull, inverted: the heaviest edges sit at
-	// MIN_TOPIC_LINK_DISTANCE_FACTOR of the normal length.
-	const weight = Math.max(1, link.weight);
-	const t = Math.min(1, Math.log2(weight) / Math.log2(WEIGHT_DISTANCE_SATURATION));
-	return linkDistance * (1 - t * (1 - MIN_TOPIC_LINK_DISTANCE_FACTOR));
-}
-
-/**
  * Get the draw radius for a node from its degree and the auto-tuned nodeSize.
  *
- * Size encodes exactly one thing — connectedness — so it stays unambiguous.
- * Bridge nodes are surfaced by the highlight toggle's color, not by size.
- * Must match the renderer's sprite radius (`syncNodes`), since this value
- * also drives hit-testing, collision spacing, and label offsets.
+ * Delegates to the shared {@link nodeDrawRadius} formula (also used by the
+ * renderer's `syncNodes`) so hit-testing, collision spacing and label offsets
+ * can never disagree with the drawn circle. Bridge nodes are surfaced by the
+ * highlight toggle's color, not by size.
  */
 function getNodeRadius(node: GraphNode): number {
-	const base = Math.max(1, nodeSize);
-	const degree = node.degree ?? 0;
-	return base + Math.min(Math.log1p(degree) * 2.5, base * 5);
+	return nodeDrawRadius(node, nodeSize);
 }
 
 /**
@@ -962,9 +1012,14 @@ function render(mode: RenderMode) {
 				if (hullFadeProgress >= 1) outgoingHulls = [];
 				else requestRender("world");
 			}
+			// The incoming grouping fades with the cross-fade itself, not with the
+			// edge fade: tying it to `edgeFadeAlpha` blanked every region on any
+			// data change, so folding one topic made all of them blink. During a
+			// cross-fade the unchanged topics resolve between two near-identical
+			// shapes at complementary alphas, which reads as holding steady.
 			renderer.drawHulls(hulls, {
 				focusedClusters,
-				fadeAlpha: edgeFadeAlpha,
+				fadeAlpha: outgoingHulls.length > 0 ? easeOutCubic(hullFadeProgress) : 1,
 				outgoing: outgoingHulls,
 				outgoingAlpha: outgoingHulls.length > 0 ? 1 - easeOutCubic(hullFadeProgress) : 0,
 			});
@@ -975,7 +1030,7 @@ function render(mode: RenderMode) {
 			lastHullPaths = [];
 			lastHullSignature = "";
 			hullFadeProgress = 1;
-			renderer.drawHulls([], { focusedClusters, fadeAlpha: edgeFadeAlpha });
+			renderer.drawHulls([], { focusedClusters, fadeAlpha: 1 });
 		}
 
 		// ── Edges ──────────────────────────────────────────────
@@ -1018,6 +1073,24 @@ function render(mode: RenderMode) {
 		}
 
 		// ── Nodes ──────────────────────────────────────────────
+		// Advance spawn-grow animations: each newborn node's radius eases from a
+		// fraction to full size, finished entries drop out, and an unfinished
+		// animation requests the next world frame so it completes even once the
+		// simulation is at rest.
+		let spawnScales: Map<string, number> | null = null;
+		if (nodeSpawnTimes.size > 0) {
+			const now = performance.now();
+			spawnScales = new Map();
+			for (const [id, born] of nodeSpawnTimes) {
+				const t = (now - born) / NODE_SPAWN_MS;
+				if (t >= 1) {
+					nodeSpawnTimes.delete(id);
+					continue;
+				}
+				spawnScales.set(id, NODE_SPAWN_START_SCALE + (1 - NODE_SPAWN_START_SCALE) * easeOutCubic(t));
+			}
+			if (isWorld && nodeSpawnTimes.size > 0) requestRender("world");
+		}
 		renderer.syncNodes(simNodes, nodeSize, {
 			selectedNodes,
 			hoveredNodeId: hoveredNode?.id ?? null,
@@ -1026,6 +1099,7 @@ function render(mode: RenderMode) {
 			isForceMode: true,
 			hoverAlphas,
 			nodeClusterMap,
+			spawnScales,
 		});
 	}
 
@@ -1038,12 +1112,40 @@ function render(mode: RenderMode) {
 	const hovId = hoveredNode?.id ?? null;
 	const hoverNeighbors = hovId ? adjacency.get(hovId) : undefined;
 
+	// Nodes are drawn counter-scaled against the zoom; labels must anchor above
+	// the circle as drawn, size themselves against it, and judge visibility by
+	// the size the user actually sees.
+	const labelZoomFactor = zoomNodeScale(scale);
+
 	// Label font size in CSS pixels (screen space).
 	// The renderer counter-scales each label with t.scale.set(1/viewport_scale), which
-	// makes the effective screen size equal to t.style.fontSize exactly — so this value
-	// is the on-screen pixel height at every zoom level, no division by scale needed.
-	// Tied to nodeSize so labels feel proportional when the user adjusts node size.
-	const LABEL_FONT_PX = Math.max(Math.round(nodeSize * 2.5), 10);
+	// makes the effective screen size equal to t.style.fontSize exactly — so these
+	// values are on-screen pixel heights at every zoom level, no division by scale.
+	//
+	// Sized per node against the circle as drawn (which carries the degree curve
+	// and the zoom counter-scale on top of `nodeSize`), because a single shared
+	// size fails in both directions: derived from the base it left big collapsed
+	// topics captioned in tiny text, and derived from the largest node it made
+	// every label big whenever a few large nodes were on screen.
+	//
+	// The response is deliberately compressed — a node 4× the radius gets a 2×
+	// label, not 4× — so size differences stay legible as a hierarchy without
+	// the largest captions dominating the canvas.
+	const LABEL_FONT_MIN_PX = 10;
+	const LABEL_FONT_MAX_PX = 22;
+	/** Node screen radius that maps to the baseline font size. */
+	const LABEL_REFERENCE_RADIUS = 6;
+	const baselineFontPx = Math.max(nodeSize * 2.5, LABEL_FONT_MIN_PX);
+	function labelFontFor(node: SimNode): number {
+		const screenRadius = getNodeRadius(node) * labelZoomFactor * scale;
+		const ratio = Math.sqrt(Math.max(screenRadius, 1) / LABEL_REFERENCE_RADIUS);
+		return Math.round(Math.min(LABEL_FONT_MAX_PX, Math.max(LABEL_FONT_MIN_PX, baselineFontPx * ratio)));
+	}
+
+	// The occlusion grid is a fixed lattice, so it takes one representative
+	// size — the baseline. Per-label widths are still measured exactly in
+	// `canDrawLabel`; this only sets the row height.
+	const LABEL_FONT_PX = Math.round(Math.max(baselineFontPx, LABEL_FONT_MIN_PX));
 
 	// Label occlusion culling — grid-based O(n) instead of O(n²) linear scan.
 	// The canvas is divided into LABEL_CELL_W×LABEL_CELL_H px cells (screen space).
@@ -1063,10 +1165,10 @@ function render(mode: RenderMode) {
 		labelGrid.fill(0);
 	}
 
-	function canDrawLabel(nodeX: number, labelY: number, approxCharCount: number): boolean {
-		// LABEL_FONT_PX is already in screen px, so sw/sh are screen px directly
-		const sw = approxCharCount * LABEL_FONT_PX * 0.55;
-		const sh = LABEL_FONT_PX;
+	function canDrawLabel(nodeX: number, labelY: number, approxCharCount: number, fontPx = LABEL_FONT_PX): boolean {
+		// Font sizes are already in screen px, so sw/sh are screen px directly
+		const sw = approxCharCount * fontPx * 0.55;
+		const sh = fontPx;
 		const screen = renderer.worldToScreen(nodeX, labelY);
 		const x1 = screen.x - sw / 2 - LABEL_PAD_X;
 		const y1 = screen.y - sh - LABEL_PAD_Y;
@@ -1140,46 +1242,48 @@ function render(mode: RenderMode) {
 	}> = [];
 
 	for (const node of sortedLabelNodes) {
-		const radius = getNodeRadius(node);
+		const radius = getNodeRadius(node) * labelZoomFactor;
 		const labelY = node.y - radius - 2 / scale;
 		const nodeAlpha = hoverAlphas.get(node.id) ?? 0.85;
 		// Screen-space radius: how large the node circle appears on screen
 		const screenRadius = radius * scale;
+		// Each label is sized to its own node, so occlusion must measure with it.
+		const fontSize = labelFontFor(node);
 
 		if (hovId && node.id === hovId) {
 			// Hovered node: always show label, skip occlusion check (it wins)
-			canDrawLabel(node.x, labelY, node.label.length);
+			canDrawLabel(node.x, labelY, node.label.length, fontSize);
 			labelEntries.push({
 				nodeX: node.x,
 				nodeY: labelY,
 				text: node.label,
 				color: c.textNormal,
 				alpha: 1,
-				fontSize: LABEL_FONT_PX,
+				fontSize,
 			});
 		} else if (hovId && hoverNeighbors?.has(node.id)) {
-			if (!canDrawLabel(node.x, labelY, node.label.length)) continue;
+			if (!canDrawLabel(node.x, labelY, node.label.length, fontSize)) continue;
 			labelEntries.push({
 				nodeX: node.x,
 				nodeY: labelY,
 				text: node.label,
 				color: c.textMuted,
 				alpha: nodeAlpha,
-				fontSize: LABEL_FONT_PX,
+				fontSize,
 			});
 		} else if (node.highlighted && !hovId) {
-			if (!canDrawLabel(node.x, labelY, node.label.length)) continue;
+			if (!canDrawLabel(node.x, labelY, node.label.length, fontSize)) continue;
 			labelEntries.push({
 				nodeX: node.x,
 				nodeY: labelY,
 				text: node.label,
 				color: c.textAccent,
 				alpha: 1,
-				fontSize: LABEL_FONT_PX,
+				fontSize,
 			});
 		} else if (screenRadius >= MIN_LABEL_SCREEN_RADIUS) {
 			// Node is large enough on screen to anchor a label — show it if space allows
-			if (!canDrawLabel(node.x, labelY, node.label.length)) continue;
+			if (!canDrawLabel(node.x, labelY, node.label.length, fontSize)) continue;
 			// Smooth fade-in over a 2px radius window so labels don't pop in abruptly
 			const fadeAlpha = Math.min(1, (screenRadius - MIN_LABEL_SCREEN_RADIUS) / 2);
 			labelEntries.push({
@@ -1188,7 +1292,7 @@ function render(mode: RenderMode) {
 				text: node.label,
 				color: node.highlighted ? c.textAccent : c.textNormal,
 				alpha: nodeAlpha * fadeAlpha,
-				fontSize: LABEL_FONT_PX,
+				fontSize,
 			});
 		}
 	}
@@ -1730,60 +1834,6 @@ function openNodeMenu(node: GraphNode, clientX: number, clientY: number) {
 // ============================================================================
 
 /** Compute the 2D centroid (mean x, y) for each cluster. */
-function computeClusterCentroids(nodes: SimNode[]): Map<number, { x: number; y: number }> {
-	const sums = new Map<number, { sx: number; sy: number; count: number }>();
-	for (const n of nodes) {
-		const c = n.cluster ?? 0;
-		const entry = sums.get(c) ?? { sx: 0, sy: 0, count: 0 };
-		entry.sx += n.x ?? 0;
-		entry.sy += n.y ?? 0;
-		entry.count += 1;
-		sums.set(c, entry);
-	}
-	const centroids = new Map<number, { x: number; y: number }>();
-	for (const [c, { sx, sy, count }] of sums) {
-		centroids.set(c, { x: sx / count, y: sy / count });
-	}
-	return centroids;
-}
-
-/**
- * Custom d3-force that gently pulls each node toward its cluster's 2D centroid.
- * The centroid is recomputed every tick so it tracks the moving average.
- */
-function clusterCohesionForce(nodes: SimNode[], strength: number) {
-	let _strength = strength;
-
-	function force(alpha: number) {
-		// Recompute centroids each tick so they follow the nodes
-		const centroids = computeClusterCentroids(nodes);
-
-		for (const node of nodes) {
-			// Skip pinned nodes
-			if (node.fx != null && node.fy != null) continue;
-
-			const centroid = centroids.get(node.cluster ?? 0);
-			if (!centroid) continue;
-
-			const dx = centroid.x - (node.x ?? 0);
-			const dy = centroid.y - (node.y ?? 0);
-			node.vx = (node.vx ?? 0) + dx * _strength * alpha;
-			node.vy = (node.vy ?? 0) + dy * _strength * alpha;
-		}
-	}
-
-	force.strength = (s?: number) => {
-		if (s === undefined) return _strength;
-		_strength = s;
-		return force;
-	};
-
-	// d3 force interface: initialize is a no-op since we track nodes directly
-	force.initialize = () => {};
-
-	return force;
-}
-
 // ============================================================================
 // Shared graph data setup (used by both wiki and smart modes)
 // ============================================================================
@@ -1863,6 +1913,15 @@ function buildInternalData(data: GraphData): {
 		}
 	}
 
+	// Identity of the outgoing frame, for entrance animations: nodes and edges
+	// not present in it are the *change*, and only they animate in — the rest of
+	// the graph holds still so the change is what the eye lands on.
+	const previousNodeIds = new Set(simNodes.map((n) => n.id));
+	const previousEdgeKeys = new Set<string>();
+	for (const link of renderableSimLinks) {
+		previousEdgeKeys.add(simLinkKey((link.source as SimNode).id, (link.target as SimNode).id, link.type));
+	}
+
 	// Compute centroid from all known positions (old + cached) for scattering new nodes
 	let centroidX = 0;
 	let centroidY = 0;
@@ -1874,6 +1933,15 @@ function buildInternalData(data: GraphData): {
 		}
 		centroidX /= knownForCentroid.size;
 		centroidY /= knownForCentroid.size;
+	}
+	// Radius of the known layout, for placing connection-less new nodes on its
+	// rim. Dropping them at the centroid buries them inside the existing node
+	// mass where they're invisible (and charge repulsion pushes an isolated node
+	// out to the rim anyway — the rim is simply where it will settle).
+	let knownLayoutRadius = 0;
+	for (const { x, y } of knownForCentroid.values()) {
+		const distance = Math.hypot(x - centroidX, y - centroidY);
+		if (distance > knownLayoutRadius) knownLayoutRadius = distance;
 	}
 
 	// Create mutable copies.
@@ -1888,7 +1956,40 @@ function buildInternalData(data: GraphData): {
 	const unknownCount = data.nodes.filter((n) => !oldPositions.has(n.id) && !persistentPositionCache.has(n.id)).length;
 	// Spread radius for circle pre-layout: scale with node count so the graph fills
 	// a reasonable area before forces kick in (reduces initial chaos).
-	const circleRadius = Math.max(150, Math.sqrt(unknownCount) * linkDistance * 0.5);
+	const circleRadius = Math.max(150, Math.sqrt(unknownCount) * effectiveLinkDistance * 0.5);
+
+	// A node created while the graph is open should appear next to what it
+	// connects to, not in a ring around the whole layout — seed unknown nodes at
+	// the centroid of their already-positioned neighbours when they have any.
+	const knownPosition = (id: string) => oldPositions.get(id) ?? persistentPositionCache.get(id);
+	const neighborIds = new Map<string, string[]>();
+	if (unknownCount > 0 && hasAnyKnown) {
+		for (const e of data.edges) {
+			if (!neighborIds.has(e.source)) neighborIds.set(e.source, []);
+			if (!neighborIds.has(e.target)) neighborIds.set(e.target, []);
+			neighborIds.get(e.source)?.push(e.target);
+			neighborIds.get(e.target)?.push(e.source);
+		}
+	}
+	const neighborSeedPosition = (id: string): { x: number; y: number } | null => {
+		const neighbors = neighborIds.get(id);
+		if (!neighbors) return null;
+		let sumX = 0;
+		let sumY = 0;
+		let count = 0;
+		for (const neighborId of neighbors) {
+			const position = knownPosition(neighborId);
+			if (!position) continue;
+			sumX += position.x;
+			sumY += position.y;
+			count++;
+		}
+		if (count === 0) return null;
+		const angle = Math.random() * 2 * Math.PI;
+		const radius = 30 + Math.random() * 40;
+		return { x: sumX / count + Math.cos(angle) * radius, y: sumY / count + Math.sin(angle) * radius };
+	};
+
 	simNodes = data.nodes.map((n) => {
 		const sn: SimNode = { ...n };
 		// Priority matters: a position inherited from what this node *replaces on
@@ -1901,10 +2002,19 @@ function buildInternalData(data: GraphData): {
 			sn.y = old.y;
 		} else {
 			allPositionsKnown = false;
-			if (hasAnyKnown) {
-				// Scatter new nodes in a ring around the centroid of the known layout
+			const seeded = hasAnyKnown ? neighborSeedPosition(n.id) : null;
+			if (seeded) {
+				sn.x = seeded.x;
+				sn.y = seeded.y;
+			} else if (hasAnyKnown) {
+				// No positioned neighbours — scatter on the rim of the known
+				// layout: the sparse band where an unconnected node settles
+				// anyway, and still inside the current camera frame (the camera
+				// doesn't move for live updates, so "just past the furthest
+				// node" would be just out of view).
 				const angle = (2 * Math.PI * newNodeIndex) / Math.max(1, unknownCount);
-				const radius = 80 + Math.random() * 60;
+				const radius =
+					knownLayoutRadius > 0 ? knownLayoutRadius * (0.9 + Math.random() * 0.1) : 80 + Math.random() * 60;
 				sn.x = centroidX + Math.cos(angle) * radius;
 				sn.y = centroidY + Math.sin(angle) * radius;
 			} else {
@@ -1921,6 +2031,20 @@ function buildInternalData(data: GraphData): {
 
 	simNodeMap = new Map(simNodes.map((n) => [n.id, n]));
 
+	// Stamp entrance animations for nodes born in this change. A fresh layout is
+	// excluded — everything is new there, and it has its own reveal (the canvas
+	// stays hidden until the layout partially settles).
+	if (previousNodeIds.size > 0) {
+		const now = performance.now();
+		for (const n of simNodes) {
+			if (!previousNodeIds.has(n.id)) nodeSpawnTimes.set(n.id, now);
+		}
+	}
+	// Nodes removed by the change can't finish an animation they're no longer in.
+	for (const id of nodeSpawnTimes.keys()) {
+		if (!simNodeMap.has(id)) nodeSpawnTimes.delete(id);
+	}
+
 	simLinks = data.edges
 		.filter((e) => simNodeMap.has(e.source) && simNodeMap.has(e.target))
 		.map((e) => ({
@@ -1928,6 +2052,7 @@ function buildInternalData(data: GraphData): {
 			target: simNodeMap.get(e.target)!,
 			weight: e.weight,
 			type: e.type,
+			isNew: !previousEdgeKeys.has(simLinkKey(e.source, e.target, e.type)),
 		}));
 
 	// Pre-split by edge type to avoid filtering every render frame
@@ -1945,10 +2070,17 @@ function buildInternalData(data: GraphData): {
 		adjacency.get(tId)?.add(sId);
 	}
 
-	// Start edge fade-in on full data change
+	// Start the edge fade-in. Only edges marked `isNew` above consume it — the
+	// rest of the graph renders at full opacity throughout, so a local change
+	// (one topic folding) no longer flashes every edge on screen.
 	edgeFadeAlpha = 0;
 
 	return { oldPositions, allPositionsKnown, isFreshLayout };
+}
+
+/** Canonical identity of a rendered edge — endpoint order doesn't matter. */
+function simLinkKey(a: string, b: string, type: string): string {
+	return a < b ? `${a}\0${b}\0${type}` : `${b}\0${a}\0${type}`;
 }
 
 // ============================================================================
@@ -1959,41 +2091,29 @@ function setupForceSimulation(
 	oldPositions: Map<string, { x: number; y: number }>,
 	allPositionsKnown: boolean,
 	isFreshLayout: boolean,
+	isIncrementalUpdate = false,
 ) {
-	// Save the default d3 link strength function so we can apply linkStrength as
-	// a multiplier, matching how Obsidian's native graph works.
-	const baseLinkForce = forceLink<SimNode, SimLink>(simLinks)
-		.id((d) => d.id)
-		.distance(weightedLinkDistance);
-	const defaultLinkStrengthFn = baseLinkForce.strength() as (link: SimLink, i: number, links: SimLink[]) => number;
-	cachedDefaultLinkStrengthFn = defaultLinkStrengthFn;
-	baseLinkForce.strength((l, i, links) => linkStrength * defaultLinkStrengthFn(l, i, links) * weightPull(l));
-
 	// A fresh simulation has no applied parameters yet, so the hot-update effect
 	// must treat its next run as a real change rather than a no-op repeat.
 	lastPhysicsSignature = null;
 
 	simulation = forceSimulation<SimNode>(simNodes);
+	// Full production force set — shared with the headless layout benchmark, so
+	// what gets measured there is exactly what runs here.
+	applyLayoutForces(simulation, simNodes, simLinks, layoutPhysicsConfig());
 	simulation
-		.force("link", baseLinkForce)
-		.force("charge", forceManyBody().strength(chargeStrength).distanceMin(30))
-		// Obsidian uses forceX + forceY for centering (spring toward origin),
-		// NOT forceCenter (which shifts the centroid). This is the key difference.
-		.force("centerX", forceX<SimNode>(0).strength(centerStrength))
-		.force("centerY", forceY<SimNode>(0).strength(centerStrength))
-		.force("cluster", clusterCohesionForce(simNodes, clusterCohesionStrength))
-		.force(
-			"collide",
-			forceCollide<SimNode>().radius((d) => getNodeRadius(d) + 2),
-		)
 		.on("tick", () => {
 			// Positions moved — the spatial hit grid no longer matches them.
 			hitGridDirty = true;
 			// A finished re-cluster transition hands its slower decay back, so the
 			// next drag or retarget feels normal instead of inheriting the drift.
+			// The migration cohesion boost is handed back with it — the settled
+			// layout must live at the gentle equilibrium strength.
 			if (isReclustering && simulation && simulation.alpha() < 0.02) {
 				isReclustering = false;
 				simulation.alphaDecay(baseAlphaDecay).velocityDecay(baseVelocityDecay);
+				const clusterForce = simulation.force("cluster") as ReturnType<typeof clusterCohesionForce> | undefined;
+				clusterForce?.strength(effectiveClusterCohesion);
 			}
 
 			// During initial settling, continuously refit the camera so it
@@ -2008,14 +2128,16 @@ function setupForceSimulation(
 				if (forceTickCount % refitEvery === 0) {
 					const bounds = computeNodeBounds(simNodes);
 					if (bounds) {
-						const frame = framingTransform(
+						// Centre on the core (so unsorted strays don't drag the view
+						// off to one side) while the scale still fits every node.
+						const frame = framingFocus(
 							bounds,
 							{ width: pixi.width, height: pixi.height },
 							GRAPH_FIT_PADDING,
+							GRAPH_FIT_MAX_SCALE,
+							computeCoreNodeBounds(simNodes),
 						);
-						const cx = (bounds.minX + bounds.maxX) / 2;
-						const cy = (bounds.minY + bounds.maxY) / 2;
-						pixi.animateToFrame(cx, cy, frame.scale, isReclustering ? 400 : 150);
+						pixi.animateToFrame(frame.centerX, frame.centerY, frame.scale, isReclustering ? 400 : 150);
 					}
 				}
 				// Once settled, do one final smooth fit and stop tracking.
@@ -2026,11 +2148,17 @@ function setupForceSimulation(
 					// The layout can still creep after alpha drops below the tracking
 					// threshold — clusters keep spreading for a while — so that "final"
 					// fit is often already stale. Take one more measurement after the
-					// drift has actually stopped.
+					// drift has actually stopped, but only *apply* it if the framing
+					// really went stale: on a collapse the graph is already settled
+					// and framed, and an unconditional refit reads as the camera
+					// lurching out for no reason a second after it arrived.
+					const settledBounds = computeNodeBounds(simNodes);
 					if (settleFitTimer != null) clearTimeout(settleFitTimer);
 					settleFitTimer = setTimeout(() => {
 						settleFitTimer = null;
-						animateCameraToNodes(undefined, GRAPH_FIT_PADDING, 500);
+						if (driftedSince(settledBounds)) {
+							animateCameraToNodes(undefined, GRAPH_FIT_PADDING, 500);
+						}
 					}, SETTLE_FIT_DELAY_MS);
 				}
 			}
@@ -2064,6 +2192,13 @@ function setupForceSimulation(
 		simulation.alpha(Math.max(simulation.alpha(), 0.08));
 		needsInitialFit = true;
 		forceTickCount = 0;
+	}
+	// A live vault-change patch settles locally around the changed nodes (they
+	// were seeded near their neighbours) and never moves the camera — the user
+	// may be reading the graph while a note syncs in.
+	else if (isIncrementalUpdate && oldPositions.size > 0) {
+		simulation.alpha(allPositionsKnown ? 0.05 : 0.3);
+		needsInitialFit = false;
 	}
 	// All nodes restored from cache → gentle settle, no camera refit needed.
 	// Some nodes had prior positions (mode switch) → slow drift into place.
@@ -2108,6 +2243,11 @@ function isColorOnlyChange(data: GraphData): boolean {
 }
 
 function setupGraph(data: GraphData) {
+	// Consume the incremental flag whichever path this change takes, so a
+	// leftover flag can't misclassify a later unrelated rebuild.
+	const isIncrementalUpdate = incrementalUpdatePending;
+	incrementalUpdatePending = false;
+
 	if (data.nodes.length === 0) {
 		if (simulation) {
 			simulation.stop();
@@ -2132,9 +2272,11 @@ function setupGraph(data: GraphData) {
 				sn.highlighted = node.highlighted;
 			}
 		}
-		// Sync the cohesion force strength to the current prop value.
+		// Sync the cohesion force strength to the current prop value — but never
+		// mid-transition: a pure recolor (highlight toggle) landing while a
+		// re-cluster is still migrating would silently drop the boost early.
 		const clusterForce = simulation?.force("cluster") as ReturnType<typeof clusterCohesionForce> | undefined;
-		if (clusterForce) clusterForce.strength(clusterCohesionStrength);
+		if (clusterForce && !isReclustering) clusterForce.strength(effectiveClusterCohesion);
 		// Re-derive cluster metadata so pills on the canvas reflect the new segmentation.
 		// (buildInternalData is not called in this path, so we update it explicitly.)
 		refreshClusterMetadata(data);
@@ -2144,6 +2286,14 @@ function setupGraph(data: GraphData) {
 		// applied to a simulation that is no longer ticking, leaving colours and
 		// hulls updated over a frozen layout.
 		if (clustersChanged && clusterCohesionStrength > 0 && simulation && simulation.alpha() < RECLUSTER_ALPHA) {
+			// Equilibrium cohesion is tuned deliberately gentle (density profile,
+			// per-cluster member damping) so settled clusters keep breathing room —
+			// but that same gentleness can no longer *migrate* nodes across the
+			// layout when a granularity change hands them new topics, so freshly
+			// split groups stayed spatially interleaved and their hulls overlapped.
+			// Boost the pull for the transition only; the tick handler that ends
+			// the re-cluster (alpha < 0.02) restores the equilibrium strength.
+			clusterForce?.strength(effectiveClusterCohesion * RECLUSTER_COHESION_BOOST);
 			simulation
 				.alpha(RECLUSTER_ALPHA)
 				.alphaDecay(RECLUSTER_ALPHA_DECAY)
@@ -2166,7 +2316,7 @@ function setupGraph(data: GraphData) {
 	}
 
 	const { oldPositions, allPositionsKnown, isFreshLayout } = buildInternalData(data);
-	setupForceSimulation(oldPositions, allPositionsKnown, isFreshLayout);
+	setupForceSimulation(oldPositions, allPositionsKnown, isFreshLayout, isIncrementalUpdate);
 }
 
 // React to graphData changes — setupGraph is called via untrack so that writes
@@ -2201,48 +2351,48 @@ $effect(() => {
 // Reading `simulation` ($state) means this effect re-runs when a new simulation
 // is created (e.g. after a full graph rebuild), so slider changes always apply.
 $effect(() => {
+	// Everything applyLayoutForces reads. Raw slider values plus the two
+	// value-stable $deriveds (nodeSize, visibleNodeCount) that feed the density
+	// profile — a color-only graph change re-evaluates the deriveds but doesn't
+	// re-fire this effect, so a settled layout can't be perturbed by a repaint.
 	const _charge = chargeStrength;
 	const _link = linkDistance;
 	const _center = centerStrength;
 	const _linkStr = linkStrength;
 	const _cohesion = clusterCohesionStrength;
+	const _nodeSize = nodeSize;
+	const _count = visibleNodeCount;
 	const sim = simulation; // $state — tracks simulation creation
 
 	if (!sim) return;
 
-	const charge = sim.force("charge") as ReturnType<typeof forceManyBody> | undefined;
-	if (charge) charge.strength(_charge);
-
-	const cx = sim.force("centerX") as ReturnType<typeof forceX> | undefined;
-	if (cx) cx.strength(_center);
-	const cy = sim.force("centerY") as ReturnType<typeof forceY> | undefined;
-	if (cy) cy.strength(_center);
-
-	const link = sim.force("link") as ReturnType<typeof forceLink<SimNode, SimLink>> | undefined;
-	if (link) {
-		// Re-apply the weight-aware functions, not flat constants: assigning
-		// `distance(_link)` / a plain strength here would silently drop the
-		// coupling scaling every time any physics setting changed.
-		void _link;
-		link.distance(weightedLinkDistance);
-		if (cachedDefaultLinkStrengthFn) {
-			const baseFn = cachedDefaultLinkStrengthFn;
-			link.strength((l: SimLink, i: number, links: SimLink[]) => _linkStr * baseFn(l, i, links) * weightPull(l));
-		}
+	// One shared code path with initial setup (and the layout benchmark):
+	// recreating the forces wholesale is cheap, and mutating them field-by-field
+	// here previously meant the weight-aware link functions had to be carefully
+	// re-applied by hand or the coupling scaling silently dropped.
+	applyLayoutForces(sim, simNodes, simLinks, {
+		linkDistance: _link,
+		chargeStrength: _charge,
+		centerStrength: _center,
+		linkStrength: _linkStr,
+		clusterCohesionStrength: _cohesion,
+		nodeSize: _nodeSize,
+		visibleNodeCount: _count,
+	});
+	// Recreating the forces resets cohesion to its equilibrium strength; restore
+	// the migration boost if a re-cluster is still in flight, or a settings
+	// write landing mid-transition would strand topics half-migrated.
+	if (isReclustering) {
+		const migratingCluster = sim.force("cluster") as ReturnType<typeof clusterCohesionForce> | undefined;
+		migratingCluster?.strength(effectiveClusterCohesion * RECLUSTER_COHESION_BOOST);
 	}
-
-	const collide = sim.force("collide") as ReturnType<typeof forceCollide<SimNode>> | undefined;
-	if (collide) collide.radius((d: SimNode) => getNodeRadius(d) + 2);
-
-	const clusterForce = sim.force("cluster") as ReturnType<typeof clusterCohesionForce> | undefined;
-	if (clusterForce) clusterForce.strength(_cohesion);
 
 	// Reheat only when a force parameter really changed. `settings` is replaced
 	// wholesale on every write (`{ ...settings, ...partial }`), which invalidates
 	// each property read even when the number is identical — so without this
 	// comparison a purely visual toggle (topic labels, highlights) would restart
 	// the layout at alpha 0.3 and visibly re-shuffle the graph.
-	const signature = `${_charge}:${_link}:${_center}:${_linkStr}:${_cohesion}`;
+	const signature = `${_charge}:${_link}:${_center}:${_linkStr}:${_cohesion}:${_nodeSize}:${_count}`;
 	const changed = signature !== lastPhysicsSignature;
 	lastPhysicsSignature = signature;
 	if (changed && sim.alpha() < 0.05) {
@@ -2314,14 +2464,14 @@ onMount(() => {
 			if (alpha < 0.05) {
 				const bounds = computeNodeBounds(simNodes);
 				if (bounds) {
-					const frame = framingTransform(
+					const frame = framingFocus(
 						bounds,
 						{ width: renderer.width, height: renderer.height },
 						GRAPH_FIT_PADDING,
+						GRAPH_FIT_MAX_SCALE,
+						computeCoreNodeBounds(simNodes),
 					);
-					const cx = (bounds.minX + bounds.maxX) / 2;
-					const cy = (bounds.minY + bounds.maxY) / 2;
-					renderer.snapToFrame(cx, cy, frame.scale);
+					renderer.snapToFrame(frame.centerX, frame.centerY, frame.scale);
 				}
 			} else {
 				// Simulation still running — tick loop will handle fitting.
@@ -2387,19 +2537,55 @@ onMount(() => {
 	};
 });
 
+/**
+ * How much the layout's extent must change after the settle before a
+ * corrective refit is worth it. Below this the framing is still essentially
+ * right, and re-running it just moves the camera under the user.
+ */
+const SETTLE_REFIT_DRIFT_THRESHOLD = 0.12;
+
+/**
+ * Whether the layout has drifted enough since `previous` to justify refitting.
+ *
+ * A fresh build keeps spreading after alpha decays, so its first "final" fit
+ * really is stale. A collapse settles almost immediately at a layout the
+ * camera already framed — there the delayed refit had nothing to correct and
+ * only read as an unexplained zoom-out a second later.
+ */
+function driftedSince(previous: BoundingBox | null): boolean {
+	if (!previous) return false;
+	const current = computeNodeBounds(simNodes);
+	if (!current) return false;
+	const previousWidth = Math.max(previous.maxX - previous.minX, 1);
+	const previousHeight = Math.max(previous.maxY - previous.minY, 1);
+	const widthDrift = Math.abs(current.maxX - current.minX - previousWidth) / previousWidth;
+	const heightDrift = Math.abs(current.maxY - current.minY - previousHeight) / previousHeight;
+	return Math.max(widthDrift, heightDrift) > SETTLE_REFIT_DRIFT_THRESHOLD;
+}
+
 /** Animate the camera to frame the given nodes with the specified padding and duration. */
 function animateCameraToNodes(
 	filter?: (node: SimNode) => boolean,
 	padding: number | FramingPadding = 40,
 	duration = 400,
+	// Whole-graph framings cap the zoom; selection zooms pass a permissive cap
+	// because magnifying a few chosen notes is the point of the gesture.
+	maxScale = GRAPH_FIT_MAX_SCALE,
 ) {
 	if (!pixi) return;
+	// Always frame the full bounds: an explicit fit means "show me everything",
+	// and framing only a trimmed core left excluded nodes stranded outside the
+	// viewport — which reads as a broken fit, not a smart one. Keeping strays
+	// from dominating the frame is the layout's job (satellite centering,
+	// sparse spread), not the camera's.
 	const bounds = computeNodeBounds(simNodes, filter);
 	if (!bounds) return;
-	const target = framingTransform(bounds, { width: pixi.width, height: pixi.height }, padding);
-	const centerX = (bounds.minX + bounds.maxX) / 2;
-	const centerY = (bounds.minY + bounds.maxY) / 2;
-	pixi.animateToFrame(centerX, centerY, target.scale, duration);
+	// Whole-graph framings centre on the core so a lopsided ring of unsorted
+	// notes doesn't shove the main graph aside; an explicit selection is
+	// centred on exactly what was selected.
+	const centreBounds = filter ? null : computeCoreNodeBounds(simNodes);
+	const target = framingFocus(bounds, { width: pixi.width, height: pixi.height }, padding, maxScale, centreBounds);
+	pixi.animateToFrame(target.centerX, target.centerY, target.scale, duration);
 }
 
 /**
@@ -2425,7 +2611,15 @@ export function followLayout() {
 	// such a node, which is why the view stayed zoomed out until the node was
 	// dragged: releasing a drag sets alphaTarget(0.3), and *that* sustained pull
 	// is what recentred it. This gives the transition the same treatment.
-	simulation.alphaTarget(RETARGET_ALPHA).restart();
+	//
+	// Damped like the granularity transition: the sustained alpha with the
+	// default (low) drag made expanding notes spring out and rebound, and moved
+	// the camera on the fast refit cadence — jumpy on both counts. The recluster
+	// drag keeps the motion flowing, and `isReclustering` selects the slower,
+	// longer-eased camera sampling; the tick handler hands both back once the
+	// layout comes to rest.
+	simulation.alphaTarget(RETARGET_ALPHA).velocityDecay(RECLUSTER_VELOCITY_DECAY).restart();
+	isReclustering = true;
 	if (retargetTimer != null) clearTimeout(retargetTimer);
 	retargetTimer = setTimeout(() => {
 		retargetTimer = null;
@@ -2461,7 +2655,7 @@ function zoomByFactor(factor: number) {
  */
 export function panToSelection() {
 	if (selectedNodes.size === 0) return;
-	animateCameraToNodes((n) => selectedNodes.has(n.id), 60, 400);
+	animateCameraToNodes((n) => selectedNodes.has(n.id), 60, 400, 4);
 }
 
 /**
@@ -2469,7 +2663,7 @@ export function panToSelection() {
  */
 export function panToClusters(clusters: Set<number>) {
 	if (simNodes.length === 0 || clusters.size === 0) return;
-	animateCameraToNodes((n) => n.cluster != null && clusters.has(n.cluster), 60, 400);
+	animateCameraToNodes((n) => n.cluster != null && clusters.has(n.cluster), 60, 400, 4);
 }
 </script>
 
