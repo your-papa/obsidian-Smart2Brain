@@ -222,6 +222,32 @@ function handleDragEnd(e: PointerEvent) {
 	detentIndex = nearest;
 }
 
+/**
+ * Keyboard control for the handle. A `<div>` synthesises no click from
+ * Enter/Space the way the old `<button>` did, so the binding is explicit — and
+ * since this is announced as a slider, the arrow keys should move it directly
+ * rather than only cycling.
+ */
+function handleHandleKeydown(e: KeyboardEvent) {
+	if (e.key === "Enter" || e.key === " ") {
+		e.preventDefault();
+		handleHandleClick();
+		return;
+	}
+	if (e.key === "ArrowUp") {
+		e.preventDefault();
+		detentIndex = Math.min(detents.length - 1, detentIndex + 1);
+		return;
+	}
+	if (e.key === "ArrowDown") {
+		e.preventDefault();
+		// Below the smallest detent there is nowhere left to go but closed, which
+		// matches what dragging past it does.
+		if (detentIndex === 0) onClose();
+		else detentIndex -= 1;
+	}
+}
+
 /** Tapping the handle steps between detents — a reachable alternative to dragging. */
 function handleHandleClick() {
 	if (!draggable || isDragging) return;
@@ -268,21 +294,31 @@ const sheetHeight = $derived.by(() => {
            a 4px-tall pill is far below anything a thumb can reliably land on,
            so the padded bar around it takes the pointer.
 
-           A real `<button>` rather than a styled div, so the tap-to-step
-           behaviour is reachable by keyboard and announced — the drag itself
-           has no keyboard equivalent, but stepping detents does. -->
-      <button
-        type="button"
+           Deliberately not a `<button>`. It was one, for keyboard reach, but
+           mobile Obsidian paints `button:active` with a full-width background
+           and WebKit adds its own tap highlight — so every drag flashed a
+           rectangle behind the pill and made an indicator feel like a control
+           you had pressed. A `separator` with `tabindex` keeps it focusable and
+           correctly announced as a resize grip, without inheriting any button
+           chrome to fight. -->
+      <div
         class="s2b-sheet-handle"
+        role="slider"
+        aria-orientation="vertical"
         aria-label="Resize panel"
+        aria-valuemin={0}
+        aria-valuemax={detents.length - 1}
+        aria-valuenow={detentIndex}
+        tabindex="0"
         onpointerdown={handleDragStart}
         onpointermove={handleDragMove}
         onpointerup={handleDragEnd}
         onpointercancel={handleDragEnd}
         onclick={handleHandleClick}
+        onkeydown={handleHandleKeydown}
       >
         <div class="s2b-sheet-grabber"></div>
-      </button>
+      </div>
     {/if}
 
     <div class="s2b-sheet-scroll" class:s2b-sheet-scroll--faded={hasOverflow} bind:this={scrollEl}>
@@ -371,10 +407,33 @@ const sheetHeight = $derived.by(() => {
     border-radius: 0;
     box-shadow: none;
     cursor: grab;
+    /* The grabber pill is the only thing that should ever paint here. WebKit
+       otherwise flashes a full-width grey rectangle on touch, which made a
+       passive indicator read as a button being pressed. */
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+    -webkit-user-select: none;
     /* Claim the vertical gesture for the drag. Only on the handle: the scroll
        region below must keep its own panning, and the sliders inside it keep
        the `pan-y` they need (see RangeSlider). */
     touch-action: none;
+  }
+
+  /* Focus lands on the grabber pill rather than outlining the full-width bar,
+     which would reintroduce exactly the rectangle this stopped painting. */
+  .s2b-sheet-handle:focus-visible {
+    outline: none;
+  }
+
+  .s2b-sheet-handle:focus-visible .s2b-sheet-grabber {
+    outline: 2px solid var(--background-modifier-border-focus);
+    outline-offset: 3px;
+  }
+
+  /* Feedback while dragging belongs on the pill too — it darkens instead of the
+     bar behind it lighting up. */
+  .s2b-bottom-sheet--dragging .s2b-sheet-grabber {
+    background: var(--text-muted);
   }
 
   .s2b-sheet-grabber {

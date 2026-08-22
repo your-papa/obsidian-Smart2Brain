@@ -1252,9 +1252,13 @@ let isControlsCollapsed = $state(true);
  * fires on the *transition into* having a selection, so reopening the settings
  * sheet while a selection is still live doesn't immediately close it again.
  */
+// Keyed on the selection alone, matching what actually opens the sheet on
+// mobile. Including `isImmersed` here would close the settings sheet on entering
+// immerse, where nothing takes the sheet slot in return — immersion's affordance
+// is a toolbar button now, precisely so it does not occupy the canvas.
 let hadSelection = false;
 $effect(() => {
-	const hasSelection = selectedPaths.length > 0 || isImmersed;
+	const hasSelection = selectedPaths.length > 0;
 	if (hasSelection && !hadSelection && onMobile) isControlsCollapsed = true;
 	hadSelection = hasSelection;
 });
@@ -2248,7 +2252,14 @@ function handleHoverPreview(event: MouseEvent, path: string, targetEl: HTMLEleme
     {/if}
   {/snippet}
 
-  {#if isImmersed || selectedPaths.length > 0}
+  <!-- Immersion is a *mode* you work inside, not a transient result like a
+       selection, so on mobile it must not hold the sheet open: a sheet plus its
+       dismiss layer covers the canvas, which left the graph you just immersed
+       into un-pannable, un-selectable and impossible to immerse further. The
+       sheet is therefore driven by the selection alone, and immersion carries
+       its own persistent affordance on the toolbar (see GraphControls), which
+       floats above the canvas without blocking it. -->
+  {#if onMobile ? selectedPaths.length > 0 : isImmersed || selectedPaths.length > 0}
     {#if onMobile}
       <!--
         The desktop bar's only mobile treatment was `flex-wrap: wrap`, which
@@ -2262,7 +2273,7 @@ function handleHoverPreview(event: MouseEvent, path: string, targetEl: HTMLEleme
       -->
       <BottomSheet
         open={true}
-        onClose={selectedPaths.length > 0 ? handleClearSelection : handleExitImmerse}
+        onClose={handleClearSelection}
         draggable={false}
         ariaLabel="Graph selection"
       >
@@ -2272,61 +2283,48 @@ function handleHoverPreview(event: MouseEvent, path: string, targetEl: HTMLEleme
         <div class="selection-sheet setting-group">
           <div class="selection-sheet-header">
             <span class="selection-count">{@render selectionCount()}</span>
-            <Button
-              iconId="x"
-              onClick={selectedPaths.length > 0 ? handleClearSelection : handleExitImmerse}
-              tooltip={selectedPaths.length > 0 ? "Clear selection" : "Exit immerse"}
-            />
+            <Button iconId="x" onClick={handleClearSelection} tooltip="Clear selection" />
           </div>
           <div class="selection-sheet-actions setting-items">
-            {#if selectedPaths.length > 0}
-              <!-- Promoted from icon-only to a labelled row. It rendered at
-                   30x26 on the bar — the easiest control here to mis-tap, and
-                   it sat next to a destructive one. -->
+            <!-- Promoted from icon-only to a labelled row. It rendered at
+                 30x26 on the bar — the easiest control here to mis-tap, and
+                 it sat next to a destructive one. -->
+            <Button
+              iconId="scan"
+              buttonText="Zoom to selection"
+              onClick={handleZoomToSelection}
+              tooltip="Move the camera to fit the selected notes"
+            />
+            {#if selectedTopicsCollapseAction !== null}
               <Button
-                iconId="scan"
-                buttonText="Zoom to selection"
-                onClick={handleZoomToSelection}
-                tooltip="Move the camera to fit the selected notes"
-              />
-              {#if selectedTopicsCollapseAction !== null}
-                <Button
-                  iconId={selectedTopicsCollapseAction === "collapse" ? "chevrons-down-up" : "chevrons-up-down"}
-                  buttonText={selectedTopicsCollapseAction === "collapse" ? "Collapse" : "Expand"}
-                  onClick={() => void handleCollapseSelectedTopics()}
-                  tooltip={selectedTopicsCollapseAction === "collapse"
-                    ? "Fold the selected topics into single nodes"
-                    : "Unfold the selected topics back into notes"}
-                />
-              {/if}
-              <Button
-                iconId="scan-search"
-                buttonText="Immerse"
-                onClick={handleImmerse}
-                tooltip="Rebuild graph with selected notes only"
-              />
-              {#if !hasOpenChat}
-                <Button
-                  iconId="message-square"
-                  buttonText="Open in chat"
-                  onClick={handleSendToChat}
-                  tooltip="Reveal the chat and attach the selected notes"
-                />
-              {/if}
-              <Button
-                iconId="copy-plus"
-                buttonText="Open all"
-                onClick={handleOpenAllSelected}
-                tooltip="Open all selected notes in new tabs"
-              />
-            {:else}
-              <Button
-                iconId="log-out"
-                buttonText="Exit immerse"
-                onClick={handleExitImmerse}
-                tooltip="Return to the full graph"
+                iconId={selectedTopicsCollapseAction === "collapse" ? "chevrons-down-up" : "chevrons-up-down"}
+                buttonText={selectedTopicsCollapseAction === "collapse" ? "Collapse" : "Expand"}
+                onClick={() => void handleCollapseSelectedTopics()}
+                tooltip={selectedTopicsCollapseAction === "collapse"
+                  ? "Fold the selected topics into single nodes"
+                  : "Unfold the selected topics back into notes"}
               />
             {/if}
+            <Button
+              iconId="scan-search"
+              buttonText="Immerse"
+              onClick={handleImmerse}
+              tooltip="Rebuild graph with selected notes only"
+            />
+            {#if !hasOpenChat}
+              <Button
+                iconId="message-square"
+                buttonText="Open in chat"
+                onClick={handleSendToChat}
+                tooltip="Reveal the chat and attach the selected notes"
+              />
+            {/if}
+            <Button
+              iconId="copy-plus"
+              buttonText="Open all"
+              onClick={handleOpenAllSelected}
+              tooltip="Open all selected notes in new tabs"
+            />
           </div>
         </div>
       </BottomSheet>
@@ -2419,6 +2417,8 @@ function handleHoverPreview(event: MouseEvent, path: string, targetEl: HTMLEleme
     onFocusSegment={handleFocusSegment}
     onToggleCollapseAll={handleToggleCollapseAll}
     bind:isCollapsed={isControlsCollapsed}
+    {isImmersed}
+    onExitImmerse={handleExitImmerse}
   />
 </div>
 

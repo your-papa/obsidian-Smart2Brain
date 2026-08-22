@@ -60,6 +60,10 @@ interface Props {
 	 * be able to take the sheet slot over (only one sheet at a time).
 	 */
 	isCollapsed?: boolean;
+	/** True while the graph is rebuilt from a subset of notes. */
+	isImmersed?: boolean;
+	/** Leave immerse and return to the full graph. */
+	onExitImmerse?: () => void;
 }
 
 let {
@@ -90,6 +94,8 @@ let {
 	isTopicsCollapsed = false,
 	onToggleCollapseAll,
 	isCollapsed = $bindable(true),
+	isImmersed = false,
+	onExitImmerse,
 }: Props = $props();
 
 let isDevCollapsed = $state(true);
@@ -301,6 +307,20 @@ $effect(() => {
   size the rail read as undersized against the canvas.
 -->
 <div class="graph-toolbar">
+  <!-- Immersion's exit lives on the rail rather than in a sheet, because it is a
+       mode rather than a transient result: it persists while you pan, select and
+       immerse further, so its control has to persist too without covering the
+       canvas. Only shown while immersed — a rail button that did nothing the
+       rest of the time would be worse than no button. Accented so the rail also
+       answers "why am I only seeing some of my notes?". -->
+  {#if isImmersed}
+    <Button
+      iconId="log-out"
+      onClick={() => onExitImmerse?.()}
+      tooltip={onMobile ? "Exit immerse — back to the full graph" : "Exit immerse (Esc)"}
+      styles="is-active"
+    />
+  {/if}
   <Button iconId="maximize" onClick={onFitToView} tooltip={fitTooltip} />
   <Button
     iconId="lasso"
