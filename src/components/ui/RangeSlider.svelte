@@ -83,10 +83,16 @@ const fillRatio = $derived.by(() => {
 	 * changing the value. Claiming the gesture here keeps the drag with the
 	 * control the finger is actually on.
 	 *
-	 * `pan-y` rather than `none`: the panel this lives in scrolls vertically and
-	 * is taller than a phone screen, so a slider that swallowed both axes would
-	 * become a dead zone you cannot scroll past. Horizontal goes to the thumb,
-	 * vertical still scrolls the panel.
+	 * `none`, not `pan-y`. `pan-y` still declares "I do not handle horizontal
+	 * panning", which is exactly the axis the sidebar-swipe listens on — so the
+	 * sidebar kept opening mid-drag. Only `none` claims both axes and stops the
+	 * browser generating the pan the host is watching for.
+	 *
+	 * `pan-y` was originally chosen so a tall panel could still be scrolled by
+	 * dragging over the slider. That trade no longer applies: the slider sits in
+	 * a card inside a scrolling sheet, with the row's label, the surrounding
+	 * card and the whole sheet body all available to scroll from — none of which
+	 * is a 6px-tall control whose entire purpose is the horizontal drag.
 	 *
 	 * Deliberately no track or thumb styling: Obsidian paints both itself off the
 	 * `slider` class and the `--slider-fill-ratio` we set inline, and overriding
@@ -94,7 +100,7 @@ const fillRatio = $derived.by(() => {
 	 * touch behaviour changes.
 	 */
 	.s2b-range {
-		touch-action: pan-y;
+		touch-action: none;
 	}
 
 	/* No transparent border to grow the hit area on mobile.

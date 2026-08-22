@@ -324,6 +324,13 @@ const sheetHeight = $derived.by(() => {
     box-shadow: var(--shadow-l);
     animation: s2b-sheet-in 160ms ease-out;
     transition: height 200ms cubic-bezier(0.32, 0.72, 0, 1);
+    /* Claim every gesture that lands on the sheet's own chrome. Obsidian binds
+       swipe-down to the command palette and horizontal swipes to the sidebars
+       as JS touch listeners, and the browser only withholds those events from
+       the host if we declare we are handling the axis. Left at `auto`, a drag
+       that started anywhere but the 24px handle opened the command palette.
+       The scroll region below re-enables the one axis it genuinely needs. */
+    touch-action: none;
   }
 
   /* Under the finger the height must follow the pointer exactly; a transition
@@ -379,6 +386,10 @@ const sheetHeight = $derived.by(() => {
     overflow-y: auto;
     /* Keep a scroll that reaches its end from chaining into the canvas behind. */
     overscroll-behavior: contain;
+    /* Vertical only: this genuinely scrolls, so the browser must own that axis.
+       Horizontal stays claimed by the sheet's `none`, which is what keeps a
+       sideways drag over the content from opening a sidebar. */
+    touch-action: pan-y;
     /* The bottom inset clears Obsidian's floating mobile navbar, which is NOT
        covered by the host view's own reservation: `.smart-graph-view` subtracts
        the navbar's 52px, but the navbar floats with a gap beneath it and so

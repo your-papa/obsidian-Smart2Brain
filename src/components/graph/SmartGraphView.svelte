@@ -2266,7 +2266,10 @@ function handleHoverPreview(event: MouseEvent, path: string, targetEl: HTMLEleme
         draggable={false}
         ariaLabel="Graph selection"
       >
-        <div class="selection-sheet">
+        <!-- Same structure as the settings sheet: a heading outside a
+             `.setting-items` card holding the rows, so the two sheets read as
+             one surface rather than two hand-styled ones. -->
+        <div class="selection-sheet setting-group">
           <div class="selection-sheet-header">
             <span class="selection-count">{@render selectionCount()}</span>
             <Button
@@ -2275,7 +2278,7 @@ function handleHoverPreview(event: MouseEvent, path: string, targetEl: HTMLEleme
               tooltip={selectedPaths.length > 0 ? "Clear selection" : "Exit immerse"}
             />
           </div>
-          <div class="selection-sheet-actions">
+          <div class="selection-sheet-actions setting-items">
             {#if selectedPaths.length > 0}
               <!-- Promoted from icon-only to a labelled row. It rendered at
                    30x26 on the bar — the easiest control here to mis-tap, and
@@ -2529,33 +2532,41 @@ function handleHoverPreview(event: MouseEvent, path: string, targetEl: HTMLEleme
      the navbar band from its own height, so the clearance comes from the one
      measurement that was already right. */
 
+  /* Core sizes `.setting-group` for a full settings tab; this is a narrow
+     column, same as the settings sheet. */
   .selection-sheet {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    padding-top: 2px;
+    max-width: none;
+    width: 100%;
   }
 
-  /* The count is the sheet's title, which is why there is no divider here:
-     a header separated from its body by layout doesn't need a rule to say so. */
+  /* The count is the sheet's heading, so it matches a `.setting-item-heading`:
+     outside the card, 16px in so it shares the rows' left edge, no rule (the
+     card below provides the separation). */
   .selection-sheet-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    padding-bottom: 8px;
-    border-bottom: 1px solid var(--background-modifier-border);
+    min-height: 32px;
+    padding: 0 16px;
+    margin-bottom: 8px;
   }
 
+  /* The card holding the verbs. Background set explicitly rather than left to
+     `--setting-items-background`, which outside a settings tab resolves to the
+     same value as the sheet behind it — see the settings panel for the same
+     note. */
   .selection-sheet-actions {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    background-color: var(--background-primary);
+    padding-block: 4px;
   }
 
   /* Full-width rows at the touch floor. `justify-content` is set explicitly
      because Obsidian's base `button` rule centres content, which ragged the
-     labels once the buttons became full-width. */
+     labels once the buttons became full-width. Transparent, like a
+     `.setting-item` inside a card — the card paints the surface. */
   .selection-sheet-actions :global(button) {
     display: flex;
     align-items: center;
@@ -2563,7 +2574,18 @@ function handleHoverPreview(event: MouseEvent, path: string, targetEl: HTMLEleme
     gap: 10px;
     width: 100%;
     min-height: 44px;
-    padding: 8px 12px;
+    padding: 10px 16px;
     text-align: left;
+    background: none;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  /* Hairlines between rows, the way core separates items within one card.
+     `:not(:first-child)` rather than a border on every row, so the card's own
+     rounded top edge stays clean. */
+  .selection-sheet-actions :global(button:not(:first-child)) {
+    border-top: 1px solid var(--background-modifier-border);
   }
 </style>
