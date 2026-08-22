@@ -247,9 +247,45 @@ describe("deriveGranularityLadder", () => {
 		const ladder = deriveGranularityLadder(probes);
 
 		expect(ladder!.length).toBeLessThanOrEqual(MAX_DERIVED_GRANULARITY_LEVELS);
-		// The extremes must survive trimming, or the slider loses reach.
+		// The broad extreme must survive trimming, or the slider loses reach.
 		expect(ladder![0]).toBeCloseTo(0.1, 5);
-		expect(ladder![ladder!.length - 1]).toBeCloseTo(0.1 + 29 * 0.25, 5);
+		// The fine extreme is deliberately NOT the finest grouping found: rungs
+		// past the readability cap (30 topics here → count 31 dropped) and
+		// near-duplicate steps are trimmed first, so the top rung is the finest
+		// *useful* grouping — count 26 at γ 0.1 + 24×0.25.
+		expect(ladder![ladder!.length - 1]).toBeCloseTo(0.1 + 24 * 0.25, 5);
+	});
+
+	it("drops rungs whose topic count exceeds the readability cap", () => {
+		const ladder = deriveGranularityLadder([
+			{ resolution: 0.5, topicCount: 8 },
+			{ resolution: 1.0, topicCount: 20 },
+			{ resolution: 2.0, topicCount: 45 },
+			{ resolution: 4.0, topicCount: 80 },
+		]);
+		expect(ladder).toEqual([0.5, 1.0]);
+	});
+
+	it("requires a real jump in topic count between rungs", () => {
+		// 10 → 11 → 12 are near-duplicate groupings; only 10 and 20 remain.
+		const ladder = deriveGranularityLadder([
+			{ resolution: 0.5, topicCount: 10 },
+			{ resolution: 1.0, topicCount: 11 },
+			{ resolution: 1.5, topicCount: 12 },
+			{ resolution: 2.0, topicCount: 20 },
+		]);
+		expect(ladder).toEqual([0.5, 2.0]);
+	});
+
+	it("waives the readability cap when every grouping exceeds it", () => {
+		// A huge vault whose coarsest partition is already past the cap still
+		// deserves a slider — capped-only filtering would return nothing.
+		const ladder = deriveGranularityLadder([
+			{ resolution: 0.5, topicCount: 40 },
+			{ resolution: 1.0, topicCount: 60 },
+			{ resolution: 2.0, topicCount: 90 },
+		]);
+		expect(ladder).toEqual([0.5, 1.0, 2.0]);
 	});
 });
 

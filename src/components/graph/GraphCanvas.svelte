@@ -1,21 +1,19 @@
 <script lang="ts">
 import { onMount, untrack } from "svelte";
 import { Menu } from "obsidian";
-import {
-	forceSimulation,
-	forceLink,
-	forceManyBody,
-	forceCollide,
-	forceX,
-	forceY,
-	type SimulationNodeDatum,
-	type SimulationLinkDatum,
-} from "d3-force";
+import { forceSimulation, type SimulationNodeDatum, type SimulationLinkDatum } from "d3-force";
 import type { GraphData, GraphNode, EdgeType } from "../../types/graph";
 import { deriveClusterRepresentativesFromGraph } from "../../views/smart-graph/graphDataBuilder";
-import { computeNodeBounds, easeOutCubic, framingTransform, type FramingPadding } from "../../utils/graphAnimation";
+import {
+	computeNodeBounds,
+	easeOutCubic,
+	framingTransform,
+	GRAPH_FIT_MAX_SCALE,
+	type FramingPadding,
+} from "../../utils/graphAnimation";
 import { buildTopicRegion, centroid } from "../../utils/convexHull";
-import { densityForceProfile, nodeDrawRadius, zoomNodeScale } from "../../utils/graphUtils";
+import { autoNodeSize, densityForceProfile, nodeDrawRadius, zoomNodeScale } from "../../utils/graphUtils";
+import { applyLayoutForces, clusterCohesionForce, type LayoutPhysicsConfig } from "../../utils/graphLayout";
 import { resolveNodePaths, topicNodeId } from "../../utils/mergeNodes";
 import { PixiRenderer, readThemeColors, type ClusterPillHit } from "./pixiRenderer";
 
@@ -128,7 +126,7 @@ let pixi: PixiRenderer | null = null;
 let representedNoteCount = $derived(
 	graphData.nodes.reduce((count, node) => count + (node.kind === "topic" ? (node.memberPaths?.length ?? 1) : 1), 0),
 );
-let nodeSize = $derived(Math.max(2, Math.round(7 - Math.log10(Math.max(representedNoteCount, 10)) * 1.8)));
+let nodeSize = $derived(autoNodeSize(representedNoteCount));
 
 // Density-adaptive physics: unlike node size (which keys off *represented*
 // notes so folding doesn't change the sizing regime), the forces key off the
@@ -137,11 +135,29 @@ let nodeSize = $derived(Math.max(2, Math.round(7 - Math.log10(Math.max(represent
 // densityForceProfile for the asymmetry between the intra- and inter-cluster
 // length scales). The user's slider values are the baseline at the reference
 // density, where every multiplier is exactly 1.
-let forceProfile = $derived(densityForceProfile(graphData.nodes.length));
+let visibleNodeCount = $derived(graphData.nodes.length);
+let forceProfile = $derived(densityForceProfile(visibleNodeCount));
+/** Density-adjusted link distance — for the circle pre-layout's sizing. */
 let effectiveLinkDistance = $derived(linkDistance * forceProfile.spacing);
-let effectiveChargeStrength = $derived(chargeStrength * forceProfile.charge);
-let effectiveCenterStrength = $derived(centerStrength * forceProfile.center);
+/** Density-adjusted cohesion — for the color-only path's in-place strength sync. */
 let effectiveClusterCohesion = $derived(clusterCohesionStrength * forceProfile.cohesion);
+
+/**
+ * The raw physics inputs {@link applyLayoutForces} derives everything from —
+ * the density profile is applied inside it, never here, so the canvas and the
+ * headless layout benchmark cannot disagree about the effective values.
+ */
+function layoutPhysicsConfig(): LayoutPhysicsConfig {
+	return {
+		linkDistance,
+		chargeStrength,
+		centerStrength,
+		linkStrength,
+		clusterCohesionStrength,
+		nodeSize,
+		visibleNodeCount,
+	};
+}
 
 // Edge alpha auto-tuned from edge count: fade edges as the graph grows denser so
 // overlapping edges don't compound into a dark mass.  Clamped to [0.18, 0.60].
@@ -211,9 +227,6 @@ let canvasRevealTimer: ReturnType<typeof setTimeout> | null = null;
 
 // Simulation reference — $state so the hot-update $effect re-runs when simulation is (re)created
 let simulation: ReturnType<typeof forceSimulation<SimNode>> | null = $state(null);
-// D3's default link strength function, captured at simulation init so the
-// hot-update effect can reuse it (it depends on the link topology).
-let cachedDefaultLinkStrengthFn: ((link: SimLink, i: number, links: SimLink[]) => number) | null = null;
 // Last applied force parameters, so the hot-update effect can tell a real physics
 // change from a settings-object replacement that left every number untouched.
 // Cleared whenever a simulation is created so a fresh one always gets its forces.
@@ -258,20 +271,6 @@ const EDGE_FADE_RATE = 0.04; // reaches 1 in 25 ticks (~0.4s at 60fps)
 
 /** Cross-fade speed for topic regions — reaches 1 in ~15 frames (~250ms at 60fps). */
 const HULL_FADE_RATE = 0.067;
-
-/** How much each doubling of an edge's weight increases its pull. */
-const WEIGHT_PULL_SCALE = 0.35;
-/** Ceiling on weight-based pull, so one dominant pair can't collapse together. */
-const WEIGHT_PULL_MAX = 3;
-
-/**
- * Crossing-link count at which a topic pair reaches its shortest rest length.
- * Above this the distance stops shrinking, so one dominant pair can't drag two
- * topics on top of each other.
- */
-const WEIGHT_DISTANCE_SATURATION = 64;
-/** Shortest a topic link may become, as a fraction of the normal link distance. */
-const MIN_TOPIC_LINK_DISTANCE_FACTOR = 0.45;
 
 /**
  * How far a topic's notes are seeded from its collapsed position when expanding.
@@ -319,6 +318,17 @@ const RETARGET_HOLD_MS = 1200;
 const RECLUSTER_ALPHA = 0.22;
 const RECLUSTER_ALPHA_DECAY = 0.012;
 const RECLUSTER_VELOCITY_DECAY = 0.55;
+/**
+ * Cohesion multiplier held during the re-cluster transition.
+ *
+ * The equilibrium cohesion is tuned gentle (base strength × density profile ×
+ * per-cluster member damping — combined ~5× weaker than it once was, so
+ * settled clusters keep breathing room). Migration across the layout to a
+ * *new* topic needs the strong pull back for a moment, or freshly split
+ * topics stay spatially interleaved with overlapping hulls. Restored to the
+ * equilibrium strength when the transition ends.
+ */
+const RECLUSTER_COHESION_BOOST = 3;
 
 /**
  * Delay before the corrective fit that runs after the layout has stopped
@@ -894,49 +904,6 @@ function trimOutliers(points: Array<{ x: number; y: number }>): Array<{ x: numbe
 	const kept = points.filter((_, index) => distances[index] <= limit);
 	// Never trim away so much that the region stops representing the topic.
 	return kept.length >= 3 ? kept : points;
-}
-
-/**
- * Extra pull applied to an edge based on its weight.
- *
- * Only collapsed topic-to-topic edges use this. Their weight is a *count* of how
- * many note-level links cross between two topics, so without it a pair joined by
- * 200 links sits exactly as far apart as one joined by 3 — the edge would encode
- * coupling without the layout ever showing it.
- *
- * Log-scaled and clamped: crossing counts are heavy-tailed, so a linear mapping
- * would let one dominant pair collapse onto each other while everything else
- * drifted apart. Note-level edges are left alone — their weights are cosine
- * scores and small link counts that already behave.
- */
-function weightPull(link: SimLink): number {
-	const source = link.source as SimNode;
-	const target = link.target as SimNode;
-	if (source?.kind !== "topic" && target?.kind !== "topic") return 1;
-
-	const weight = Math.max(1, link.weight);
-	return Math.min(WEIGHT_PULL_MAX, 1 + Math.log2(weight) * WEIGHT_PULL_SCALE);
-}
-
-/**
- * Rest length for a link, shortened for heavily-crossed topic pairs.
- *
- * Strength alone cannot express coupling: in d3-force every link is a spring
- * with a rest length and a stiffness, and stiffness only changes how *fast* a
- * pair converges — not where it settles. With one fixed distance, two topics
- * joined by 200 links come to rest exactly as far apart as two joined by 3.
- * Shortening the spring is what actually pulls coupled topics together.
- */
-function weightedLinkDistance(link: SimLink): number {
-	const source = link.source as SimNode;
-	const target = link.target as SimNode;
-	if (source?.kind !== "topic" && target?.kind !== "topic") return effectiveLinkDistance;
-
-	// Same log curve as the pull, inverted: the heaviest edges sit at
-	// MIN_TOPIC_LINK_DISTANCE_FACTOR of the normal length.
-	const weight = Math.max(1, link.weight);
-	const t = Math.min(1, Math.log2(weight) / Math.log2(WEIGHT_DISTANCE_SATURATION));
-	return effectiveLinkDistance * (1 - t * (1 - MIN_TOPIC_LINK_DISTANCE_FACTOR));
 }
 
 /**
@@ -1864,60 +1831,6 @@ function openNodeMenu(node: GraphNode, clientX: number, clientY: number) {
 // ============================================================================
 
 /** Compute the 2D centroid (mean x, y) for each cluster. */
-function computeClusterCentroids(nodes: SimNode[]): Map<number, { x: number; y: number }> {
-	const sums = new Map<number, { sx: number; sy: number; count: number }>();
-	for (const n of nodes) {
-		const c = n.cluster ?? 0;
-		const entry = sums.get(c) ?? { sx: 0, sy: 0, count: 0 };
-		entry.sx += n.x ?? 0;
-		entry.sy += n.y ?? 0;
-		entry.count += 1;
-		sums.set(c, entry);
-	}
-	const centroids = new Map<number, { x: number; y: number }>();
-	for (const [c, { sx, sy, count }] of sums) {
-		centroids.set(c, { x: sx / count, y: sy / count });
-	}
-	return centroids;
-}
-
-/**
- * Custom d3-force that gently pulls each node toward its cluster's 2D centroid.
- * The centroid is recomputed every tick so it tracks the moving average.
- */
-function clusterCohesionForce(nodes: SimNode[], strength: number) {
-	let _strength = strength;
-
-	function force(alpha: number) {
-		// Recompute centroids each tick so they follow the nodes
-		const centroids = computeClusterCentroids(nodes);
-
-		for (const node of nodes) {
-			// Skip pinned nodes
-			if (node.fx != null && node.fy != null) continue;
-
-			const centroid = centroids.get(node.cluster ?? 0);
-			if (!centroid) continue;
-
-			const dx = centroid.x - (node.x ?? 0);
-			const dy = centroid.y - (node.y ?? 0);
-			node.vx = (node.vx ?? 0) + dx * _strength * alpha;
-			node.vy = (node.vy ?? 0) + dy * _strength * alpha;
-		}
-	}
-
-	force.strength = (s?: number) => {
-		if (s === undefined) return _strength;
-		_strength = s;
-		return force;
-	};
-
-	// d3 force interface: initialize is a no-op since we track nodes directly
-	force.initialize = () => {};
-
-	return force;
-}
-
 // ============================================================================
 // Shared graph data setup (used by both wiki and smart modes)
 // ============================================================================
@@ -2177,40 +2090,27 @@ function setupForceSimulation(
 	isFreshLayout: boolean,
 	isIncrementalUpdate = false,
 ) {
-	// Save the default d3 link strength function so we can apply linkStrength as
-	// a multiplier, matching how Obsidian's native graph works.
-	const baseLinkForce = forceLink<SimNode, SimLink>(simLinks)
-		.id((d) => d.id)
-		.distance(weightedLinkDistance);
-	const defaultLinkStrengthFn = baseLinkForce.strength() as (link: SimLink, i: number, links: SimLink[]) => number;
-	cachedDefaultLinkStrengthFn = defaultLinkStrengthFn;
-	baseLinkForce.strength((l, i, links) => linkStrength * defaultLinkStrengthFn(l, i, links) * weightPull(l));
-
 	// A fresh simulation has no applied parameters yet, so the hot-update effect
 	// must treat its next run as a real change rather than a no-op repeat.
 	lastPhysicsSignature = null;
 
 	simulation = forceSimulation<SimNode>(simNodes);
+	// Full production force set — shared with the headless layout benchmark, so
+	// what gets measured there is exactly what runs here.
+	applyLayoutForces(simulation, simNodes, simLinks, layoutPhysicsConfig());
 	simulation
-		.force("link", baseLinkForce)
-		.force("charge", forceManyBody().strength(effectiveChargeStrength).distanceMin(30))
-		// Obsidian uses forceX + forceY for centering (spring toward origin),
-		// NOT forceCenter (which shifts the centroid). This is the key difference.
-		.force("centerX", forceX<SimNode>(0).strength(effectiveCenterStrength))
-		.force("centerY", forceY<SimNode>(0).strength(effectiveCenterStrength))
-		.force("cluster", clusterCohesionForce(simNodes, effectiveClusterCohesion))
-		.force(
-			"collide",
-			forceCollide<SimNode>().radius((d) => getNodeRadius(d) + 2),
-		)
 		.on("tick", () => {
 			// Positions moved — the spatial hit grid no longer matches them.
 			hitGridDirty = true;
 			// A finished re-cluster transition hands its slower decay back, so the
 			// next drag or retarget feels normal instead of inheriting the drift.
+			// The migration cohesion boost is handed back with it — the settled
+			// layout must live at the gentle equilibrium strength.
 			if (isReclustering && simulation && simulation.alpha() < 0.02) {
 				isReclustering = false;
 				simulation.alphaDecay(baseAlphaDecay).velocityDecay(baseVelocityDecay);
+				const clusterForce = simulation.force("cluster") as ReturnType<typeof clusterCohesionForce> | undefined;
+				clusterForce?.strength(effectiveClusterCohesion);
 			}
 
 			// During initial settling, continuously refit the camera so it
@@ -2361,9 +2261,11 @@ function setupGraph(data: GraphData) {
 				sn.highlighted = node.highlighted;
 			}
 		}
-		// Sync the cohesion force strength to the current prop value.
+		// Sync the cohesion force strength to the current prop value — but never
+		// mid-transition: a pure recolor (highlight toggle) landing while a
+		// re-cluster is still migrating would silently drop the boost early.
 		const clusterForce = simulation?.force("cluster") as ReturnType<typeof clusterCohesionForce> | undefined;
-		if (clusterForce) clusterForce.strength(effectiveClusterCohesion);
+		if (clusterForce && !isReclustering) clusterForce.strength(effectiveClusterCohesion);
 		// Re-derive cluster metadata so pills on the canvas reflect the new segmentation.
 		// (buildInternalData is not called in this path, so we update it explicitly.)
 		refreshClusterMetadata(data);
@@ -2373,6 +2275,14 @@ function setupGraph(data: GraphData) {
 		// applied to a simulation that is no longer ticking, leaving colours and
 		// hulls updated over a frozen layout.
 		if (clustersChanged && clusterCohesionStrength > 0 && simulation && simulation.alpha() < RECLUSTER_ALPHA) {
+			// Equilibrium cohesion is tuned deliberately gentle (density profile,
+			// per-cluster member damping) so settled clusters keep breathing room —
+			// but that same gentleness can no longer *migrate* nodes across the
+			// layout when a granularity change hands them new topics, so freshly
+			// split groups stayed spatially interleaved and their hulls overlapped.
+			// Boost the pull for the transition only; the tick handler that ends
+			// the re-cluster (alpha < 0.02) restores the equilibrium strength.
+			clusterForce?.strength(effectiveClusterCohesion * RECLUSTER_COHESION_BOOST);
 			simulation
 				.alpha(RECLUSTER_ALPHA)
 				.alphaDecay(RECLUSTER_ALPHA_DECAY)
@@ -2430,51 +2340,48 @@ $effect(() => {
 // Reading `simulation` ($state) means this effect re-runs when a new simulation
 // is created (e.g. after a full graph rebuild), so slider changes always apply.
 $effect(() => {
-	// The density-adjusted values, so a slider change hot-applies at the same
-	// spread the full setup uses. Both are value-stable $deriveds: a color-only
-	// graph change re-evaluates them but doesn't re-fire this effect.
-	const _charge = effectiveChargeStrength;
-	const _link = effectiveLinkDistance;
-	const _center = effectiveCenterStrength;
+	// Everything applyLayoutForces reads. Raw slider values plus the two
+	// value-stable $deriveds (nodeSize, visibleNodeCount) that feed the density
+	// profile — a color-only graph change re-evaluates the deriveds but doesn't
+	// re-fire this effect, so a settled layout can't be perturbed by a repaint.
+	const _charge = chargeStrength;
+	const _link = linkDistance;
+	const _center = centerStrength;
 	const _linkStr = linkStrength;
-	const _cohesion = effectiveClusterCohesion;
+	const _cohesion = clusterCohesionStrength;
+	const _nodeSize = nodeSize;
+	const _count = visibleNodeCount;
 	const sim = simulation; // $state — tracks simulation creation
 
 	if (!sim) return;
 
-	const charge = sim.force("charge") as ReturnType<typeof forceManyBody> | undefined;
-	if (charge) charge.strength(_charge);
-
-	const cx = sim.force("centerX") as ReturnType<typeof forceX> | undefined;
-	if (cx) cx.strength(_center);
-	const cy = sim.force("centerY") as ReturnType<typeof forceY> | undefined;
-	if (cy) cy.strength(_center);
-
-	const link = sim.force("link") as ReturnType<typeof forceLink<SimNode, SimLink>> | undefined;
-	if (link) {
-		// Re-apply the weight-aware functions, not flat constants: assigning
-		// `distance(_link)` / a plain strength here would silently drop the
-		// coupling scaling every time any physics setting changed.
-		void _link;
-		link.distance(weightedLinkDistance);
-		if (cachedDefaultLinkStrengthFn) {
-			const baseFn = cachedDefaultLinkStrengthFn;
-			link.strength((l: SimLink, i: number, links: SimLink[]) => _linkStr * baseFn(l, i, links) * weightPull(l));
-		}
+	// One shared code path with initial setup (and the layout benchmark):
+	// recreating the forces wholesale is cheap, and mutating them field-by-field
+	// here previously meant the weight-aware link functions had to be carefully
+	// re-applied by hand or the coupling scaling silently dropped.
+	applyLayoutForces(sim, simNodes, simLinks, {
+		linkDistance: _link,
+		chargeStrength: _charge,
+		centerStrength: _center,
+		linkStrength: _linkStr,
+		clusterCohesionStrength: _cohesion,
+		nodeSize: _nodeSize,
+		visibleNodeCount: _count,
+	});
+	// Recreating the forces resets cohesion to its equilibrium strength; restore
+	// the migration boost if a re-cluster is still in flight, or a settings
+	// write landing mid-transition would strand topics half-migrated.
+	if (isReclustering) {
+		const migratingCluster = sim.force("cluster") as ReturnType<typeof clusterCohesionForce> | undefined;
+		migratingCluster?.strength(effectiveClusterCohesion * RECLUSTER_COHESION_BOOST);
 	}
-
-	const collide = sim.force("collide") as ReturnType<typeof forceCollide<SimNode>> | undefined;
-	if (collide) collide.radius((d: SimNode) => getNodeRadius(d) + 2);
-
-	const clusterForce = sim.force("cluster") as ReturnType<typeof clusterCohesionForce> | undefined;
-	if (clusterForce) clusterForce.strength(_cohesion);
 
 	// Reheat only when a force parameter really changed. `settings` is replaced
 	// wholesale on every write (`{ ...settings, ...partial }`), which invalidates
 	// each property read even when the number is identical — so without this
 	// comparison a purely visual toggle (topic labels, highlights) would restart
 	// the layout at alpha 0.3 and visibly re-shuffle the graph.
-	const signature = `${_charge}:${_link}:${_center}:${_linkStr}:${_cohesion}`;
+	const signature = `${_charge}:${_link}:${_center}:${_linkStr}:${_cohesion}:${_nodeSize}:${_count}`;
 	const changed = signature !== lastPhysicsSignature;
 	lastPhysicsSignature = signature;
 	if (changed && sim.alpha() < 0.05) {
@@ -2624,11 +2531,19 @@ function animateCameraToNodes(
 	filter?: (node: SimNode) => boolean,
 	padding: number | FramingPadding = 40,
 	duration = 400,
+	// Whole-graph framings cap the zoom; selection zooms pass a permissive cap
+	// because magnifying a few chosen notes is the point of the gesture.
+	maxScale = GRAPH_FIT_MAX_SCALE,
 ) {
 	if (!pixi) return;
+	// Always frame the full bounds: an explicit fit means "show me everything",
+	// and framing only a trimmed core left excluded nodes stranded outside the
+	// viewport — which reads as a broken fit, not a smart one. Keeping strays
+	// from dominating the frame is the layout's job (satellite centering,
+	// sparse spread), not the camera's.
 	const bounds = computeNodeBounds(simNodes, filter);
 	if (!bounds) return;
-	const target = framingTransform(bounds, { width: pixi.width, height: pixi.height }, padding);
+	const target = framingTransform(bounds, { width: pixi.width, height: pixi.height }, padding, maxScale);
 	const centerX = (bounds.minX + bounds.maxX) / 2;
 	const centerY = (bounds.minY + bounds.maxY) / 2;
 	pixi.animateToFrame(centerX, centerY, target.scale, duration);
@@ -2701,7 +2616,7 @@ function zoomByFactor(factor: number) {
  */
 export function panToSelection() {
 	if (selectedNodes.size === 0) return;
-	animateCameraToNodes((n) => selectedNodes.has(n.id), 60, 400);
+	animateCameraToNodes((n) => selectedNodes.has(n.id), 60, 400, 4);
 }
 
 /**
@@ -2709,7 +2624,7 @@ export function panToSelection() {
  */
 export function panToClusters(clusters: Set<number>) {
 	if (simNodes.length === 0 || clusters.size === 0) return;
-	animateCameraToNodes((n) => n.cluster != null && clusters.has(n.cluster), 60, 400);
+	animateCameraToNodes((n) => n.cluster != null && clusters.has(n.cluster), 60, 400, 4);
 }
 </script>
 

@@ -96,6 +96,22 @@ describe("encodeTopicCaches / decodeTopicCaches", () => {
 		expect(wikiPartition).toHaveLength(3);
 	});
 
+	it("discards a ladder derived under different rules, keeping the rest of the entry", () => {
+		// The regression: a persisted 10-rung ladder survived the switch to a
+		// 7-rung derivation, because the cache is keyed by graph signature —
+		// which cannot notice that the code computing the ladder changed.
+		const encoded = encodeTopicCaches(sampleSnapshot());
+		const stale = structuredClone(encoded);
+		for (const graph of stale.graphs) graph.granularityLadderRules = "rules-from-an-older-build";
+
+		const decoded = decodeTopicCaches(stale);
+		expect(decoded).not.toBeNull();
+		const entry = decoded?.graphs.get("full-graph-sig");
+		expect(entry?.granularityLadder).toBeNull();
+		// The expensive partitions are unaffected — only the ladder is re-derived.
+		expect(entry?.leiden.get("7:1:fused")).toEqual({ "a.md": 0, "b.md": 0, "c.md": 1 });
+	});
+
 	it("rejects payloads from another schema version or malformed shapes", () => {
 		const encoded = encodeTopicCaches(sampleSnapshot());
 		expect(decodeTopicCaches({ ...encoded, version: 999 })).toBeNull();

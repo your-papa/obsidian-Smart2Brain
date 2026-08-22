@@ -66,6 +66,63 @@ export function computeNodeBounds<T extends { x?: number | null; y?: number | nu
 	return count > 0 ? { minX, minY, maxX, maxY } : null;
 }
 
+/** Fraction of nodes excluded from each end of each axis by {@link computeCoreNodeBounds}. */
+const CORE_BOUNDS_TRIM_FRACTION = 0.06;
+/** Never trim so much that the result stops describing the graph. */
+const CORE_BOUNDS_MAX_TRIM_FRACTION = 0.2;
+
+/**
+ * Bounding box of the graph's *core*, ignoring the most extreme outliers.
+ *
+ * **Not** used for camera framing: an explicit "fit to view" must show every
+ * node, and framing a trimmed core strands the excluded ones off-screen, which
+ * reads as a broken fit. Keeping strays from dominating the frame is the
+ * layout's job (satellite centering, sparse spread), not the camera's.
+ *
+ * This exists for *measurement* — the layout benchmark's `fill`/`waste`
+ * metrics compare the honest full frame against the area the graph's core
+ * actually occupies, which is how "a knot marooned in white space" gets
+ * quantified rather than eyeballed.
+ *
+ * Trims by rank rather than distance so the result is stable regardless of how
+ * far a stray drifted, and always keeps at least one node per end so small
+ * graphs (where a single satellite is a large share of the population) are
+ * trimmed too — a proportional-only trim rounds to zero there, which is
+ * exactly the case that motivated this.
+ *
+ * Falls back to the full bounds when the graph is too small to trim
+ * meaningfully.
+ */
+export function computeCoreNodeBounds<T extends { x?: number | null; y?: number | null }>(
+	nodes: ReadonlyArray<T>,
+	filter?: (node: T) => boolean,
+): BoundingBox | null {
+	const xs: number[] = [];
+	const ys: number[] = [];
+	for (const node of nodes) {
+		if (node.x != null && node.y != null && (!filter || filter(node))) {
+			xs.push(node.x);
+			ys.push(node.y);
+		}
+	}
+	if (xs.length === 0) return null;
+	// Below ~8 nodes every node is a meaningful share of the picture.
+	if (xs.length < 8) return computeNodeBounds(nodes, filter);
+
+	const maxTrim = Math.floor((xs.length * CORE_BOUNDS_MAX_TRIM_FRACTION) / 2);
+	const trim = Math.min(Math.max(1, Math.round(xs.length * CORE_BOUNDS_TRIM_FRACTION)), maxTrim);
+	if (trim < 1) return computeNodeBounds(nodes, filter);
+
+	xs.sort((a, b) => a - b);
+	ys.sort((a, b) => a - b);
+	return {
+		minX: xs[trim],
+		maxX: xs[xs.length - 1 - trim],
+		minY: ys[trim],
+		maxY: ys[ys.length - 1 - trim],
+	};
+}
+
 /**
  * Calculate the target camera transform that frames a bounding box
  * within a viewport of the given width and height.
@@ -75,6 +132,19 @@ export function computeNodeBounds<T extends { x?: number | null; y?: number | nu
  * @param padding  Pixel padding around the edges.
  * @param maxScale Maximum allowed zoom level (default 4).
  */
+/**
+ * Zoom ceiling for framing the *whole* graph.
+ *
+ * Without a cap, fitting a tiny vault (or a collapsed view) magnifies a
+ * handful of nodes to fill the viewport — giant discs with giant labels. A
+ * small graph should sit comfortably at near-natural scale with room around
+ * it instead. Selection zooms deliberately ignore this: zooming *to* a few
+ * chosen notes is exactly when high magnification is wanted.
+ *
+ * Shared with the layout benchmark so measured `fit`/`nodePx` match the app.
+ */
+export const GRAPH_FIT_MAX_SCALE = 1.3;
+
 export function framingTransform(
 	bounds: BoundingBox,
 	viewport: { width: number; height: number },

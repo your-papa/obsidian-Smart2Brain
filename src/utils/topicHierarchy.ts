@@ -155,7 +155,28 @@ export const GRANULARITY_PROBE_RESOLUTIONS = [
 ] as const;
 
 /** Never derive a ladder longer than this, however varied the vault. */
-export const MAX_DERIVED_GRANULARITY_LEVELS = 10;
+export const MAX_DERIVED_GRANULARITY_LEVELS = 7;
+
+/**
+ * Most topics a granularity level may produce and still be offered.
+ *
+ * Past a few dozen topics the view stops being readable regardless of vault
+ * size: the colour palette has 24 slots (collisions past that are guaranteed),
+ * label pills crowd each other out, and hulls tile the canvas. The finest
+ * rungs were "more topics", not "more insight". When every probe exceeds this
+ * (a huge vault whose coarsest partition is already large), the cap is waived
+ * rather than offering no ladder at all.
+ */
+export const MAX_USEFUL_TOPICS = 30;
+
+/**
+ * How much bigger a rung's topic count must be than the previous rung's.
+ *
+ * Distinct counts alone allowed near-duplicate steps — 22 topics vs 24 topics
+ * is not a different way of seeing the vault, but it cost a slider stop and a
+ * Leiden run. Requiring a real jump keeps each step a visible regrouping.
+ */
+export const MIN_RUNG_TOPIC_RATIO = 1.3;
 
 /**
  * Smallest group that counts as a topic.
@@ -204,12 +225,18 @@ export function summarizePartition(communities: CommunityMap): { topicCount: num
 /**
  * Choose the ladder's rungs from probe results.
  *
- * Keeps the *first* γ producing each distinct topic count, so every step visibly
- * changes the grouping and adjacent rungs are never duplicates. Two kinds of
- * probe are discarded outright: those that found no topics (γ too low to
- * separate anything, or a graph with no edges), and those flagged as fragmented
- * — a γ so high that the vault shattered into mostly one-note groups is not a
- * level worth offering.
+ * Keeps the *first* γ producing each distinct topic count, then thins the
+ * candidates twice:
+ *
+ * - counts above {@link MAX_USEFUL_TOPICS} are dropped — the finest rungs were
+ *   "more topics", not "more insight" (waived if the cap would leave fewer
+ *   than two rungs, so a huge vault still gets a ladder);
+ * - each surviving rung must have at least {@link MIN_RUNG_TOPIC_RATIO}× the
+ *   previous rung's topics, so every slider step is a visible regrouping
+ *   rather than a near-duplicate.
+ *
+ * Probes that found no topics (γ too low, or an edgeless graph) and those
+ * flagged as fragmented (mostly one-note groups) are discarded outright.
  *
  * Returns null when fewer than two usable levels exist — the caller falls back
  * to the static ladder rather than showing a slider that cannot move.
@@ -225,10 +252,22 @@ export function deriveGranularityLadder(
 		if (!byCount.has(probe.topicCount)) byCount.set(probe.topicCount, probe.resolution);
 	}
 
-	const ladder = [...byCount.entries()]
-		.sort((a, b) => a[0] - b[0])
-		.map(([, resolution]) => resolution)
-		.sort((a, b) => a - b);
+	const buildLadder = (maxTopics: number): number[] => {
+		const ascending = [...byCount.entries()].sort((a, b) => a[0] - b[0]);
+		const rungs: Array<{ count: number; resolution: number }> = [];
+		for (const [count, resolution] of ascending) {
+			if (count > maxTopics) continue;
+			const previous = rungs[rungs.length - 1];
+			if (previous && count < previous.count * MIN_RUNG_TOPIC_RATIO) continue;
+			rungs.push({ count, resolution });
+		}
+		return rungs.map((rung) => rung.resolution).sort((a, b) => a - b);
+	};
+
+	let ladder = buildLadder(MAX_USEFUL_TOPICS);
+	// Every grouping this vault supports is past the readability cap — offer
+	// the ladder anyway rather than no slider at all.
+	if (ladder.length < 2) ladder = buildLadder(Number.POSITIVE_INFINITY);
 
 	if (ladder.length < 2) return null;
 	if (ladder.length <= MAX_DERIVED_GRANULARITY_LEVELS) return ladder;
@@ -246,6 +285,25 @@ export function deriveGranularityLadder(
 
 /** Lowest selectable granularity level (broadest topics). */
 export const MIN_GRANULARITY_LEVEL = 1;
+
+/**
+ * Identity of the rules {@link deriveGranularityLadder} currently applies.
+ *
+ * A cached ladder is keyed by graph signature, which says nothing about the
+ * *code* that derived it — so tightening the derivation leaves every existing
+ * cache entry describing a slider this build would never produce (observed:
+ * a persisted 10-rung ladder surviving the switch to 7). Including this in
+ * the cache key retires those entries automatically, instead of relying on
+ * someone remembering to bump a schema version.
+ */
+export const GRANULARITY_LADDER_RULES_KEY = [
+	MAX_DERIVED_GRANULARITY_LEVELS,
+	MAX_USEFUL_TOPICS,
+	MIN_RUNG_TOPIC_RATIO,
+	MIN_TOPIC_SIZE,
+	MAX_SINGLETON_SHARE,
+	GRANULARITY_PROBE_RESOLUTIONS.join(","),
+].join("|");
 
 /** Highest level on a given ladder. */
 export function maxGranularityLevel(ladder: readonly number[] = GRANULARITY_LEVEL_RESOLUTIONS): number {

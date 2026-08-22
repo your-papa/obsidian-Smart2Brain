@@ -32,6 +32,7 @@
  */
 
 import type { GraphEdge } from "../../types/graph";
+import { GRANULARITY_LADDER_RULES_KEY } from "../../utils/topicHierarchy";
 import { getData } from "../../stores/dataStore.svelte";
 import { Logger } from "../../utils/logging";
 
@@ -180,8 +181,13 @@ export function setCachedSemanticEdges(key: string, edges: GraphEdge[]): void {
 /**
  * v2: multiple graphs (active + archived) instead of a single slot.
  * v3: each cached graph carries the γ it was last viewed at.
+ * v4: granularity ladders are derived by different rules (readability cap,
+ *     minimum step between rungs), so ladders cached under v3 describe a
+ *     slider this build would never produce. Bump whenever the *derivation*
+ *     changes — the cache is keyed by graph signature, which cannot notice
+ *     that the code computing the value changed.
  */
-const TOPIC_CACHE_VERSION = 3;
+const TOPIC_CACHE_VERSION = 4;
 
 /** One graph's cached derivations, as carried in a snapshot. */
 export interface CachedGraphEntry {
@@ -208,6 +214,8 @@ interface PersistedGraphCaches {
 	/** Partition key → community id per node, aligned with `nodePaths`; -1 = absent. */
 	partitions: Record<string, number[]>;
 	granularityLadder: number[] | null;
+	/** Identity of the derivation rules that produced `granularityLadder`. */
+	granularityLadderRules?: string;
 	resolution: number | null;
 	lastUsed: number;
 }
@@ -291,6 +299,7 @@ function encodeGraph(signature: string, entry: CachedGraphEntry): PersistedGraph
 		nodePaths,
 		partitions,
 		granularityLadder: entry.granularityLadder ? [...entry.granularityLadder] : null,
+		granularityLadderRules: GRANULARITY_LADDER_RULES_KEY,
 		resolution: entry.resolution,
 		lastUsed: entry.lastUsed,
 	};
@@ -337,7 +346,10 @@ function decodeGraph(raw: unknown): { signature: string; entry: CachedGraphEntry
 		leiden.set(key, partition);
 	}
 
-	const ladder = persisted.granularityLadder;
+	// A ladder derived under different rules describes a slider this build
+	// would never produce — drop it so it is re-probed rather than restored.
+	const rulesMatch = persisted.granularityLadderRules === GRANULARITY_LADDER_RULES_KEY;
+	const ladder = rulesMatch ? persisted.granularityLadder : null;
 	return {
 		signature: persisted.signature,
 		entry: {

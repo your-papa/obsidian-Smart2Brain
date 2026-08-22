@@ -227,7 +227,7 @@ export const DEFAULT_SMART_GRAPH_SETTINGS: SmartGraphSettings = {
 	chargeStrength: -120,
 	centerStrength: 0.07,
 	linkStrength: 1,
-	clusterCohesionStrength: 0.55,
+	clusterCohesionStrength: 0.45,
 	showWikiLinks: true,
 	showSemanticLinks: true,
 	linkOnlyTopics: false,

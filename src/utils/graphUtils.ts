@@ -45,6 +45,16 @@ const TOPIC_RADIUS_HALF_POINT = 18;
  * doubling of connections visible while approaching the ceiling
  * asymptotically instead of hitting it.
  */
+/**
+ * Auto-tuned base node radius from how many notes the graph *represents* —
+ * larger for small vaults, smaller for dense ones, on a continuous log scale.
+ * A collapsed topic counts as its members, not as one node, so folding doesn't
+ * change the sizing regime (see the canvas's representedNoteCount).
+ */
+export function autoNodeSize(representedNoteCount: number): number {
+	return Math.max(2, Math.round(7 - Math.log10(Math.max(representedNoteCount, 10)) * 1.8));
+}
+
 export function nodeDrawRadius(node: { degree?: number; kind?: string }, nodeSize: number): number {
 	const base = Math.max(1, nodeSize);
 	const degree = Math.max(0, node.degree ?? 0);
@@ -59,8 +69,26 @@ export function nodeDrawRadius(node: { degree?: number; kind?: string }, nodeSiz
 const SPREAD_REFERENCE_NODES = 400;
 /** Compaction floor for very large graphs. */
 const SPREAD_FACTOR_MIN = 0.65;
-/** Spread ceiling for very small graphs (immerse, tiny vault, collapse-all). */
-const SPREAD_FACTOR_MAX = 1.7;
+/**
+ * Spread ceiling — reached only by the sparsest graphs via the extra boost
+ * below {@link SPARSE_SPREAD_BOOST_NODES}.
+ */
+const SPREAD_FACTOR_MAX = 4.5;
+
+/**
+ * Below this node count an extra spread boost kicks in on top of the base
+ * ¼-power curve.
+ *
+ * The base curve is sized for note-level graphs; on a collapsed view of a
+ * handful of topics it tops out around 2.5×, which still lays 8 topics out in
+ * ~300 world px — a knot the overview zoom cap then refuses to magnify, so
+ * most of the viewport stays white. The layout has to be bigger in *world*
+ * units: no camera policy can fill a screen with a knot without inflating
+ * nodes into discs. The boost is continuous at the threshold (its factor is
+ * exactly 1 there).
+ */
+const SPARSE_SPREAD_BOOST_NODES = 60;
+const SPARSE_SPREAD_BOOST_EXPONENT = 0.35;
 
 /**
  * Base spread multiplier from how many nodes are on screen — the raw signal
@@ -77,9 +105,21 @@ const SPREAD_FACTOR_MAX = 1.7;
  */
 export function densitySpreadFactor(visibleNodeCount: number): number {
 	const count = Math.max(1, visibleNodeCount);
-	const factor = (SPREAD_REFERENCE_NODES / count) ** 0.25;
+	let factor = (SPREAD_REFERENCE_NODES / count) ** 0.25;
+	if (count < SPARSE_SPREAD_BOOST_NODES) {
+		factor *= (SPARSE_SPREAD_BOOST_NODES / count) ** SPARSE_SPREAD_BOOST_EXPONENT;
+	}
 	return Math.min(SPREAD_FACTOR_MAX, Math.max(SPREAD_FACTOR_MIN, factor));
 }
+
+/**
+ * Node count below which centering starts easing off, reaching its floor at a
+ * handful of nodes. Sized so a typical collapsed view (a dozen or two topics)
+ * opens up, while anything approaching a real note-level graph is untouched.
+ */
+const SPARSE_CENTER_RELAX_NODES = 60;
+/** How weak the centering may get on the sparsest graphs. */
+const SPARSE_CENTER_RELAX_FLOOR = 0.35;
 
 /** Per-force multipliers derived from the visible-node density. */
 export interface DensityForceProfile {
@@ -103,21 +143,26 @@ export interface DensityForceProfile {
  * act on only one of the scales carry the asymmetry:
  *
  * - **spacing** follows the spread factor directly.
- * - **charge** follows its square root — charge acts on both scales at once
+ * - **charge** follows √spread when spreading and spread^0.35 when
+ *   compacting — charge acts on both scales at once
  *   (it separates notes within a cluster *and* pushes clusters apart), so
  *   scaling it fully squeezed cluster interiors on big graphs and flung
  *   unlinked satellites to the horizon on small ones. Softened, it keeps more
  *   note-to-note breathing room at high density and calmer satellites at low.
  * - **center** strengthens on dense graphs, supra-quadratically in the
- *   compaction (exponent 2.5, capped 2.8×) — it's the only inward force an
+ *   compaction (exponent 2.5, capped 2.2× — the cap was 2.8 until the layout
+ *   benchmark showed the extra pull compressing cluster *interiors* about as
+ *   hard as cohesion itself, right when gaps sat at the tight end of their
+ *   band already) — it's the only inward force an
  *   unlinked node feels, and negligible against local forces inside a
  *   cluster, so it closes inter-cluster gaps without compressing anything.
  *   Steep because the pull must *outpace* the compaction: a linear response
  *   barely engaged before the spread floor bound it, and clusters still
- *   floated far apart. Never weakened below 1× for small graphs, where
- *   satellites already sit far out.
- * - **cohesion** relaxes on dense graphs, faster than spacing (spread^1.5,
- *   floored at 0.45) — it is the intra-cluster crush, and letting clusters
+ *   floated far apart. Below the reference density it relaxes instead
+ *   (floored at 0.55): on a sparse graph centering is what holds the few
+ *   nodes in a knot, and there is no crowding for it to counteract.
+ * - **cohesion** relaxes on dense graphs, faster than spacing (spread^1.8,
+ *   floored at 0.4) — it is the intra-cluster crush, and letting clusters
  *   expand fills the very gaps the center pull is closing. Never strengthened
  *   above 1×.
  *
@@ -126,11 +171,25 @@ export interface DensityForceProfile {
  */
 export function densityForceProfile(visibleNodeCount: number): DensityForceProfile {
 	const spread = densitySpreadFactor(visibleNodeCount);
+	// Node count, not the spread factor, decides which side of the reference
+	// density we are on: `spread` saturates at both clamps, so comparing it
+	// against 1 misclassifies every graph past a clamp.
+	const isSparse = visibleNodeCount < SPREAD_REFERENCE_NODES;
 	return {
 		spacing: spread,
-		charge: Math.sqrt(spread),
-		center: Math.min(2.8, Math.max(1, (1 / spread) ** 2.5)),
-		cohesion: Math.min(1, Math.max(0.45, spread ** 1.5)),
+		// Asymmetric: small graphs keep the stronger √spread (their satellites
+		// and sparse clusters need real repulsion to spread out), dense graphs
+		// get the gentler power (their interiors must not be squeezed as hard
+		// as the global structure compacts).
+		charge: isSparse ? Math.sqrt(spread) : spread ** 0.35,
+		// Very sparse graphs relax the centering: it is the force holding a
+		// handful of nodes in a knot, and there is no crowding for it to
+		// counteract. Only below SPARSE_CENTER_RELAX_NODES, and floored, so a
+		// small graph still reads as one object rather than a scatter.
+		center: isSparse
+			? Math.max(SPARSE_CENTER_RELAX_FLOOR, Math.min(1, visibleNodeCount / SPARSE_CENTER_RELAX_NODES))
+			: Math.min(2.2, (1 / spread) ** 2.5),
+		cohesion: Math.min(1, Math.max(0.4, spread ** 1.8)),
 	};
 }
 

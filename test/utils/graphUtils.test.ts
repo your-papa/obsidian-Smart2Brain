@@ -134,10 +134,10 @@ describe("densitySpreadFactor", () => {
 	});
 
 	it("clamps at both extremes so the force balance stays in its tested regime", () => {
-		expect(densitySpreadFactor(1)).toBe(1.7);
+		expect(densitySpreadFactor(1)).toBe(4.5);
 		expect(densitySpreadFactor(1_000_000)).toBe(0.65);
 		// Degenerate inputs behave like a tiny graph rather than exploding.
-		expect(densitySpreadFactor(0)).toBe(1.7);
+		expect(densitySpreadFactor(0)).toBe(4.5);
 	});
 });
 
@@ -163,15 +163,41 @@ describe("densityForceProfile", () => {
 		expect(dense.center).toBeLessThanOrEqual(2.8);
 	});
 
-	it("on small graphs: spreads spacing, softens the charge spread, never weakens centering or boosts cohesion", () => {
+	it("on small graphs: spreads spacing, softens the charge spread, relaxes centering, never boosts cohesion", () => {
 		const small = densityForceProfile(12);
 		expect(small.spacing).toBeGreaterThan(1);
 		// Softer than spacing so unlinked satellites aren't flung to the horizon.
 		expect(small.charge).toBeLessThan(small.spacing);
 		expect(small.charge).toBeGreaterThan(1);
-		// Weakening the only inward pull a satellite feels would push them out.
-		expect(small.center).toBe(1);
+		// Centering eases off so a handful of nodes can open up to fill the
+		// viewport instead of settling as a knot — but stays firm enough that
+		// the graph still reads as one object.
+		expect(small.center).toBeLessThan(1);
+		expect(small.center).toBeGreaterThanOrEqual(0.35);
 		expect(small.cohesion).toBe(1);
+	});
+});
+
+describe("densityForceProfile sparse/dense split", () => {
+	it("relaxes centering only for sparse graphs, never for dense ones", () => {
+		// Regression: the sparse branch once keyed off the spread factor, which
+		// saturates at both clamps — so every graph past the compaction floor
+		// was misread as sparse and had its centering relaxed instead of
+		// boosted, blowing dense layouts out to several times their extent.
+		for (const count of [800, 2000, 8000, 100_000]) {
+			expect(densityForceProfile(count).center).toBeGreaterThan(1);
+		}
+		for (const count of [5, 10, 30]) {
+			expect(densityForceProfile(count).center).toBeLessThan(1);
+		}
+	});
+
+	it("keeps the reference density exactly neutral on both sides of the split", () => {
+		expect(densityForceProfile(400)).toEqual({ spacing: 1, charge: 1, center: 1, cohesion: 1 });
+		// Just below the reference the profile must not jump discontinuously.
+		const justBelow = densityForceProfile(399);
+		expect(justBelow.center).toBeGreaterThan(0.9);
+		expect(justBelow.spacing).toBeGreaterThanOrEqual(1);
 	});
 });
 
