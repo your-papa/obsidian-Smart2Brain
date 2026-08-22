@@ -868,10 +868,22 @@ function applyLivePatch(patched: GraphData, communities: Record<string, number>,
 	// Keep the current rung's cache entry in step, so a granularity round-trip
 	// back to this γ doesn't resurrect the pre-patch assignment. Other rungs go
 	// stale for the changed notes only, until drift or Refresh re-clusters.
+	//
+	// Addressed by signature rather than written to whichever slot is active.
+	// Both callers arrive from async contexts (a debounce timer, and after an
+	// awaited semantic query), so another leaf may own the slot by now — and
+	// the "does this key exist" test would then match *its* graph and overwrite
+	// that graph's partition. The entry belongs to the graph being patched,
+	// which is the pre-patch one: this vote describes how its communities move,
+	// and the caller re-keys to `patched` immediately after.
+	const patchedSignature = graphTopologySignature(graphData);
 	// Only refresh an entry that exists — a missing one means a fresh Leiden run
 	// is in flight for this key, and it will land its own (better) result.
-	if (Object.keys(communities).length > 0 && topicCaches.leiden.has(currentPartitionKey())) {
-		topicCaches.leiden.set(currentPartitionKey(), communities);
+	if (
+		Object.keys(communities).length > 0 &&
+		getCachedPartition(patchedSignature, currentPartitionKey()) !== undefined
+	) {
+		setCachedPartition(patchedSignature, currentPartitionKey(), communities);
 		scheduleTopicCacheSave();
 	}
 	graphData = patched;
@@ -896,7 +908,12 @@ function maybeReclusterAfterDrift() {
 	Logger.info(`[SmartGraph] Live topic drift ${liveTopicDrift} ≥ ${threshold} — re-running Leiden`);
 	liveTopicDrift = 0;
 	// The cached partitions and the hierarchy describe the pre-drift graph.
-	topicCaches.graphSignature = graphTopologySignature(graphData);
+	// Re-key through the swap rather than assigning the slot directly: assigning
+	// `graphSignature` and clearing the map would discard whatever graph the
+	// slot currently holds — another leaf's partitions, if it owns the slot.
+	// The swap archives that graph first, then hands us an empty map keyed to
+	// ours (or this graph's own archived entry, if it has been seen before).
+	swapActiveGraphCache(graphTopologySignature(graphData));
 	topicCaches.leiden.clear();
 	topicHierarchy = null;
 	void runLeidenSegmentation();
@@ -1574,6 +1591,10 @@ async function computeTopicHierarchy(topicEdges: GraphEdge[]) {
  * The granularity ladder is re-derived too, since its rungs came from the old seed.
  */
 async function handleSeedChange() {
+	// Claim the slot for this graph before clearing it: with a second graph leaf
+	// open, the active map may be that leaf's, and its partitions are still
+	// valid under the seed *it* is using.
+	ensureActiveGraphCache(graphTopologySignature(graphData));
 	topicCaches.leiden.clear();
 	hasDerivedGranularityLadder = false;
 	await runLeidenSegmentation();
