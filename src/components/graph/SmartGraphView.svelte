@@ -25,7 +25,12 @@ import {
 	type GraphFilter,
 } from "../../views/smart-graph/graphDataBuilder";
 import { getVectorStoreService, waitForVectorStore, waitForVectorStoreIndex } from "../../vectorstore";
-import { labelTopics } from "../../views/smart-graph/topicLabeler";
+import {
+	labelTopics,
+	topicMembershipKey,
+	TITLES_PER_TOPIC,
+	type TopicToLabel,
+} from "../../views/smart-graph/topicLabeler";
 import {
 	buildTopicHierarchy,
 	coarseResolutionFor,
@@ -1781,9 +1786,12 @@ function resolveAndApplySegments(gd: GraphData) {
 		}
 		defaultClusterLabels = labels;
 		// Topic membership changed, so previously generated names may describe a
-		// grouping that no longer exists. Drop them and (if enabled) re-label —
-		// the cache means unchanged topics don't cost another call.
-		generatedClusterLabels = {};
+		// grouping that no longer exists. Rebuild from the cache rather than
+		// blanking: entries are keyed by membership, so a topic that survived the
+		// change gets its name straight back, and one that didn't simply misses and
+		// keeps its hub-filename default. This is also what restores names after a
+		// reload — the cache is persisted but `generatedClusterLabels` is not.
+		applyCachedTopicLabels();
 		if (settings.autoLabelClusters && settings.graphChatModel) {
 			void runTopicLabeling();
 		}
@@ -1810,13 +1818,81 @@ function resolveAndApplySegments(gd: GraphData) {
 }
 
 /**
+ * Whether private note titles must be kept from the graph model.
+ *
+ * A filename is content: "Q3 Layoff List" leaks the sensitive fact by title
+ * alone. The vault-wide privacy filter only runs at index time and is gated on
+ * the *embedding* provider, so it says nothing about the graph chat model — a
+ * separately configured provider that never passes through that check.
+ */
+function shouldWithholdPrivateTitles(): boolean {
+	const graphProvider = settings.graphChatModel?.provider;
+	return graphProvider != null && !data.isProviderTrusted(graphProvider);
+}
+
+/**
+ * The per-topic title lists used both to *request* labels and to look up
+ * already-cached ones.
+ *
+ * Shared deliberately: the cache is keyed by these titles, so if the two callers
+ * ranked or filtered notes differently they would compute different keys and a
+ * restored label would never match the run that produced it.
+ */
+function buildTopicsToLabel(withholdPrivateTitles: boolean): TopicToLabel[] {
+	// Rank each topic's notes by degree so the titles we send are representative.
+	const nodesByPath = new Map(graphData.nodes.map((node) => [node.path, node]));
+	return segments.map((segment, index) => {
+		const titles = [...segment.paths]
+			.filter((path) => !withholdPrivateTitles || !data.isFilePrivate(path))
+			.map((path) => nodesByPath.get(path))
+			.filter((node): node is GraphNode => node != null)
+			.sort((left, right) => (right.degree ?? 0) - (left.degree ?? 0) || left.label.localeCompare(right.label))
+			.map((node) => node.label);
+		// A topic whose notes are all private sends nothing and keeps its hub-note
+		// fallback — labelTopics skips empty-title topics rather than calling.
+		return { id: index, titles, fallbackLabel: segment.label };
+	});
+}
+
+/**
+ * Re-apply already-cached names to the current topics, without any model call.
+ *
+ * The label cache survives a reload, but `generatedClusterLabels` does not — it
+ * is only ever written by a completed run. Without this, a restart shows
+ * hub-filename labels for names that are sitting in the cache, and the only way
+ * to get them back is to press the button (which now forces a re-generation and
+ * re-spends the calls). Cheap enough to run on every topic change: it is a
+ * handful of map lookups, and a miss just leaves the default in place.
+ */
+function applyCachedTopicLabels() {
+	const cache = getTopicLabelCache();
+	if (cache.size === 0) {
+		generatedClusterLabels = {};
+		return;
+	}
+
+	const topics = buildTopicsToLabel(shouldWithholdPrivateTitles());
+	const restored: Record<number, string> = {};
+	for (const topic of topics) {
+		if (topic.titles.length === 0) continue;
+		const cached = cache.get(topicMembershipKey(topic.titles.slice(0, TITLES_PER_TOPIC)));
+		if (cached) restored[topic.id] = cached;
+	}
+	generatedClusterLabels = restored;
+}
+
+/**
  * Generate concept names for the current topics via the configured graph model.
  *
  * Notes are offered to the model in hub-first order (same ranking the default
- * label uses), so the most central notes describe the topic. Cheap and safe to
- * call repeatedly: unchanged topics are served from cache.
+ * label uses), so the most central notes describe the topic. Calls fan out up to
+ * the labeller's concurrency limit and can be cancelled mid-run.
+ *
+ * Unchanged topics are served from cache unless `force` is set — the manual
+ * button does force, so an explicit press always re-rolls; the automatic pass
+ * does not, so it only pays for topics that actually changed.
  */
-async function runTopicLabeling() {
+async function runTopicLabeling(options: { force?: boolean } = {}) {
 	if (!settings.graphChatModel || segments.length === 0) return;
 
 	labelingAbort?.abort();
@@ -1824,30 +1900,41 @@ async function runTopicLabeling() {
 	labelingAbort = controller;
 	const localBuildVersion = buildVersion;
 
-	// Rank each topic's notes by degree so the titles we send are representative.
-	const nodesByPath = new Map(graphData.nodes.map((node) => [node.path, node]));
-	const topics = segments.map((segment, index) => {
-		const titles = [...segment.paths]
-			.map((path) => nodesByPath.get(path))
-			.filter((node): node is GraphNode => node != null)
-			.sort((left, right) => (right.degree ?? 0) - (left.degree ?? 0) || left.label.localeCompare(right.label))
-			.map((node) => node.label);
-		return { id: index, titles, fallbackLabel: segment.label };
-	});
+	const withholdPrivateTitles = shouldWithholdPrivateTitles();
+	const topics = buildTopicsToLabel(withholdPrivateTitles);
+
+	// Withholding titles quietly degrades the result: topics come back named after
+	// a filename, or not renamed at all, with nothing on screen explaining why.
+	// Only surfaced on an explicit press — the automatic pass runs on every topic
+	// change and would turn this into a recurring nag.
+	if (withholdPrivateTitles && options.force) {
+		const withheld = segments.filter((segment) =>
+			[...segment.paths].some((path) => data.isFilePrivate(path)),
+		).length;
+		if (withheld > 0) {
+			new Notice(
+				`Private note titles were withheld from ${withheld} ${withheld === 1 ? "topic" : "topics"}. ` +
+					"Trust the graph model's provider in Settings to include them.",
+			);
+		}
+	}
 
 	isLabeling = true;
 	try {
 		const labels = await labelTopics(topics, settings.graphChatModel, {
 			signal: controller.signal,
 			cache: getTopicLabelCache(),
+			force: options.force,
 		});
+		// Workers write each label into the membership-keyed cache as they finish,
+		// so a cancelled or superseded run still leaves real, paid-for results
+		// behind. Persist before the guard below returns, or quitting after a
+		// cancel silently throws that work away and re-spends it on restart.
+		scheduleTopicCacheSave();
 		// A rebuild (or unmount) landed while we were waiting — these labels are
 		// keyed to topic ids that may no longer mean the same thing.
 		if (controller.signal.aborted || localBuildVersion !== buildVersion) return;
 		generatedClusterLabels = labels;
-		// labelTopics filled the membership-keyed label cache — persist it so a
-		// restart doesn't re-spend the API calls.
-		scheduleTopicCacheSave();
 	} finally {
 		if (labelingAbort === controller) {
 			isLabeling = false;
@@ -1856,13 +1943,32 @@ async function runTopicLabeling() {
 	}
 }
 
-/** Manual "Label topics" action — ignores the auto toggle. */
+/**
+ * Manual cancel — the spinner doubles as a stop button while a run is live.
+ *
+ * Aborting rejects the in-flight calls, which lets `runTopicLabeling`'s existing
+ * `finally` clear the spinner and its `signal.aborted` guard drop the partial
+ * result. Labels already generated stay in the membership cache, so re-running
+ * restores them without another call.
+ */
+function handleCancelLabeling() {
+	labelingAbort?.abort();
+}
+
+/**
+ * Manual "Label topics" action — ignores the auto toggle.
+ *
+ * Forces regeneration rather than reusing cached names. Pressing this button
+ * when every topic is already cached would otherwise re-display the identical
+ * labels without a single call, which reads as the button doing nothing; a
+ * deliberate press means "give me different names".
+ */
 function handleLabelTopics() {
 	if (!settings.graphChatModel) {
 		new Notice("Select a graph chat model in Settings → Graph to name topics.");
 		return;
 	}
-	void runTopicLabeling();
+	void runTopicLabeling({ force: true });
 }
 
 // ─── Saved Views ─────────────────────────────────────────
@@ -2135,6 +2241,7 @@ function handleHoverPreview(event: MouseEvent, path: string, targetEl: HTMLEleme
     isLeidenRunning={isLeidenRunning}
     {isLabeling}
     onLabelTopics={handleLabelTopics}
+    onCancelLabeling={handleCancelLabeling}
     {lassoMode}
     onLassoModeChange={handleLassoModeChange}
     {graphData}

@@ -24,6 +24,33 @@ function updateSetting<K extends keyof typeof pluginData.smartGraphSettings>(
 
 const graphChatModel = $derived(pluginData.smartGraphSettings.graphChatModel ?? null);
 
+/**
+ * Whether the configured naming model would have private titles withheld.
+ *
+ * Note titles are the entire payload for topic naming, so a private note is
+ * withheld outright rather than partially redacted.
+ */
+const graphModelWithholdsPrivate = $derived(
+	graphChatModel != null && !pluginData.isProviderTrusted(graphChatModel.provider),
+);
+
+/**
+ * The naming-model description, which gains a warning only while it is actually
+ * true — invisible for a trusted or local provider.
+ *
+ * Sits on the model row rather than the automatic toggle because withholding is
+ * a property of the selected provider: it applies to manual naming too. Stated
+ * here at all because the automatic pass deliberately runs silent (it fires on
+ * every topic change, and a notice there would nag), so for a user who never
+ * presses the button in the Topics panel this is the only place it surfaces.
+ */
+const namingModelDesc = $derived(
+	graphModelWithholdsPrivate
+		? "Model used to name topics. Without one, a topic is named after its best-connected note. " +
+				"This provider isn't trusted for private notes, so private titles are withheld from naming."
+		: "Model used to name topics. Without one, a topic is named after its best-connected note.",
+);
+
 function openGraphModelSelection() {
 	new ModelSelectionModal(
 		plugin,
@@ -37,10 +64,7 @@ function openGraphModelSelection() {
 </script>
 
 <SettingGroup heading="Topic Names">
-  <SettingItem
-    name="Topic naming model"
-    desc="Model used to name topics. Without one, a topic is named after its best-connected note."
-  >
+  <SettingItem name="Topic naming model" desc={namingModelDesc}>
     <ModelSettingControl
       available={models.hasProviders && models.hasModels}
       loading={models.hasProviders && models.isLoadingModels}

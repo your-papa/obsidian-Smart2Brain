@@ -39,6 +39,8 @@ interface Props {
 	isLabeling?: boolean;
 	/** Manually (re)generate topic names via the configured graph model. */
 	onLabelTopics?: () => void;
+	/** Abort an in-flight naming run. */
+	onCancelLabeling?: () => void;
 	lassoMode?: boolean;
 	onLassoModeChange?: (active: boolean) => void;
 	graphData?: GraphData;
@@ -70,6 +72,7 @@ let {
 	isLeidenRunning = false,
 	isLabeling = false,
 	onLabelTopics,
+	onCancelLabeling,
 	lassoMode = false,
 	onLassoModeChange,
 	graphData = { nodes: [], edges: [] },
@@ -237,6 +240,33 @@ function handleResetDevSettings() {
 const onMobile = isMobileUI();
 const fitTooltip = onMobile ? "Fit graph to view" : "Fit graph to view (F)";
 const lassoTooltip = onMobile ? "Lasso selection" : "Lasso selection (or hold Shift + drag)";
+
+// Pointer/keyboard focus on the topic-naming button, which turns the spinner
+// into a cancel control. Tracked here because Button exposes no hover state.
+// On mobile there is no hover, so the X shows for the whole run instead of
+// hiding the only way to stop it.
+let labelButtonHot = $state(false);
+let labelButtonEl = $state<HTMLButtonElement | undefined>(undefined);
+const showCancelLabeling = $derived(isLabeling && (labelButtonHot || onMobile));
+
+// Listener wiring + cleanup on a real DOM node — the one job $effect is for.
+$effect(() => {
+	const el = labelButtonEl;
+	if (!el) return;
+
+	const enter = () => (labelButtonHot = true);
+	const leave = () => (labelButtonHot = false);
+	el.addEventListener("mouseenter", enter);
+	el.addEventListener("mouseleave", leave);
+	el.addEventListener("focus", enter);
+	el.addEventListener("blur", leave);
+	return () => {
+		el.removeEventListener("mouseenter", enter);
+		el.removeEventListener("mouseleave", leave);
+		el.removeEventListener("focus", enter);
+		el.removeEventListener("blur", leave);
+	};
+});
 </script>
 
 <!-- Unified vertical toolbar -->
@@ -351,13 +381,17 @@ const lassoTooltip = onMobile ? "Lasso selection" : "Lasso selection (or hold Sh
             >Found · {segments.length}
             {#if !onMobile}<span class="section-label-hint">shift/⌘ multi-select</span>{/if}</span
           >
+          <!-- The spinner doubles as the cancel control: hovering (or focusing)
+               a live run swaps it for an X. Listeners go on the button itself
+               rather than a wrapper — it is already focusable, so keyboard users
+               reach the cancel affordance by tabbing to it. -->
           <Button
-            iconId={isLabeling ? "loader" : "sparkles"}
-            ariaLabel="Name topics with AI"
-            tooltip={isLabeling ? "Naming topics…" : "Name topics with AI"}
-            onClick={() => onLabelTopics?.()}
-            disabled={isLabeling}
-            styles={isLabeling ? "is-spinning" : ""}
+            bind:element={labelButtonEl}
+            iconId={showCancelLabeling ? "x" : isLabeling ? "loader" : "sparkles"}
+            ariaLabel={isLabeling ? "Cancel naming topics" : "Name topics with AI"}
+            tooltip={isLabeling ? "Cancel naming" : "Name topics with AI"}
+            onClick={() => (isLabeling ? onCancelLabeling?.() : onLabelTopics?.())}
+            styles={isLabeling && !showCancelLabeling ? "is-spinning" : ""}
           />
         </div>
         <div class="segment-list">
