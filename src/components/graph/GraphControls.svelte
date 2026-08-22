@@ -727,11 +727,29 @@ $effect(() => {
     display: flex;
     flex-direction: column;
     gap: 6px;
-    /* Above the sheet's dismiss layer, so fit / lasso / topics stay reachable
-       while a sheet is open — the sheet leaves the graph visible on purpose,
-       and a toolbar you can see but not press would undercut that. The sliders
-       button in particular has to keep working as the sheet's own toggle. */
-    z-index: 15;
+    /* Sits in the gap between the sheet's dismiss layer (12) and the sheet
+       itself (14): above the layer so fit / lasso / topics stay pressable
+       while a sheet is open — and so the sliders button keeps working as the
+       sheet's own toggle — but below the sheet, which is opaque. Putting the
+       toolbar above the sheet instead left the icons painted over the sheet's
+       own controls. */
+    z-index: 13;
+  }
+
+  /* A vertical rail runs straight down into the sheet: at the 44px mobile touch
+     size the column is ~294px tall, so five of its six buttons ended up behind
+     the sheet — including the sliders button that closes it. Laid out as a row
+     it occupies the strip above the sheet instead, which stays clear even at
+     the full detent (the row ends ~6px above a 90%-height sheet).
+
+     Right-aligned so it keeps its corner rather than stretching across the
+     canvas, and wrapped so a narrower phone drops buttons to a second row
+     instead of pushing them off-screen. */
+  :global(.is-mobile) .graph-toolbar {
+    flex-direction: row-reverse;
+    flex-wrap: wrap-reverse;
+    justify-content: flex-start;
+    max-width: calc(100vw - 16px);
   }
 
   /* Sized here rather than via Button's `iconSize` prop: for an icon-only button

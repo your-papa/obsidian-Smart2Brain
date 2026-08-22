@@ -287,10 +287,13 @@ const sheetHeight = $derived.by(() => {
 <style>
   /* Covers the canvas above the sheet only — the sheet itself must stay
      tappable, so this is a sibling rather than a parent. */
+  /* 12 / 13 / 14 across the three layers is load-bearing: the graph toolbar
+     sits at 13, between this and the sheet, so it stays pressable while a
+     sheet is open without painting over the sheet's own controls. */
   .s2b-sheet-dismiss {
     position: absolute;
     inset: 0;
-    z-index: 13;
+    z-index: 12;
     background: transparent;
   }
 
@@ -371,7 +374,18 @@ const sheetHeight = $derived.by(() => {
     overflow-y: auto;
     /* Keep a scroll that reaches its end from chaining into the canvas behind. */
     overscroll-behavior: contain;
-    padding: 0 12px calc(12px + env(safe-area-inset-bottom));
+    /* The bottom inset clears Obsidian's floating mobile navbar, which is NOT
+       covered by the host view's own reservation: `.smart-graph-view` subtracts
+       the navbar's 52px, but the navbar floats with a gap beneath it and so
+       occupies more of the viewport bottom than its own height. Measured in the
+       emulator, it starts 32px above where the sheet ends — so without this the
+       last rows of the topic list sit under the navbar pill.
+
+       Padding rather than shortening the sheet: the sheet's background should
+       still run to the bottom edge (a gap under it would show canvas through a
+       strip the navbar only partly covers); it is the scrollable *content* that
+       has to stop short. */
+    padding: 0 12px calc(44px + env(safe-area-inset-bottom));
   }
 
   /* Without a handle above it the content would sit flush against the sheet's
