@@ -6,6 +6,7 @@ import { invalidateProviderState } from "../lib/query";
 import type SecondBrainPlugin from "../main";
 import type { ChatModel } from "../stores/chatStore.svelte";
 import { getData } from "../stores/dataStore.svelte";
+import { getPendingChangesStore } from "../stores/pendingChangesStore.svelte";
 import { BUILT_IN_TOOL_IDS, type BuiltInToolId, type AgentConfig, type SkillMetadata } from "../types/plugin";
 import { VIEW_TYPE_CHAT } from "../views/chat/Chat";
 import { lookupModelInfo } from "../providers/modelsDevApi";
@@ -1653,7 +1654,27 @@ export class AgentManager {
 	}
 
 	async deleteThread(threadId: string): Promise<void> {
-		await this.chatManager.delete(this.normalizeThreadId(threadId));
+		const resolvedThreadId = this.normalizeThreadId(threadId);
+		await this.chatManager.delete(resolvedThreadId);
+		// Drop the thread's staged changes with it. Nothing else does: the vault
+		// `delete` handler in main.ts is gated on `isAgentFilePath`, so a removed
+		// `.chat` never reaches this store, and its entries would sit in
+		// pending-changes.json forever — keyed to a thread that no longer exists,
+		// still tracked by the rename handler, and unreachable from any UI.
+		// Entries are staged under the same normalized path this resolves to.
+		//
+		// Guarded because `getPendingChangesStore()` throws when the store is absent
+		// (before init, or after `cleanup()` nulls it on unload). Deleting a chat must
+		// not fail on that — the deletion itself already succeeded above, and losing
+		// the entry sweep is a leak, not a broken operation.
+		try {
+			getPendingChangesStore().removeThread(resolvedThreadId);
+		} catch (error) {
+			Logger.warn(
+				`[AgentManager] Could not clear pending changes for deleted thread ${resolvedThreadId}:`,
+				error,
+			);
+		}
 	}
 
 	/** Rename the chat thread's file to `title`. Returns the new vault path, or `undefined` on failure. */

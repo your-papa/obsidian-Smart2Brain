@@ -617,8 +617,8 @@ export class PendingChangesStore {
 	 * which is why this is keyed on the snapshot rather than on status.
 	 *
 	 * Single source of truth for the callers that must agree: `rejectAll` (what to
-	 * revert), `PendingChangesBar` (whether to stay visible), and `cleanupResolved`
-	 * (what is safe to forget).
+	 * revert), `PendingChangesBar` (whether to stay visible), and `removeThread`
+	 * (what is being discarded, so it can be reported).
 	 */
 	hasUnrevertedApplication(entry: PendingChangeEntry): boolean {
 		return entry.change.type === "update" && entry.change.initialOriginalContent !== undefined;
@@ -696,30 +696,15 @@ export class PendingChangesStore {
 		return currentContent !== change.originalContent;
 	}
 
-	/** Remove all resolved (accepted/rejected) entries for a thread. */
-	cleanupResolved(threadId: string): void {
-		const beforeLength = this.#entries.length;
-		// Keep anything still holding unreverted content on disk: dropping it would
-		// discard the only record of what the note looked like before, leaving the
-		// applied text with no way to undo it. Same rule the bar uses to stay visible.
-		this.#entries = this.#entries.filter(
-			(e) => e.threadId !== threadId || e.status === "pending" || this.hasUnrevertedApplication(e),
-		);
-		this.scheduleSave();
-		if (this.#entries.length !== beforeLength) {
-			this.notifyChange();
-		}
-	}
-
 	/**
-	 * Remove all entries for a thread (e.g. when the thread is deleted).
+	 * Remove all entries for a thread. Called when the chat is deleted.
 	 *
-	 * Unlike {@link cleanupResolved} this drops everything, including entries still
-	 * holding unreverted applied content: the chat is gone, so there is no surface
-	 * left to review them on and keeping them would leak rows into a thread that no
-	 * longer exists. But that content stays in the vault with its only undo record
-	 * discarded, so warn rather than doing it silently — the note is left as the
-	 * agent partially wrote it, and the user gets no other signal.
+	 * Drops everything, including entries still holding unreverted applied content:
+	 * the chat is gone, so there is no surface left to review them on and keeping
+	 * them would leak rows into a thread that no longer exists. But that content
+	 * stays in the vault with its only undo record discarded, so warn rather than
+	 * doing it silently — the note is left as the agent partially wrote it, and the
+	 * user gets no other signal.
 	 */
 	removeThread(threadId: string): void {
 		const beforeLength = this.#entries.length;
