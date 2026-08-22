@@ -391,8 +391,16 @@ $effect(() => {
     <!-- Granularity and "Inferred links" both decide *which topics exist*
          (they re-run Leiden), so they belong together and above the topic list
          they produce. Everything under Display only changes how the same topics
-         are drawn. -->
-    <span class="section-label">Topics</span>
+         are drawn.
+
+         `setting-group` / `setting-items` are Obsidian's own classes, not ours:
+         the heading sits outside the card and `.setting-items` paints the
+         lighter offset background, with radius and border coming from
+         `--setting-items-*`. Using core's structure means the panel tracks the
+         user's theme instead of approximating it. -->
+    <div class="setting-group">
+      <SettingContainer name="Topics" isHeading />
+      <div class="setting-items">
 
     <!-- Held back until the vault's levels are known: the slider's length is
          derived, so showing it early would change its range under the user. -->
@@ -438,13 +446,18 @@ $effect(() => {
           onSettingsChange({ linkOnlyTopics: !value, showSemanticLinks: value })}
       />
     </SettingContainer>
+      </div>
+    </div>
 
     {#if segments.length > 0}
-      <div class="section-label section-label--with-action">
-        <span
-          >Found · {segments.length}
-          {#if !onMobile}<span class="section-label-hint">shift/⌘ multi-select</span>{/if}</span
-        >
+      <div class="setting-group">
+      <!-- A heading row like the others, so the naming button lands in the
+           control slot Obsidian already right-aligns rather than needing a
+           bespoke flex row. -->
+      <SettingContainer name="Found · {segments.length}" isHeading class="section-heading--action">
+        {#snippet nameSuffix()}
+          {#if !onMobile}<span class="section-label-hint">shift/⌘ multi-select</span>{/if}
+        {/snippet}
         <!-- The spinner doubles as the cancel control: hovering (or focusing)
              a live run swaps it for an X. Listeners go on the button itself
              rather than a wrapper — it is already focusable, so keyboard users
@@ -457,8 +470,8 @@ $effect(() => {
           onClick={() => (isLabeling ? onCancelLabeling?.() : onLabelTopics?.())}
           styles={isLabeling && !showCancelLabeling ? "is-spinning" : ""}
         />
-      </div>
-      <div class="segment-list">
+      </SettingContainer>
+      <div class="setting-items segment-list">
         {#each segments as seg (seg.id)}
           <button
             type="button"
@@ -472,6 +485,7 @@ $effect(() => {
           </button>
         {/each}
       </div>
+      </div>
     {/if}
 
     <!-- ── Scope ────────────────────────────── -->
@@ -479,7 +493,9 @@ $effect(() => {
          it is the rarest thing to touch — usually set once and left — so the
          controls reached on every visit stay at the top, where the topic list
          can also sit directly under the settings that produce it. -->
-    <span class="section-label">Scope</span>
+    <div class="setting-group">
+      <SettingContainer name="Scope" isHeading />
+      <div class="setting-items">
     <SettingContainer
       name="Markdown only"
       desc="Show only Markdown notes; off shows all indexable files"
@@ -490,11 +506,15 @@ $effect(() => {
         onchange={(value) => onSettingsChange({ markdownOnly: value })}
       />
     </SettingContainer>
+      </div>
+    </div>
 
     <!-- ── Display ───────────────────────────── -->
     <!-- Purely how the graph above is drawn — nothing here changes which notes
          are included or how they group. -->
-    <span class="section-label">Display</span>
+    <div class="setting-group">
+      <SettingContainer name="Display" isHeading />
+      <div class="setting-items">
     <SettingContainer
       name="Topic regions"
       desc="Tint the area behind each topic so groups read at a glance"
@@ -545,6 +565,8 @@ $effect(() => {
         onchange={(value) => onSettingsChange({ highlightBridges: value })}
       />
     </SettingContainer>
+      </div>
+    </div>
   </div>
 {/snippet}
 
@@ -848,13 +870,16 @@ $effect(() => {
     padding: 0;
   }
 
+  /* Centred: this is a caption describing the whole graph, not a labelled
+     setting, so aligning it to the settings' left edge made it read as a row
+     that had lost its control. The rule underneath is gone too — the grouped
+     cards below now provide the separation it was drawing by hand. */
   .stats-row {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    padding-bottom: 6px;
-    border-bottom: 1px solid var(--background-modifier-border);
-    margin-bottom: 4px;
+    justify-content: center;
+    text-align: center;
+    padding: 0 16px 10px;
   }
 
   .stats-text {
@@ -883,15 +908,39 @@ $effect(() => {
     padding-right: 4px;
   }
 
-  .section-label--with-action {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
+  /* A heading row carries no control by default, so it has no min-height to
+     stop the naming button from squashing it. */
+  :global(.section-heading--action) {
+    min-height: 32px;
+  }
+
+  /* Core sizes `.setting-group` for a full-width settings tab
+     (`--setting-group-max-width`, centred). This panel is a narrow column, so
+     let the group take whatever width it is given instead. */
+  .graph-controls-body :global(.setting-group) {
+    max-width: none;
+    width: 100%;
+  }
+
+  .graph-controls-body :global(.setting-group + .setting-group) {
+    margin-top: 12px;
+  }
+
+  /* Core's card padding is sized for a full settings tab (20px each side on
+     top of each item's own 16px). That is too airy for a panel this narrow.
+
+     The background is set explicitly rather than left to
+     `--setting-items-background`: outside a settings tab that variable resolves
+     to the same darker value as the surface behind it, so the cards vanished
+     into their own container. `--background-primary` is the lighter of the
+     pair, which is the way round a settings tab actually renders. */
+  .graph-controls-body :global(.setting-items) {
+    padding-block: 4px;
+    background-color: var(--background-primary);
   }
 
   /* The label button reuses Obsidian's clickable-icon chrome; only the spin is ours. */
-  .section-label--with-action :global(.is-spinning svg) {
+  :global(.is-spinning svg) {
     animation: s2b-label-spin 1s linear infinite;
   }
 
@@ -928,7 +977,9 @@ $effect(() => {
     display: flex;
     flex-direction: column;
     gap: 1px;
-    padding: 2px 0 6px;
+    /* 10px + the row's own 6px lands the dots on the same 16px edge as the
+       setting names and section headings. */
+    padding: 6px 10px;
     max-height: 40vh;
     overflow-y: auto;
     /* Without this a flex child refuses to shrink below its content height,

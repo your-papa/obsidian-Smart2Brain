@@ -34,15 +34,34 @@ function handleChange(e: Event) {
 	value = Number(target.value);
 	oncommit?.(value);
 }
+
+/**
+ * How far along the track the value sits, 0–1.
+ *
+ * Obsidian paints the filled part of the track itself, from a
+ * `linear-gradient` on `input[type="range"].slider` that reads this variable —
+ * the same way its own `SliderComponent` sets it inline. Without it the
+ * gradient resolves to a 0% fill and the control renders as a bare grey rail,
+ * which is why this looked hand-rolled next to a native slider.
+ */
+const fillRatio = $derived.by(() => {
+	const span = max - min;
+	if (span <= 0) return 0;
+	return Math.min(1, Math.max(0, (value - min) / span));
+});
 </script>
 
 <div class="flex items-center gap-2 {className}">
 	{#if showValue}
 		<output class="text-ui-small text-text-muted w-8 text-right">{value}</output>
 	{/if}
+	<!-- `slider` is Obsidian's own class: it is what opts this input into the
+	     native filled track (and the theme's thumb sizing) rather than the bare
+	     rail the base `input[type="range"]` rule gives. -->
 	<input
 		type="range"
-		class="s2b-range w-full cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+		class="slider s2b-range w-full cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+		style="--slider-fill-ratio: {fillRatio};"
 		{value}
 		{min}
 		{max}
@@ -69,24 +88,21 @@ function handleChange(e: Event) {
 	 * become a dead zone you cannot scroll past. Horizontal goes to the thumb,
 	 * vertical still scrolls the panel.
 	 *
-	 * Deliberately no track or thumb styling: Obsidian paints the track through
-	 * `background` on the input itself, and overriding it here would drop the
-	 * user's theme for a hand-rolled slider. Only the touch behaviour changes.
+	 * Deliberately no track or thumb styling: Obsidian paints both itself off the
+	 * `slider` class and the `--slider-fill-ratio` we set inline, and overriding
+	 * either here would drop the user's theme for a hand-rolled slider. Only the
+	 * touch behaviour changes.
 	 */
 	.s2b-range {
 		touch-action: pan-y;
 	}
 
-	/* A 6px-tall element is thinner than a fingertip, so most taps missed it
-	   outright. A transparent border enlarges the hit area without entering the
-	   background painting area, so Obsidian's track keeps drawing exactly as the
-	   theme intended — `padding` + `background-clip: content-box` was tried first
-	   and erased the rail, leaving a thumb floating over nothing. Mobile only: a
-	   mouse is precise enough, and the extra height would loosen the desktop
-	   panel's rhythm. */
-	:global(.is-mobile) .s2b-range {
-		border-top: 10px solid transparent;
-		border-bottom: 10px solid transparent;
-		box-sizing: content-box;
-	}
+	/* No transparent border to grow the hit area on mobile.
+
+	   That was added back when this rendered as a bare 6px rail, where the only
+	   thing to aim at really was 6px tall. With the native `slider` class the
+	   theme's own thumb applies at 24px, which is already a reasonable target,
+	   and the border made the control 26px tall — visibly fatter than every
+	   native slider next to it, which is what gave it away as non-native. The
+	   thumb overflows the track box, so it stays grabbable without it. */
 </style>

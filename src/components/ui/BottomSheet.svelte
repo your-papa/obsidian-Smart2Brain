@@ -311,6 +311,11 @@ const sheetHeight = $derived.by(() => {
     display: flex;
     flex-direction: column;
     min-height: 0;
+    /* The darker of the pair, matching how a settings tab renders: the page is
+       `--background-secondary` and the grouped cards on it are lighter. (Don't
+       read that off `--setting-items-background`, which resolves to the darker
+       value here — the settings tab overrides it. Measured, core paints a
+       #ffffff card on a #f6f6f6 page.) */
     background: var(--background-secondary);
     border-top: 1px solid var(--background-modifier-border);
     /* Rounded at the top only: the bottom edge is flush against the navbar, and
