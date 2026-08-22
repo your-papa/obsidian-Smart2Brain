@@ -18,6 +18,7 @@ vi.mock("../../src/stores/dataStore.svelte", () => ({
 import { PendingChangesStore } from "../../src/stores/pendingChangesStore.svelte";
 import { getData } from "../../src/stores/dataStore.svelte";
 import { TFile } from "obsidian";
+import { Logger } from "../../src/utils/logging";
 
 /* --------------------------------------------------------------------------
  * Helpers
@@ -557,6 +558,75 @@ describe("PendingChangesStore", () => {
 				expect(plugin.app.vault.modify).not.toHaveBeenCalled();
 				// And it must not remain permanently unresolvable.
 				expect(store.getActionableForThread("thread-1")).toEqual([]);
+			});
+
+			/*
+			 * Audit of every path that resolves or discards an entry, to pin down the
+			 * `initialOriginalContent` invariant ("applied content the user has not
+			 * signed off on"). Three consecutive review escapes came from changing what
+			 * that flag was used for without re-checking every reader, so each site is
+			 * asserted here rather than reasoned about.
+			 */
+			it("keeps an entry actionable after a row-level reject", async () => {
+				const { id } = await stagePartiallyAccepted();
+
+				// rejectChange writes nothing to the vault, so the applied text remains.
+				store.rejectChange(id);
+
+				expect(store.getEntry(id)?.status).toBe("rejected");
+				expect(store.hasUnrevertedApplication(store.getEntry(id)!)).toBe(true);
+				expect(store.getActionableForThread("thread-1").map((e) => e.id)).toContain(id);
+			});
+
+			it("keeps an entry actionable when superseded by a newer proposal", async () => {
+				const { id } = await stagePartiallyAccepted();
+
+				// addChanges auto-rejects an older pending update for the same path+thread.
+				store.addChanges(
+					[{ type: "update", path: "note.md", originalContent: "x", newContent: "y" }],
+					"tc-2",
+					"thread-1",
+				);
+
+				expect(store.getEntry(id)?.status).toBe("rejected");
+				// Its applied content is still on disk, so the undo must stay reachable.
+				expect(store.getActionableForThread("thread-1").map((e) => e.id)).toContain(id);
+			});
+
+			it("survives a save/load round-trip", async () => {
+				const { id } = await stagePartiallyAccepted();
+				store.rejectChangeGroup(id, 0);
+
+				// Persist, then rehydrate into a fresh store from the same serialized blob.
+				let written = "";
+				plugin.app.vault.adapter.write = vi.fn(async (_p: string, data: string) => {
+					written = data;
+				});
+				await (store as unknown as { saveToDisk(): Promise<void> }).saveToDisk();
+
+				plugin.app.vault.adapter.exists = vi.fn().mockResolvedValue(true);
+				plugin.app.vault.adapter.read = vi.fn(async () => written);
+				const reloaded = new PendingChangesStore(plugin);
+				await reloaded.load();
+
+				// The applied content is still in the vault after a restart, so the entry
+				// must come back actionable rather than being forgotten.
+				expect(reloaded.hasUnrevertedApplication(reloaded.getEntry(id)!)).toBe(true);
+				expect(reloaded.getActionableForThread("thread-1").map((e) => e.id)).toContain(id);
+			});
+
+			it("removeThread discards stranded content but says so", async () => {
+				const warn = vi.spyOn(Logger, "warn").mockImplementation(() => {});
+				const { id } = await stagePartiallyAccepted();
+				store.rejectChangeGroup(id, 0);
+
+				// Deleting the chat removes its rows — there is no surface left to review
+				// them on — but the note keeps the applied text, so that must not be silent.
+				store.removeThread("thread-1");
+
+				expect(store.getEntry(id)).toBeUndefined();
+				expect(warn).toHaveBeenCalledWith(expect.stringContaining("note.md"));
+				warn.mockRestore();
 			});
 
 			it("reports a group-resolved entry as still actionable", async () => {

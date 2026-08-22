@@ -711,9 +711,27 @@ export class PendingChangesStore {
 		}
 	}
 
-	/** Remove all entries for a thread (e.g., when thread is deleted). */
+	/**
+	 * Remove all entries for a thread (e.g. when the thread is deleted).
+	 *
+	 * Unlike {@link cleanupResolved} this drops everything, including entries still
+	 * holding unreverted applied content: the chat is gone, so there is no surface
+	 * left to review them on and keeping them would leak rows into a thread that no
+	 * longer exists. But that content stays in the vault with its only undo record
+	 * discarded, so warn rather than doing it silently — the note is left as the
+	 * agent partially wrote it, and the user gets no other signal.
+	 */
 	removeThread(threadId: string): void {
 		const beforeLength = this.#entries.length;
+		const strandedPaths = this.#entries
+			.filter((e) => e.threadId === threadId && this.hasUnrevertedApplication(e))
+			.map((e) => e.change.path);
+		if (strandedPaths.length > 0) {
+			Logger.warn(
+				`[PendingChanges] Discarding ${strandedPaths.length} partially-applied change(s) with the deleted thread. ` +
+					`These notes keep the content that was already applied: ${strandedPaths.join(", ")}`,
+			);
+		}
 		this.#entries = this.#entries.filter((e) => e.threadId !== threadId);
 		this.scheduleSave();
 		if (this.#entries.length !== beforeLength) {
