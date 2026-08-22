@@ -53,6 +53,7 @@ import {
 	loadPersistedTopicCaches,
 	scheduleTopicCacheSave,
 	setActiveGraphResolution,
+	setCachedGranularityLadder,
 	setCachedPartition,
 	setCachedSemanticEdges,
 	swapActiveGraphCache,
@@ -1472,6 +1473,15 @@ async function deriveGranularityLevels(topicEdges: GraphEdge[]) {
 			void deriveGranularityLevels(getTopicEdges());
 			return;
 		}
+		// A live patch changed the graph under the sweep (no rebuild, so
+		// buildVersion didn't move). The rungs describe a topology that is no
+		// longer on screen; re-probe rather than publishing them.
+		if (graphTopologySignature(graphData) !== runSignature) {
+			Logger.info("[SmartGraph] Re-probing the granularity ladder: the graph changed mid-derivation");
+			isDerivingGranularityLadder = false;
+			void deriveGranularityLevels(getTopicEdges());
+			return;
+		}
 
 		const ladder = deriveGranularityLadder(probes);
 		if (ladder) {
@@ -1487,8 +1497,11 @@ async function deriveGranularityLevels(topicEdges: GraphEdge[]) {
 		hasDerivedGranularityLadder = true;
 		// Remember the outcome for this graph, so reopening the view restores the
 		// ladder instead of re-probing. The probes also filled the Leiden cache,
-		// so this save persists every rung at once.
-		topicCaches.granularityLadder = granularityLadder;
+		// so this save persists every rung at once. Addressed by signature: the
+		// sweep awaits a Leiden run per rung, so another leaf may hold the active
+		// slot by now, and an unaddressed write would hand *its* slider levels
+		// derived from this topology.
+		setCachedGranularityLadder(runSignature, granularityLadder);
 		scheduleTopicCacheSave();
 	} finally {
 		isDerivingGranularityLadder = false;

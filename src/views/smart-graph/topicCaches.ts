@@ -220,6 +220,35 @@ export function getCachedPartition(signature: string, key: string): Record<strin
 	return archivedGraphs.get(signature)?.leiden.get(key);
 }
 
+/**
+ * Store a derived granularity ladder against the graph it describes.
+ *
+ * Same hazard as {@link setCachedPartition}: probing sweeps several γ values,
+ * awaiting a Leiden run at each, so another leaf can become the active graph
+ * before the finished ladder is written. Storing it in whichever slot happens
+ * to be active would give that graph's slider levels derived from a different
+ * topology.
+ */
+export function setCachedGranularityLadder(signature: string, ladder: number[] | null): void {
+	if (signature === topicCaches.graphSignature) {
+		topicCaches.granularityLadder = ladder;
+		return;
+	}
+	const archived = archivedGraphs.get(signature);
+	if (archived) {
+		archived.granularityLadder = ladder;
+		archived.lastUsed = Date.now();
+		return;
+	}
+	archivedGraphs.set(signature, {
+		leiden: new Map(),
+		granularityLadder: ladder,
+		resolution: null,
+		lastUsed: Date.now(),
+	});
+	evictOldest(archivedGraphs, MAX_CACHED_GRAPHS - 1);
+}
+
 /** Look up a cached semantic edge set by its full cache key. */
 export function getCachedSemanticEdges(key: string): GraphEdge[] | null {
 	const entry = semanticEdgeSets.get(key);

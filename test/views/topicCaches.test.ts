@@ -6,6 +6,7 @@ import {
 	getCachedPartition,
 	getCachedSemanticEdges,
 	setActiveGraphResolution,
+	setCachedGranularityLadder,
 	setCachedPartition,
 	setCachedSemanticEdges,
 	snapshotTopicCaches,
@@ -237,6 +238,25 @@ describe("signature-addressed partitions", () => {
 		setCachedPartition("addr-active", "7:1:fused", { "x.md": 2 });
 		expect(topicCaches.leiden.get("7:1:fused")).toEqual({ "x.md": 2 });
 		expect(getCachedPartition("addr-active", "7:1:fused")).toEqual({ "x.md": 2 });
+	});
+
+	it("files a derived ladder under its own graph, not whichever slot is active", () => {
+		// Probing sweeps several γ values, awaiting a Leiden run at each, so
+		// another leaf can take the active slot before the ladder is stored —
+		// which would give that graph's slider levels from a different topology.
+		swapActiveGraphCache("ladder-a");
+		topicCaches.leiden.set("seed", { "a.md": 0 });
+		swapActiveGraphCache("ladder-b");
+		topicCaches.leiden.set("seed", { "b.md": 0 });
+		topicCaches.granularityLadder = [1, 2];
+
+		setCachedGranularityLadder("ladder-a", [0.5, 1.0, 2.0]);
+
+		// The active graph keeps its own ladder…
+		expect(topicCaches.granularityLadder).toEqual([1, 2]);
+		// …and A's is waiting when we return to it.
+		expect(swapActiveGraphCache("ladder-a")).toBe(true);
+		expect(topicCaches.granularityLadder).toEqual([0.5, 1.0, 2.0]);
 	});
 
 	it("preserves a result for a graph that is neither active nor archived", () => {
