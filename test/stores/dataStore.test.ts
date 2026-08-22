@@ -38,7 +38,7 @@ import {
 	SetChatModelError,
 	SetEmbedModelError,
 } from "../../src/stores/dataStore.svelte";
-import { compileSpaceMembershipDraft } from "../../src/lib/views";
+import { compilePrivacyMembershipDraft } from "../../src/lib/views";
 import type { StoredProviderState } from "../../src/stores/dataStore.svelte";
 import type { PromptFileReader } from "../../src/types/plugin";
 import { BASE_SYSTEM_PROMPT, DEFAULT_MEMORY_PROMPT } from "../../src/agent/prompts";
@@ -806,7 +806,7 @@ describe("PluginDataStore – Privacy List", () => {
 
 	it("should treat unlisted files as private in private-by-default mode", () => {
 		store.setPrivacyFilter(
-			compileSpaceMembershipDraft({
+			compilePrivacyMembershipDraft({
 				manualPaths: ["shared.md"],
 				autoIncludeRules: [],
 				excludedPaths: [],
@@ -820,7 +820,7 @@ describe("PluginDataStore – Privacy List", () => {
 	it("should treat listed files as private in public-by-default mode", () => {
 		store.setPrivacyMode("public-by-default");
 		store.setPrivacyFilter(
-			compileSpaceMembershipDraft({
+			compilePrivacyMembershipDraft({
 				manualPaths: ["secret.md"],
 				autoIncludeRules: [],
 				excludedPaths: [],

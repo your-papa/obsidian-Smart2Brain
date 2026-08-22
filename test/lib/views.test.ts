@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-	compileSpaceMembershipDraft,
-	createEmptySpaceFilter,
+	compilePrivacyMembershipDraft,
+	createEmptyPrivacyFilter,
 	describeViewFilter,
 	getAllMarkdownPaths,
-	matchesSpaceMembershipDraftPath,
-	parseSpaceMembershipFilter,
-	resolveSpaceMembershipDraft,
+	matchesPrivacyMembershipDraftPath,
+	parsePrivacyMembershipFilter,
+	resolvePrivacyMembershipDraft,
 	resolveViewFilter,
 	rewriteViewFilterForRename,
 } from "../../src/lib/views";
@@ -492,17 +492,17 @@ describe("getAllMarkdownPaths", () => {
 describe("space membership draft helpers", () => {
 	it("compiles an empty draft to an empty paths filter", () => {
 		expect(
-			compileSpaceMembershipDraft({
+			compilePrivacyMembershipDraft({
 				manualPaths: [],
 				autoIncludeRules: [],
 				excludedPaths: [],
 			}),
-		).toEqual(createEmptySpaceFilter());
+		).toEqual(createEmptyPrivacyFilter());
 	});
 
 	it("compiles manual paths, auto rules, and exclusions into the existing filter shape", () => {
 		expect(
-			compileSpaceMembershipDraft({
+			compilePrivacyMembershipDraft({
 				manualPaths: ["Manual/a.md"],
 				autoIncludeRules: [{ type: "folder", value: "Research" }],
 				excludedPaths: ["Research/old.md"],
@@ -523,7 +523,7 @@ describe("space membership draft helpers", () => {
 	});
 
 	it("parses a simple compiled filter back into a file-first draft", () => {
-		const parsed = parseSpaceMembershipFilter({
+		const parsed = parsePrivacyMembershipFilter({
 			type: "all",
 			conditions: [
 				{
@@ -546,7 +546,7 @@ describe("space membership draft helpers", () => {
 	});
 
 	it("marks non-simple all-groups as advanced", () => {
-		const parsed = parseSpaceMembershipFilter({
+		const parsed = parsePrivacyMembershipFilter({
 			type: "all",
 			conditions: [
 				{ type: "folder", value: "Work" },
@@ -571,7 +571,7 @@ describe("space membership draft helpers", () => {
 			},
 		);
 
-		const result = resolveSpaceMembershipDraft(app, {
+		const result = resolvePrivacyMembershipDraft(app, {
 			manualPaths: ["Manual/a.md", "missing.md"],
 			autoIncludeRules: [
 				{ type: "folder", value: "Research" },
@@ -603,11 +603,11 @@ describe("space membership draft helpers", () => {
 			excludedPaths: ["Research/skip.md"],
 		};
 
-		expect(matchesSpaceMembershipDraftPath(app, draft, "Work/manual.md")).toBe(true);
-		expect(matchesSpaceMembershipDraftPath(app, draft, "Research/ml-paper.md")).toBe(true);
-		expect(matchesSpaceMembershipDraftPath(app, draft, "Assets/diagram.pdf")).toBe(true);
-		expect(matchesSpaceMembershipDraftPath(app, draft, "Research/skip.md")).toBe(false);
-		expect(matchesSpaceMembershipDraftPath(app, draft, "Other/file.md")).toBe(false);
+		expect(matchesPrivacyMembershipDraftPath(app, draft, "Work/manual.md")).toBe(true);
+		expect(matchesPrivacyMembershipDraftPath(app, draft, "Research/ml-paper.md")).toBe(true);
+		expect(matchesPrivacyMembershipDraftPath(app, draft, "Assets/diagram.pdf")).toBe(true);
+		expect(matchesPrivacyMembershipDraftPath(app, draft, "Research/skip.md")).toBe(false);
+		expect(matchesPrivacyMembershipDraftPath(app, draft, "Other/file.md")).toBe(false);
 	});
 });
 
@@ -740,7 +740,7 @@ describe("property leaf", () => {
 			excludedPaths: [],
 		};
 
-		const parsed = parseSpaceMembershipFilter(compileSpaceMembershipDraft(draft));
+		const parsed = parsePrivacyMembershipFilter(compilePrivacyMembershipDraft(draft));
 
 		expect(parsed.isAdvanced).toBe(false);
 		expect(parsed.draft.autoIncludeRules).toEqual([{ type: "property", value: "client", values: ["Acme"] }]);
@@ -754,7 +754,7 @@ describe("property leaf", () => {
 		// isFilePrivate() uses the sync matcher in tool loops; it must not
 		// disagree with the set-based resolver used to render the UI.
 		for (const path of FILES) {
-			expect(matchesSpaceMembershipDraftPath(app(), draft, path)).toBe(resolved.paths.has(path));
+			expect(matchesPrivacyMembershipDraftPath(app(), draft, path)).toBe(resolved.paths.has(path));
 		}
 	});
 
@@ -792,7 +792,7 @@ describe("empty leaf values", () => {
 		};
 
 		for (const path of FILES) {
-			expect(matchesSpaceMembershipDraftPath(app, draft, path)).toBe(false);
+			expect(matchesPrivacyMembershipDraftPath(app, draft, path)).toBe(false);
 		}
 	});
 
