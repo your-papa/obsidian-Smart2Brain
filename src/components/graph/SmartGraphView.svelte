@@ -1926,13 +1926,15 @@ async function runTopicLabeling(options: { force?: boolean } = {}) {
 			cache: getTopicLabelCache(),
 			force: options.force,
 		});
+		// Workers write each label into the membership-keyed cache as they finish,
+		// so a cancelled or superseded run still leaves real, paid-for results
+		// behind. Persist before the guard below returns, or quitting after a
+		// cancel silently throws that work away and re-spends it on restart.
+		scheduleTopicCacheSave();
 		// A rebuild (or unmount) landed while we were waiting — these labels are
 		// keyed to topic ids that may no longer mean the same thing.
 		if (controller.signal.aborted || localBuildVersion !== buildVersion) return;
 		generatedClusterLabels = labels;
-		// labelTopics filled the membership-keyed label cache — persist it so a
-		// restart doesn't re-spend the API calls.
-		scheduleTopicCacheSave();
 	} finally {
 		if (labelingAbort === controller) {
 			isLabeling = false;
