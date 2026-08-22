@@ -325,6 +325,13 @@ let selectedTopicsCollapseAction: "collapse" | "expand" | null = $derived.by(() 
 
 /** The graph as rendered: topics collapsed to single nodes, or as-is. */
 let displayGraphData: GraphData = $derived.by(() => {
+	// Collapsing is meaningless with topics hidden: every node is unsorted, so
+	// folding would merge the whole graph into one "Unsorted · N" node instead of
+	// showing the raw view the toggle is for. `handleSettingsChange` already
+	// clears the folds when topics are switched off, but this guard is what makes
+	// the bad state unreachable — any other path that leaves collapse state set
+	// (a restored setting, a rebuild) can't resurrect it.
+	if (!(settings.showTopics ?? true)) return graphData;
 	if (effectiveCollapsedTopics.size === 0) return graphData;
 	return buildCollapsedGraph(graphData, {
 		collapsedTopics: effectiveCollapsedTopics,
@@ -1091,6 +1098,18 @@ function handleSettingsChange(partial: Partial<SmartGraphSettings>) {
 	// own — repaint from the communities already in hand. Deliberately not a Leiden
 	// run: this toggle is display-only, so both directions are just a re-colour.
 	if (partial.showTopics !== undefined) {
+		// Hiding topics strips every node's cluster, so `allTopicIds` collapses to
+		// the single UNSORTED sentinel. Left standing, collapse-all would then fold
+		// the entire graph into one "Unsorted · N" node — the opposite of the raw
+		// view this toggle exists to show — and the collapse control is disabled
+		// while topics are hidden, so it couldn't be undone from the toolbar.
+		// There are no topics to be collapsed in this state, so drop the folds
+		// outright rather than carrying them into a view they can't describe.
+		if (partial.showTopics === false) {
+			collapseAll = false;
+			collapsedTopics = new Set();
+			expandedTopics = new Set();
+		}
 		resolveAndApplySegments(graphData);
 	}
 }
