@@ -1,7 +1,7 @@
 import { tool } from "@langchain/core/tools";
 import type { App, TFile } from "obsidian";
 import { z } from "zod";
-import { DEFAULT_TOOLS_CONFIG, getData } from "../../stores/dataStore.svelte";
+import { DEFAULT_TOOLS_CONFIG } from "../../stores/dataStore.svelte";
 import { getPendingChangesStore } from "../../stores/pendingChangesStore.svelte";
 import type { GrepNotesSettings } from "../../types/plugin";
 import { getIndexableVaultFiles, isTextIndexableFile, shouldProcessVaultPath } from "../../utils/fileFiltering";
@@ -9,6 +9,7 @@ import { Logger } from "../../utils/logging";
 import { normalizeVaultPath } from "../../utils/pathUtils";
 import { resolveFileReferenceDetailed } from "../../utils/pathResolution";
 import { buildGrepMatcher, MAX_SCANNED_LINE_LENGTH } from "./grepMatcher";
+import { resolveToolAgent, resolveToolProvider } from "./toolAgentContext";
 
 const DEFAULT_LIMIT = 50;
 
@@ -62,9 +63,8 @@ function buildContextBlock(lines: string[], hitIndex: number, contextLines: numb
  * to a single note. Results are paged via `offset`/`limit` over a flat, stable
  * (path-sorted) match list so nothing is silently dropped.
  */
-export function createGrepNotesTool(app: App) {
-	const pluginData = getData();
-	const getConfig = () => pluginData.getSelectedAgent().toolsConfig.grep_notes;
+export function createGrepNotesTool(app: App, agentId = "") {
+	const getConfig = () => resolveToolAgent(agentId).toolsConfig.grep_notes;
 	const toolConfig = getConfig();
 
 	const grepFn = async ({
@@ -131,7 +131,7 @@ export function createGrepNotesTool(app: App) {
 		// vault-wide grep reads every eligible note — the search is exhaustive.
 		// Freeze protection comes from the per-line length guard below (pathological
 		// lines are skipped and reported), not from bounding the file count.
-		const currentProvider = pluginData.getSelectedAgent().chatModel?.provider;
+		const currentProvider = resolveToolProvider(agentId);
 		const store = getPendingChangesStore();
 		const flat: FlatMatch[] = [];
 		let filesSearched = 0;

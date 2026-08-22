@@ -17,12 +17,13 @@ import { extractPdfPages, extractTextFromPdf, extractTextFromPdfPages } from "..
 import { Logger } from "../../utils/logging";
 import { extractReferenceInfo, resolveFileReferenceDetailed } from "../../utils/pathResolution";
 import { READ_CONTENT_BUDGET_FRACTION, contextWindowToCharBudget, truncateToBudget } from "../../utils/contentBudget";
+import { resolveToolAgent, resolveToolProvider } from "./toolAgentContext";
 
 /** Conservative cap for whole-PDF vision sends — well under Anthropic's 32 MB native-PDF limit. */
 const MAX_PDF_VISION_BYTES = 20 * 1024 * 1024;
 
-function resolveMaxContentLength(): number {
-	const contextWindow = getData().getSelectedAgent().chatModel?.modelConfig?.contextWindow;
+function resolveMaxContentLength(agentId: string): number {
+	const contextWindow = resolveToolAgent(agentId).chatModel?.modelConfig?.contextWindow;
 	return contextWindowToCharBudget(contextWindow, READ_CONTENT_BUDGET_FRACTION);
 }
 
@@ -331,6 +332,11 @@ export interface ReadNoteContentOptions {
 	pdfProcessor?: BaseChatModel;
 	offset?: number;
 	length?: number;
+	/** The agent that owns this run. Determines which provider the privacy filter is
+	 *  evaluated against, and which agent's context window sizes the content budget.
+	 *  Omitted by the public api path, which has no run to attribute — that falls back
+	 *  to the selected agent (see `resolveToolAgent`). */
+	agentId?: string;
 }
 
 /**
@@ -340,6 +346,7 @@ export interface ReadNoteContentOptions {
  * uses the provided vision/PDF processors when the target needs analysis.
  */
 export async function readNoteContent(app: App, path: string, opts: ReadNoteContentOptions = {}): Promise<string> {
+	const agentId = opts.agentId ?? "";
 	const { imageProcessor, pdfProcessor, offset, length } = opts;
 	const pluginData = getData();
 
@@ -363,7 +370,7 @@ export async function readNoteContent(app: App, path: string, opts: ReadNoteCont
 		const ext = file.extension.toLowerCase();
 
 		// Privacy check
-		const currentProvider = pluginData.getSelectedAgent().chatModel?.provider;
+		const currentProvider = resolveToolProvider(agentId);
 		if (currentProvider) {
 			const store = getPendingChangesStore();
 			if (store.shouldBlockFile(file.path, currentProvider)) {
@@ -378,7 +385,7 @@ export async function readNoteContent(app: App, path: string, opts: ReadNoteCont
 				}
 
 				// Privacy check against the image processor's provider
-				const processorSettings = pluginData.getSelectedAgent().toolsConfig.read_content?.settings as
+				const processorSettings = resolveToolAgent(agentId).toolsConfig.read_content?.settings as
 					| { imageProcessor?: { provider?: string } }
 					| undefined;
 				const processorProvider = processorSettings?.imageProcessor?.provider;
@@ -421,7 +428,7 @@ export async function readNoteContent(app: App, path: string, opts: ReadNoteCont
 
 				if (pdfProcessor) {
 					// Privacy check against the PDF processor's provider
-					const processorSettings = pluginData.getSelectedAgent().toolsConfig.read_content?.settings as
+					const processorSettings = resolveToolAgent(agentId).toolsConfig.read_content?.settings as
 						| { pdfProcessor?: { provider?: string } }
 						| undefined;
 					const processorProvider = processorSettings?.pdfProcessor?.provider;
@@ -529,12 +536,12 @@ export async function readNoteContent(app: App, path: string, opts: ReadNoteCont
 					return `PDF "${file.name}" contains ${totalPages} page(s) but no extractable text. The PDF may contain only images/scans.`;
 				}
 
-				const truncated = truncateContent(text, resolveMaxContentLength());
+				const truncated = truncateContent(text, resolveMaxContentLength(agentId));
 				return `Content of PDF "${file.name}" (${totalPages} pages):\n\n${truncated}`;
 			}
 
 			if (isExcalidrawFile(file)) {
-				const maxLength = resolveMaxContentLength();
+				const maxLength = resolveMaxContentLength(agentId);
 				return await readExcalidrawContent(app, file, maxLength);
 			}
 
@@ -545,7 +552,7 @@ export async function readNoteContent(app: App, path: string, opts: ReadNoteCont
 					const sectionResult = extractSubpathContent(app, file, content, subpath);
 					if (!sectionResult.ok) return sectionResult.error;
 					const { text: sectionText, label: sectionLabel } = sectionResult;
-					const maxLength = length ?? resolveMaxContentLength();
+					const maxLength = length ?? resolveMaxContentLength(agentId);
 					const start = Math.min(offset ?? 0, sectionText.length);
 					const slice = sectionText.slice(start, maxLength > 0 ? start + maxLength : undefined);
 					const remaining = sectionText.length - (start + slice.length);
@@ -557,7 +564,7 @@ export async function readNoteContent(app: App, path: string, opts: ReadNoteCont
 					return `${header}:\n\n${slice}${suffix}`;
 				}
 
-				const maxLength = length ?? resolveMaxContentLength();
+				const maxLength = length ?? resolveMaxContentLength(agentId);
 				const start = Math.min(offset ?? 0, content.length);
 				const slice = content.slice(start, maxLength > 0 ? start + maxLength : undefined);
 				const remaining = content.length - (start + slice.length);
@@ -576,17 +583,22 @@ export async function readNoteContent(app: App, path: string, opts: ReadNoteCont
 	}
 }
 
-export function createReadContentTool(app: App, imageProcessor?: BaseChatModel, pdfProcessor?: BaseChatModel) {
+export function createReadContentTool(
+	app: App,
+	imageProcessor?: BaseChatModel,
+	pdfProcessor?: BaseChatModel,
+	agentId = "",
+) {
 	const pluginData = getData();
 	const defaultToolConfig = DEFAULT_TOOLS_CONFIG.read_content;
-	const getToolConfig = () => pluginData.getSelectedAgent().toolsConfig.read_content;
+	const getToolConfig = () => resolveToolAgent(agentId).toolsConfig.read_content;
 
 	const readContentFn = ({
 		path,
 		offset,
 		length,
 	}: { path: string; offset?: number; length?: number }): Promise<string> =>
-		readNoteContent(app, path, { imageProcessor, pdfProcessor, offset, length });
+		readNoteContent(app, path, { imageProcessor, pdfProcessor, offset, length, agentId });
 
 	const toolConfig = getToolConfig();
 

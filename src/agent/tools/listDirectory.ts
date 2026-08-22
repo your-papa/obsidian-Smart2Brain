@@ -1,10 +1,11 @@
 import { tool } from "@langchain/core/tools";
 import type { App } from "obsidian";
 import { z } from "zod";
-import { DEFAULT_TOOLS_CONFIG, getData } from "../../stores/dataStore.svelte";
+import { DEFAULT_TOOLS_CONFIG } from "../../stores/dataStore.svelte";
 import { getPendingChangesStore } from "../../stores/pendingChangesStore.svelte";
 import { isPathInFolder, normalizeFolderPrefix, normalizeVaultPath } from "../../utils/pathUtils";
 import { isAgentFilePath } from "../../utils/fileFiltering";
+import { resolveToolAgent, resolveToolProvider } from "./toolAgentContext";
 
 interface DirectoryTreeFileEntry {
 	name: string;
@@ -76,8 +77,8 @@ const listDirectorySchema = z.object({
 
 type ListDirectoryInput = z.infer<typeof listDirectorySchema>;
 
-function getListDirectoryToolConfig(): { name: string; description: string } {
-	const selectedConfig = getData().getSelectedAgent().toolsConfig.list_directory;
+function getListDirectoryToolConfig(agentId: string): { name: string; description: string } {
+	const selectedConfig = resolveToolAgent(agentId).toolsConfig.list_directory;
 	const defaultConfig = DEFAULT_TOOLS_CONFIG.list_directory;
 
 	return {
@@ -281,8 +282,8 @@ function buildDirectoryListResult(
 	};
 }
 
-export function createListDirectoryTool(app: App) {
-	const toolConfig = getListDirectoryToolConfig();
+export function createListDirectoryTool(app: App, agentId = "") {
+	const toolConfig = getListDirectoryToolConfig(agentId);
 
 	return tool(
 		async ({ path, recursive, maxDepth, includeFiles = true, includeFolders = true }: ListDirectoryInput) => {
@@ -309,7 +310,7 @@ export function createListDirectoryTool(app: App) {
 			}
 
 			const store = getPendingChangesStore();
-			const currentProvider = getData().getSelectedAgent().chatModel?.provider;
+			const currentProvider = resolveToolProvider(agentId);
 			const scanOptions: DirectoryScanOptions = {
 				rootPath,
 				recursive: effectiveRecursive,

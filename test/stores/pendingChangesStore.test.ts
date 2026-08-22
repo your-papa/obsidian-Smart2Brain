@@ -18,6 +18,7 @@ vi.mock("../../src/stores/dataStore.svelte", () => ({
 import { PendingChangesStore } from "../../src/stores/pendingChangesStore.svelte";
 import { getData } from "../../src/stores/dataStore.svelte";
 import { TFile } from "obsidian";
+import { Logger } from "../../src/utils/logging";
 
 /* --------------------------------------------------------------------------
  * Helpers
@@ -379,6 +380,370 @@ describe("PendingChangesStore", () => {
 			await store.rejectAll("thread-1");
 
 			expect(store.getEntry(id2)?.status).toBe("pending");
+		});
+
+		/**
+		 * `rejectAll` restores a note that had groups partially accepted. That restore
+		 * used to be an unconditional `vault.modify`, which silently destroyed any edit
+		 * the user made by hand in between — `modify` doesn't go through trash, so the
+		 * work was unrecoverable.
+		 */
+		describe("rejectAll revert of partially-accepted groups", () => {
+			/** Stage a 2-group update and accept the first group, leaving the file
+			 *  partially applied (the state that arms the revert path). */
+			async function stagePartiallyAccepted() {
+				const original = "line1\nline2\nline3\n";
+				const proposed = "CHANGED1\nline2\nCHANGED3\n";
+				const file = makeTFile("note.md");
+				plugin.app.vault.getAbstractFileByPath = vi.fn().mockReturnValue(file);
+				plugin.app.vault.read = vi.fn().mockResolvedValue(original);
+
+				const [id] = store.addChanges(
+					[{ type: "update", path: "note.md", originalContent: original, newContent: proposed }],
+					"tc-1",
+					"thread-1",
+				);
+
+				await store.acceptChangeGroup(id, 0);
+
+				const afterGroupAccept = (plugin.app.vault.modify as ReturnType<typeof vi.fn>).mock.calls[0][1];
+				return { id, original, afterGroupAccept, file };
+			}
+
+			/**
+			 * Regression (review of PR #411): accepting one group and then rejecting the
+			 * remaining ones drives `newContent` back to `originalContent`, so
+			 * `rejectChangeGroup` flips the entry to `rejected` — while the accepted group
+			 * is still written to the note. `rejectAll` filtered on `status === "pending"`
+			 * and therefore skipped exactly those entries, stranding the applied text on
+			 * disk while reporting that everything had been rejected.
+			 */
+			it("reverts an entry already marked rejected by group-level rejections", async () => {
+				const { id, original, afterGroupAccept } = await stagePartiallyAccepted();
+
+				// Reject the one remaining group. Groups are recomputed from the advanced
+				// originalContent, so the remaining change is index 0.
+				store.rejectChangeGroup(id, 0);
+				expect(store.getEntry(id)?.status).toBe("rejected");
+				expect(store.getPendingCount("thread-1")).toBe(0);
+
+				// The accepted group is still on disk at this point.
+				plugin.app.vault.read = vi.fn().mockResolvedValue(afterGroupAccept);
+				(plugin.app.vault.modify as ReturnType<typeof vi.fn>).mockClear();
+
+				const skipped = await store.rejectAll("thread-1");
+
+				expect(skipped).toEqual([]);
+				expect(plugin.app.vault.modify).toHaveBeenCalledWith(expect.anything(), original);
+			});
+
+			it("does not re-revert on a second rejectAll", async () => {
+				const { id, original, afterGroupAccept } = await stagePartiallyAccepted();
+				store.rejectChangeGroup(id, 0);
+
+				plugin.app.vault.read = vi.fn().mockResolvedValue(afterGroupAccept);
+				await store.rejectAll("thread-1");
+
+				// The user edits the note after the revert. A second rejectAll must not
+				// clobber that with the now-stale pre-proposal snapshot.
+				plugin.app.vault.read = vi.fn().mockResolvedValue("my own later edits\n");
+				(plugin.app.vault.modify as ReturnType<typeof vi.fn>).mockClear();
+
+				const skipped = await store.rejectAll("thread-1");
+
+				expect(plugin.app.vault.modify).not.toHaveBeenCalled();
+				expect(skipped).toEqual([]);
+				void original;
+			});
+
+			/**
+			 * The bar renders `getActionableForThread`. If that returned only pending
+			 * entries, a thread whose sole entry was fully resolved at group level would
+			 * render nothing — stranding the applied text with no way to reach the undo.
+			 */
+			/**
+			 * Regression (review of PR #411): accepting EVERY group flips the entry to
+			 * `accepted` while `initialOriginalContent` stayed set, so `rejectAll` — which
+			 * selects on that snapshot — reverted a change the user had explicitly
+			 * accepted, silently discarding it. The snapshot is now cleared the moment the
+			 * outcome settles, so it only ever means "unreviewed partial write present".
+			 */
+			it("does not revert an update whose groups were ALL accepted", async () => {
+				const { id, afterGroupAccept } = await stagePartiallyAccepted();
+
+				// Accept the one remaining group; the entry completes.
+				plugin.app.vault.read = vi.fn().mockResolvedValue(afterGroupAccept);
+				await store.acceptChangeGroup(id, 0);
+				expect(store.getEntry(id)?.status).toBe("accepted");
+
+				// A second, unrelated entry keeps the thread's Reject All live.
+				store.addChanges([{ type: "create", path: "other.md", content: "X" }], "tc-2", "thread-1");
+
+				expect(store.hasUnrevertedApplication(store.getEntry(id)!)).toBe(false);
+				expect(store.getActionableForThread("thread-1").map((e) => e.id)).not.toContain(id);
+
+				(plugin.app.vault.modify as ReturnType<typeof vi.fn>).mockClear();
+				await store.rejectAll("thread-1");
+
+				// The accepted note must be left exactly as the user accepted it.
+				expect(plugin.app.vault.modify).not.toHaveBeenCalled();
+			});
+
+			it("does not revert after a whole-entry accept following a group accept", async () => {
+				const { id, afterGroupAccept } = await stagePartiallyAccepted();
+
+				// Accept the rest of the entry via the row-level action rather than groups.
+				plugin.app.vault.read = vi.fn().mockResolvedValue(afterGroupAccept);
+				await store.acceptChange(id);
+				expect(store.getEntry(id)?.status).toBe("accepted");
+
+				store.addChanges([{ type: "create", path: "other.md", content: "X" }], "tc-2", "thread-1");
+				expect(store.hasUnrevertedApplication(store.getEntry(id)!)).toBe(false);
+
+				(plugin.app.vault.modify as ReturnType<typeof vi.fn>).mockClear();
+				await store.rejectAll("thread-1");
+
+				expect(plugin.app.vault.modify).not.toHaveBeenCalled();
+			});
+
+			/**
+			 * Regression (review of PR #411): `#handleFileRename` skipped non-pending
+			 * entries, so a group-resolved entry kept a stale path after its note was
+			 * renamed. The revert then looked up a file that no longer existed there and
+			 * reported success while the applied content sat at the new path.
+			 */
+			it("follows a rename of a note that still has applied content", async () => {
+				// `load()` is what registers the vault rename handler.
+				await store.load();
+				const { id, original, afterGroupAccept } = await stagePartiallyAccepted();
+				store.rejectChangeGroup(id, 0);
+				expect(store.getEntry(id)?.status).toBe("rejected");
+
+				// The vault rename handler fires for the non-pending entry too.
+				const renameCb = (plugin.app.vault.on as ReturnType<typeof vi.fn>).mock.calls.find(
+					(c) => c[0] === "rename",
+				)?.[1] as (file: { path: string }, oldPath: string) => void;
+				renameCb({ path: "renamed.md" }, "note.md");
+
+				expect(store.getEntry(id)?.change.path).toBe("renamed.md");
+
+				// The undo now targets the note where it actually lives.
+				plugin.app.vault.getAbstractFileByPath = vi.fn().mockReturnValue(makeTFile("renamed.md"));
+				plugin.app.vault.read = vi.fn().mockResolvedValue(afterGroupAccept);
+				(plugin.app.vault.modify as ReturnType<typeof vi.fn>).mockClear();
+
+				const skipped = await store.undoAppliedGroups(id);
+
+				expect(skipped).toBeUndefined();
+				expect(plugin.app.vault.modify).toHaveBeenCalledWith(expect.anything(), original);
+			});
+
+			/**
+			 * Regression (same review): a missing target returned `undefined` — the
+			 * "success" signal — so the UI said the note was restored when nothing had
+			 * been written, and the entry stayed actionable forever because the snapshot
+			 * is only cleared on a real write.
+			 */
+			it("reports a missing note instead of claiming it was restored", async () => {
+				const { id } = await stagePartiallyAccepted();
+				store.rejectChangeGroup(id, 0);
+
+				// The note was deleted (or moved while the plugin was unloaded).
+				plugin.app.vault.getAbstractFileByPath = vi.fn().mockReturnValue(null);
+				(plugin.app.vault.modify as ReturnType<typeof vi.fn>).mockClear();
+
+				const skipped = await store.undoAppliedGroups(id);
+
+				expect(skipped).toEqual({ path: "note.md", reason: "missing" });
+				expect(plugin.app.vault.modify).not.toHaveBeenCalled();
+				// And it must not remain permanently unresolvable.
+				expect(store.getActionableForThread("thread-1")).toEqual([]);
+			});
+
+			/*
+			 * Audit of every path that resolves or discards an entry, to pin down the
+			 * `initialOriginalContent` invariant ("applied content the user has not
+			 * signed off on"). Three consecutive review escapes came from changing what
+			 * that flag was used for without re-checking every reader, so each site is
+			 * asserted here rather than reasoned about.
+			 */
+			it("keeps an entry actionable after a row-level reject", async () => {
+				const { id } = await stagePartiallyAccepted();
+
+				// rejectChange writes nothing to the vault, so the applied text remains.
+				store.rejectChange(id);
+
+				expect(store.getEntry(id)?.status).toBe("rejected");
+				expect(store.hasUnrevertedApplication(store.getEntry(id)!)).toBe(true);
+				expect(store.getActionableForThread("thread-1").map((e) => e.id)).toContain(id);
+			});
+
+			it("keeps an entry actionable when superseded by a newer proposal", async () => {
+				const { id } = await stagePartiallyAccepted();
+
+				// addChanges auto-rejects an older pending update for the same path+thread.
+				store.addChanges(
+					[{ type: "update", path: "note.md", originalContent: "x", newContent: "y" }],
+					"tc-2",
+					"thread-1",
+				);
+
+				expect(store.getEntry(id)?.status).toBe("rejected");
+				// Its applied content is still on disk, so the undo must stay reachable.
+				expect(store.getActionableForThread("thread-1").map((e) => e.id)).toContain(id);
+			});
+
+			it("survives a save/load round-trip", async () => {
+				const { id } = await stagePartiallyAccepted();
+				store.rejectChangeGroup(id, 0);
+
+				// Persist, then rehydrate into a fresh store from the same serialized blob.
+				let written = "";
+				plugin.app.vault.adapter.write = vi.fn(async (_p: string, data: string) => {
+					written = data;
+				});
+				await (store as unknown as { saveToDisk(): Promise<void> }).saveToDisk();
+
+				plugin.app.vault.adapter.exists = vi.fn().mockResolvedValue(true);
+				plugin.app.vault.adapter.read = vi.fn(async () => written);
+				const reloaded = new PendingChangesStore(plugin);
+				await reloaded.load();
+
+				// The applied content is still in the vault after a restart, so the entry
+				// must come back actionable rather than being forgotten.
+				expect(reloaded.hasUnrevertedApplication(reloaded.getEntry(id)!)).toBe(true);
+				expect(reloaded.getActionableForThread("thread-1").map((e) => e.id)).toContain(id);
+			});
+
+			it("removeThread discards stranded content but says so", async () => {
+				const warn = vi.spyOn(Logger, "warn").mockImplementation(() => {});
+				const { id } = await stagePartiallyAccepted();
+				store.rejectChangeGroup(id, 0);
+
+				// Deleting the chat removes its rows — there is no surface left to review
+				// them on — but the note keeps the applied text, so that must not be silent.
+				store.removeThread("thread-1");
+
+				expect(store.getEntry(id)).toBeUndefined();
+				expect(warn).toHaveBeenCalledWith(expect.stringContaining("note.md"));
+				warn.mockRestore();
+			});
+
+			it("reports a group-resolved entry as still actionable", async () => {
+				const { id } = await stagePartiallyAccepted();
+				store.rejectChangeGroup(id, 0);
+
+				expect(store.getPendingCount("thread-1")).toBe(0);
+				// ...but the note still holds the accepted group, so the UI must show it.
+				expect(store.getActionableForThread("thread-1").map((e) => e.id)).toEqual([id]);
+				expect(store.hasUnrevertedApplication(store.getEntry(id)!)).toBe(true);
+			});
+
+			it("stops reporting it once the content has been undone", async () => {
+				const { id, afterGroupAccept } = await stagePartiallyAccepted();
+				store.rejectChangeGroup(id, 0);
+				plugin.app.vault.read = vi.fn().mockResolvedValue(afterGroupAccept);
+
+				await store.rejectAll("thread-1");
+
+				expect(store.getActionableForThread("thread-1")).toEqual([]);
+				expect(store.hasUnrevertedApplication(store.getEntry(id)!)).toBe(false);
+			});
+
+			it("undoAppliedGroups restores a single entry", async () => {
+				const { id, original, afterGroupAccept } = await stagePartiallyAccepted();
+				store.rejectChangeGroup(id, 0);
+				plugin.app.vault.read = vi.fn().mockResolvedValue(afterGroupAccept);
+				(plugin.app.vault.modify as ReturnType<typeof vi.fn>).mockClear();
+
+				const skipped = await store.undoAppliedGroups(id);
+
+				expect(skipped).toBeUndefined();
+				expect(plugin.app.vault.modify).toHaveBeenCalledWith(expect.anything(), original);
+				expect(store.getActionableForThread("thread-1")).toEqual([]);
+			});
+
+			it("undoAppliedGroups reports a skip without overwriting user edits", async () => {
+				const { id } = await stagePartiallyAccepted();
+				store.rejectChangeGroup(id, 0);
+				plugin.app.vault.read = vi.fn().mockResolvedValue("my own later edits\n");
+				(plugin.app.vault.modify as ReturnType<typeof vi.fn>).mockClear();
+
+				const skipped = await store.undoAppliedGroups(id);
+
+				expect(skipped).toEqual({ path: "note.md", reason: "conflict" });
+				expect(plugin.app.vault.modify).not.toHaveBeenCalled();
+			});
+
+			it("cleanupResolved keeps an entry that still has content on disk", async () => {
+				const { id } = await stagePartiallyAccepted();
+				store.rejectChangeGroup(id, 0);
+
+				store.cleanupResolved("thread-1");
+
+				// Dropping it would discard the only record of the pre-proposal content.
+				expect(store.getEntry(id)).toBeDefined();
+			});
+
+			it("reverts to the pre-proposal content when the file is untouched since", async () => {
+				const { id, original, afterGroupAccept } = await stagePartiallyAccepted();
+
+				// File still holds exactly what the group accept wrote.
+				plugin.app.vault.read = vi.fn().mockResolvedValue(afterGroupAccept);
+				(plugin.app.vault.modify as ReturnType<typeof vi.fn>).mockClear();
+
+				const skipped = await store.rejectAll("thread-1");
+
+				expect(skipped).toEqual([]);
+				expect(plugin.app.vault.modify).toHaveBeenCalledWith(expect.anything(), original);
+				expect(store.getEntry(id)?.status).toBe("rejected");
+			});
+
+			it("does NOT overwrite a note the user edited after the group accept", async () => {
+				const { id } = await stagePartiallyAccepted();
+
+				// User hand-edits the note in the editor after accepting the group.
+				plugin.app.vault.read = vi.fn().mockResolvedValue("my own precious edits\n");
+				(plugin.app.vault.modify as ReturnType<typeof vi.fn>).mockClear();
+
+				const skipped = await store.rejectAll("thread-1");
+
+				// Regression: this used to unconditionally modify() back to the
+				// pre-proposal content, destroying the user's edits.
+				expect(plugin.app.vault.modify).not.toHaveBeenCalled();
+				expect(skipped).toEqual([{ path: "note.md", reason: "conflict" }]);
+				// The proposal is still dead either way.
+				expect(store.getEntry(id)?.status).toBe("rejected");
+			});
+
+			it("rejects every entry even when one revert is skipped", async () => {
+				const { id } = await stagePartiallyAccepted();
+				const [plainId] = store.addChanges(
+					[{ type: "create", path: "other.md", content: "X" }],
+					"tc-2",
+					"thread-1",
+				);
+
+				plugin.app.vault.read = vi.fn().mockResolvedValue("conflicting content\n");
+
+				const skipped = await store.rejectAll("thread-1");
+
+				expect(skipped).toEqual([{ path: "note.md", reason: "conflict" }]);
+				expect(store.getEntry(id)?.status).toBe("rejected");
+				expect(store.getEntry(plainId)?.status).toBe("rejected");
+				expect(store.getPendingCount("thread-1")).toBe(0);
+			});
+
+			it("reports the path when the revert write itself throws", async () => {
+				const { afterGroupAccept } = await stagePartiallyAccepted();
+
+				plugin.app.vault.read = vi.fn().mockResolvedValue(afterGroupAccept);
+				plugin.app.vault.modify = vi.fn().mockRejectedValue(new Error("disk full"));
+
+				const skipped = await store.rejectAll("thread-1");
+
+				expect(skipped).toEqual([{ path: "note.md", reason: "failed" }]);
+			});
 		});
 	});
 

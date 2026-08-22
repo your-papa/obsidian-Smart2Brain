@@ -4,6 +4,7 @@ import { firstChangedLine, revealAndScroll } from "../../lib/pendingChangeNaviga
 import { getPlugin } from "../../stores/state.svelte";
 import { getPendingChangesStore } from "../../stores/pendingChangesStore.svelte";
 import type { PendingChangeEntry } from "../../types/shared";
+import type { RevertSkip } from "../../stores/pendingChangesStore.svelte";
 import { icon } from "../../utils/utils";
 import { VIEW_TYPE_CHAT } from "../../views/chat/Chat";
 import MarkdownRenderer from "../ui/MarkdownRenderer.svelte";
@@ -16,11 +17,33 @@ const { threadPath }: Props = $props();
 const store = getPendingChangesStore();
 
 const threadId = $derived(threadPath);
-const pendingEntries = $derived.by(() => {
+/**
+ * Everything in this thread that still needs the user — pending proposals, plus
+ * any entry whose groups were all resolved individually but whose applied text is
+ * still written to the note.
+ *
+ * The bar used to render only `status === "pending"` entries. Accepting one diff
+ * group and then rejecting the rest leaves an entry marked `rejected` with its
+ * accepted content on disk; if that was the thread's only entry the bar vanished,
+ * stranding the change with no way to reach "Reject All".
+ */
+const actionableEntries = $derived.by(() => {
 	void store.revision;
-	return threadId ? store.getEntriesForThread(threadId).filter((e) => e.status === "pending") : [];
+	return threadId ? store.getActionableForThread(threadId) : [];
 });
+const pendingEntries = $derived(actionableEntries.filter((e) => e.status === "pending"));
 const pendingCount = $derived(pendingEntries.length);
+/** Entries holding applied-but-unreverted content (never also `pending`). */
+const appliedEntries = $derived(actionableEntries.filter((e) => e.status !== "pending"));
+const appliedCount = $derived(appliedEntries.length);
+
+/** Headline for the summary row, which now covers two distinct kinds of entry. */
+const summaryLabel = $derived.by(() => {
+	const parts: string[] = [];
+	if (pendingCount > 0) parts.push(`${pendingCount} pending change${pendingCount !== 1 ? "s" : ""}`);
+	if (appliedCount > 0) parts.push(`${appliedCount} partially applied`);
+	return parts.join(", ");
+});
 
 let isExpanded = $state(false);
 
@@ -110,6 +133,29 @@ function handleReject(entry: PendingChangeEntry) {
 	new Notice(`Rejected: ${changePathLabel(entry)}`);
 }
 
+/** Restore a note whose diff groups were partially accepted, for an entry that is
+ *  no longer pending (so accept/reject would both be no-ops on it). */
+async function handleUndoApplied(entry: PendingChangeEntry) {
+	const skipped = await store.undoAppliedGroups(entry.id);
+	if (!skipped) {
+		new Notice(`Restored: ${changePathLabel(entry)}`);
+		return;
+	}
+	new Notice(describeSkip(skipped));
+}
+
+/** A restore that didn't happen, phrased for the reason it didn't. */
+function describeSkip(skip: RevertSkip): string {
+	switch (skip.reason) {
+		case "conflict":
+			return `Left "${skip.path}" as-is — it changed after the change was partially applied.`;
+		case "missing":
+			return `Could not restore "${skip.path}" — that note no longer exists. Any applied content moved with it.`;
+		case "failed":
+			return `Failed to restore "${skip.path}". See the console for details.`;
+	}
+}
+
 async function handleAcceptAll() {
 	if (!threadId) return;
 	const count = pendingCount;
@@ -127,8 +173,18 @@ async function handleAcceptAll() {
 
 async function handleRejectAll() {
 	if (!threadId) return;
-	await store.rejectAll(threadId);
-	new Notice("Rejected all pending changes");
+	// Capture before the call — both counts are zero afterwards.
+	const hadPending = pendingCount > 0;
+	const skipped = await store.rejectAll(threadId);
+	if (skipped.length === 0) {
+		new Notice(hadPending ? "Rejected all pending changes" : "Restored the partially applied notes");
+	} else {
+		// A partially-accepted note that couldn't be restored is left as it is. Say
+		// so per reason — otherwise "Rejected all" reads as "everything was undone"
+		// while those files still hold the accepted groups.
+		const head = hadPending ? "Rejected all pending changes." : "Finished undoing applied changes.";
+		new Notice(`${head} ${skipped.map(describeSkip).join(" ")}`);
+	}
 }
 
 /** Jump to this change's position in the target note (its first changed line).
@@ -157,7 +213,7 @@ function previewChange(evt: Event, entry: PendingChangeEntry) {
 }
 </script>
 
-{#if pendingCount > 0}
+{#if actionableEntries.length > 0}
   <div class="pcb-container">
     <!-- Summary bar -->
     <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -166,33 +222,37 @@ function previewChange(evt: Event, entry: PendingChangeEntry) {
       <div class="pcb-summary-left">
         <div class="pcb-icon" use:icon={"file-diff"} style="--icon-size: var(--icon-xs)"></div>
         <span class="pcb-count">
-          {pendingCount} pending change{pendingCount !== 1 ? "s" : ""}
+          {summaryLabel}
         </span>
       </div>
       <div class="pcb-summary-right">
-        <button
-          class="pcb-action pcb-action-accept"
-          onclick={(e) => {
-            e.stopPropagation();
-            handleAcceptAll();
-          }}
-          title="Accept all changes"
-          type="button"
-        >
-          <div use:icon={"check"} style="--icon-size: 12px"></div>
-          <span>Accept All</span>
-        </button>
+        {#if pendingCount > 0}
+          <button
+            class="pcb-action pcb-action-accept"
+            onclick={(e) => {
+              e.stopPropagation();
+              handleAcceptAll();
+            }}
+            title="Accept all changes"
+            type="button"
+          >
+            <div use:icon={"check"} style="--icon-size: 12px"></div>
+            <span>Accept All</span>
+          </button>
+        {/if}
         <button
           class="pcb-action pcb-action-reject"
           onclick={(e) => {
             e.stopPropagation();
             handleRejectAll();
           }}
-          title="Reject all changes"
+          title={pendingCount > 0
+            ? "Reject all changes, restoring any partially applied notes"
+            : "Restore the partially applied notes to their original content"}
           type="button"
         >
           <div use:icon={"x"} style="--icon-size: 12px"></div>
-          <span>Reject All</span>
+          <span>{pendingCount > 0 ? "Reject All" : "Undo Applied"}</span>
         </button>
         <div class="pcb-chevron" class:pcb-chevron-open={isExpanded}>▸</div>
       </div>
@@ -201,7 +261,7 @@ function previewChange(evt: Event, entry: PendingChangeEntry) {
     <!-- Expanded change list -->
     {#if isExpanded}
       <div class="pcb-list">
-        {#each pendingEntries as entry (entry.id)}
+        {#each actionableEntries as entry (entry.id)}
           {@const previewContent = previewContentOf(entry)}
           {@const isPreviewOpen = previewedEntryIds.has(entry.id)}
           <div class="pcb-entry">
@@ -225,6 +285,17 @@ function previewChange(evt: Event, entry: PendingChangeEntry) {
                 <span class="pcb-badge {changeTypeBadgeClass(entry.change.type)}">
                   {changeTypeLabel(entry)}
                 </span>
+                {#if entry.status !== "pending"}
+                  <!-- Not a proposal awaiting review: its groups were all resolved
+                       individually and some accepted text is still in the note. -->
+                  <span
+                    class="pcb-applied"
+                    title="Some of this change was applied to the note. Undo it to restore the note's original content."
+                  >
+                    <span use:icon={"circle-alert"} style="--icon-size: 11px"></span>
+                    Partly applied
+                  </span>
+                {/if}
                 {#if entry.change.type === "update"}
                   <!-- svelte-ignore a11y_mouse_events_have_key_events -->
                   <a
@@ -261,30 +332,48 @@ function previewChange(evt: Event, entry: PendingChangeEntry) {
                 {/if}
               </div>
               <div class="pcb-entry-actions">
-                <button
-                  class="pcb-action-icon pcb-action-accept"
-                  onclick={(e) => {
-                    e.stopPropagation();
-                    handleAccept(entry);
-                  }}
-                  title="Accept change"
-                  aria-label="Accept change to {entry.change.path}"
-                  type="button"
-                >
-                  <div use:icon={"check"} style="--icon-size: 12px"></div>
-                </button>
-                <button
-                  class="pcb-action-icon pcb-action-reject"
-                  onclick={(e) => {
-                    e.stopPropagation();
-                    handleReject(entry);
-                  }}
-                  title="Reject change"
-                  aria-label="Reject change to {entry.change.path}"
-                  type="button"
-                >
-                  <div use:icon={"x"} style="--icon-size: 12px"></div>
-                </button>
+                {#if entry.status === "pending"}
+                  <button
+                    class="pcb-action-icon pcb-action-accept"
+                    onclick={(e) => {
+                      e.stopPropagation();
+                      handleAccept(entry);
+                    }}
+                    title="Accept change"
+                    aria-label="Accept change to {entry.change.path}"
+                    type="button"
+                  >
+                    <div use:icon={"check"} style="--icon-size: 12px"></div>
+                  </button>
+                  <button
+                    class="pcb-action-icon pcb-action-reject"
+                    onclick={(e) => {
+                      e.stopPropagation();
+                      handleReject(entry);
+                    }}
+                    title="Reject change"
+                    aria-label="Reject change to {entry.change.path}"
+                    type="button"
+                  >
+                    <div use:icon={"x"} style="--icon-size: 12px"></div>
+                  </button>
+                {:else}
+                  <!-- Already resolved at group level: accept/reject are no-ops on it
+                       (both early-return on non-pending), so offer the one action that
+                       still does something — undoing the text left in the note. -->
+                  <button
+                    class="pcb-action-icon pcb-action-reject"
+                    onclick={(e) => {
+                      e.stopPropagation();
+                      handleUndoApplied(entry);
+                    }}
+                    title="Restore this note to its content from before the proposal"
+                    aria-label="Undo applied change to {entry.change.path}"
+                    type="button"
+                  >
+                    <div use:icon={"undo-2"} style="--icon-size: 12px"></div>
+                  </button>
+                {/if}
               </div>
             </div>
 
@@ -504,6 +593,22 @@ function previewChange(evt: Event, entry: PendingChangeEntry) {
     font-weight: var(--font-semibold);
     background: color-mix(in srgb, var(--color-red) 20%, transparent);
     color: var(--color-red);
+    cursor: help;
+  }
+
+  /* Shares the deprivatizing badge's shape; amber rather than red — this is a
+     "needs your attention" state, not a privacy warning. */
+  .pcb-applied {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    flex-shrink: 0;
+    padding: 1px 5px;
+    border-radius: var(--radius-s);
+    font-size: 10px;
+    font-weight: var(--font-semibold);
+    background: color-mix(in srgb, var(--color-yellow) 20%, transparent);
+    color: var(--color-yellow);
     cursor: help;
   }
 

@@ -288,6 +288,13 @@ export class PixiRenderer {
 	private _height = 0;
 	private _destroyed = false;
 	private _ready = false;
+	/**
+	 * Whether `app.init()` has resolved. `this.app` is assigned synchronously by
+	 * `new Application()` but is not usable — and must not be destroyed — until its
+	 * async `init()` completes. Distinct from `_ready`, which additionally requires
+	 * the scene graph to be built.
+	 */
+	private _appInitialized = false;
 
 	// Callback fired whenever the viewport moves (pan/zoom/pinch)
 	private _onViewportMoved: (() => void) | null = null;
@@ -338,6 +345,17 @@ export class PixiRenderer {
 			// actually changed, so a settled graph costs no GPU work at idle.
 			autoStart: false,
 		});
+
+		// `app.init()` creates a WebGL context — a real async gap, longer on a cold
+		// GPU. If the owner tore us down inside it, `destroy()` already ran and found
+		// nothing to release (`_appInitialized` was still false). Undo the context we
+		// just finished creating and stop, rather than building a full scene graph and
+		// registering a shared-ticker callback that nothing will ever remove.
+		if (this._destroyed) {
+			this.app.destroy(true, { children: true });
+			return;
+		}
+		this._appInitialized = true;
 
 		// Style the canvas
 		const canvas = this.app.canvas as HTMLCanvasElement;
@@ -495,7 +513,14 @@ export class PixiRenderer {
 		// Sprites share this render texture, so it isn't covered by the
 		// children-destroy below.
 		this.nodeTexture?.destroy(true);
-		this.app.destroy(true, { children: true });
+		// Only tear down a pixi Application whose async `init()` actually resolved.
+		// `new Application()` assigns `this.app` synchronously, so a destroy during
+		// init would otherwise call `destroy()` on a renderer that was never created
+		// — which throws, aborting the caller's remaining cleanup. `init()` checks
+		// `_destroyed` after its await and releases the context itself in that case.
+		if (this._appInitialized) {
+			this.app.destroy(true, { children: true });
+		}
 	}
 
 	/**

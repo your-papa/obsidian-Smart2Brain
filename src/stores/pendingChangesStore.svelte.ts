@@ -38,6 +38,19 @@ const pendingChangesArraySchema = z.array(pendingChangeEntrySchema);
 let _store: PendingChangesStore | null = null;
 
 /**
+ * Why a partially-applied note was not restored.
+ *
+ * - `conflict` — it changed after the group accept, so we left the user's work alone.
+ * - `missing`  — nothing exists at that path any more (deleted, or moved while the
+ *                plugin was unloaded); there is nothing to restore.
+ * - `failed`   — the write itself threw.
+ */
+export interface RevertSkip {
+	path: string;
+	reason: "conflict" | "missing" | "failed";
+}
+
+/**
  * Determine whether to include a removed or added part in the output.
  */
 function shouldIncludePart(part: Change, isTarget: boolean, targetUsesNew: boolean): boolean {
@@ -306,6 +319,10 @@ export class PendingChangesStore {
 		});
 
 		entry.status = "accepted";
+		// The whole proposal is applied with the user's approval, so any partial-write
+		// snapshot from earlier group accepts is settled — see `hasUnrevertedApplication`.
+		// Leaving it set would let `rejectAll` revert a change they just accepted.
+		if (change.type === "update") change.initialOriginalContent = undefined;
 		this.scheduleSave();
 		this.notifyChange();
 	}
@@ -328,8 +345,16 @@ export class PendingChangesStore {
 	 * note could interleave read→modify and clobber each other.) The stored
 	 * promise is the tail of the chain; the map entry is cleared only when this
 	 * op is still the tail, so a later arrival that already chained onto us keeps
-	 * the entry alive. */
-	private async withFileLock<T>(filePath: string, fn: () => Promise<T>): Promise<T> {
+	 * the entry alive.
+	 *
+	 * The key is normalized here rather than at the call sites: `#fileLocks` is a
+	 * plain string map, so `"a//b.md"` and `"a/b.md"` would occupy *different*
+	 * chains for one file and let two ops interleave read→modify — exactly the
+	 * clobbering the queue exists to prevent. Callers pass whatever path they hold;
+	 * making the invariant structural means a future call site can't reintroduce
+	 * the split by forgetting to normalize. */
+	private async withFileLock<T>(rawPath: string, fn: () => Promise<T>): Promise<T> {
+		const filePath = normalizePath(rawPath);
 		const previous = this.#fileLocks.get(filePath) ?? Promise.resolve();
 
 		// Run only after everything already queued for this path settles. Swallow
@@ -387,6 +412,13 @@ export class PendingChangesStore {
 				change.originalContent = newVaultContent;
 				if (change.originalContent === change.newContent) {
 					entry.status = "accepted";
+					// Every group is now applied and the user approved each one, so the
+					// note's content is theirs — not an unreviewed partial write. Drop the
+					// pre-proposal snapshot: it exists to mark "there is applied content
+					// here the user has not signed off on", and keeping it would make
+					// `rejectAll` treat this completed acceptance as something to undo,
+					// silently reverting a change they explicitly accepted.
+					change.initialOriginalContent = undefined;
 				}
 			});
 
@@ -442,30 +474,122 @@ export class PendingChangesStore {
 		}
 	}
 
-	/** Reject all pending changes for a thread, reverting any partially-applied group writes. */
-	async rejectAll(threadId: string): Promise<void> {
-		const pending = this.#entries.filter((e) => e.threadId === threadId && e.status === "pending");
-		for (const entry of pending) {
-			// Revert vault file if groups were partially accepted
-			if (entry.change.type === "update" && entry.change.initialOriginalContent !== undefined) {
-				const change = entry.change;
-				const initialOriginalContent = change.initialOriginalContent;
-				if (initialOriginalContent === undefined) continue;
-				try {
-					await this.withFileLock(change.path, async () => {
-						const file = this.#plugin.app.vault.getAbstractFileByPath(change.path);
-						if (file instanceof TFile) {
-							await this.#plugin.app.vault.modify(file, initialOriginalContent);
-						}
-					});
-				} catch (e) {
-					Logger.error(`[PendingChanges] Failed to revert ${entry.change.path}:`, e);
+	/**
+	 * Restore a note whose diff groups were partially accepted back to its
+	 * pre-proposal content. No-op for anything with nothing applied.
+	 *
+	 * @returns a {@link RevertSkip} when the revert did NOT happen, else undefined.
+	 *   The reason is carried so callers can say which it was — "we left your edits
+	 *   alone" and "that note is gone" are very different messages to receive.
+	 */
+	private async revertAppliedGroups(entry: PendingChangeEntry): Promise<RevertSkip | undefined> {
+		if (!this.hasUnrevertedApplication(entry)) return undefined;
+		// Narrowed by hasUnrevertedApplication, which TS can't see through.
+		const change = entry.change as Extract<PendingChange, { type: "update" }>;
+		const initialOriginalContent = change.initialOriginalContent;
+		if (initialOriginalContent === undefined) return undefined;
+
+		try {
+			return await this.withFileLock(change.path, async () => {
+				const file = this.#plugin.app.vault.getAbstractFileByPath(change.path);
+				if (!(file instanceof TFile)) {
+					// Nothing at this path to restore. Reporting success would tell the
+					// user the note was put back when it wasn't — and, because the
+					// snapshot below is only cleared on an actual write, the entry would
+					// stay actionable forever with no way to resolve it. Renames are now
+					// tracked for these entries (see #handleFileRename), so reaching here
+					// means the note was deleted, or moved while the plugin was unloaded.
+					Logger.warn(
+						`[PendingChanges] Cannot restore "${change.path}" — the note no longer exists at that path.`,
+					);
+					// Clear the snapshot: there is no file left to undo, so keeping it
+					// would strand the entry as permanently unresolvable.
+					change.initialOriginalContent = undefined;
+					return { path: change.path, reason: "missing" as const };
 				}
-			}
+
+				// Conflict check, matching acceptChange/acceptChangeGroup. Rejecting
+				// is not a licence to discard the user's own work: between the group
+				// accept and this reject they may have edited the note by hand, and
+				// `vault.modify` does not go through trash, so an unconditional
+				// overwrite destroys those edits with no way back.
+				//
+				// `originalContent` is the right baseline, not `initialOriginalContent`:
+				// acceptChangeGroup advances `originalContent` to exactly what it wrote
+				// (see its `change.originalContent = newVaultContent`), so it tracks what
+				// we last put on disk. If the file still matches it, our writes are the
+				// only ones there and undoing them is safe.
+				const currentContent = await this.#plugin.app.vault.read(file);
+				if (currentContent !== change.originalContent) {
+					Logger.warn(
+						`[PendingChanges] Skipped reverting "${change.path}" — it was modified after the group accept; leaving the file as-is.`,
+					);
+					// Snapshot deliberately kept: the note is still there, so the user can
+					// resolve the conflict and undo later.
+					return { path: change.path, reason: "conflict" as const };
+				}
+
+				await this.#plugin.app.vault.modify(file, initialOriginalContent);
+				// The note is back to its pre-proposal state, so there is nothing left
+				// to undo. Clearing this makes the revert idempotent: a later revert
+				// (or one after the user edits the note again) must not re-apply this
+				// stale snapshot over their newer content.
+				change.originalContent = initialOriginalContent;
+				change.initialOriginalContent = undefined;
+				return undefined;
+			});
+		} catch (e) {
+			Logger.error(`[PendingChanges] Failed to revert ${change.path}:`, e);
+			return { path: change.path, reason: "failed" as const };
+		}
+	}
+
+	/**
+	 * Undo the partially-applied content of a single entry (the per-row counterpart
+	 * of `rejectAll`'s revert), marking it rejected.
+	 *
+	 * @returns the path when the revert was skipped, else undefined.
+	 */
+	async undoAppliedGroups(entryId: string): Promise<RevertSkip | undefined> {
+		const entry = this.#entries.find((e) => e.id === entryId);
+		if (!entry) return undefined;
+
+		const skipped = await this.revertAppliedGroups(entry);
+		entry.status = "rejected";
+		this.scheduleSave();
+		this.notifyChange();
+		return skipped;
+	}
+
+	/** Reject all pending changes for a thread, reverting any partially-applied group writes.
+	 *
+	 *  Returns the paths whose revert was skipped because the file no longer matched what
+	 *  we wrote — the entries are still rejected (the proposal is dead either way), but the
+	 *  file keeps its current content. Callers should surface these: a silent skip reads as
+	 *  "everything was undone" when it wasn't. */
+	async rejectAll(threadId: string): Promise<RevertSkip[]> {
+		// Two distinct sets, deliberately:
+		//
+		//  - anything still `pending`, which must be marked rejected; and
+		//  - anything with `initialOriginalContent` set, which has partially-applied
+		//    content ON DISK that must be undone regardless of its status.
+		//
+		// The second set is not a subset of the first. Accepting one diff group and
+		// then rejecting the remaining ones drives `newContent` back to
+		// `originalContent`, so `rejectChangeGroup` already flipped the entry to
+		// `rejected` — while the accepted group is still written to the note. Filtering
+		// on `pending` alone skipped exactly those entries, leaving the applied text in
+		// the vault while the UI reported that everything had been rejected.
+		const targets = this.getActionableForThread(threadId);
+		const skippedReverts: RevertSkip[] = [];
+		for (const entry of targets) {
+			const skipped = await this.revertAppliedGroups(entry);
+			if (skipped) skippedReverts.push(skipped);
 			entry.status = "rejected";
 		}
 		this.scheduleSave();
 		this.notifyChange();
+		return skippedReverts;
 	}
 
 	/** Get all entries for a thread. */
@@ -476,6 +600,38 @@ export class PendingChangesStore {
 	/** Get only pending entries for a thread. */
 	getPendingForThread(threadId: string): PendingChangeEntry[] {
 		return this.#entries.filter((e) => e.threadId === threadId && e.status === "pending");
+	}
+
+	/**
+	 * Whether this entry has applied content in the note that the user has NOT
+	 * signed off on.
+	 *
+	 * `initialOriginalContent` is the invariant: set on the first
+	 * `acceptChangeGroup`, and cleared the moment the outcome is settled — either
+	 * every group was accepted (the content is now theirs) or the applied text was
+	 * reverted (there is nothing left on disk). So it means "unreviewed partial
+	 * write present", not merely "a group was once accepted".
+	 *
+	 * Status alone cannot answer this. Resolving the last group individually flips
+	 * the entry to `accepted`/`rejected` while partial text may still be on disk,
+	 * which is why this is keyed on the snapshot rather than on status.
+	 *
+	 * Single source of truth for the callers that must agree: `rejectAll` (what to
+	 * revert), `PendingChangesBar` (whether to stay visible), and `cleanupResolved`
+	 * (what is safe to forget).
+	 */
+	hasUnrevertedApplication(entry: PendingChangeEntry): boolean {
+		return entry.change.type === "update" && entry.change.initialOriginalContent !== undefined;
+	}
+
+	/**
+	 * Entries for a thread that still need the user: pending proposals, plus any
+	 * entry holding partially-applied content that has not been reverted.
+	 */
+	getActionableForThread(threadId: string): PendingChangeEntry[] {
+		return this.#entries.filter(
+			(e) => e.threadId === threadId && (e.status === "pending" || this.hasUnrevertedApplication(e)),
+		);
 	}
 
 	/** Get a single entry by ID. */
@@ -543,16 +699,39 @@ export class PendingChangesStore {
 	/** Remove all resolved (accepted/rejected) entries for a thread. */
 	cleanupResolved(threadId: string): void {
 		const beforeLength = this.#entries.length;
-		this.#entries = this.#entries.filter((e) => e.threadId !== threadId || e.status === "pending");
+		// Keep anything still holding unreverted content on disk: dropping it would
+		// discard the only record of what the note looked like before, leaving the
+		// applied text with no way to undo it. Same rule the bar uses to stay visible.
+		this.#entries = this.#entries.filter(
+			(e) => e.threadId !== threadId || e.status === "pending" || this.hasUnrevertedApplication(e),
+		);
 		this.scheduleSave();
 		if (this.#entries.length !== beforeLength) {
 			this.notifyChange();
 		}
 	}
 
-	/** Remove all entries for a thread (e.g., when thread is deleted). */
+	/**
+	 * Remove all entries for a thread (e.g. when the thread is deleted).
+	 *
+	 * Unlike {@link cleanupResolved} this drops everything, including entries still
+	 * holding unreverted applied content: the chat is gone, so there is no surface
+	 * left to review them on and keeping them would leak rows into a thread that no
+	 * longer exists. But that content stays in the vault with its only undo record
+	 * discarded, so warn rather than doing it silently — the note is left as the
+	 * agent partially wrote it, and the user gets no other signal.
+	 */
 	removeThread(threadId: string): void {
 		const beforeLength = this.#entries.length;
+		const strandedPaths = this.#entries
+			.filter((e) => e.threadId === threadId && this.hasUnrevertedApplication(e))
+			.map((e) => e.change.path);
+		if (strandedPaths.length > 0) {
+			Logger.warn(
+				`[PendingChanges] Discarding ${strandedPaths.length} partially-applied change(s) with the deleted thread. ` +
+					`These notes keep the content that was already applied: ${strandedPaths.join(", ")}`,
+			);
+		}
 		this.#entries = this.#entries.filter((e) => e.threadId !== threadId);
 		this.scheduleSave();
 		if (this.#entries.length !== beforeLength) {
@@ -564,7 +743,13 @@ export class PendingChangesStore {
 	#handleFileRename(oldPath: string, newPath: string): void {
 		let changed = false;
 		for (const entry of this.#entries) {
-			if (entry.status !== "pending") continue;
+			// Track renames for pending proposals AND for anything still holding
+			// unreverted applied content. The latter is not pending — its groups were
+			// resolved individually — but its path is still a live pointer to text in
+			// the vault that Undo Applied / Reject All must reach. Skipping it left a
+			// stale path, so the revert looked up a file that no longer existed and
+			// reported success while the applied content sat at the new path.
+			if (entry.status !== "pending" && !this.hasUnrevertedApplication(entry)) continue;
 			if (entry.change.path === oldPath) {
 				entry.change.path = newPath;
 				changed = true;

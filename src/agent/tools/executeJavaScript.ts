@@ -1,9 +1,10 @@
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
-import { DEFAULT_TOOLS_CONFIG, getData } from "../../stores/dataStore.svelte";
+import { DEFAULT_TOOLS_CONFIG } from "../../stores/dataStore.svelte";
 import { formatExecutionResult, type JavaScriptExecutionResult } from "./executeJavaScriptShared";
 import type { ExecuteJavaScriptWorkerRequest, ExecuteJavaScriptWorkerResponse } from "./executeJavaScriptWorker";
 import ExecuteJavaScriptWorkerConstructor from "./executeJavaScriptWorker?worker&inline";
+import { resolveToolAgent } from "./toolAgentContext";
 
 const EXECUTION_TIMEOUT_MS = 3_000;
 
@@ -56,8 +57,8 @@ async function executeInWorker(code: string, input?: unknown): Promise<JavaScrip
 	});
 }
 
-export function createExecuteJavaScriptTool() {
-	const getToolConfig = () => getData().getSelectedAgent().toolsConfig.execute_javascript;
+export function createExecuteJavaScriptTool(agentId = "") {
+	const getToolConfig = () => resolveToolAgent(agentId).toolsConfig.execute_javascript;
 	const defaultToolConfig = DEFAULT_TOOLS_CONFIG.execute_javascript;
 
 	return tool(
