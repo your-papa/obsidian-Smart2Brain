@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { formatEta, summarizeValidationProgressCounts } from "../../src/vectorstore/VectorStoreService";
+import {
+	canReuseCachedEmbeddings,
+	formatEta,
+	summarizeValidationProgressCounts,
+} from "../../src/vectorstore/VectorStoreService";
 import { getDefaultEmbeddingBatchSize, normalizeEmbeddingBatchSize } from "../../src/vectorstore/batchSize";
 
 describe("embedding batch size helpers", () => {
@@ -61,5 +65,52 @@ describe("formatEta", () => {
 		expect(formatEta(90_000)).toBe("2m");
 		expect(formatEta(60 * 60_000)).toBe("1h");
 		expect(formatEta(72 * 60_000)).toBe("1h 12m");
+	});
+});
+
+/*
+ * The embeddings instance is cached per index for the whole plugin session, and
+ * it bakes in the credentials it was built with. Reuse therefore has to consider
+ * the registry's credential generation, not just provider/model ids — otherwise a
+ * rotated API key or an edited baseUrl keeps being used until Obsidian restarts,
+ * failing silently (an embed call just 401s).
+ *
+ * This is the same defect the `authGen` term fixed in the agent's runnable cache.
+ * `getEmbeddingsForInstance` is private and only reachable through index init, so
+ * the rule is extracted here to be directly assertable — without a seam the guard
+ * could be deleted without failing anything.
+ */
+describe("canReuseCachedEmbeddings", () => {
+	const cached = { providerId: "openai", modelId: "text-embedding-3-small", authGeneration: 7 };
+	const want = { provider: "openai", model: "text-embedding-3-small" };
+
+	it("reuses when provider, model and credentials are all unchanged", () => {
+		expect(canReuseCachedEmbeddings(cached, want, 7)).toBe(true);
+	});
+
+	it("rebuilds after a credential change, even with identical ids", () => {
+		// The rotation case: same provider, same model, new key.
+		expect(canReuseCachedEmbeddings(cached, want, 8)).toBe(false);
+	});
+
+	it("rebuilds when the provider changes", () => {
+		expect(canReuseCachedEmbeddings(cached, { provider: "ollama", model: want.model }, 7)).toBe(false);
+	});
+
+	it("rebuilds when the model changes", () => {
+		expect(canReuseCachedEmbeddings(cached, { provider: want.provider, model: "other" }, 7)).toBe(false);
+	});
+
+	it("never reuses a never-populated cache slot", () => {
+		// A fresh IndexInstance starts with all three null.
+		expect(canReuseCachedEmbeddings({ providerId: null, modelId: null, authGeneration: null }, want, 0)).toBe(
+			false,
+		);
+	});
+
+	it("does not treat a null generation as matching generation 0", () => {
+		// Guards the sentinel: `null` means "never built", which must not collide with
+		// the registry's initial generation of 0.
+		expect(canReuseCachedEmbeddings({ ...cached, authGeneration: null }, want, 0)).toBe(false);
 	});
 });

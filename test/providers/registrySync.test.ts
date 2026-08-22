@@ -220,5 +220,43 @@ describe("registrySync", () => {
 			unsyncProvider("never-registered");
 			expect(getRegistry().getAuthGeneration()).toBe(before);
 		});
+
+		/**
+		 * The generation is the shared invalidation signal for every cache whose values
+		 * embed resolved credentials. Two consumers rely on it today — the agent's
+		 * runnable cache and VectorStoreService's per-index embeddings instance — and
+		 * both compare a stored generation against the live one. Pin the property they
+		 * both depend on: a credential edit must make a previously-captured generation
+		 * compare unequal, while an unrelated read must not.
+		 */
+		it("makes a captured generation stale after a credential edit", () => {
+			data.add("openai", { apiKey: "sk-old" });
+			syncProvider(data, "openai");
+
+			// What a cache stores alongside the instance it just built.
+			const capturedAtBuild = getRegistry().getAuthGeneration();
+			// A plain read must not invalidate anything.
+			expect(getRegistry().getAuthGeneration()).toBe(capturedAtBuild);
+
+			data.auth.set("openai", { apiKey: "sk-new" });
+			syncProvider(data, "openai");
+
+			// The cache's reuse check now fails, so it rebuilds against the new key.
+			expect(getRegistry().getAuthGeneration()).not.toBe(capturedAtBuild);
+		});
+
+		it("survives a baseUrl-only edit (no key change)", () => {
+			data.add("my-local", { apiKey: "sk", baseUrl: "http://localhost:1234" });
+			data.meta = { "my-local": { templateId: "openai-compatible", displayName: "Local" } };
+			syncProvider(data, "my-local");
+			const captured = getRegistry().getAuthGeneration();
+
+			// Repointing at a different endpoint invalidates cached instances just as a
+			// rotated key does — same provider id, entirely different destination.
+			data.auth.set("my-local", { apiKey: "sk", baseUrl: "http://localhost:9999" });
+			syncProvider(data, "my-local");
+
+			expect(getRegistry().getAuthGeneration()).not.toBe(captured);
+		});
 	});
 });
