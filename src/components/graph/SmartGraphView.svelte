@@ -1571,6 +1571,16 @@ async function computeTopicHierarchy(topicEdges: GraphEdge[]) {
 				coarseResolution,
 			);
 			if (localBuildVersion !== buildVersion) return;
+			// Same live-patch hazard as the segmentation run: a vault patch changes
+			// the node set without bumping buildVersion or the partition key, so
+			// this coarse result describes a topology that has moved on. Caching it
+			// under the current signature would pair it with fine communities it
+			// never nested under, and the outline would show parents that match
+			// neither the canvas nor the controls.
+			if (graphTopologySignature(graphData) !== runSignature) {
+				Logger.info("[SmartGraph] Discarding a coarse partition the graph has moved past");
+				return;
+			}
 			setCachedPartition(runSignature, cacheKey, result);
 			scheduleTopicCacheSave();
 			communities = result;
@@ -1581,6 +1591,12 @@ async function computeTopicHierarchy(topicEdges: GraphEdge[]) {
 	}
 
 	if (localBuildVersion !== buildVersion) return;
+	// A live patch moves the node set without touching buildVersion or the
+	// partition key, so neither guard below would catch it.
+	if (graphTopologySignature(graphData) !== runSignature) {
+		Logger.info("[SmartGraph] Discarding a hierarchy the graph has moved past");
+		return;
+	}
 	// Pairing this coarse partition with a fine one it never nested under would
 	// describe a parent structure that matches neither the controls nor the
 	// canvas. The run triggered by whatever changed will rebuild it.
