@@ -169,9 +169,33 @@ export function swapActiveGraphCache(signature: string, currentResolution?: numb
 	return restored !== undefined;
 }
 
-/** Record the γ the active graph is being viewed at. */
-export function setActiveGraphResolution(resolution: number): void {
-	topicCaches.resolution = resolution;
+/**
+ * Record the γ a graph is being viewed at.
+ *
+ * Signature-addressed like the other setters: this is called from a settings
+ * write, which can land while another leaf owns the active slot. Writing there
+ * would give that graph this leaf's granularity, so restoring it would
+ * re-segment at the wrong γ — and because topic ids are positions in a fresh
+ * partition, that also clears its folds, focus and selection.
+ */
+export function setCachedResolution(signature: string, resolution: number): void {
+	if (signature === topicCaches.graphSignature) {
+		topicCaches.resolution = resolution;
+		return;
+	}
+	const archived = archivedGraphs.get(signature);
+	if (archived) {
+		archived.resolution = resolution;
+		archived.lastUsed = Date.now();
+		return;
+	}
+	archivedGraphs.set(signature, {
+		leiden: new Map(),
+		granularityLadder: null,
+		resolution,
+		lastUsed: Date.now(),
+	});
+	evictOldest(archivedGraphs, MAX_CACHED_GRAPHS - 1);
 }
 
 /**

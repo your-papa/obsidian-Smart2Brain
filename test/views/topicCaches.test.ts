@@ -9,9 +9,9 @@ import {
 	getCachedPartition,
 	getCachedResolution,
 	getCachedSemanticEdges,
-	setActiveGraphResolution,
 	setCachedGranularityLadder,
 	setCachedPartition,
+	setCachedResolution,
 	setCachedSemanticEdges,
 	snapshotTopicCaches,
 	swapActiveGraphCache,
@@ -158,12 +158,12 @@ describe("swapActiveGraphCache", () => {
 		// Full graph viewed at γ 1.0.
 		swapActiveGraphCache("res-full");
 		setCachedPartition("res-full", "7:1:fused", { "a.md": 0 });
-		setActiveGraphResolution(1.0);
+		setCachedResolution("res-full", 1.0);
 
 		// Immerse and dial the topics finer — a statement about the subset.
 		swapActiveGraphCache("res-immersed", 1.0);
 		setCachedPartition("res-immersed", "7:4.2:fused", { "a.md": 0 });
-		setActiveGraphResolution(4.2);
+		setCachedResolution("res-immersed", 4.2);
 
 		// Exiting restores the full graph's own γ, not the immersed one.
 		expect(swapActiveGraphCache("res-full", 4.2)).toBe(true);
@@ -177,7 +177,7 @@ describe("swapActiveGraphCache", () => {
 	it("leaves resolution null for a graph never assigned one", () => {
 		swapActiveGraphCache("res-fresh-a");
 		setCachedPartition("res-fresh-a", "7:1:fused", { "a.md": 0 });
-		setActiveGraphResolution(2.2);
+		setCachedResolution("res-fresh-a", 2.2);
 		// A graph seen for the first time has no γ of its own — the caller keeps
 		// the current global setting rather than being moved.
 		swapActiveGraphCache("res-fresh-b", 2.2);
@@ -235,6 +235,22 @@ describe("signature-addressed partitions", () => {
 		expect(getCachedPartition("addr-a", "7:1:fused")).toEqual({ "a.md": 1 });
 		expect(swapActiveGraphCache("addr-a")).toBe(true);
 		expect(getCachedPartition("addr-a", "7:1:fused")).toEqual({ "a.md": 1 });
+	});
+
+	it("records a γ against its own graph, not whichever slot is active", () => {
+		// A settings write can land while another leaf owns the slot; storing the
+		// γ there would re-segment that graph at the wrong granularity on restore
+		// — and since topic ids are positions in a fresh partition, that also
+		// clears its folds, focus and selection.
+		swapActiveGraphCache("gamma-a");
+		setCachedResolution("gamma-a", 1.0);
+		swapActiveGraphCache("gamma-b");
+		setCachedResolution("gamma-b", 2.2);
+
+		setCachedResolution("gamma-a", 4.2);
+
+		expect(getCachedResolution("gamma-b")).toBe(2.2);
+		expect(getCachedResolution("gamma-a")).toBe(4.2);
 	});
 
 	it("writes straight through when the graph is still active", () => {

@@ -57,9 +57,9 @@ import {
 	getTopicLabelCache,
 	loadPersistedTopicCaches,
 	scheduleTopicCacheSave,
-	setActiveGraphResolution,
 	setCachedGranularityLadder,
 	setCachedPartition,
+	setCachedResolution,
 	setCachedSemanticEdges,
 	swapActiveGraphCache,
 } from "../../views/smart-graph/topicCaches";
@@ -1079,7 +1079,9 @@ function handleSettingsChange(partial: Partial<SmartGraphSettings>) {
 	// (immerse, filters) restores it rather than the last γ set anywhere. Every
 	// path that changes γ — slider drag, commit, arrow keys, dev panel — routes
 	// through here.
-	if (partial.leidenResolution !== undefined) setActiveGraphResolution(partial.leidenResolution);
+	if (partial.leidenResolution !== undefined) {
+		setCachedResolution(graphTopologySignature(graphData), partial.leidenResolution);
+	}
 }
 
 function handleFolderFilterChange(folders: string[]) {
