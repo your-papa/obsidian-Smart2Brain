@@ -14,8 +14,8 @@ import { Logger } from "../../utils/logging";
 const pluginData = getData();
 const plugin = getPlugin();
 const githubIssuesListUrl =
-	"https://github.com/your-papa/obsidian-Smart2Brain/issues?q=is%3Aissue%20state%3Aopen%20label%3Abug";
-const githubIssuesNewUrl = "https://github.com/your-papa/obsidian-Smart2Brain/issues/new/choose";
+	"https://github.com/s2b-dev/smart-second-brain/issues?q=is%3Aissue%20state%3Aopen%20label%3Abug";
+const githubIssuesNewUrl = "https://github.com/s2b-dev/smart-second-brain/issues/new/choose";
 
 function openGitHubIssues() {
 	window.open(githubIssuesListUrl, "_blank", "noopener,noreferrer");

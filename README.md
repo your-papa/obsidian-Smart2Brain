@@ -15,9 +15,9 @@ Your Smart Second Brain is a **free** and **open-source** Obsidian plugin that m
 The three are designed to work together: search surfaces your notes, the graph reveals how they connect, and the AI assistant can draw on both when answering. Each pillar is also useful on its own. **Smart search and the graph work right away with no AI provider** — connecting one (OpenAI, Anthropic, OpenRouter, or a local [Ollama](https://ollama.com/) model) unlocks the full AI assistant. Desktop-only.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://github.com/your-papa/obsidian-Smart2Brain/assets/48623649/3e9cb3bc-ea57-4afc-b616-9c9360e39232">
-  <source media="(prefers-color-scheme: light)" srcset="https://github.com/your-papa/obsidian-Smart2Brain/assets/48623649/9948671a-ebc4-4315-b376-0918c6f7f4f8">
-  <img alt="S2B Chat" src="https://github.com/your-papa/obsidian-Smart2Brain/assets/48623649/9948671a-ebc4-4315-b376-0918c6f7f4f8">
+  <source media="(prefers-color-scheme: dark)" srcset="https://github.com/s2b-dev/smart-second-brain/assets/48623649/3e9cb3bc-ea57-4afc-b616-9c9360e39232">
+  <source media="(prefers-color-scheme: light)" srcset="https://github.com/s2b-dev/smart-second-brain/assets/48623649/9948671a-ebc4-4315-b376-0918c6f7f4f8">
+  <img alt="S2B Chat" src="https://github.com/s2b-dev/smart-second-brain/assets/48623649/9948671a-ebc4-4315-b376-0918c6f7f4f8">
 </picture>
 
 
@@ -78,7 +78,7 @@ If you have any suggestions or wish to contribute, we would greatly appreciate i
 
 # 📢 You want to support?
 
-- Report issues or open a feature request [here](https://github.com/your-papa/obsidian-Smart2Brain/issues/new/choose)
+- Report issues or open a feature request [here](https://github.com/s2b-dev/smart-second-brain/issues/new/choose)
 - Open a PR for code contributions — see **Development** below
 
 # 🛠️ Development
@@ -100,7 +100,7 @@ To try a dev build in a real vault, run `bun run setup-vault` once to symlink `b
 
 # ❓ FAQ
 
-Don't hesitate to ask your question in the [Q&A](https://github.com/your-papa/obsidian-Smart2Brain/discussions/categories/q-a)
+Don't hesitate to ask your question in the [Q&A](https://github.com/s2b-dev/smart-second-brain/discussions/categories/q-a)
 
 ## Are any queries sent to the cloud?
 
