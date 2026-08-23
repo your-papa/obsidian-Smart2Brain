@@ -10,6 +10,7 @@ import GenericAIIcon from "../ui/logos/GenericAIIcon.svelte";
 import CircularLoader from "../ui/CircularLoader.svelte";
 import Button from "../ui/Button.svelte";
 import { icon } from "../../utils/utils";
+import { Logger } from "../../utils/logging";
 import { ProviderSetupModal } from "../../views/provider-setup/ProviderSetup";
 import { confirmDelete, confirmDeleteWithOption } from "../modal/ConfirmModal";
 
@@ -84,8 +85,7 @@ async function removeProvider(purgeEmbeddings = false) {
 	if (!purgeEmbeddings) return;
 
 	// Separate error scope: the provider IS removed by now, so a purge failure must not
-	// report "Failed to remove provider". The vectors stay addressable by "provider:model"
-	// id, so a failed purge is recoverable by re-adding the provider and deleting again.
+	// report "Failed to remove provider" — that would misstate what happened.
 	//
 	// The vector store is only assigned at onLayoutReady, so it can genuinely be absent
 	// (its type asserts non-null, but `onunload` guards it for the same reason). Deleting
@@ -98,13 +98,26 @@ async function removeProvider(purgeEmbeddings = false) {
 		return;
 	}
 
-	try {
-		for (const indexId of orphanedIndexIds) {
+	// Each index is attempted independently: `deleteIndex` awaits `store.clear()` and
+	// `store.close()` before it reaches the IndexedDB drop, so one rejection would
+	// otherwise abandon every index after it — and their config records are already gone,
+	// which makes the survivors much harder to reach again. Failures are collected and
+	// reported together instead.
+	const failed: string[] = [];
+	for (const indexId of orphanedIndexIds) {
+		try {
 			await vectorStore.deleteIndex(indexId);
+		} catch (error) {
+			failed.push(indexId);
+			Logger.error(`[ProviderItem] Failed to delete embedding index ${indexId}:`, error);
 		}
-	} catch (error) {
+	}
+
+	if (failed.length > 0) {
 		new Notice(
-			`Provider removed, but deleting its embeddings failed: ${error instanceof Error ? error.message : String(error)}`,
+			`Provider removed, but deleting ${failed.length} of ${orphanedIndexIds.length} embedding ${
+				orphanedIndexIds.length === 1 ? "index" : "indexes"
+			} failed: ${failed.join(", ")}. See the console for details.`,
 		);
 	}
 }
