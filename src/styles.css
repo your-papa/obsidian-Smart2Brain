@@ -1048,6 +1048,9 @@
 	padding: 6px 14px;
 	font-size: var(--font-ui-small);
 	flex-shrink: 0;
+	/* Slightly wider than the base pill's 4px: these pills are taller and carry
+	   18px vendor artwork rather than a small inline glyph. */
+	gap: 6px;
 }
 
 .s2b-model-filter-bar .s2b-pill.s2b-pill--active {
@@ -1056,14 +1059,38 @@
 	color: var(--text-accent);
 }
 
+/* Matches the filled star on a favourited row, so "Favorites is on" and "this
+   model is favourited" use the same visual language. Scoped to the monochrome
+   star only — vendor artwork keeps its own fills. */
+.s2b-model-filter-fav.s2b-pill--active .s2b-model-filter-icon svg {
+	fill: currentColor;
+}
+
 .s2b-model-filter-icon {
 	display: inline-flex;
 	align-items: center;
+	justify-content: center;
+	/* The bar scrolls horizontally, so nothing inside a pill may be squeezed. */
+	flex-shrink: 0;
 }
 
 .s2b-model-filter-icon svg {
 	width: 16px;
 	height: 16px;
+}
+
+/* Vendor marks are brand artwork with their own fills, unlike the monochrome
+   star. They must keep those colours instead of inheriting the pill's
+   `currentColor`, which flips to the accent while the pill is active. Sized a
+   touch larger than the star so the logos stay legible at pill scale. */
+.s2b-model-filter-icon--vendor {
+	width: 18px;
+	height: 18px;
+}
+
+.s2b-model-filter-icon--vendor svg {
+	width: 18px;
+	height: 18px;
 }
 
 .s2b-model-suggestion {
@@ -1114,29 +1141,35 @@
 }
 
 /* Full 44px touch target: this sits inside a row that itself selects a model,
-   so an undersized star turns a favourite tap into an accidental selection. */
-.s2b-model-suggestion-fav {
-	display: flex;
-	align-items: center;
-	justify-content: center;
+   so an undersized star turns a favourite tap into an accidental selection.
+   `.clickable-icon` supplies the transparent-at-rest background, hover fill and
+   rounding; only the touch sizing and the favourite state belong here. Without
+   that class the bare <button> keeps the host's default chrome, which on mobile
+   reads as a permanently highlighted grey box. */
+.s2b-model-suggestion-fav.clickable-icon {
 	width: 44px;
 	height: 44px;
 	padding: 0;
-	border: none;
-	border-radius: var(--radius-s);
-	background: transparent;
+	flex-shrink: 0;
 	color: var(--text-faint);
-	cursor: pointer;
-	box-shadow: none;
 }
 
-.s2b-model-suggestion-fav.is-favorite {
+/* A 44px target needs a mark big enough to read as its occupant rather than a
+   speck floating in an empty square. */
+.s2b-model-suggestion-fav.clickable-icon svg {
+	width: 22px;
+	height: 22px;
+}
+
+/* Lucide's star is an outline (`fill: none`), so colour alone is a weak on/off
+   signal at phone size — filling the glyph makes the favourited state read at a
+   glance instead of relying on a faint-vs-accent stroke comparison. */
+.s2b-model-suggestion-fav.clickable-icon.is-favorite {
 	color: var(--text-accent);
 }
 
-.s2b-model-suggestion-fav svg {
-	width: 18px;
-	height: 18px;
+.s2b-model-suggestion-fav.clickable-icon.is-favorite svg {
+	fill: currentColor;
 }
 
 .s2b-model-suggestion-check {
