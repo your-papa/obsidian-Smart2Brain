@@ -150,14 +150,22 @@ const SUPPORTED_DRAG_MIMES = new Set([
 
 const models = useAvailableModels();
 
-// Resolve the session's own agent first, exactly as ModelSelectButton and
-// ChatRecommendations do, so this reflects the agent THIS tab actually runs. The
-// vision check below drives a notice that writes a model back to this agent, so
-// reading the global selection here would report on one agent and update another.
+// The agent THIS tab runs, resolved session-first exactly as ModelSelectButton and
+// ChatRecommendations do. The global fallback keeps this always-defined for the
+// display/estimate reads below.
 const selectedAgent = $derived(
 	(session?.selectedAgentId ? getData().getAgent(session.selectedAgentId) : undefined) ??
 		getData().getSelectedAgent(),
 );
+
+// Write target for the "Switch model" notice, which must NOT inherit the fallback
+// above. A session pinned to a since-deleted agent (deleteAgent doesn't repoint live
+// sessions) would otherwise resolve to the global agent and save the model there,
+// leaving this tab on the dead agent. Passing the session's id through even when it
+// no longer resolves is deliberate: selectChatModelAction reports "that agent no
+// longer exists" for an unresolvable id, whereas omitting it would re-enable the
+// global fallback — the very thing being avoided.
+const selectedAgentWriteTarget = $derived(session?.selectedAgentId ?? selectedAgent.id);
 
 const selectedChatModel = $derived.by(() => {
 	return selectedAgent.chatModel;
@@ -741,7 +749,7 @@ async function attachVaultFile(file: TFile): Promise<boolean> {
 		const modelName = selectedChatModel?.model ?? "the selected model";
 		showActionNotice(
 			`Image attachments require a vision-capable model (current: ${modelName}).`,
-			selectChatModelAction("Switch model", selectedAgent.id),
+			selectChatModelAction("Switch model", selectedAgentWriteTarget),
 		);
 		return false;
 	}
