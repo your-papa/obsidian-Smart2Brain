@@ -82,13 +82,25 @@ async function removeProvider(purgeEmbeddings = false) {
 	}
 
 	if (!purgeEmbeddings) return;
+
 	// Separate error scope: the provider IS removed by now, so a purge failure must not
 	// report "Failed to remove provider". The vectors stay addressable by "provider:model"
 	// id, so a failed purge is recoverable by re-adding the provider and deleting again.
+	//
+	// The vector store is only assigned at onLayoutReady, so it can genuinely be absent
+	// (its type asserts non-null, but `onunload` guards it for the same reason). Deleting
+	// embeddings is an explicit destructive choice the user opted into, so a missing
+	// service must be reported rather than optional-chained away — silently completing
+	// the dialog would leave every vector on disk with no sign anything was skipped.
+	const vectorStore = plugin.vectorStoreService;
+	if (!vectorStore) {
+		new Notice("Provider removed. Its embeddings were kept — the index service is still starting up.");
+		return;
+	}
+
 	try {
-		// Guarded: the vector store is initialized on layout-ready, so it can be absent.
 		for (const indexId of orphanedIndexIds) {
-			await plugin.vectorStoreService?.deleteIndex(indexId);
+			await vectorStore.deleteIndex(indexId);
 		}
 	} catch (error) {
 		new Notice(
