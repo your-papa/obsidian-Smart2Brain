@@ -53,7 +53,7 @@ bun run test        # Vitest unit tests
 
 To try a dev build in a real vault, run `bun run setup-vault` once to symlink `build/smart-second-brain/` into the bundled test vault's plugins folder, then open `integration/Smart2Brain Test Vault` in Obsidian and enable the plugin. See [`CLAUDE.md`](CLAUDE.md) for the full command reference and integration-test setup.
 
-Architecture deep-dive: [`docs/architecture-overview.md`](docs/architecture-overview.md).
+Architecture background: [`docs/architecture-overview.md`](docs/architecture-overview.md) — outdated, kept for context. [`CLAUDE.md`](CLAUDE.md) reflects the current structure.
 
 ## Contributing
 

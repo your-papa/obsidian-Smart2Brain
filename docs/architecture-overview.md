@@ -1,5 +1,12 @@
 # Smart2Brain Architecture Overview
 
+> [!WARNING]
+> **This document is outdated.** It was last revised in April 2026 and does not
+> reflect the current codebase. Treat it as background on the original design
+> rather than an accurate map. For current structure and conventions, see
+> [`CLAUDE.md`](../CLAUDE.md); for retrieval specifically, see the
+> [search algorithm reference](https://smartsecondbrain.dev/internals/search-algorithm/).
+
 ## Document Purpose
 
 This document explains how the plugin is architected at a system level.
