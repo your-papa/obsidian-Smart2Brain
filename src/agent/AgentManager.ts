@@ -32,7 +32,14 @@ import {
 import type { ChatAttachment } from "../types/shared";
 import { gzipString, toArrayBuffer } from "../utils/gzip";
 import { Logger } from "../utils/logging";
-import { memoriesDir } from "../utils/agentPaths";
+import { basePromptPath, memoriesDir, memoryPromptPath } from "../utils/agentPaths";
+import {
+	editProviderAction,
+	openNoteAction,
+	selectChatModelAction,
+	settingsAction,
+	showActionNotice,
+} from "../utils/actionNotice";
 import { StartupProfiler } from "../utils/startupProfiler";
 import {
 	Agent,
@@ -467,7 +474,12 @@ export class AgentManager {
 						})
 						.catch((error) => {
 							Logger.error(`Failed to save the base prompt for ${agent.name}:`, error);
-							new Notice(`Could not save the system prompt: ${extractErrorMessage(error)}`);
+							// The edit is gone with the closed editor; the link shows what is
+							// actually on disk so the user can redo it against the real content.
+							showActionNotice(
+								`Could not save the system prompt: ${extractErrorMessage(error)}`,
+								openNoteAction(basePromptPath(agentId), "Open the prompt note"),
+							);
 						});
 				},
 				defaultPrompt: BASE_SYSTEM_PROMPT,
@@ -499,7 +511,10 @@ export class AgentManager {
 						})
 						.catch((error) => {
 							Logger.error(`Failed to save the memory prompt for ${agent.name}:`, error);
-							new Notice(`Could not save the memory instructions: ${extractErrorMessage(error)}`);
+							showActionNotice(
+								`Could not save the memory instructions: ${extractErrorMessage(error)}`,
+								openNoteAction(memoryPromptPath(agentId), "Open the memory note"),
+							);
 						});
 				},
 				defaultPrompt: DEFAULT_MEMORY_PROMPT,
@@ -548,7 +563,10 @@ export class AgentManager {
 						})
 						.catch((error) => {
 							Logger.error(`Failed to save skill ${skillName}:`, error);
-							new Notice(`Could not save the "${skillName}" skill: ${extractErrorMessage(error)}`);
+							showActionNotice(
+								`Could not save the "${skillName}" skill: ${extractErrorMessage(error)}`,
+								openNoteAction(`${skills.getSkillsDir()}/${skillName}/SKILL.md`, "Open the skill note"),
+							);
 						});
 				},
 				defaultPrompt: bundled.content,
@@ -1202,7 +1220,15 @@ export class AgentManager {
 		const unavailableProviders = this.registerConfiguredProviders();
 
 		if (unavailableProviders.length > 0) {
-			new Notice(`Cannot connect to: ${unavailableProviders.join(", ")}. Check that the service is running.`);
+			// One link only, even when several providers failed: a toast is the wrong place for a
+			// list of links, and the settings tab shows all of them anyway. A single failure gets
+			// taken straight to its own setup modal.
+			showActionNotice(
+				`Cannot connect to: ${unavailableProviders.join(", ")}. Check that the service is running.`,
+				unavailableProviders.length === 1
+					? editProviderAction(unavailableProviders[0])
+					: settingsAction("general", "Review providers"),
+			);
 		}
 
 		Logger.log("[AgentManager] Registry initialized with providers:", this.registry.list());
@@ -1477,7 +1503,11 @@ export class AgentManager {
 				// Genuinely gone (deleted, or its secret was cleared) — on-demand registration
 				// above already had its chance, so clearing the model is the correct response.
 				pluginData.updateAgent(selectedAgent.id, { chatModel: null });
-				new Notice(`Provider "${chatModel.provider}" is no longer available. Please select a new model.`);
+				// The agent has just been left with no model, so the picker is the only way forward.
+				showActionNotice(
+					`Provider "${chatModel.provider}" is no longer available.`,
+					selectChatModelAction("Select a new model", selectedAgent.id),
+				);
 			}
 			throw error;
 		}

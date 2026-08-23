@@ -162,7 +162,7 @@ async function exportIndex(targetIndexId: string) {
 async function importFromFile() {
 	if (!isVectorStoreInitialized()) return;
 	const service = getVectorStoreService();
-	const indexId = await service.importIndex();
+	const indexId = await service.importIndex(purpose);
 	if (indexId) {
 		const sep = indexId.indexOf(":");
 		pluginData.setEmbedIndex(purpose, indexId.slice(0, sep), indexId.slice(sep + 1));

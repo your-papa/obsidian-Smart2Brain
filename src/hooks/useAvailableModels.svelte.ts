@@ -9,6 +9,7 @@ import type { EmbedModelConfig } from "../providers/index";
 import type { ChatModel } from "../stores/chatStore.svelte";
 import { getData } from "../stores/dataStore.svelte";
 import { getPlugin, requestSettingsTab } from "../stores/state.svelte";
+import { addProviderAction, settingsAction, showActionNotice } from "../utils/actionNotice";
 import type { HydratedChatModelMetadata, HydratedEmbeddingModelMetadata } from "../types/modelMetadata";
 
 export interface ModelOption {
@@ -363,14 +364,26 @@ export class AvailableModels {
 		// a settings tab that looks unremarkable, with no statement of what was wrong. The
 		// embedding case in particular fell through silently — a provider with chat models but no
 		// embedding models satisfies both checks below.
+		//
+		// This method already lands the user on the General tab, so the links here are the step
+		// *after* that — the modal that actually resolves the branch — rather than a redundant
+		// "open settings".
 		if (!this.hasProviders) {
-			new Notice("Add an AI provider first to use model features.");
+			showActionNotice("No AI provider configured yet.", addProviderAction());
 		} else if (needsEmbedding && !this.hasEmbedModels) {
-			new Notice(
+			// No provider exposes an embedding model at all, so the fix is a provider —
+			// not an index config. That also avoids guessing search-vs-graph here: this
+			// method has no purpose in scope, and picking one would send graph users to
+			// reconfigure search.
+			showActionNotice(
 				"No embedding models available. Add a provider that offers embeddings, or check that this one exposes them.",
+				addProviderAction("Add a provider"),
 			);
 		} else if (!needsEmbedding && !this.hasModels) {
-			new Notice("No models found. Check that your provider is running and reachable.");
+			showActionNotice(
+				"No models found. Check that your provider is running and reachable.",
+				settingsAction("general", "Review providers"),
+			);
 		} else {
 			new Notice("Opening provider settings.");
 		}

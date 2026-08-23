@@ -1,5 +1,6 @@
 <script lang="ts">
 import { Notice, Platform, TFile, normalizePath } from "obsidian";
+import { selectChatModelAction, showActionNotice } from "../../utils/actionNotice";
 import { onDestroy, onMount } from "svelte";
 import { useAvailableModels } from "../../hooks/useAvailableModels.svelte";
 import { EmbeddableMarkdownEditor } from "../../lib/editor";
@@ -149,9 +150,22 @@ const SUPPORTED_DRAG_MIMES = new Set([
 
 const models = useAvailableModels();
 
-const selectedAgent = $derived.by(() => {
-	return getData().getSelectedAgent();
-});
+// The agent THIS tab runs, resolved session-first exactly as ModelSelectButton and
+// ChatRecommendations do. The global fallback keeps this always-defined for the
+// display/estimate reads below.
+const selectedAgent = $derived(
+	(session?.selectedAgentId ? getData().getAgent(session.selectedAgentId) : undefined) ??
+		getData().getSelectedAgent(),
+);
+
+// Write target for the "Switch model" notice, which must NOT inherit the fallback
+// above. A session pinned to a since-deleted agent (deleteAgent doesn't repoint live
+// sessions) would otherwise resolve to the global agent and save the model there,
+// leaving this tab on the dead agent. Passing the session's id through even when it
+// no longer resolves is deliberate: selectChatModelAction reports "that agent no
+// longer exists" for an unresolvable id, whereas omitting it would re-enable the
+// global fallback — the very thing being avoided.
+const selectedAgentWriteTarget = $derived(session?.selectedAgentId ?? selectedAgent.id);
 
 const selectedChatModel = $derived.by(() => {
 	return selectedAgent.chatModel;
@@ -733,8 +747,9 @@ async function attachVaultFile(file: TFile): Promise<boolean> {
 	const isImage = ["png", "jpg", "jpeg", "gif", "webp"].includes(ext);
 	if (isImage && selectedModelSupportsVision === false) {
 		const modelName = selectedChatModel?.model ?? "the selected model";
-		new Notice(
-			`Image attachments require a vision-capable model. Switch models to attach images (current: ${modelName}).`,
+		showActionNotice(
+			`Image attachments require a vision-capable model (current: ${modelName}).`,
+			selectChatModelAction("Switch model", selectedAgentWriteTarget),
 		);
 		return false;
 	}

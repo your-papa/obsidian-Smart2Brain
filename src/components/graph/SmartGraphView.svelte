@@ -1,6 +1,7 @@
 <script lang="ts">
 import { untrack, tick, onDestroy } from "svelte";
 import { getAllTags, Notice, TFile, type TAbstractFile, type WorkspaceLeaf } from "obsidian";
+import { settingsAction, showActionNotice } from "../../utils/actionNotice";
 import { getPlugin } from "../../stores/state.svelte";
 import { getData } from "../../stores/dataStore.svelte";
 import { getIndexableVaultFiles, isAgentFilePath, isEmbeddableFile } from "../../utils/fileFiltering";
@@ -1972,8 +1973,9 @@ async function runTopicLabeling(options: { force?: boolean } = {}) {
 			[...segment.paths].some((path) => data.isFilePrivate(path)),
 		).length;
 		if (withheld > 0) {
-			new Notice(
-				`Private note titles were withheld from ${withheld} ${withheld === 1 ? "topic" : "topics"}. Trust the graph model's provider in Settings to include them.`,
+			showActionNotice(
+				`Private note titles were withheld from ${withheld} ${withheld === 1 ? "topic" : "topics"}. Trust the graph model's provider to include them.`,
+				settingsAction("general", "Open provider settings"),
 			);
 		}
 	}
@@ -2024,7 +2026,11 @@ function handleCancelLabeling() {
  */
 function handleLabelTopics() {
 	if (!settings.graphChatModel) {
-		new Notice("Select a graph chat model in Settings → Graph to name topics.");
+		// The breadcrumb is the link now, so it comes out of the message text.
+		showActionNotice(
+			"No graph chat model selected, so topics can't be named.",
+			settingsAction("graph", "Open graph settings"),
+		);
 		return;
 	}
 	void runTopicLabeling({ force: true });

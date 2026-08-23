@@ -21,7 +21,13 @@ import { chunkText } from "../utils/chunkText";
 import { getEmbeddableVaultFiles, isEmbeddableFile, readIndexableContent } from "../utils/fileFiltering";
 import { Logger } from "../utils/logging";
 import { matchesPathPrefix } from "../utils/pathUtils";
-import { showSettingsLinkNotice } from "../utils/settingsNotice";
+import {
+	configureEmbedIndexAction,
+	indexingReportAction,
+	settingsAction,
+	showActionNotice,
+	showSettingsLinkNotice,
+} from "../utils/actionNotice";
 import { StartupProfiler } from "../utils/startupProfiler";
 import { getDefaultEmbeddingBatchSize, normalizeEmbeddingBatchSize } from "./batchSize";
 import { aggregateChunksToNotes } from "./chunkAggregation";
@@ -787,8 +793,11 @@ export class VectorStoreService {
 			);
 
 			if (preFilterSkipped > 0) {
-				new Notice(
-					`Skipped indexing ${preFilterSkipped} notes (unreadable: ${skippedReadError.join(", ")})`,
+				// The filename list used to be inlined here and overflowed the toast on any
+				// real vault; the report lists them properly.
+				showActionNotice(
+					`Skipped indexing ${preFilterSkipped} ${preFilterSkipped === 1 ? "note" : "notes"} (unreadable).`,
+					indexingReportAction(inst.indexId, "View report"),
 					8000,
 				);
 			}
@@ -1306,8 +1315,9 @@ export class VectorStoreService {
 		Logger.error(
 			`[VectorStore] Stopping indexing for ${inst.indexId}: provider unreachable after ${consecutiveFailures} consecutive failures — ${reason}`,
 		);
-		new Notice(
-			"Indexing stopped — the embedding provider is not reachable.\nCheck the connection, then resume from settings.",
+		showActionNotice(
+			"Indexing stopped — the embedding provider is not reachable. Check the connection, then resume.",
+			settingsAction("search", "Open search settings"),
 			10_000,
 		);
 		inst.abortController?.abort();
@@ -1834,10 +1844,11 @@ export class VectorStoreService {
 
 		const reason = error instanceof Error ? error.message : String(error);
 		const offline = /network|offline|fetch failed|timed out|ECONNREFUSED|ENOTFOUND/i.test(reason);
-		new Notice(
+		showActionNotice(
 			offline
 				? "Semantic search unavailable — the embedding provider is not reachable. Showing no semantic results."
 				: `Semantic search failed: ${reason.slice(0, 120)}`,
+			settingsAction("search", "Open search settings"),
 			8000,
 		);
 	}
@@ -2183,9 +2194,12 @@ export class VectorStoreService {
 	 * Reads provider/model metadata from the file, registers the index, and
 	 * bulk-loads embeddings into IDB.
 	 *
+	 * @param purpose Which index the caller is importing into. Only used to aim the
+	 *   "Re-index" link on a failure notice at the right setup modal — importing into
+	 *   the graph index must not send the user to reconfigure search.
 	 * @returns The index ID that was imported, or null on failure/cancel.
 	 */
-	async importIndex(): Promise<string | null> {
+	async importIndex(purpose: "search" | "graph" = "search"): Promise<string | null> {
 		const filePaths = showOpenDialog({
 			title: "Import Embedding Index",
 			filters: [{ name: "MessagePack", extensions: ["msgpack"] }],
@@ -2199,14 +2213,16 @@ export class VectorStoreService {
 			const decoded = decode(new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength)) as SerializedIndex;
 
 			if (typeof decoded.version !== "number" || !Number.isInteger(decoded.version)) {
-				new Notice(
+				showActionNotice(
 					"Export file has an invalid or missing version field. Re-index to regenerate a compatible export.",
+					configureEmbedIndexAction(purpose, "Re-index"),
 				);
 				return null;
 			}
 			if (decoded.version < INDEX_VERSION) {
-				new Notice(
+				showActionNotice(
 					`Export file schema v${decoded.version} is outdated (current: v${INDEX_VERSION}). Re-index to regenerate a compatible export.`,
+					configureEmbedIndexAction(purpose, "Re-index"),
 				);
 				return null;
 			}

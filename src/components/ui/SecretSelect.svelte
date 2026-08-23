@@ -1,7 +1,7 @@
 <script lang="ts">
 import { Tooltip } from "bits-ui";
-import { Notice } from "obsidian";
 import { listSecrets } from "../../lib/secretStorage";
+import { showActionNotice } from "../../utils/actionNotice";
 import { getPlugin } from "../../stores/state.svelte";
 import { Logger } from "../../utils/logging";
 import { AddSecretModal } from "../settings/AddSecretModal";
@@ -43,7 +43,13 @@ let secretMissing = $derived(value && value.length > 0 && secrets.length > 0 && 
 
 $effect(() => {
 	if (secretMissing && !hasNotifiedMissing) {
-		new Notice(`Secret "${value}" not found in Obsidian Keychain. Please select or create a new secret.`);
+		// Reuse the local handler rather than opening AddSecretModal directly: it also
+		// refreshes the list and clears the notified/attempt flags on success.
+		showActionNotice(
+			`Secret "${value}" not found in Obsidian Keychain.`,
+			{ label: "Add a secret", run: handleAddSecret },
+			10000,
+		);
 		hasNotifiedMissing = true;
 	}
 });

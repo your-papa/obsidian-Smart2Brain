@@ -1,5 +1,6 @@
 <script lang="ts">
 import { Notice, getIconIds, normalizePath, type Modal } from "obsidian";
+import { obsidianSettingsAction, showActionNotice } from "../../utils/actionNotice";
 import { onMount } from "svelte";
 import { AddSkillModal } from "./AddSkillModal";
 import { ToolsModal } from "./ToolsModal";
@@ -44,7 +45,7 @@ import {
 	type SkillDisplayInfo,
 } from "../../types/plugin";
 import { getProviderDefinition } from "../../providers/index";
-import type { ChatModel } from "../../stores/chatStore.svelte";
+import { buildPersistedChatModel } from "../../utils/persistedChatModel";
 import { getData } from "../../stores/dataStore.svelte";
 
 interface Props {
@@ -170,19 +171,6 @@ const summarizationContextWindowWarning = $derived.by(() => {
 	if (summarizationContextWindow >= chatContextWindow) return null;
 	return `This summarization model has a smaller context window (${formatContextWindowLabel(summarizationContextWindow)}) than the chat model (${formatContextWindowLabel(chatContextWindow)}), so history compaction may fail earlier.`;
 });
-
-function buildPersistedChatModel(provider: string, model: string, existing?: ChatModel | null): ChatModel {
-	const hydrated = models.hydratedChatModelsByKey.get(`${provider}:${model}`);
-	return {
-		provider,
-		model,
-		modelConfig: {
-			contextWindow: hydrated?.contextWindow ?? existing?.modelConfig?.contextWindow ?? 128000,
-			supportsVision: hydrated?.capabilities.vision ?? existing?.modelConfig?.supportsVision,
-			temperature: existing?.modelConfig?.temperature,
-		},
-	};
-}
 
 function openModelSelectionModal() {
 	const currentSelection = selectedAgent?.chatModel
@@ -438,11 +426,17 @@ async function toggleSkill(skillId: string, newEnabled: boolean) {
 		const linkedPlugin = plugin.skillsService?.getCachedSkills().get(skillId)?.linkedPluginId;
 		if (linkedPlugin) {
 			if (!plugin.agentManager?.isPluginInstalled(linkedPlugin)) {
-				new Notice(`Please install the ${skill.displayName} plugin first.`);
+				showActionNotice(
+					`The ${skill.displayName} plugin isn't installed yet.`,
+					obsidianSettingsAction("community-plugins", "Browse community plugins"),
+				);
 				return;
 			}
 			if (!plugin.agentManager?.isPluginEnabled(linkedPlugin)) {
-				new Notice(`Please enable the ${skill.displayName} plugin in Obsidian settings first.`);
+				showActionNotice(
+					`The ${skill.displayName} plugin is installed but not enabled.`,
+					obsidianSettingsAction("community-plugins", "Open community plugins"),
+				);
 				return;
 			}
 		}

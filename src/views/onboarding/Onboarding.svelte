@@ -6,7 +6,7 @@ import Button from "../../components/ui/Button.svelte";
 import Toggle from "../../components/ui/Toggle.svelte";
 import { useAvailableModels } from "../../hooks/useAvailableModels.svelte";
 import type SecondBrainPlugin from "../../main";
-import { type ChatModel } from "../../stores/chatStore.svelte";
+import { buildPersistedChatModel } from "../../utils/persistedChatModel";
 import { getData } from "../../stores/dataStore.svelte";
 import { isMobileUI } from "../../utils/platform";
 import { icon } from "../../utils/utils";
@@ -163,19 +163,6 @@ function openProviderSetup() {
 
 function openPrivacySettings() {
 	new PrivacyListModal(plugin.app).open();
-}
-
-function buildPersistedChatModel(provider: string, model: string, existing?: ChatModel | null): ChatModel {
-	const hydrated = models.hydratedChatModelsByKey.get(`${provider}:${model}`);
-	return {
-		provider,
-		model,
-		modelConfig: {
-			contextWindow: hydrated?.contextWindow ?? existing?.modelConfig?.contextWindow ?? 128000,
-			supportsVision: hydrated?.capabilities.vision ?? existing?.modelConfig?.supportsVision,
-			temperature: existing?.modelConfig?.temperature,
-		},
-	};
 }
 
 // Reuse the same picker + agent-update flow as the chat header's model selector.
