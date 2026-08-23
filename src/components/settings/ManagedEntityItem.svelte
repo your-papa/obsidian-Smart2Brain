@@ -255,12 +255,21 @@ function handleRadioClick(event: MouseEvent) {
     flex-shrink: 0;
   }
 
+  /* `width`/`height`/`padding` carry `!important` because core out-specifies the
+     scoped class here: `.is-tablet button:not(.clickable-icon)` (and its
+     `.is-mobile` sibling) is 0,2,1 against this rule's 0,2,0, and applies
+     `padding: var(--size-4-1) var(--size-4-5)` — 4px 20px. Under `border-box`
+     that stretches the 16px dot to 43x16, and `border-radius: 999px` renders
+     the result as a flat lozenge rather than a circle. This is a real button,
+     so it can't opt out via `.clickable-icon` (that class brings its own
+     sizing/hover chrome), hence forcing the geometry instead. */
   .managed-entity-item-radio {
     position: relative;
     top: 4px;
-    width: 16px;
-    height: 16px;
-    padding: 0;
+    width: 16px !important;
+    height: 16px !important;
+    min-width: 0 !important;
+    padding: 0 !important;
     border-radius: 999px;
     border: 1.5px solid var(--background-modifier-border);
     background: var(--background-primary);
