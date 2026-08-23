@@ -4,6 +4,7 @@ import "./lib/i18n";
 import "./lib/langgraphContext";
 import { Logger as Log, applyVerboseLogging } from "./utils/logging";
 import { isAgentFilePath } from "./utils/fileFiltering";
+import { resetAvailableModels, useAvailableModels } from "./hooks/useAvailableModels.svelte";
 import { isMobileUI } from "./utils/platform";
 import { StartupProfiler } from "./utils/startupProfiler";
 import { persistStartupRecord, recordStartupEnvironment } from "./utils/startupTimingsStore";
@@ -641,6 +642,15 @@ export default class SecondBrainPlugin extends Plugin {
 			// (ChatRecommendations.svelte reads pluginData.staleGuidance), so no startup
 			// Notice here — that would double-notify.
 
+			// Bring up the shared model store now rather than on first UI read. It keeps a
+			// QueryObserver subscribed per configured provider, which is what actually
+			// fetches each provider's auth + model list. Constructing it lazily tied that
+			// to whichever view happened to mount first: with, say, only the graph view
+			// open, nothing read it, so a provider added afterwards was never subscribed
+			// and its models never loaded ("Loading models…" until an Obsidian reload).
+			// Initializing here makes the subscriptions view-independent.
+			useAvailableModels();
+
 			// Start search/vector store initialization (non-blocking, fire-and-forget)
 			this.lexicalSearchService = StartupProfiler.measureSync("lexical:startInit", () =>
 				LexicalSearchService.startInitialize(this),
@@ -817,6 +827,10 @@ export default class SecondBrainPlugin extends Plugin {
 
 	onunload() {
 		Log.info("Unloading plugin");
+		// The model store's module state survives a disable/enable cycle. Without this
+		// reset, its QueryObservers keep fetching with the unloaded plugin's credentials
+		// and the next enable reuses a singleton bound to this (now dead) data store.
+		resetAvailableModels();
 		if (this.runningIndicator) {
 			void unmount(this.runningIndicator);
 			this.runningIndicator = null;

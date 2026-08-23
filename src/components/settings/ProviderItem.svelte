@@ -11,7 +11,7 @@ import CircularLoader from "../ui/CircularLoader.svelte";
 import Button from "../ui/Button.svelte";
 import { icon } from "../../utils/utils";
 import { ProviderSetupModal } from "../../views/provider-setup/ProviderSetup";
-import { confirmDelete } from "../modal/ConfirmModal";
+import { confirmDelete, confirmDeleteWithOption } from "../modal/ConfirmModal";
 
 interface Props {
 	provider: string;
@@ -46,14 +46,54 @@ function handleOpenSettings() {
 }
 
 async function handleRemoveProvider() {
-	if (!(await confirmDelete(plugin.app, displayName))) return;
+	// Embeddings this provider built are expensive to recompute, so deleting them is a
+	// separate, opt-in decision rather than a side effect of removing the provider —
+	// re-adding the same provider and model later reuses the vectors as they are.
+	// The checkbox only appears when there is actually something to delete.
+	const ownedIndexes = data.embeddingIndexes.filter((index) => index.provider === provider);
+	const indexedNotes = ownedIndexes.reduce((sum, index) => sum + (index.documentCount ?? 0), 0);
+
+	if (ownedIndexes.length === 0) {
+		if (!(await confirmDelete(plugin.app, displayName))) return;
+		await removeProvider();
+		return;
+	}
+
+	const { confirmed, checked } = await confirmDeleteWithOption(plugin.app, displayName, {
+		label: "Also delete the embeddings built with this provider",
+		description: `Frees the storage used by ${indexedNotes.toLocaleString()} indexed ${
+			indexedNotes === 1 ? "note" : "notes"
+		}. Leave this off to keep them — re-adding this provider reuses them instead of re-embedding, which can be slow and costly.`,
+	});
+	if (!confirmed) return;
+	await removeProvider(checked);
+}
+
+async function removeProvider(purgeEmbeddings = false) {
+	let orphanedIndexIds: string[];
 	try {
-		await data.deleteProvider(provider);
+		orphanedIndexIds = await data.deleteProvider(provider);
 		// Drop cached auth/state entirely (not just invalidate) so re-adding a provider with
 		// the same slug ID doesn't inherit this one's stale "connected" verdict from cache.
 		removeProviderQueries(provider);
 	} catch (error) {
 		new Notice(error instanceof Error ? error.message : "Failed to remove provider");
+		return;
+	}
+
+	if (!purgeEmbeddings) return;
+	// Separate error scope: the provider IS removed by now, so a purge failure must not
+	// report "Failed to remove provider". The vectors stay addressable by "provider:model"
+	// id, so a failed purge is recoverable by re-adding the provider and deleting again.
+	try {
+		// Guarded: the vector store is initialized on layout-ready, so it can be absent.
+		for (const indexId of orphanedIndexIds) {
+			await plugin.vectorStoreService?.deleteIndex(indexId);
+		}
+	} catch (error) {
+		new Notice(
+			`Provider removed, but deleting its embeddings failed: ${error instanceof Error ? error.message : String(error)}`,
+		);
 	}
 }
 </script>

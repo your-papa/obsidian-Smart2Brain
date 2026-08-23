@@ -1,4 +1,4 @@
-import { createQuery } from "@tanstack/svelte-query";
+import { createQuery, QueryObserver } from "@tanstack/svelte-query";
 import { QueryClient } from "@tanstack/svelte-query";
 import type { AuthValidationResult } from "../agent/AgentManager";
 import { getProviderDefinition, isEmbeddingProvider } from "../providers";
@@ -104,9 +104,45 @@ export function getProviderStateQueryOptions(providerId: string) {
  * @param provider - Function returning the provider ID string
  */
 export function createProviderStateQuery(provider: () => string) {
-	return createQuery<ProviderState>(() => ({
-		...getProviderStateQueryOptions(provider()),
-	}));
+	// The client is passed explicitly rather than resolved from Svelte context: this query
+	// is also created outside any component (by the `AvailableModels` singleton, which lives
+	// in a bare `$effect.root`), and `getQueryClientContext()` *throws* when no
+	// `QueryClientProvider` is above it. It's the same module-level client the provider
+	// supplies, so component and non-component callers share one cache either way.
+	return createQuery<ProviderState>(
+		() => ({
+			...getProviderStateQueryOptions(provider()),
+		}),
+		() => queryClient,
+	);
+}
+
+/**
+ * Subscribe to a provider's state query imperatively, keeping it active (and therefore
+ * fetched and up to date) until the returned unsubscribe function is called.
+ *
+ * `createQuery` is not usable for this. Its observer only subscribes from an `$effect`
+ * inside `createBaseQuery`, which requires an active reactive owner *and* a live read of
+ * the result; merely constructing it — or touching `isPending`, which goes through
+ * `trackResult` — leaves the query `isActive() === false`, `fetchStatus: "idle"`, so it
+ * never fetches. That was the "Loading models…" hang: a provider added at runtime got a
+ * query object but no subscriber.
+ *
+ * A bare `QueryObserver` has no such dependency: `subscribe()` activates the query and
+ * triggers the initial fetch immediately.
+ *
+ * @param provider - The provider ID string
+ * @returns Unsubscribe function.
+ */
+export function subscribeProviderState(provider: string, onChange?: () => void): () => void {
+	const observer = new QueryObserver<ProviderState>(queryClient, {
+		...getProviderStateQueryOptions(provider),
+	});
+	const unsubscribe = observer.subscribe(() => onChange?.());
+	return () => {
+		unsubscribe();
+		observer.destroy();
+	};
 }
 
 /**

@@ -28,6 +28,29 @@ export interface ProviderConfigSource {
 }
 
 /**
+ * Listeners notified whenever the set of usable providers changes.
+ *
+ * The model store (`AvailableModels`) uses this to keep a `QueryObserver` subscribed per
+ * configured provider. It can't do that from an `$effect`: it lives in a bare
+ * `$effect.root` with no component driving the scheduler, so its effects were verified not
+ * to re-run on provider changes — a provider added at runtime never got subscribed and its
+ * models never loaded. These hooks fire from the same places the registry is reconciled,
+ * which is exactly when the configured set can change.
+ */
+type ProvidersChangedListener = () => void;
+const providersChangedListeners = new Set<ProvidersChangedListener>();
+
+/** Subscribe to provider-set changes. Returns an unsubscribe function. */
+export function onProvidersChanged(listener: ProvidersChangedListener): () => void {
+	providersChangedListeners.add(listener);
+	return () => providersChangedListeners.delete(listener);
+}
+
+function notifyProvidersChanged(): void {
+	for (const listener of providersChangedListeners) listener();
+}
+
+/**
  * Registers a single provider, or refreshes its auth if already registered.
  *
  * @returns true if the provider is registered and usable afterwards.
@@ -39,12 +62,14 @@ export function syncProvider(data: ProviderConfigSource, providerId: string): bo
 		// Configured but unresolvable (e.g. its secret was cleared) — drop any stale entry
 		// rather than leaving the previous credentials live.
 		registry.unregister(providerId);
+		notifyProvidersChanged();
 		return false;
 	}
 
 	const definition = getProviderDefinition(providerId, data.getAllProviderMeta());
 	if (!definition) {
 		registry.unregister(providerId);
+		notifyProvidersChanged();
 		return false;
 	}
 
@@ -52,6 +77,7 @@ export function syncProvider(data: ProviderConfigSource, providerId: string): bo
 	// Going through it (rather than `updateAuth`) also refreshes the definition, which
 	// matters for template providers whose meta feeds `createTemplateDefinition`.
 	registry.register(providerId, definition, auth);
+	notifyProvidersChanged();
 	return true;
 }
 
@@ -60,6 +86,7 @@ export function syncProvider(data: ProviderConfigSource, providerId: string): bo
  */
 export function unsyncProvider(providerId: string): void {
 	getRegistry().unregister(providerId);
+	notifyProvidersChanged();
 }
 
 /**

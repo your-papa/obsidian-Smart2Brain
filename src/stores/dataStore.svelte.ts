@@ -2073,12 +2073,17 @@ export class PluginDataStore {
 		const wasConfigured = config.isConfigured;
 		config.isConfigured = isConfigured;
 
-		// If disabling, clear any agent chat model using that provider
+		// If disabling, clear every agent model slot pointing at this provider — not just
+		// the chat model. A dangling summarization/title reference would still be handed to
+		// the LLM path at runtime, and a dangling chatModel makes the chat view read as
+		// "model selected" and hide the provider CTA. Same cleanup as deleteProvider.
+		// (Favorites are deliberately kept: disabling is reversible, and an inert favorite
+		// is harmless while the provider is off.)
 		if (wasConfigured && !isConfigured) {
 			for (const agent of Object.values(this.#data.agents)) {
-				if (agent.chatModel?.provider === providerId) {
-					agent.chatModel = null;
-				}
+				if (agent.chatModel?.provider === providerId) agent.chatModel = null;
+				if (agent.summarizationModel?.provider === providerId) agent.summarizationModel = null;
+				if (agent.titleModel?.provider === providerId) agent.titleModel = null;
 			}
 		}
 
@@ -2320,7 +2325,16 @@ export class PluginDataStore {
 		await this.saveSettings();
 	}
 
-	async deleteProvider(providerId: string): Promise<void> {
+	/**
+	 * Delete a provider and every reference to it across plugin data.
+	 *
+	 * Returns the IDs of embedding indexes that belonged to this provider. Their config
+	 * records are gone, but their vectors are intentionally left on disk (see below) so
+	 * they can be reused. Pass these IDs to `VectorStoreService.deleteIndex` only when
+	 * the user has explicitly opted into discarding the embeddings; ignoring the return
+	 * value is the correct default, and drafts never own indexes anyway.
+	 */
+	async deleteProvider(providerId: string): Promise<string[]> {
 		if (!(providerId in this.#data.providerMeta)) {
 			throw new Error(`Provider with ID "${providerId}" not found`);
 		}
@@ -2333,6 +2347,46 @@ export class PluginDataStore {
 
 		delete this.#data.providerMeta[providerId];
 		delete this.#data.providerConfig[providerId];
+
+		// Drop every reference to the provider that just went away. Without this the
+		// selections survive as dangling pointers to a provider that no longer exists:
+		// an agent keeps a `chatModel` whose provider is gone, so the chat view still
+		// reads as "a model is selected" and shows suggestions instead of the "Add an
+		// AI provider" CTA, and the composer offers a model it can never run.
+		// `renameProvider` re-points these same fields; deletion clears them.
+		for (const agent of Object.values(this.#data.agents)) {
+			if (agent.chatModel?.provider === providerId) agent.chatModel = null;
+			if (agent.summarizationModel?.provider === providerId) agent.summarizationModel = null;
+			if (agent.titleModel?.provider === providerId) agent.titleModel = null;
+		}
+
+		if (this.#data.favoriteModels) {
+			this.#data.favoriteModels = this.#data.favoriteModels.filter((fav) => fav.provider !== providerId);
+		}
+
+		// Embedding indexes are keyed "provider:model", so the provider's indexes go
+		// too — along with the search/graph assignments pointing at them, which would
+		// otherwise keep naming an index whose provider can no longer embed anything.
+		//
+		// Only the config *records* are dropped; the vectors themselves are deliberately
+		// left in IndexedDB, because they are expensive to recompute. This does not
+		// strand them: the IndexedDB name is derived from the same "provider:model" id,
+		// and `setEmbedIndex` recreates the config record from that id — so re-adding
+		// this provider and selecting the same model reopens the existing database
+		// instead of re-embedding the vault. Purging is a separate, opt-in action, and
+		// the orphaned IDs are returned so a caller holding the vector store can do it.
+		const orphanedIndexIds = this.#data.embeddingIndexes
+			.filter((index) => index.provider === providerId)
+			.map((index) => index.id);
+		if (orphanedIndexIds.length > 0) {
+			this.#data.embeddingIndexes = this.#data.embeddingIndexes.filter((index) => index.provider !== providerId);
+			if (this.#data.searchEmbedIndex && orphanedIndexIds.includes(this.#data.searchEmbedIndex)) {
+				this.#data.searchEmbedIndex = null;
+			}
+			if (this.#data.graphEmbedIndex && orphanedIndexIds.includes(this.#data.graphEmbedIndex)) {
+				this.#data.graphEmbedIndex = null;
+			}
+		}
 
 		// A secret ID can be shared (assignSecretIdToProviderField lets one field
 		// point at an existing secret). Only remove secrets no remaining provider
@@ -2353,6 +2407,8 @@ export class PluginDataStore {
 		unsyncProvider(providerId);
 
 		await this.saveSettings();
+
+		return orphanedIndexIds;
 	}
 }
 

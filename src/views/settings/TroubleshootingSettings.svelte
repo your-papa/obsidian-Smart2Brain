@@ -32,7 +32,7 @@ async function handleCleanupPluginData() {
 		"Delete",
 	);
 	modal.open();
-	if (!(await modal.promise)) return;
+	if (!(await modal.promise).confirmed) return;
 
 	try {
 		for (const index of [...pluginData.embeddingIndexes]) {
