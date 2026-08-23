@@ -474,8 +474,13 @@ function isOverClusterPill(x: number, y: number): boolean {
 // elements" setting, exactly like the native `.clickable-icon` buttons on the
 // toolbar rail. Grab/grabbing stay literal: panning is direct manipulation of
 // a surface, not a click target, so it is not what that setting governs.
+// Guarded on `ready`, not just non-null: `pixi` is assigned before
+// `renderer.init()` is awaited, and the `canvas` getter reads `this.app`, which
+// only exists once that init has run. The lasso effect below fires on mount and
+// can land inside exactly that window, where a non-null `pixi` would still
+// throw. This is the hazard `PixiRenderer.ready` already exists to describe.
 function applyCursor(overInteractive: boolean) {
-	if (!pixi) return;
+	if (!pixi?.ready) return;
 	pixi.canvas.style.cursor = overInteractive ? "var(--cursor)" : lassoMode ? "crosshair" : "grab";
 }
 
