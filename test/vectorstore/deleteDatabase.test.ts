@@ -24,21 +24,20 @@ function stubIndexedDB(request: ReturnType<typeof createRequestStub>) {
 
 afterEach(() => {
 	vi.unstubAllGlobals();
-	vi.useRealTimers();
 });
 
 describe("deleteDatabase", () => {
-	it("resolves when the request succeeds", async () => {
+	it("reports a successful deletion", async () => {
 		const request = createRequestStub();
 		stubIndexedDB(request);
 
 		const promise = deleteDatabase("db");
 		request.onsuccess?.();
 
-		await expect(promise).resolves.toBeUndefined();
+		await expect(promise).resolves.toEqual({ status: "deleted" });
 	});
 
-	it("rejects with the request error when deletion fails", async () => {
+	it("reports the request error when deletion fails", async () => {
 		const request = createRequestStub();
 		stubIndexedDB(request);
 
@@ -46,53 +45,45 @@ describe("deleteDatabase", () => {
 		request.error = new Error("quota exceeded");
 		request.onerror?.();
 
-		await expect(promise).rejects.toThrow("quota exceeded");
+		const result = await promise;
+		expect(result.status).toBe("error");
+		expect(result).toMatchObject({ error: { message: "quota exceeded" } });
 	});
 
-	it("rejects with a named fallback when the request exposes no error", async () => {
+	it("falls back to a named error when the request exposes none", async () => {
 		const request = createRequestStub();
 		stubIndexedDB(request);
 
 		const promise = deleteDatabase("my-db");
 		request.onerror?.();
 
-		await expect(promise).rejects.toThrow('Failed to delete IndexedDB database "my-db"');
+		const result = await promise;
+		expect(result.status).toBe("error");
+		expect(result).toMatchObject({ error: { message: 'Failed to delete IndexedDB database "my-db"' } });
 	});
 
-	it("still resolves when a blocked deletion later completes", async () => {
-		vi.useFakeTimers();
+	it("reports blocked immediately instead of waiting", async () => {
 		const request = createRequestStub();
 		stubIndexedDB(request);
 
 		const promise = deleteDatabase("db");
-		// Blocked is not terminal: the delete goes through once the other connection closes.
 		request.onblocked?.();
-		vi.advanceTimersByTime(1000);
-		request.onsuccess?.();
 
-		await expect(promise).resolves.toBeUndefined();
+		// Resolves without any timer advancing: an IndexedDB delete request cannot be
+		// cancelled, so there is nothing to wait for — the browser completes it once the
+		// blocking connection closes.
+		await expect(promise).resolves.toEqual({ status: "blocked" });
 	});
 
-	it("rejects when a deletion stays blocked past the timeout", async () => {
-		vi.useFakeTimers();
-		const request = createRequestStub();
-		stubIndexedDB(request);
-
-		const promise = deleteDatabase("stuck-db");
-		const assertion = expect(promise).rejects.toThrow(/blocked by an open connection/);
-		request.onblocked?.();
-		await vi.advanceTimersByTimeAsync(5000);
-
-		await assertion;
-	});
-
-	it("rejects when deleteDatabase throws synchronously", async () => {
+	it("never rejects when deleteDatabase throws synchronously", async () => {
 		vi.stubGlobal("indexedDB", {
 			deleteDatabase: vi.fn(() => {
 				throw new Error("indexedDB unavailable");
 			}),
 		});
 
-		await expect(deleteDatabase("db")).rejects.toThrow("indexedDB unavailable");
+		const result = await deleteDatabase("db");
+		expect(result.status).toBe("error");
+		expect(result).toMatchObject({ error: { message: "indexedDB unavailable" } });
 	});
 });

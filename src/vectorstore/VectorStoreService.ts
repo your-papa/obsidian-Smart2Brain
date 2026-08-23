@@ -2283,30 +2283,41 @@ export class VectorStoreService {
 
 		// Delete IndexedDB databases (HNSW + HNSW internal index).
 		//
-		// Awaited: `deleteDatabase` is asynchronous and returns a request, so a bare call
-		// reports nothing — `onerror`/`onblocked` would go unobserved and this method would
-		// resolve as if the vectors were gone while they were still on disk. `onblocked` is
-		// reachable in particular for the `-hnsw-index` database, whose connection is owned
-		// by the `HNSWWithDB` wrapper and is not closed by `HNSWVectorStore.close()`.
+		// Awaited: `deleteDatabase` is asynchronous and reports through events, so a bare
+		// call observes nothing and this method would resolve as if the databases were gone
+		// whatever happened.
+		//
+		// What is being dropped here is empty shells, not data: when an instance existed,
+		// `store.clear()` above already emptied every object store and dropped the persisted
+		// HNSW graph. So a database that survives is wasted space, not a stale index that
+		// could be reopened with old vectors.
+		//
+		// That is why only a genuine `"error"` is fatal. `"blocked"` means another
+		// connection still holds the database (reachable for `-hnsw-index`, whose connection
+		// is owned by the `HNSWWithDB` wrapper and is not closed by
+		// `HNSWVectorStore.close()`); the request stays queued and the browser completes it
+		// once that connection closes. It cannot be cancelled, so failing the deletion would
+		// both misreport a delete that is still very likely to happen and strand a config
+		// record for an index whose data is already gone.
 		const hnswDbName = getDbName("s2b-hnsw", this.vaultId, indexId);
-		const failures = (
-			await Promise.all([
-				deleteDatabase(hnswDbName).catch((error: unknown) => error),
-				deleteDatabase(`${hnswDbName}-hnsw-index`).catch((error: unknown) => error),
-			])
-		).filter((result): result is unknown => result !== undefined);
+		const dbNames = [hnswDbName, `${hnswDbName}-hnsw-index`];
+		const results = await Promise.all(dbNames.map((dbName) => deleteDatabase(dbName)));
 
-		// Config records are dropped only when the data is actually gone. Keeping them on
-		// failure leaves the index addressable (and re-deletable) instead of stranding
-		// orphaned databases that nothing references any more.
-		if (failures.length > 0) {
-			for (const failure of failures) {
-				Logger.error(`[VectorStore] Failed to delete IndexedDB database for ${indexId}:`, failure);
+		const errors: Error[] = [];
+		results.forEach((result, idx) => {
+			if (result.status === "error") {
+				errors.push(result.error);
+				Logger.error(`[VectorStore] Failed to delete IndexedDB database ${dbNames[idx]}:`, result.error);
+			} else if (result.status === "blocked") {
+				Logger.warn(
+					`[VectorStore] Deletion of IndexedDB database ${dbNames[idx]} is blocked by an open connection; it will complete once that connection closes.`,
+				);
 			}
+		});
+
+		if (errors.length > 0) {
 			throw new Error(
-				`Could not delete stored vectors for ${indexId}: ${failures
-					.map((failure) => (failure instanceof Error ? failure.message : String(failure)))
-					.join("; ")}`,
+				`Could not delete stored vectors for ${indexId}: ${errors.map((error) => error.message).join("; ")}`,
 			);
 		}
 
