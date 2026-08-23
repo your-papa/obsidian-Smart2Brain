@@ -736,7 +736,7 @@ async function attachVaultFile(file: TFile): Promise<boolean> {
 		const modelName = selectedChatModel?.model ?? "the selected model";
 		showActionNotice(
 			`Image attachments require a vision-capable model (current: ${modelName}).`,
-			selectChatModelAction("Switch model"),
+			selectChatModelAction("Switch model", selectedAgent.id),
 		);
 		return false;
 	}

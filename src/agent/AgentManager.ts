@@ -1506,7 +1506,7 @@ export class AgentManager {
 				// The agent has just been left with no model, so the picker is the only way forward.
 				showActionNotice(
 					`Provider "${chatModel.provider}" is no longer available.`,
-					selectChatModelAction("Select a new model"),
+					selectChatModelAction("Select a new model", selectedAgent.id),
 				);
 			}
 			throw error;

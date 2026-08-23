@@ -2194,9 +2194,12 @@ export class VectorStoreService {
 	 * Reads provider/model metadata from the file, registers the index, and
 	 * bulk-loads embeddings into IDB.
 	 *
+	 * @param purpose Which index the caller is importing into. Only used to aim the
+	 *   "Re-index" link on a failure notice at the right setup modal — importing into
+	 *   the graph index must not send the user to reconfigure search.
 	 * @returns The index ID that was imported, or null on failure/cancel.
 	 */
-	async importIndex(): Promise<string | null> {
+	async importIndex(purpose: "search" | "graph" = "search"): Promise<string | null> {
 		const filePaths = showOpenDialog({
 			title: "Import Embedding Index",
 			filters: [{ name: "MessagePack", extensions: ["msgpack"] }],
@@ -2212,14 +2215,14 @@ export class VectorStoreService {
 			if (typeof decoded.version !== "number" || !Number.isInteger(decoded.version)) {
 				showActionNotice(
 					"Export file has an invalid or missing version field. Re-index to regenerate a compatible export.",
-					configureEmbedIndexAction("search", "Re-index"),
+					configureEmbedIndexAction(purpose, "Re-index"),
 				);
 				return null;
 			}
 			if (decoded.version < INDEX_VERSION) {
 				showActionNotice(
 					`Export file schema v${decoded.version} is outdated (current: v${INDEX_VERSION}). Re-index to regenerate a compatible export.`,
-					configureEmbedIndexAction("search", "Re-index"),
+					configureEmbedIndexAction(purpose, "Re-index"),
 				);
 				return null;
 			}

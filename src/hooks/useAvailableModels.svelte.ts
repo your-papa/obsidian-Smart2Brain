@@ -9,7 +9,7 @@ import type { EmbedModelConfig } from "../providers/index";
 import type { ChatModel } from "../stores/chatStore.svelte";
 import { getData } from "../stores/dataStore.svelte";
 import { getPlugin, requestSettingsTab } from "../stores/state.svelte";
-import { addProviderAction, configureEmbedIndexAction, settingsAction, showActionNotice } from "../utils/actionNotice";
+import { addProviderAction, settingsAction, showActionNotice } from "../utils/actionNotice";
 import type { HydratedChatModelMetadata, HydratedEmbeddingModelMetadata } from "../types/modelMetadata";
 
 export interface ModelOption {
@@ -371,9 +371,13 @@ export class AvailableModels {
 		if (!this.hasProviders) {
 			showActionNotice("No AI provider configured yet.", addProviderAction());
 		} else if (needsEmbedding && !this.hasEmbedModels) {
+			// No provider exposes an embedding model at all, so the fix is a provider —
+			// not an index config. That also avoids guessing search-vs-graph here: this
+			// method has no purpose in scope, and picking one would send graph users to
+			// reconfigure search.
 			showActionNotice(
 				"No embedding models available. Add a provider that offers embeddings, or check that this one exposes them.",
-				configureEmbedIndexAction("search", "Configure embedding index"),
+				addProviderAction("Add a provider"),
 			);
 		} else if (!needsEmbedding && !this.hasModels) {
 			showActionNotice(

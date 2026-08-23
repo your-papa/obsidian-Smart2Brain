@@ -170,12 +170,18 @@ export function editProviderAction(providerId: string, label = "Check provider s
 }
 
 /**
- * Open the chat model picker for the currently selected agent and persist the choice,
- * so picking a model here behaves exactly as it does from the composer's model pill
- * (precedent: ModelSelectButton.svelte). This is the one action that writes, and only
- * because the write *is* what the user came to the picker to do.
+ * Open the chat model picker and persist the choice, so picking a model here behaves
+ * exactly as it does from the composer's model pill (precedent: ModelSelectButton.svelte).
+ * This is the one action that writes, and only because the write *is* what the user came
+ * to the picker to do.
+ *
+ * `agentId` MUST be passed whenever the caller knows which agent produced the notice.
+ * A chat tab can run a per-session agent that isn't `getSelectedAgent()`, so defaulting
+ * to the global selection would write the model onto an unrelated agent and leave the
+ * one the user was actually using still broken. The fallback exists only for call sites
+ * with no agent in scope.
  */
-export function selectChatModelAction(label = "Select a model"): NoticeAction {
+export function selectChatModelAction(label = "Select a model", agentId?: string): NoticeAction {
 	return {
 		label,
 		run: async () => {
@@ -189,13 +195,15 @@ export function selectChatModelAction(label = "Select a model"): NoticeAction {
 			]);
 
 			const data = getData();
-			const agent = data.getSelectedAgent();
-			const currentSelection = agent?.chatModel
+			const agent = (agentId ? data.getAgent(agentId) : undefined) ?? data.getSelectedAgent();
+			if (!agent) return;
+
+			const currentSelection = agent.chatModel
 				? { provider: agent.chatModel.provider, model: agent.chatModel.model }
 				: null;
 
 			new ModelSelectionModal(plugin, "chat", currentSelection, (selected) => {
-				if (!selected || !agent) return;
+				if (!selected) return;
 				data.updateAgent(agent.id, {
 					chatModel: buildPersistedChatModel(selected.provider, selected.model, agent.chatModel),
 				});
