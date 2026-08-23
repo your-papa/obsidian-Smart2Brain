@@ -442,9 +442,25 @@ function portalComposer(node: HTMLElement) {
     /* Inset from the leaf's own edges (published as --s2b-composer-left/width,
        the leaf's true bounds) rather than the full viewport, so the composer
        keeps a margin instead of sitting flush against the screen edge — and
-       still respects a sidebar split's actual width. */
-    left: calc(var(--s2b-composer-left, 0px) + 16px);
-    width: calc(var(--s2b-composer-width, 100%) - 32px);
+       still respects a sidebar split's actual width.
+
+       Width is additionally capped at `--file-line-width` and centred inside the
+       leaf, because absolute positioning drops the `mx-auto
+       max-w-[--file-line-width]` the container carries in the normal flow. On a
+       phone the leaf is narrower than that cap, so `min()` resolves to the
+       inset width and nothing changes; on a tablet the cap wins and the
+       composer stays aligned with the message column above it instead of
+       stretching the full leaf. */
+    --s2b-composer-inset-width: calc(var(--s2b-composer-width, 100%) - 32px);
+    --s2b-composer-render-width: min(
+      var(--s2b-composer-inset-width),
+      var(--file-line-width)
+    );
+    width: var(--s2b-composer-render-width);
+    left: calc(
+      var(--s2b-composer-left, 0px) + 16px +
+        (var(--s2b-composer-inset-width) - var(--s2b-composer-render-width)) / 2
+    );
     /* The host stretches an unsized child to its full height (measured 874px),
        which would drag the `top` calc below with it. */
     height: auto;

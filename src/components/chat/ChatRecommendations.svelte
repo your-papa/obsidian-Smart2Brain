@@ -472,9 +472,21 @@ function reviewNotice(notice: UpdateNotice): void {
   /* Intrinsically sized, not `width: 100%`: unlike the suggestion/notice rows,
      this button has no trailing dismiss chip to align against, so stretching it
      to the column's full width just reads as an oversized, oddly-stretched CTA
-     rather than a normal button. */
+     rather than a normal button.
+
+     Centred rather than left-aligned to the rows below: it replaces the whole
+     suggestions list, so there is no left edge to line up with — only the
+     centred greeting directly above it.
+
+     Centring is `margin-inline: auto`, not `align-self`: the button's parent is
+     a plain block `.recommendation-group` div, not a flex container, so
+     `align-self` has nothing to resolve against and silently does nothing. */
   .model-cta {
-    align-self: flex-start;
+    margin-inline: auto;
+    /* Keeps the shrink-to-fit sizing the old `align-self: flex-start` gave it —
+       a bare block-level flex container would otherwise stretch full-width and
+       `margin-inline: auto` would have no slack left to centre with. */
+    width: fit-content;
     display: flex;
     align-items: center;
     gap: 0.75rem;

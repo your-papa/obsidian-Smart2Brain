@@ -1455,14 +1455,6 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
     opacity: 1;
   }
 
-  /* There is no hover affordance on mobile, so the opacity-0 default above left
-     this button invisible until the wrapper happened to gain :focus-within —
-     meaning the first tap only revealed it and a second tap was needed to
-     actually activate it. Always show it there. */
-  :global(.is-mobile .fullscreen-toggle-button.clickable-icon) {
-    opacity: 1;
-  }
-
   /* Markdown editor styling */
   .markdown-editor-container {
     /* Reset some CM6 styles for chat input look */
@@ -1497,11 +1489,33 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
     :global(.cm-line) {
       padding-block: 0 !important;
       line-height: 1.5;
+      /* Anchor for the absolutely-positioned placeholder below. `.cm-line` is
+         `display: block` with no `position` in CM6's base theme, so promoting it
+         to `relative` changes nothing about the layout. */
+      position: relative;
     }
 
+    /* Taken out of flow so it contributes no width to the line box.
+       CM6 renders the placeholder as a real inline-block `<span>` widget inside
+       the first line, not as an input `placeholder` attribute. Obsidian's
+       embeddable editor omits CM6's `drawSelection`, so the caret here is the
+       browser's native contenteditable caret — and the browser positions that
+       from DOM layout, not from CM6's document model. With the widget in flow it
+       occupies real width, so the caret was painted after it, appearing to sit
+       "behind" the placeholder text. (The document is empty either way; this was
+       cosmetic.) Absolute positioning leaves the line box genuinely zero-width,
+       so the caret lands at the start where it belongs.
+
+       `inset-inline-start: 0` is against the line's padding box, which already
+       carries CM6's `padding: 0 2px 0 6px` — so this aligns with the line's text
+       origin rather than needing to re-add that 6px. */
     :global(.cm-placeholder) {
       color: var(--text-muted);
       font-style: normal;
+      position: absolute;
+      inset-inline-start: 0;
+      top: 0;
+      pointer-events: none;
     }
   }
 </style>
