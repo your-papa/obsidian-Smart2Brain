@@ -150,9 +150,14 @@ const SUPPORTED_DRAG_MIMES = new Set([
 
 const models = useAvailableModels();
 
-const selectedAgent = $derived.by(() => {
-	return getData().getSelectedAgent();
-});
+// Resolve the session's own agent first, exactly as ModelSelectButton and
+// ChatRecommendations do, so this reflects the agent THIS tab actually runs. The
+// vision check below drives a notice that writes a model back to this agent, so
+// reading the global selection here would report on one agent and update another.
+const selectedAgent = $derived(
+	(session?.selectedAgentId ? getData().getAgent(session.selectedAgentId) : undefined) ??
+		getData().getSelectedAgent(),
+);
 
 const selectedChatModel = $derived.by(() => {
 	return selectedAgent.chatModel;

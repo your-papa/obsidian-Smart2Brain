@@ -211,8 +211,16 @@ export function selectChatModelAction(label = "Select a model", agentId?: string
 
 			new ModelSelectionModal(plugin, "chat", currentSelection, (selected) => {
 				if (!selected) return;
-				data.updateAgent(agent.id, {
-					chatModel: buildPersistedChatModel(selected.provider, selected.model, agent.chatModel),
+				// Re-resolve rather than reusing the agent captured above: the picker is a
+				// modal the user can sit in, and `updateAgent` throws on a deleted id. This
+				// also picks up a chatModel that changed while the picker was open.
+				const target = data.getAgent(agent.id);
+				if (!target) {
+					new Notice("That agent no longer exists, so the model wasn't saved.");
+					return;
+				}
+				data.updateAgent(target.id, {
+					chatModel: buildPersistedChatModel(selected.provider, selected.model, target.chatModel),
 				});
 			}).open();
 		},
