@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Smart Second Brain is an Obsidian plugin (`smart-second-brain`) that turns the vault into an AI-assisted second brain: chat-with-your-notes via a RAG pipeline, a smart graph view, and provider-agnostic LLM support (OpenAI, Ollama, Anthropic, OpenRouter, OpenAI-compatible endpoints). Desktop-only (`isDesktopOnly: true`). Stack: Svelte 5 (runes) + TypeScript + Vite + LangChain/LangGraph, with Tailwind for styles, Biome for lint/format, Vitest for tests, and Bun as the package manager.
+Smart Second Brain is an Obsidian plugin (`smart-second-brain`) that turns the vault into an AI-assisted second brain: chat-with-your-notes via a RAG pipeline, a smart graph view, and provider-agnostic LLM support (OpenAI, Ollama, oMLX, Anthropic, OpenRouter, OpenAI-compatible endpoints). Runs on desktop and mobile (`isDesktopOnly: false`). Stack: Svelte 5 (runes) + TypeScript + Vite + LangChain/LangGraph, with Tailwind for styles, Biome for lint/format, Vitest for tests, and Bun as the package manager.
 
 ## Commands
 
@@ -21,6 +21,21 @@ Use `bun` (not npm/yarn). The lockfile is `bun.lock`.
 - `bun run setup-vault` — symlinks `build/smart-second-brain/` into `integration/Smart2Brain Test Vault/.obsidian/plugins/`. Run once after the first build.
 
 There is no separate `bun install` step needed beyond what `bun.lock` records; do **not** edit `package.json` versions manually without re-locking.
+
+## Documentation lives on the site, not in the README
+
+User-facing documentation lives in the **`s2b-dev/site`** repo (checked out at
+`../site`), published at `smartsecondbrain.dev`. The README here is deliberately
+minimal — pitch, install, development setup, links. Do not add feature lists,
+provider tables, or FAQ content back into it; that duplication is what caused
+the README to drift out of date.
+
+**Before cutting a release**, refresh the site's enumerable facts — it is not
+automated. The checklist lives in `../site/CLAUDE.md` under "Before a plugin
+release" and covers the provider list, bundled skills, built-in tools,
+`minAppVersion`, and platform support. Changing `PROVIDER_TEMPLATES`,
+`BUILT_IN_TOOL_IDS`, `src/skills/defaults/`, or `manifest.json` means the site
+needs updating too.
 
 ## btca — querying upstream docs
 
