@@ -12,7 +12,7 @@
 
 Your Smart Second Brain is a **free** and **open-source** Obsidian plugin that makes your vault smarter — better search, an interactive knowledge graph, and an AI assistant that actually knows your notes.
 
-The three are designed to work together: search surfaces your notes, the graph reveals how they connect, and the AI assistant can draw on both when answering. Each pillar is also useful on its own. **Smart search and the graph work right away with no AI provider** — connecting one (OpenAI, Anthropic, OpenRouter, or a local [Ollama](https://ollama.com/) model) unlocks the full AI assistant. Desktop-only.
+The three are designed to work together: search surfaces your notes, the graph reveals how they connect, and the AI assistant can draw on both when answering. Each pillar is also useful on its own. **Smart search and the graph work right away with no AI provider** — connecting one (OpenAI, Anthropic, OpenRouter, or a local [Ollama](https://ollama.com/) model) unlocks the full AI assistant. Runs on desktop and mobile.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://github.com/s2b-dev/smart-second-brain/assets/48623649/3e9cb3bc-ea57-4afc-b616-9c9360e39232">
@@ -34,7 +34,7 @@ The three are designed to work together: search surfaces your notes, the graph r
 **🤖 Agentic chat with your notes** *(requires an AI provider)*
 
 - **Tool-using agent:** An LLM agent that decides how to answer — it can search your vault, read note and file content, list folders, inspect tags and frontmatter properties, fetch URLs, and search the web as needed. Connect additional **MCP servers** to give the agent access to any external tool or data source.
-- **Skills:** Extend the agent with reusable instruction sets. Bundled skills cover Dataview, Canvas, Bases, TaskNotes, and Obsidian Charts; you can add your own under the plugin's config folder.
+- **Skills:** Extend the agent with reusable instruction sets. Bundled skills cover exploring the vault, editing notes, searching the web, and managing skills themselves; you can add your own as plain notes under `Agents/Skills/` in your vault.
 - **Reference links to notes:** Answers cite the notes they draw from as Obsidian links, so you can trace where information comes from.
 - **Staged note edits:** The agent can create and modify notes, but changes are **staged for your review** — you see an inline diff and approve or reject before anything is written to disk.
 - **Run code in context:** Execute JavaScript and Dataview queries against your vault when a question needs computation, not just retrieval.
@@ -43,7 +43,7 @@ The three are designed to work together: search surfaces your notes, the graph r
 
 **🔌 Provider & model choice**
 
-- **Providers:** OpenAI (and any OpenAI-compatible endpoint), Anthropic, Ollama (local), OpenRouter, and OpenAI Codex sign-in. Multiple instances of a provider with distinct names/endpoints are supported.
+- **Providers:** OpenAI (and any OpenAI-compatible endpoint), Anthropic, Ollama (local), oMLX (local, Apple Silicon), OpenRouter, and OpenAI Codex sign-in. Multiple instances of a provider with distinct names/endpoints are supported.
 - **Local & private:** With Ollama, models run entirely on your machine and no data leaves it.
 - **Quickly switch models:** Change the active model per chat — e.g. one model for scientific writing, another for brainstorming.
 - **Fine-grained privacy controls:** Mark individual providers as *trusted* or *untrusted*. Set the vault to **private-by-default** (only notes you explicitly allow can reach a provider) or **public-by-default** (only notes you explicitly exclude are blocked). Untrusted providers — cloud APIs, by default — are blocked from reading, embedding, or being sent private notes, even if the agent tries to access them.
