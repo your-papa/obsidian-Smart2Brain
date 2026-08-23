@@ -178,8 +178,10 @@ export function editProviderAction(providerId: string, label = "Check provider s
  * `agentId` MUST be passed whenever the caller knows which agent produced the notice.
  * A chat tab can run a per-session agent that isn't `getSelectedAgent()`, so defaulting
  * to the global selection would write the model onto an unrelated agent and leave the
- * one the user was actually using still broken. The fallback exists only for call sites
- * with no agent in scope.
+ * one the user was actually using still broken. The global fallback applies only when no
+ * `agentId` was given at all — an `agentId` that no longer resolves (the agent was deleted
+ * between the notice appearing and the click) must NOT fall through to the global agent,
+ * or a stale notice silently rewrites an unrelated one.
  */
 export function selectChatModelAction(label = "Select a model", agentId?: string): NoticeAction {
 	return {
@@ -195,8 +197,13 @@ export function selectChatModelAction(label = "Select a model", agentId?: string
 			]);
 
 			const data = getData();
-			const agent = (agentId ? data.getAgent(agentId) : undefined) ?? data.getSelectedAgent();
-			if (!agent) return;
+			const agent = agentId ? data.getAgent(agentId) : data.getSelectedAgent();
+			if (!agent) {
+				// Only reachable when the targeted agent was deleted after the notice fired.
+				// Say so rather than dropping the click, which would read as a dead link.
+				new Notice("That agent no longer exists. Pick a model from the agent you want to use.");
+				return;
+			}
 
 			const currentSelection = agent.chatModel
 				? { provider: agent.chatModel.provider, model: agent.chatModel.model }
