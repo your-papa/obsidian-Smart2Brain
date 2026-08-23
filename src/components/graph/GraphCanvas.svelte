@@ -2758,6 +2758,12 @@ onMount(() => {
 				requestRender("world");
 			}
 
+			// Same "catch up on what was missed while initializing" idea as the fit
+			// above: applyCursor is a no-op until the renderer is ready, so anything
+			// that set the cursor during init was dropped. Replay it once here so the
+			// canvas doesn't wait for the first pointermove to show the right cursor.
+			applyCursor(false);
+
 			const resizeObserver = new ResizeObserver(() => {
 				const rect = containerEl.getBoundingClientRect();
 				renderer.resize(rect.width, rect.height);
