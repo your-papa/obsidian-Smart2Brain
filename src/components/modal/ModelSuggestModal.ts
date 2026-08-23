@@ -152,7 +152,9 @@ export class ModelSuggestModal extends SuggestModal<HydratedModel> {
 			btn.dataset.vendorId = vendor.id;
 			// Same artwork the rows use. Only the nine labs in VENDOR_LOGO_COMPONENTS
 			// have logos, so a miss falls back to the bare name rather than a
-			// placeholder glyph — matches `renderSuggestion`.
+			// placeholder glyph — matches `renderSuggestion`. The marks are
+			// monochrome `currentColor` glyphs, so they follow the pill's own
+			// colour (muted at rest, accent while active) alongside the label.
 			const vendorLogo = createVendorLogoElement(vendor.id);
 			if (vendorLogo) {
 				const logoWrap = document.createElement("span");

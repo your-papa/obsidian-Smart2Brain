@@ -1079,15 +1079,12 @@
 	height: 16px;
 }
 
-/* Vendor marks are brand artwork with their own fills, unlike the monochrome
-   star. They must keep those colours instead of inheriting the pill's
-   `currentColor`, which flips to the accent while the pill is active. Sized a
-   touch larger than the star so the logos stay legible at pill scale. */
-.s2b-model-filter-icon--vendor {
-	width: 18px;
-	height: 18px;
-}
-
+/* Vendor marks are monochrome `currentColor` glyphs, not multi-colour brand
+   artwork, so they take the pill's text colour by design: muted at rest and
+   accent-tinted while active, tracking the label beside them. This mirrors the
+   suggestion rows, which set `--text-normal` on their own logo wrapper for the
+   same reason. Sized a touch larger than the star so they stay legible. */
+.s2b-model-filter-icon--vendor,
 .s2b-model-filter-icon--vendor svg {
 	width: 18px;
 	height: 18px;
