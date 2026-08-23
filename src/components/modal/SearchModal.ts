@@ -23,7 +23,7 @@ import type { SearchFilter } from "../../vectorstore";
 import { Logger } from "../../utils/logging";
 import { isAgentFilePath } from "../../utils/fileFiltering";
 import { isMobileUI } from "../../utils/platform";
-import { showSettingsLinkNotice } from "../../utils/settingsNotice";
+import { openChatAction, showActionNotice, showSettingsLinkNotice } from "../../utils/actionNotice";
 import { getPathIcon, getSearchResultNoteIcon, getTagIcon, resolveIconColor } from "../../utils/noteIcons";
 import {
 	formatHeadingLabel,
@@ -862,7 +862,9 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 
 		const messenger = getSessionRegistry();
 		if (!messenger) {
-			new Notice("Chat is not initialized yet. Please open a chat first.");
+			// Reached before any chat has been opened, so the link has something to do —
+			// unlike the post-`createNewChat` guard below.
+			showActionNotice("Chat is not initialized yet.", openChatAction());
 			return;
 		}
 

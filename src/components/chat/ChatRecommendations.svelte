@@ -1,5 +1,7 @@
 <script lang="ts">
 import { Notice } from "obsidian";
+import { editAgentAction, showActionNotice } from "../../utils/actionNotice";
+import { buildPersistedChatModel } from "../../utils/persistedChatModel";
 import { getData } from "../../stores/dataStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
 import type { SessionRegistry } from "../../stores/chatStore.svelte";
@@ -65,19 +67,8 @@ function openModelPicker(): void {
 	new ModelSelectionModal(plugin, "chat", currentSelection, (selected) => {
 		if (!selected) return;
 		const agentId = session?.selectedAgentId || data.selectedAgentId;
-		const hydrated = models.hydratedChatModelsByKey.get(`${selected.provider}:${selected.model}`);
 		data.updateAgent(agentId, {
-			chatModel: {
-				provider: selected.provider,
-				model: selected.model,
-				modelConfig: {
-					contextWindow:
-						hydrated?.contextWindow ?? selectedAgent?.chatModel?.modelConfig?.contextWindow ?? 128000,
-					supportsVision:
-						hydrated?.capabilities.vision ?? selectedAgent?.chatModel?.modelConfig?.supportsVision,
-					temperature: selectedAgent?.chatModel?.modelConfig?.temperature,
-				},
-			},
+			chatModel: buildPersistedChatModel(selected.provider, selected.model, selectedAgent?.chatModel),
 		});
 	}).open();
 }
@@ -187,11 +178,17 @@ async function enablePlugin(nudge: PluginNudge): Promise<void> {
 			skillId = (await service.seedIntegrationSkill(nudge.pluginId, nudge.displayName)) ?? undefined;
 		} catch (error) {
 			Logger.error(`[ChatRecommendations] seedIntegrationSkill failed for ${nudge.pluginId}:`, error);
-			new Notice(`Could not create skill for ${nudge.displayName}: ${extractErrorMessage(error)}`);
+			showActionNotice(
+				`Could not create skill for ${nudge.displayName}: ${extractErrorMessage(error)}`,
+				editAgentAction(agent.id, "Open agent skills"),
+			);
 			return;
 		}
 		if (!skillId) {
-			new Notice(`Could not create skill for ${nudge.displayName}.`);
+			showActionNotice(
+				`Could not create skill for ${nudge.displayName}.`,
+				editAgentAction(agent.id, "Open agent skills"),
+			);
 			return;
 		}
 		// Re-discover so the new skill enters the cache; without this a later editor

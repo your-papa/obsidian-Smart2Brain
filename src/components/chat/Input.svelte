@@ -1,5 +1,6 @@
 <script lang="ts">
 import { Notice, Platform, TFile, normalizePath } from "obsidian";
+import { selectChatModelAction, showActionNotice } from "../../utils/actionNotice";
 import { onDestroy, onMount } from "svelte";
 import { useAvailableModels } from "../../hooks/useAvailableModels.svelte";
 import { EmbeddableMarkdownEditor } from "../../lib/editor";
@@ -733,8 +734,9 @@ async function attachVaultFile(file: TFile): Promise<boolean> {
 	const isImage = ["png", "jpg", "jpeg", "gif", "webp"].includes(ext);
 	if (isImage && selectedModelSupportsVision === false) {
 		const modelName = selectedChatModel?.model ?? "the selected model";
-		new Notice(
-			`Image attachments require a vision-capable model. Switch models to attach images (current: ${modelName}).`,
+		showActionNotice(
+			`Image attachments require a vision-capable model (current: ${modelName}).`,
+			selectChatModelAction("Switch model"),
 		);
 		return false;
 	}

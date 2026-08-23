@@ -1,7 +1,8 @@
 <script lang="ts">
 import { getData } from "../../stores/dataStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
-import { type ChatModel, getSessionRegistry } from "../../stores/chatStore.svelte";
+import { getSessionRegistry } from "../../stores/chatStore.svelte";
+import { buildPersistedChatModel } from "../../utils/persistedChatModel";
 import { ModelSelectionModal } from "../modal/ModelSelectionModal";
 import { useAvailableModels } from "../../hooks/useAvailableModels.svelte";
 import { stripVendorPrefix } from "../../lib/modelMetadataNormalizer";
@@ -34,19 +35,6 @@ function getModelDisplayName(provider: string, model: string): string {
 		return stripVendorPrefix(hydrated.displayName);
 	}
 	return model;
-}
-
-function buildPersistedChatModel(provider: string, model: string, existing?: ChatModel | null): ChatModel {
-	const hydrated = models.hydratedChatModelsByKey.get(`${provider}:${model}`);
-	return {
-		provider,
-		model,
-		modelConfig: {
-			contextWindow: hydrated?.contextWindow ?? existing?.modelConfig?.contextWindow ?? 128000,
-			supportsVision: hydrated?.capabilities.vision ?? existing?.modelConfig?.supportsVision,
-			temperature: existing?.modelConfig?.temperature,
-		},
-	};
 }
 
 function openModelSelectionModal() {
