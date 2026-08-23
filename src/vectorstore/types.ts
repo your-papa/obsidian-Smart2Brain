@@ -259,6 +259,53 @@ export function getDbName(prefix: string, vaultId: string, indexId?: string): st
 	return `${prefix}-${vaultId}-${sanitized}`;
 }
 
+/** How long to wait on a blocked `deleteDatabase` before giving up. */
+const DELETE_DB_BLOCKED_TIMEOUT_MS = 5000;
+
+/**
+ * Promisified `indexedDB.deleteDatabase`.
+ *
+ * The raw API returns a request and reports outcomes through events, so a bare call
+ * tells the caller nothing: `onerror` and `onblocked` are invisible to a surrounding
+ * try/catch (which only sees synchronous throws), and the deletion silently doesn't
+ * happen while the code proceeds as though it had.
+ *
+ * `onblocked` fires when another connection still holds the database, and unlike
+ * `onerror` it is not terminal — the delete completes if that connection closes, so
+ * this waits rather than failing immediately. Deleting a database that does not exist
+ * succeeds, which is what we want for idempotent cleanup.
+ *
+ * @throws if the deletion errors, is aborted, or stays blocked past the timeout.
+ */
+export function deleteDatabase(name: string): Promise<void> {
+	return new Promise<void>((resolve, reject) => {
+		let request: IDBOpenDBRequest;
+		try {
+			request = indexedDB.deleteDatabase(name);
+		} catch (error) {
+			reject(error instanceof Error ? error : new Error(String(error)));
+			return;
+		}
+
+		let blockedTimer: ReturnType<typeof setTimeout> | null = null;
+		const settle = (finish: () => void) => {
+			if (blockedTimer !== null) clearTimeout(blockedTimer);
+			finish();
+		};
+
+		request.onsuccess = () => settle(resolve);
+		request.onerror = () =>
+			settle(() => reject(request.error ?? new Error(`Failed to delete IndexedDB database "${name}"`)));
+		request.onblocked = () => {
+			// Still deletable if the blocking connection closes; only give up if it doesn't.
+			if (blockedTimer !== null) return;
+			blockedTimer = setTimeout(() => {
+				reject(new Error(`Deleting IndexedDB database "${name}" is blocked by an open connection`));
+			}, DELETE_DB_BLOCKED_TIMEOUT_MS);
+		};
+	});
+}
+
 /**
  * Result from a vector similarity search (internal use).
  * Contains the document and its similarity score.

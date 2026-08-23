@@ -1,6 +1,6 @@
 <script lang="ts">
 import { onDestroy, untrack } from "svelte";
-import { Platform } from "obsidian";
+import { Notice, Platform } from "obsidian";
 import { EmbeddingIndexSetupModal } from "../modal/EmbeddingIndexSetupModal";
 import { IndexingReportModal } from "../modal/IndexingReportModal";
 import ManagedEntityItem from "./ManagedEntityItem.svelte";
@@ -9,6 +9,7 @@ import Button from "../ui/Button.svelte";
 import ProgressBar from "../ui/ProgressBar.svelte";
 import GenericAIIcon from "../ui/logos/GenericAIIcon.svelte";
 import { confirmDelete } from "../modal/ConfirmModal";
+import { Logger } from "../../utils/logging";
 import { getProviderDefinition } from "../../providers/index";
 import { getData } from "../../stores/dataStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
@@ -129,7 +130,16 @@ async function deleteIndex(targetIndexId: string) {
 	if (!isVectorStoreInitialized()) return;
 	const entry = indexes.find((e) => e.id === targetIndexId);
 	if (!(await confirmDelete(plugin.app, entry?.model ?? targetIndexId))) return;
-	await getVectorStoreService().deleteIndex(targetIndexId);
+	try {
+		await getVectorStoreService().deleteIndex(targetIndexId);
+	} catch (error) {
+		// `deleteIndex` rejects when the stored vectors can't actually be dropped. Report it
+		// rather than letting it surface as an unhandled rejection: the index is still there,
+		// so the row below must not be reset as though it had been removed.
+		Logger.error(`[EmbeddingIndexSection] Failed to delete index ${targetIndexId}:`, error);
+		new Notice(`Could not delete this index: ${error instanceof Error ? error.message : String(error)}`);
+		return;
+	}
 	if (targetIndexId === indexId) {
 		indexProgress = {
 			isIndexing: false,

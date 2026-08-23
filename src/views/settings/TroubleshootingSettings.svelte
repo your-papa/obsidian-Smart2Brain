@@ -9,6 +9,7 @@ import Toggle from "../../components/ui/Toggle.svelte";
 import { getData } from "../../stores/dataStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
 import { ConfirmModal } from "../../components/modal/ConfirmModal";
+import { Logger } from "../../utils/logging";
 
 const pluginData = getData();
 const plugin = getPlugin();
@@ -35,12 +36,28 @@ async function handleCleanupPluginData() {
 	if (!(await modal.promise).confirmed) return;
 
 	try {
+		// Each index is deleted independently, and a failure does not abort the cleanup:
+		// `deleteIndex` rejects when its IndexedDB databases can't be dropped (e.g. a
+		// connection still holds one), and letting that propagate would skip `deleteData()`
+		// entirely — so "clear plugin data" would leave the plugin data behind too.
+		const failed: string[] = [];
 		for (const index of [...pluginData.embeddingIndexes]) {
-			await plugin.vectorStoreService.deleteIndex(index.id);
+			try {
+				await plugin.vectorStoreService.deleteIndex(index.id);
+			} catch (error) {
+				failed.push(index.id);
+				Logger.error(`[Troubleshooting] Failed to delete embedding index ${index.id}:`, error);
+			}
 		}
 
 		await pluginData.deleteData();
-		new Notice(get(t)("plugin_data_cleared"));
+		if (failed.length > 0) {
+			new Notice(
+				`Plugin data cleared, but the stored vectors for ${failed.join(", ")} could not be deleted. See the console for details.`,
+			);
+		} else {
+			new Notice(get(t)("plugin_data_cleared"));
+		}
 	} catch (error) {
 		new Notice(error instanceof Error ? error.message : "Failed to clean plugin data");
 	}

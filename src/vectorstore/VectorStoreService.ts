@@ -41,6 +41,7 @@ import {
 	type SkippedFile,
 	type VectorSearchResult,
 	type VectorStore,
+	deleteDatabase,
 	getDbName,
 	makeChunkId,
 	sanitizeIndexId,
@@ -2280,13 +2281,33 @@ export class VectorStoreService {
 			this.instances.delete(indexId);
 		}
 
-		// Delete IndexedDB databases (HNSW + HNSW internal index)
+		// Delete IndexedDB databases (HNSW + HNSW internal index).
+		//
+		// Awaited: `deleteDatabase` is asynchronous and returns a request, so a bare call
+		// reports nothing — `onerror`/`onblocked` would go unobserved and this method would
+		// resolve as if the vectors were gone while they were still on disk. `onblocked` is
+		// reachable in particular for the `-hnsw-index` database, whose connection is owned
+		// by the `HNSWWithDB` wrapper and is not closed by `HNSWVectorStore.close()`.
 		const hnswDbName = getDbName("s2b-hnsw", this.vaultId, indexId);
-		try {
-			indexedDB.deleteDatabase(hnswDbName);
-			indexedDB.deleteDatabase(`${hnswDbName}-hnsw-index`);
-		} catch (error) {
-			Logger.error(`[VectorStore] Failed to delete IndexedDB databases for ${indexId}:`, error);
+		const failures = (
+			await Promise.all([
+				deleteDatabase(hnswDbName).catch((error: unknown) => error),
+				deleteDatabase(`${hnswDbName}-hnsw-index`).catch((error: unknown) => error),
+			])
+		).filter((result): result is unknown => result !== undefined);
+
+		// Config records are dropped only when the data is actually gone. Keeping them on
+		// failure leaves the index addressable (and re-deletable) instead of stranding
+		// orphaned databases that nothing references any more.
+		if (failures.length > 0) {
+			for (const failure of failures) {
+				Logger.error(`[VectorStore] Failed to delete IndexedDB database for ${indexId}:`, failure);
+			}
+			throw new Error(
+				`Could not delete stored vectors for ${indexId}: ${failures
+					.map((failure) => (failure instanceof Error ? failure.message : String(failure)))
+					.join("; ")}`,
+			);
 		}
 
 		// Remove from plugin data
