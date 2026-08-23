@@ -1,10 +1,11 @@
 import { Notice } from "obsidian";
-import { createProviderStateQuery, invalidateAllProviders } from "../lib/query";
+import { invalidateAllProviders, type ProviderState, subscribeProviderState } from "../lib/query";
 import { hydrateChatModel, hydrateEmbeddingModel } from "../lib/modelMetadataNormalizer";
 import { fetchModelsDevData, type ModelsDevApiResponse } from "../providers/modelsDevApi";
 import { getOllamaModelsCache, type OllamaModelInfo } from "../providers/ollamaModels";
 import { fetchOpenRouterModels, type OpenRouterModelInfo } from "../providers/openrouterModels";
 import { getProviderDefinition, isEmbeddingProvider } from "../providers/index";
+import { onProvidersChanged } from "../providers/registrySync";
 import type { EmbedModelConfig } from "../providers/index";
 import type { ChatModel } from "../stores/chatStore.svelte";
 import { getData } from "../stores/dataStore.svelte";
@@ -66,9 +67,87 @@ export class AvailableModels {
 	#modelsDevData = $state<ModelsDevApiResponse | null>(null);
 	#openRouterData = $state<Map<string, OpenRouterModelInfo> | null>(null);
 	#metadataLoadStarted = false;
+	/**
+	 * Bumped whenever a subscribed provider query emits. The derived model lists read it
+	 * so they recompute as results arrive — the `QueryObserver` subscriptions live outside
+	 * Svelte's reactive graph, so without this nothing would re-run on new data.
+	 */
+	#queryEpoch = $state(0);
+	/** Live `QueryObserver` subscriptions, keyed by provider id. See the constructor. */
+	#subscriptions = new Map<string, () => void>();
+	/** Removes this instance's `onProvidersChanged` registration. Set in the constructor. */
+	#unsubscribeProvidersChanged: () => void;
 
 	constructor() {
 		void this.#loadMetadataSources();
+
+		// Keeps every configured provider's state query active for the whole session.
+		//
+		// This deliberately does NOT use `createQuery`. A `createQuery` result only
+		// subscribes from an `$effect` inside `createBaseQuery` while something actively
+		// *reads* it — so a provider configured at runtime got a query object that was
+		// never subscribed (`isActive() === false`, `fetchStatus: "idle"`) and therefore
+		// never fetched. `isLoadingModels` then stayed true forever and the UI sat on
+		// "Loading models…" until a reload. Reading `isPending` does not help either: it
+		// goes through `trackResult` and still doesn't subscribe.
+		//
+		// `subscribeProviderState` uses a bare `QueryObserver`, whose `subscribe()` activates
+		// the query and kicks off the fetch immediately, with no dependency on reactive
+		// ownership or reads.
+		//
+		// Reconciliation is driven by `onProvidersChanged` — which fires from the same
+		// registry-sync helpers the data store already calls on every provider add, remove,
+		// enable/disable and rename — NOT by an `$effect` here. This singleton lives in a
+		// bare `$effect.root` with no component driving the scheduler, and an `$effect` in
+		// that position was verified not to re-run when the provider set changed: a provider
+		// added at runtime kept getting no observer and no fetch, which is what left the UI
+		// on "Loading models…" until an Obsidian reload. A direct callback has no such
+		// dependency on reactive scheduling.
+		this.syncProviderSubscriptions();
+		this.#unsubscribeProvidersChanged = onProvidersChanged(() => this.syncProviderSubscriptions());
+	}
+
+	/**
+	 * Tear down everything this instance holds outside the reactive graph: the
+	 * provider-change registration and every live `QueryObserver` (each of whose queryFns
+	 * resolves provider credentials on fetch). Called via {@link resetAvailableModels} on
+	 * plugin unload — module state survives a disable/enable cycle, so without this the
+	 * observers would keep fetching with the unloaded plugin's auth, and the next enable
+	 * would reuse a singleton bound to the previous plugin's data store.
+	 */
+	dispose(): void {
+		this.#unsubscribeProvidersChanged();
+		for (const unsubscribe of this.#subscriptions.values()) unsubscribe();
+		this.#subscriptions.clear();
+	}
+
+	/**
+	 * Bring the live provider subscriptions in line with the configured providers:
+	 * subscribe anything new, drop anything removed, leave the rest untouched (so adding
+	 * one provider doesn't disturb the others' observers or cached data).
+	 *
+	 * Safe to call repeatedly — it's a no-op when nothing changed.
+	 */
+	syncProviderSubscriptions(): void {
+		const providerIds = this.#data.getConfiguredProviders();
+
+		for (const [providerId, unsubscribe] of this.#subscriptions) {
+			if (!providerIds.includes(providerId)) {
+				unsubscribe();
+				this.#subscriptions.delete(providerId);
+			}
+		}
+		for (const providerId of providerIds) {
+			if (this.#subscriptions.has(providerId)) continue;
+			this.#subscriptions.set(
+				providerId,
+				subscribeProviderState(providerId, () => {
+					// Nudge the reactive graph so `#availableModels` and friends recompute
+					// as each provider's models arrive.
+					this.#queryEpoch++;
+				}),
+			);
+		}
 	}
 
 	async #loadMetadataSources(): Promise<void> {
@@ -92,14 +171,45 @@ export class AvailableModels {
 	// Reactive providers list - reads from reactive $state in dataStore
 	#providers = $derived(this.#data.getConfiguredProviders());
 
-	// Combined query for each provider (auth + models together)
-	#providerQueries = $derived(this.#providers.map((provider) => createProviderStateQuery(() => provider)));
+	/**
+	 * Current state for each configured provider, aligned with `#providers` by index.
+	 *
+	 * Read straight from the query cache rather than from `createQuery` results.
+	 * `syncProviderSubscriptions` keeps a `QueryObserver` subscribed per provider, so the
+	 * cache is the authoritative, always-current copy; `#queryEpoch` (bumped by those
+	 * observers) is what makes this recompute when new data lands. Going through
+	 * `createQuery` here is what caused the "Loading models…" hang — see the constructor.
+	 */
+	#providerStates = $derived.by<(ProviderState | undefined)[]>(() => {
+		void this.#queryEpoch;
+		return this.#providers.map((provider) =>
+			this.#plugin.queryClient.getQueryData<ProviderState>(["provider", provider]),
+		);
+	});
+
+	/**
+	 * True while at least one configured provider's first fetch is still in flight.
+	 *
+	 * Checked via query *status*, not data presence: the queryFn is written to return
+	 * failure objects rather than throw, but its outer strips (secret resolution, auth
+	 * plumbing) can still reject, landing the query in `error` status with no data.
+	 * Treating "no data" as "loading" would then pin the UI on "Loading models…"
+	 * permanently — the exact hang this store exists to avoid. An errored query is
+	 * settled, not loading; the provider simply contributes no models.
+	 */
+	#isLoading = $derived.by(() => {
+		void this.#queryEpoch;
+		return this.#providers.some((provider) => {
+			const state = this.#plugin.queryClient.getQueryState(["provider", provider]);
+			return state === undefined || state.status === "pending";
+		});
+	});
 
 	// Compute available models from all providers - excludes embedding models
 	#availableModels = $derived.by(() => {
 		const out: ChatModel[] = [];
 		this.#providers.forEach((provider, idx) => {
-			const state = this.#providerQueries[idx]?.data;
+			const state = this.#providerStates[idx];
 			// Get all discovered models from the provider
 			const discoveredModels = state?.models ?? [];
 
@@ -137,7 +247,7 @@ export class AvailableModels {
 				return;
 			}
 
-			const state = this.#providerQueries[idx]?.data;
+			const state = this.#providerStates[idx];
 
 			// Use dedicated embedding models if provider supports discoverEmbeddingModels
 			// Otherwise, fall back to heuristic filtering on all models
@@ -175,7 +285,7 @@ export class AvailableModels {
 	#unavailableProviders = $derived.by(() => {
 		const unavailable: string[] = [];
 		this.#providers.forEach((provider, idx) => {
-			const state = this.#providerQueries[idx]?.data;
+			const state = this.#providerStates[idx];
 			if (state && !state.auth.success) {
 				unavailable.push(provider);
 			}
@@ -258,7 +368,7 @@ export class AvailableModels {
 	}
 
 	get isLoadingModels(): boolean {
-		return this.#providerQueries.some((q) => q.isPending);
+		return this.#isLoading;
 	}
 
 	get modelOptions(): ModelOption[] {
@@ -398,25 +508,45 @@ export class AvailableModels {
 
 // Module-level singleton instance (lazy initialized)
 let instance: AvailableModels | null = null;
+let disposeRoot: (() => void) | null = null;
 
 /**
  * Returns the singleton AvailableModels instance.
  * All components share the same reactive state.
  *
- * The instance is created inside an `$effect.root` so the TanStack queries it
- * spins up (each `createQuery` registers an internal `$effect`) always have a
- * stable, app-lifetime owner. Without this, the first `useAvailableModels()`
- * call from inside a consumer's `$derived` (e.g. the model-selection modal
- * reading `hydratedChatModels` during onboarding) constructs the singleton in
- * an unowned reactive context and Svelte throws `effect_in_unowned_derived`.
- * The root is never disposed — the singleton lives for the whole session.
+ * The instance is created inside an `$effect.root` so construction always happens in a
+ * stable reactive owner. Without this, the first `useAvailableModels()` call from inside
+ * a consumer's `$derived` (e.g. the model-selection modal reading `hydratedChatModels`
+ * during onboarding) constructs the singleton in an unowned reactive context and Svelte
+ * throws `effect_in_unowned_derived`. Note the fetching itself deliberately does NOT rely
+ * on this root: `$effect`s inside a bare root without a component driving the scheduler
+ * were verified never to re-run, so the per-provider fetch lifecycle is handled by plain
+ * `QueryObserver` subscriptions instead (see the constructor).
+ *
+ * The singleton lives until {@link resetAvailableModels} (plugin unload); `main.ts` also
+ * calls this eagerly at layout-ready so provider fetching is independent of which views
+ * happen to mount.
  */
 export function useAvailableModels(): AvailableModels {
 	if (!instance) {
-		$effect.root(() => {
+		disposeRoot = $effect.root(() => {
 			instance = new AvailableModels();
 		});
 	}
 	// biome-ignore lint/style/noNonNullAssertion: the $effect.root callback runs synchronously, so `instance` is set here.
 	return instance!;
+}
+
+/**
+ * Dispose the singleton (observers, listener registration, reactive root) and clear it so
+ * the next `useAvailableModels()` builds a fresh instance against the *current* plugin and
+ * data store. Must be called from the plugin's `onunload`: the module (and therefore
+ * `instance`) survives a disable/enable cycle, and a stale instance keeps dead references
+ * and live credential-fetching observers.
+ */
+export function resetAvailableModels(): void {
+	instance?.dispose();
+	disposeRoot?.();
+	instance = null;
+	disposeRoot = null;
 }

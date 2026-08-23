@@ -10,8 +10,9 @@ import GenericAIIcon from "../ui/logos/GenericAIIcon.svelte";
 import CircularLoader from "../ui/CircularLoader.svelte";
 import Button from "../ui/Button.svelte";
 import { icon } from "../../utils/utils";
+import { Logger } from "../../utils/logging";
 import { ProviderSetupModal } from "../../views/provider-setup/ProviderSetup";
-import { confirmDelete } from "../modal/ConfirmModal";
+import { confirmDelete, confirmDeleteWithOption } from "../modal/ConfirmModal";
 
 interface Props {
 	provider: string;
@@ -46,14 +47,78 @@ function handleOpenSettings() {
 }
 
 async function handleRemoveProvider() {
-	if (!(await confirmDelete(plugin.app, displayName))) return;
+	// Embeddings this provider built are expensive to recompute, so deleting them is a
+	// separate, opt-in decision rather than a side effect of removing the provider —
+	// re-adding the same provider and model later reuses the vectors as they are.
+	// The checkbox only appears when there is actually something to delete.
+	const ownedIndexes = data.embeddingIndexes.filter((index) => index.provider === provider);
+	const indexedNotes = ownedIndexes.reduce((sum, index) => sum + (index.documentCount ?? 0), 0);
+
+	if (ownedIndexes.length === 0) {
+		if (!(await confirmDelete(plugin.app, displayName))) return;
+		await removeProvider();
+		return;
+	}
+
+	const { confirmed, checked } = await confirmDeleteWithOption(plugin.app, displayName, {
+		label: "Also delete the embeddings built with this provider",
+		description: `Frees the storage used by ${indexedNotes.toLocaleString()} indexed ${
+			indexedNotes === 1 ? "note" : "notes"
+		}. Leave this off to keep them — re-adding this provider reuses them instead of re-embedding, which can be slow and costly.`,
+	});
+	if (!confirmed) return;
+	await removeProvider(checked);
+}
+
+async function removeProvider(purgeEmbeddings = false) {
+	let orphanedIndexIds: string[];
 	try {
-		await data.deleteProvider(provider);
+		orphanedIndexIds = await data.deleteProvider(provider);
 		// Drop cached auth/state entirely (not just invalidate) so re-adding a provider with
 		// the same slug ID doesn't inherit this one's stale "connected" verdict from cache.
 		removeProviderQueries(provider);
 	} catch (error) {
 		new Notice(error instanceof Error ? error.message : "Failed to remove provider");
+		return;
+	}
+
+	if (!purgeEmbeddings) return;
+
+	// Separate error scope: the provider IS removed by now, so a purge failure must not
+	// report "Failed to remove provider" — that would misstate what happened.
+	//
+	// The vector store is only assigned at onLayoutReady, so it can genuinely be absent
+	// (its type asserts non-null, but `onunload` guards it for the same reason). Deleting
+	// embeddings is an explicit destructive choice the user opted into, so a missing
+	// service must be reported rather than optional-chained away — silently completing
+	// the dialog would leave every vector on disk with no sign anything was skipped.
+	const vectorStore = plugin.vectorStoreService;
+	if (!vectorStore) {
+		new Notice("Provider removed. Its embeddings were kept — the index service is still starting up.");
+		return;
+	}
+
+	// Each index is attempted independently: `deleteIndex` awaits `store.clear()` and
+	// `store.close()` before it reaches the IndexedDB drop, so one rejection would
+	// otherwise abandon every index after it — and their config records are already gone,
+	// which makes the survivors much harder to reach again. Failures are collected and
+	// reported together instead.
+	const failed: string[] = [];
+	for (const indexId of orphanedIndexIds) {
+		try {
+			await vectorStore.deleteIndex(indexId);
+		} catch (error) {
+			failed.push(indexId);
+			Logger.error(`[ProviderItem] Failed to delete embedding index ${indexId}:`, error);
+		}
+	}
+
+	if (failed.length > 0) {
+		new Notice(
+			`Provider removed, but deleting ${failed.length} of ${orphanedIndexIds.length} embedding ${
+				orphanedIndexIds.length === 1 ? "index" : "indexes"
+			} failed: ${failed.join(", ")}. See the console for details.`,
+		);
 	}
 }
 </script>

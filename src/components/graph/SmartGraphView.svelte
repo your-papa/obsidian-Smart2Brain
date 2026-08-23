@@ -1282,7 +1282,7 @@ async function handleOpenPaths(paths: string[]) {
 			`Open ${paths.length} tabs`,
 		);
 		modal.open();
-		if (!(await modal.promise)) return;
+		if (!(await modal.promise).confirmed) return;
 	}
 
 	for (const path of paths) {

@@ -47,6 +47,7 @@ import {
 	type SkippedFile,
 	type VectorSearchResult,
 	type VectorStore,
+	deleteDatabase,
 	getDbName,
 	makeChunkId,
 	sanitizeIndexId,
@@ -2296,13 +2297,50 @@ export class VectorStoreService {
 			this.instances.delete(indexId);
 		}
 
-		// Delete IndexedDB databases (HNSW + HNSW internal index)
+		// Delete IndexedDB databases (HNSW + HNSW internal index).
+		//
+		// Awaited: `deleteDatabase` is asynchronous and reports through events, so a bare
+		// call observes nothing and this method would resolve as if the databases were gone
+		// whatever happened.
+		//
+		// Note the vectors are already gone by this point: when an instance existed,
+		// `store.clear()` above emptied every object store and dropped the persisted HNSW
+		// graph. What survives an incomplete deletion is an empty shell, so the risk here is
+		// not stale data being read back — it is the queued-deletion hazard described below.
+		//
+		// A `"blocked"` result is treated as a failure, even though the deletion itself will
+		// eventually go through. Another connection holds the database (reachable for
+		// `-hnsw-index`, whose connection is owned by the `HNSWWithDB` wrapper and is not
+		// closed by `HNSWVectorStore.close()`, and for a second Obsidian window on the same
+		// vault). The request cannot be cancelled, so it stays queued and fires whenever that
+		// connection closes — and if the config record were removed now, the user could
+		// recreate the same "provider:model" index in the meantime and the queued request
+		// would delete the *replacement* database, destroying a freshly built HNSW graph.
+		//
+		// Keeping the config record is what prevents that: the index stays addressable, the
+		// caller reports the failure, and a retry once the other connection is gone deletes
+		// it cleanly.
 		const hnswDbName = getDbName("s2b-hnsw", this.vaultId, indexId);
-		try {
-			indexedDB.deleteDatabase(hnswDbName);
-			indexedDB.deleteDatabase(`${hnswDbName}-hnsw-index`);
-		} catch (error) {
-			Logger.error(`[VectorStore] Failed to delete IndexedDB databases for ${indexId}:`, error);
+		const dbNames = [hnswDbName, `${hnswDbName}-hnsw-index`];
+		const results = await Promise.all(dbNames.map((dbName) => deleteDatabase(dbName)));
+
+		const failures: string[] = [];
+		results.forEach((result, idx) => {
+			if (result.status === "error") {
+				Logger.error(`[VectorStore] Failed to delete IndexedDB database ${dbNames[idx]}:`, result.error);
+				failures.push(`${dbNames[idx]}: ${result.error.message}`);
+			} else if (result.status === "blocked") {
+				Logger.warn(
+					`[VectorStore] Deletion of IndexedDB database ${dbNames[idx]} is blocked by an open connection.`,
+				);
+				failures.push(
+					`${dbNames[idx]}: blocked by another open connection (close other Obsidian windows for this vault and try again)`,
+				);
+			}
+		});
+
+		if (failures.length > 0) {
+			throw new Error(`Could not delete stored vectors for ${indexId}: ${failures.join("; ")}`);
 		}
 
 		// Remove from plugin data

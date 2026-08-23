@@ -259,6 +259,61 @@ export function getDbName(prefix: string, vaultId: string, indexId?: string): st
 	return `${prefix}-${vaultId}-${sanitized}`;
 }
 
+/** Outcome of a {@link deleteDatabase} call. */
+export type DeleteDatabaseResult =
+	/** The database was deleted (or did not exist). */
+	| { status: "deleted" }
+	/**
+	 * Another open connection is holding the database. The request stays queued and the
+	 * browser completes it once that connection closes — this is a "not yet", not a
+	 * failure, and the request cannot be cancelled.
+	 */
+	| { status: "blocked" }
+	/** The deletion genuinely failed. */
+	| { status: "error"; error: Error };
+
+/**
+ * Promisified `indexedDB.deleteDatabase`.
+ *
+ * The raw API returns a request and reports outcomes through events, so a bare call
+ * tells the caller nothing: `onerror` and `onblocked` are invisible to a surrounding
+ * try/catch (which only sees synchronous throws), and the deletion silently doesn't
+ * happen while the code proceeds as though it had. Deleting a database that does not
+ * exist succeeds, which is what we want for idempotent cleanup.
+ *
+ * Blocked deletions resolve as `"blocked"` rather than waiting on a timeout. An
+ * IndexedDB delete request cannot be cancelled: it stays queued and the browser runs it
+ * as soon as the blocking connection closes. Waiting on a timeout would report a failure
+ * for something that usually completes moments later, and there is nothing to undo.
+ *
+ * `"blocked"` is deliberately distinct from `"deleted"`: the request is still pending
+ * against that database name, so callers must not treat the name as free to reuse — a
+ * recreated database can be destroyed by the queued request when it eventually fires.
+ *
+ * Never rejects; every outcome is described by the resolved value.
+ */
+export function deleteDatabase(name: string): Promise<DeleteDatabaseResult> {
+	return new Promise<DeleteDatabaseResult>((resolve) => {
+		let request: IDBOpenDBRequest;
+		try {
+			request = indexedDB.deleteDatabase(name);
+		} catch (error) {
+			resolve({ status: "error", error: error instanceof Error ? error : new Error(String(error)) });
+			return;
+		}
+
+		request.onsuccess = () => resolve({ status: "deleted" });
+		request.onerror = () =>
+			resolve({
+				status: "error",
+				error: request.error ?? new Error(`Failed to delete IndexedDB database "${name}"`),
+			});
+		// Resolve immediately: the request stays live and will complete on its own once the
+		// blocking connection closes, so there is nothing to wait for or to undo.
+		request.onblocked = () => resolve({ status: "blocked" });
+	});
+}
+
 /**
  * Result from a vector similarity search (internal use).
  * Contains the document and its similarity score.
