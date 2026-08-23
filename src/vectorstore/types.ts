@@ -283,10 +283,12 @@ export type DeleteDatabaseResult =
  *
  * Blocked deletions resolve as `"blocked"` rather than waiting on a timeout. An
  * IndexedDB delete request cannot be cancelled: it stays queued and the browser runs it
- * as soon as the blocking connection closes. Rejecting after a timeout would therefore
- * be a lie in both directions — the caller is told the delete failed, and it then
- * usually happens anyway, moments later. Reporting "blocked" states exactly what is
- * known: the request is in flight and out of our hands.
+ * as soon as the blocking connection closes. Waiting on a timeout would report a failure
+ * for something that usually completes moments later, and there is nothing to undo.
+ *
+ * `"blocked"` is deliberately distinct from `"deleted"`: the request is still pending
+ * against that database name, so callers must not treat the name as free to reuse — a
+ * recreated database can be destroyed by the queued request when it eventually fires.
  *
  * Never rejects; every outcome is described by the resolved value.
  */
