@@ -10,7 +10,7 @@ import type { EmbedModelConfig } from "../providers/index";
 import type { ChatModel } from "../stores/chatStore.svelte";
 import { getData } from "../stores/dataStore.svelte";
 import { getPlugin, requestSettingsTab } from "../stores/state.svelte";
-import { addProviderAction, settingsAction, showActionNotice } from "../utils/actionNotice";
+import { ProviderSetupModal } from "../views/provider-setup/ProviderSetup";
 import type { HydratedChatModelMetadata, HydratedEmbeddingModelMetadata } from "../types/modelMetadata";
 
 export interface ModelOption {
@@ -458,7 +458,19 @@ export class AvailableModels {
 	};
 
 	/**
-	 * Opens the plugin's settings tab so the user can configure a provider.
+	 * Take the user to whatever actually unblocks model selection.
+	 *
+	 * Callers are "Configure Provider"/"Configure Models" buttons that already state the
+	 * problem inline (see `unavailableHint` on ModelSettingControl), so this does the thing
+	 * the button names rather than narrating it: with no provider configured, the only
+	 * possible next step is creating one, so open `ProviderSetupModal` directly instead of
+	 * dropping the user on a settings tab with a notice repeating the hint they just read.
+	 * Same reasoning — and the same modal — as ChatRecommendations.openModelPicker.
+	 *
+	 * The remaining cases are genuinely ambiguous (a provider exists but exposes no models,
+	 * or is unreachable), so those still land on the General tab where every provider can be
+	 * inspected, with a notice saying what was wrong — otherwise the tab looks unremarkable
+	 * and the button reads as a no-op.
 	 *
 	 * `dismiss` MUST be passed when calling from inside a modal. Obsidian's settings window is
 	 * itself a modal at the same z-index, so opening it from a modal that stays put just stacks it
@@ -470,32 +482,21 @@ export class AvailableModels {
 			setting?: { open: () => void; openTabById: (id: string) => void };
 		};
 
-		// Every branch must produce a Notice, or the button appears to do nothing: it navigates to
-		// a settings tab that looks unremarkable, with no statement of what was wrong. The
-		// embedding case in particular fell through silently — a provider with chat models but no
-		// embedding models satisfies both checks below.
-		//
-		// This method already lands the user on the General tab, so the links here are the step
-		// *after* that — the modal that actually resolves the branch — rather than a redundant
-		// "open settings".
+		// Nothing to configure yet: go straight to creating a provider. Closing the caller
+		// first for the same z-index reason the settings path needs it.
 		if (!this.hasProviders) {
-			showActionNotice("No AI provider configured yet.", addProviderAction());
-		} else if (needsEmbedding && !this.hasEmbedModels) {
-			// No provider exposes an embedding model at all, so the fix is a provider —
-			// not an index config. That also avoids guessing search-vs-graph here: this
-			// method has no purpose in scope, and picking one would send graph users to
-			// reconfigure search.
-			showActionNotice(
-				"No embedding models available. Add a provider that offers embeddings, or check that this one exposes them.",
-				addProviderAction("Add a provider"),
-			);
+			dismiss?.();
+			new ProviderSetupModal(this.#plugin, {}).open();
+			return;
+		}
+
+		// A provider exists but doesn't offer what's needed. Which provider is at fault isn't
+		// knowable here, so the General tab (listing all of them) is the honest destination —
+		// and the notice is what stops that tab from looking like nothing happened.
+		if (needsEmbedding && !this.hasEmbedModels) {
+			new Notice("No embedding models found for your providers. Check that one exposes embeddings.");
 		} else if (!needsEmbedding && !this.hasModels) {
-			showActionNotice(
-				"No models found. Check that your provider is running and reachable.",
-				settingsAction("general", "Review providers"),
-			);
-		} else {
-			new Notice("Opening provider settings.");
+			new Notice("No models found. Check that your provider is running and reachable.");
 		}
 
 		dismiss?.();
