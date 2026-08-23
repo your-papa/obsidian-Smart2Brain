@@ -156,7 +156,7 @@ function registerTrigger(node: HTMLElement, id: T) {
 			<Tabs.Trigger
 				value={tab.id}
 				{@attach (node) => registerTrigger(node, tab.id)}
-				class="s2b-tab-trigger relative z-[1] px-3 py-1.5 text-sm font-medium rounded-md border border-transparent bg-transparent shadow-none transition-colors data-[state=active]:text-[--text-normal] data-[state=inactive]:text-[--text-muted] data-[state=inactive]:hover:text-[--text-normal]"
+				class="s2b-tab-trigger relative z-[1] px-3 py-1.5 text-sm font-medium rounded-[10px] border border-transparent bg-transparent shadow-none transition-colors data-[state=active]:text-[--text-normal] data-[state=inactive]:text-[--text-muted] data-[state=inactive]:hover:text-[--text-normal]"
 			>
 				<span class="s2b-tab-label">
 					{#if tab.icon}
@@ -214,7 +214,12 @@ function registerTrigger(node: HTMLElement, id: T) {
 		position: absolute;
 		top: 0;
 		left: 0;
-		border-radius: 6px;
+		/* Softer than the original 6px, echoing the chat composer's rounding without
+		   going fully round: the indicator is only ~34px tall, so a pill radius
+		   (>=17px) would close the ends into half-circles and read as a different
+		   component. 10px keeps recognisably straight edges top and bottom while
+		   losing the boxy corners. */
+		border-radius: 10px;
 		background: color-mix(in srgb, var(--interactive-accent) 16%, transparent);
 		box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--interactive-accent) 24%, transparent);
 		opacity: 0;

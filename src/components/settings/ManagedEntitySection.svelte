@@ -71,7 +71,11 @@ const shouldRenderChildren = $derived(hasItems ?? !!children);
       {@render children()}
     </div>
   {:else if emptyMessage}
-    <div class="managed-entity-section-empty setting-item-description">{emptyMessage}</div>
+    <div class="setting-item managed-entity-section-empty">
+      <div class="setting-item-info">
+        <div class="setting-item-description">{emptyMessage}</div>
+      </div>
+    </div>
   {/if}
 </SettingGroup>
 
@@ -125,7 +129,15 @@ const shouldRenderChildren = $derived(hasItems ?? !!children);
     opacity: 0;
   }
 
+  /* The empty state stands in for the item list, so it reuses `.setting-item`
+     padding to line its text up with the description row above rather than
+     sitting flush against the card edge. There is no row above it to separate
+     it from, so core's top border is dropped. */
   .managed-entity-section-empty {
+    border-top: 0;
+  }
+
+  .managed-entity-section-empty .setting-item-description {
     margin: 0;
   }
 

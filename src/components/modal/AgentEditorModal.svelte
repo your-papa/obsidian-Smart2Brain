@@ -1406,13 +1406,15 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
     padding-bottom: 0 !important;
   }
 
-  /* Muted text like `ManagedEntitySection`'s empty state, but padded to the native
-     `.setting-item` inset so it lines up with the rows above it instead of sitting
-     20px further left. */
+  /* Muted text like `ManagedEntitySection`'s empty state. The horizontal inset is
+     0 to match `.skill-entity` / `.mcp-entity`, which zero out their own side
+     padding just below — the empty state stands in for those rows, so a native
+     `.setting-item` inset here would indent the message relative to the list it
+     replaces. Vertical padding keeps it off the heading above. */
   .skill-empty-state,
   .mcp-empty-state {
     margin: 0;
-    padding: 8px var(--size-4-5);
+    padding: 8px 0;
   }
   :global(.skill-entity),
   :global(.mcp-entity) {

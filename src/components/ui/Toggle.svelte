@@ -38,3 +38,20 @@ function handleKeydown(e: KeyboardEvent) {
 >
 	<input type="checkbox" tabindex={-1} {checked} {disabled} onchange={handleChange} />
 </label>
+
+<style>
+	/* The toggle usually sits in a crowded flex row (ManagedEntityItem's action
+	   cluster: delete / settings / duplicate / toggle). Those icon buttons are
+	   pinned to a 44px touch floor on mobile, so the row overflows a phone's
+	   width and flexbox looks for something to compress — and the toggle, with no
+	   shrink guard of its own, is the only thing that gives. The track squashes
+	   horizontally and core's round knob is squeezed into an ellipse with it.
+
+	   Pinning the basis to the track's own width keeps it circular. Sized from
+	   Obsidian's toggle variables rather than literals so themes that restyle the
+	   switch still get an accurate reservation. */
+	.checkbox-container {
+		flex-shrink: 0;
+		width: var(--toggle-width, 40px);
+	}
+</style>

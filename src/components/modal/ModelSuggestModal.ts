@@ -150,7 +150,19 @@ export class ModelSuggestModal extends SuggestModal<HydratedModel> {
 			btn.type = "button";
 			btn.className = "s2b-pill s2b-pill--interactive";
 			btn.dataset.vendorId = vendor.id;
-			btn.textContent = vendor.name;
+			// Same artwork the rows use. Only the nine labs in VENDOR_LOGO_COMPONENTS
+			// have logos, so a miss falls back to the bare name rather than a
+			// placeholder glyph — matches `renderSuggestion`. The marks are
+			// monochrome `currentColor` glyphs, so they follow the pill's own
+			// colour (muted at rest, accent while active) alongside the label.
+			const vendorLogo = createVendorLogoElement(vendor.id);
+			if (vendorLogo) {
+				const logoWrap = document.createElement("span");
+				logoWrap.className = "s2b-model-filter-icon s2b-model-filter-icon--vendor";
+				logoWrap.appendChild(vendorLogo);
+				btn.appendChild(logoWrap);
+			}
+			btn.appendChild(document.createTextNode(vendor.name));
 			btn.addEventListener("click", (evt) => {
 				evt.preventDefault();
 				this.selectedVendor = this.selectedVendor === vendor.id ? null : vendor.id;
@@ -226,17 +238,25 @@ export class ModelSuggestModal extends SuggestModal<HydratedModel> {
 
 		const actions = header.createDiv({ cls: "s2b-model-suggestion-actions" });
 		const isFavorite = this.pluginData.isFavoriteModel(model.provider, model.variantKey);
-		const favBtn = actions.createEl("button", { cls: "s2b-model-suggestion-fav" });
+		// `clickable-icon` is Obsidian's own icon-button class: transparent at
+		// rest, `--background-modifier-hover` on press. Without it the bare
+		// <button> keeps the host's default background and reads as permanently
+		// highlighted.
+		const favBtn = actions.createEl("button", { cls: "clickable-icon s2b-model-suggestion-fav" });
 		favBtn.type = "button";
 		favBtn.toggleClass("is-favorite", isFavorite);
 		favBtn.setAttribute("aria-label", isFavorite ? "Remove from favorites" : "Add to favorites");
+		favBtn.setAttribute("aria-pressed", String(isFavorite));
 		setIcon(favBtn, "star");
 		// The row itself selects the model, so the star must not bubble.
 		favBtn.addEventListener("click", (evt) => {
 			evt.preventDefault();
 			evt.stopPropagation();
 			this.pluginData.toggleFavoriteModel(model.provider, model.variantKey);
-			favBtn.toggleClass("is-favorite", this.pluginData.isFavoriteModel(model.provider, model.variantKey));
+			const nowFavorite = this.pluginData.isFavoriteModel(model.provider, model.variantKey);
+			favBtn.toggleClass("is-favorite", nowFavorite);
+			favBtn.setAttribute("aria-pressed", String(nowFavorite));
+			favBtn.setAttribute("aria-label", nowFavorite ? "Remove from favorites" : "Add to favorites");
 		});
 
 		if (isSelected) {
