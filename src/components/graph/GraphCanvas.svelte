@@ -459,6 +459,26 @@ function isOverClusterPill(x: number, y: number): boolean {
 	return clusterPillAt(x, y) !== undefined;
 }
 
+// ── Cursor ──────────────────────────────────────────────────
+//
+// One function owns the canvas cursor, and it is a pure function of the
+// present state — never of a transition. The previous code assigned the
+// cursor inside the "did the hovered node change?" guard, so moving from a
+// topic pill (which forces hoveredNode = null) onto empty canvas compared
+// null to null, skipped the assignment, and left `pointer` stuck on the
+// canvas. Deriving from current position instead makes that class of bug
+// unrepresentable.
+//
+// Clickable things resolve to `var(--cursor)` rather than a literal
+// `pointer` so the graph tracks Obsidian's "Use pointer cursor for clickable
+// elements" setting, exactly like the native `.clickable-icon` buttons on the
+// toolbar rail. Grab/grabbing stay literal: panning is direct manipulation of
+// a surface, not a click target, so it is not what that setting governs.
+function applyCursor(overInteractive: boolean) {
+	if (!pixi) return;
+	pixi.canvas.style.cursor = overInteractive ? "var(--cursor)" : lassoMode ? "crosshair" : "grab";
+}
+
 // ── On-demand render scheduling ─────────────────────────────
 //
 // Every render trigger funnels through requestRender, which coalesces any
@@ -1768,7 +1788,7 @@ function handleMouseMove(e: PointerEvent) {
 	} else {
 		// Hover detection: check cluster legend first, then nodes
 		if (isOverClusterPill(x, y)) {
-			canvas.style.cursor = "pointer";
+			applyCursor(true);
 			if (hoveredNode) {
 				hoveredNode = null;
 				requestRender("world");
@@ -1777,10 +1797,12 @@ function handleMouseMove(e: PointerEvent) {
 		}
 
 		const node = findNodeAt(x, y);
+		// Outside the guard below: the cursor follows the pointer's current
+		// position, while the guard gates only the expensive re-render.
+		applyCursor(node !== null);
 		if (node !== hoveredNode) {
 			hoveredNode = node;
 			previewTriggeredForNode = null;
-			canvas.style.cursor = node ? "pointer" : lassoMode ? "crosshair" : "grab";
 			requestRender("world");
 		}
 		// Cmd/Ctrl+hover triggers note preview (fire once per node)
@@ -1922,6 +1944,9 @@ function handleMouseLeave() {
 	cancelLongPress();
 	hoveredNode = null;
 	previewTriggeredForNode = null;
+	// Leaving while over a node or pill would otherwise strand `var(--cursor)`
+	// on the canvas, so re-entering over empty space starts out wrong.
+	applyCursor(false);
 	requestRender("world");
 }
 
@@ -2558,6 +2583,23 @@ $effect(() => {
 	// nodeSize feeds node radii, which the hit grid bakes in at build time.
 	hitGridDirty = true;
 	if (pixi) requestRender("world");
+});
+
+// Lasso is toggled from the toolbar, so the pointer is over the rail — not the
+// canvas — when the mode flips, and no pointermove follows to refresh the
+// cursor. Without this the crosshair only appears once you happen to move over
+// a node and back off it. DOM manipulation in response to a prop, which is what
+// $effect is for.
+$effect(() => {
+	const _lasso = lassoMode;
+	void _lasso;
+	// Mid-gesture the cursor belongs to the drag, not to hover state. Untracked
+	// so this effect keys on lassoMode alone and isn't also re-run by the
+	// lasso's own start/end.
+	untrack(() => {
+		if (isLassoing || dragSimNode) return;
+		applyCursor(false);
+	});
 });
 
 // Hot-update force parameters without full rebuild.

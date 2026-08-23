@@ -692,7 +692,7 @@ onDestroy(() => {
     border-radius: 0;
     background: transparent;
     text-align: left;
-    cursor: pointer;
+    cursor: var(--cursor);
     color: inherit;
   }
 
