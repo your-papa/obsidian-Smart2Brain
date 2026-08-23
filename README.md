@@ -51,9 +51,9 @@ bun run lint        # Biome linter
 bun run test        # Vitest unit tests
 ```
 
-To try a dev build in a real vault, run `bun run setup-vault` once to symlink `build/smart-second-brain/` into the bundled test vault's plugins folder, then open `integration/Smart2Brain Test Vault` in Obsidian and enable the plugin. See [`CLAUDE.md`](CLAUDE.md) for the full command reference and integration-test setup.
+To try a dev build in a real vault, run `bun run setup-vault` once to symlink `build/smart-second-brain/` into the bundled test vault's plugins folder, then open `integration/S2B Test Vault` in Obsidian and enable the plugin. See [`CLAUDE.md`](CLAUDE.md) for the full command reference and integration-test setup.
 
-Architecture background: [`docs/architecture-overview.md`](docs/architecture-overview.md) — outdated, kept for context. [`CLAUDE.md`](CLAUDE.md) reflects the current structure.
+[`CLAUDE.md`](CLAUDE.md) describes the module structure and conventions.
 
 ## Contributing
 

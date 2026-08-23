@@ -11,7 +11,7 @@
  */
 import { execFileSync } from "node:child_process";
 
-const VAULT = "Smart2Brain Test Vault";
+const VAULT = "S2B Test Vault";
 const PLUGIN = 'app.plugins.plugins["smart-second-brain"]';
 const ALGORITHMS = ["lexical", "semantic", "hybrid"];
 const K = 10;

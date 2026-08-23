@@ -36,7 +36,7 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:integration": "vitest run --config vitest.integration.config.ts",
-    "setup-vault": "mkdir -p 'integration/Smart2Brain Test Vault/.obsidian/plugins/smart-second-brain' && cd 'integration/Smart2Brain Test Vault/.obsidian/plugins/smart-second-brain' && ln -sf ../../../../../build/smart-second-brain/main.js main.js && ln -sf ../../../../../build/smart-second-brain/styles.css styles.css && ln -sf ../../../../../build/smart-second-brain/manifest.json manifest.json",
+    "setup-vault": "mkdir -p 'integration/S2B Test Vault/.obsidian/plugins/smart-second-brain' && cd 'integration/S2B Test Vault/.obsidian/plugins/smart-second-brain' && ln -sf ../../../../../build/smart-second-brain/main.js main.js && ln -sf ../../../../../build/smart-second-brain/styles.css styles.css && ln -sf ../../../../../build/smart-second-brain/manifest.json manifest.json",
     "corpus:generate": "bun run scripts/generate-search-corpus.ts",
     "bench:layout": "bun run scripts/graph-layout-bench.ts",
     "test:benchmark": "vitest run --config vitest.integration.config.ts integration/search-relevance-benchmark.test.ts"

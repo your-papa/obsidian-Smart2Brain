@@ -39,7 +39,7 @@
 import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-const DEFAULT_VAULT = "integration/Smart2Brain Test Vault";
+const DEFAULT_VAULT = "integration/S2B Test Vault";
 /** Corpus lives in its own folder so it is trivially separable from hand-written fixtures. */
 const CORPUS_DIR = "Corpus";
 /**

@@ -135,7 +135,7 @@ describe("search modal", () => {
 	const filesystemFixtureBaseName = `Filesystem Created Recent Fixture ${Date.now()}`;
 	const filesystemFixtureNoteName = `${filesystemFixtureBaseName}.md`;
 	const filesystemFixturePath = fileURLToPath(
-		new URL(`./Smart2Brain Test Vault/${encodeURIComponent(filesystemFixtureNoteName)}`, import.meta.url),
+		new URL(`./S2B Test Vault/${encodeURIComponent(filesystemFixtureNoteName)}`, import.meta.url),
 	);
 	const multiSelectCreateNoteName = `Search Modal Shift Enter Fixture ${Date.now()}.md`;
 	const multiSelectCreateNoteTitle = multiSelectCreateNoteName.replace(/\.md$/u, "");

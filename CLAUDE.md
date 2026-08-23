@@ -18,7 +18,7 @@ Use `bun` (not npm/yarn). The lockfile is `bun.lock`.
 - `bun run test` — Vitest unit tests (single run). `bun run test:watch` for watch mode. `bun run test:coverage` for coverage.
 - `bun run test -- <pattern>` — single file/pattern, e.g. `bun run test -- test/providers/openai.test.ts`.
 - `bun run test:integration` — end-to-end tests against a live Obsidian instance (see Integration tests below).
-- `bun run setup-vault` — symlinks `build/smart-second-brain/` into `integration/Smart2Brain Test Vault/.obsidian/plugins/`. Run once after the first build.
+- `bun run setup-vault` — symlinks `build/smart-second-brain/` into `integration/S2B Test Vault/.obsidian/plugins/`. Run once after the first build.
 
 There is no separate `bun install` step needed beyond what `bun.lock` records; do **not** edit `package.json` versions manually without re-locking.
 
@@ -49,7 +49,9 @@ Resources defined in `btca.config.jsonc`: `svelte`, `tailwindcss`, `langchainjs`
 
 ## Architecture
 
-`docs/architecture-overview.md` is the canonical deep-dive. The short version:
+This section is the canonical description of the architecture. (A longer
+`docs/architecture-overview.md` existed but went stale and was removed in
+August 2026; recover it from git history if useful, but do not trust it.)
 
 ### Composition root
 
@@ -112,10 +114,10 @@ Tests mock `obsidian`, `electron`, and `@sap-ai-sdk/langchain` via `test/__mocks
 Prefer the Obsidian CLI for manual verification over editing-and-hoping. Always target the test vault by name, with `vault=` **first**:
 
 ```bash
-obsidian vault="Smart2Brain Test Vault" command id=smart-second-brain:search-notes
-obsidian vault="Smart2Brain Test Vault" dev:dom selector='.s2b-search-modal' total
-obsidian vault="Smart2Brain Test Vault" dev:screenshot path="/tmp/search-modal.png"
-obsidian vault="Smart2Brain Test Vault" dev:errors
+obsidian vault="S2B Test Vault" command id=smart-second-brain:search-notes
+obsidian vault="S2B Test Vault" dev:dom selector='.s2b-search-modal' total
+obsidian vault="S2B Test Vault" dev:screenshot path="/tmp/search-modal.png"
+obsidian vault="S2B Test Vault" dev:errors
 ```
 
 Stable manual flow:
@@ -132,7 +134,7 @@ Known issue: on macOS, launching `obsidian` from Codex Desktop can cause Obsidia
 
 1. `bun run build`
 2. `bun run setup-vault` (one-time symlink)
-3. Open `integration/Smart2Brain Test Vault` in Obsidian and enable the plugin.
+3. Open `integration/S2B Test Vault` in Obsidian and enable the plugin.
 4. (Optional) Configure a provider with valid API keys for LLM-dependent tests.
 5. `bun run test:integration` — or a single file: `bunx vitest run --config vitest.integration.config.ts integration/plugin-lifecycle.test.ts`
 

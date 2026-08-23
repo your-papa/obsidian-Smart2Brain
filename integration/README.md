@@ -21,11 +21,11 @@ End-to-end tests that run against a live Obsidian instance using the `obsidian` 
    bun run setup-vault
    ```
 
-   This creates a symlink from `integration/Smart2Brain Test Vault/.obsidian/plugins/smart-second-brain` → `build/smart-second-brain`.
+   This creates a symlink from `integration/S2B Test Vault/.obsidian/plugins/smart-second-brain` → `build/smart-second-brain`.
 
 3. **Open the test vault in Obsidian:**
 
-   Open Obsidian → Manage Vaults → Open folder as vault → select `integration/Smart2Brain Test Vault`.
+   Open Obsidian → Manage Vaults → Open folder as vault → select `integration/S2B Test Vault`.
 
 4. **Enable the plugin:**
 
@@ -108,36 +108,36 @@ describe("my feature", () => {
 
 ## Targeting the Vault
 
-All CLI commands automatically target the **Smart2Brain Test Vault** by placing `vault="Smart2Brain Test Vault"` before the command (see `helpers/cli.ts`). You can have other vaults open — tests will always run against the correct one.
+All CLI commands automatically target the **S2B Test Vault** by placing `vault="S2B Test Vault"` before the command (see `helpers/cli.ts`). You can have other vaults open — tests will always run against the correct one.
 
 ## Manual CLI Debugging
 
 For ad hoc UI verification outside the automated test suite, prefer this sequence:
 
-1. Make sure the **Smart2Brain Test Vault** is already open in the Obsidian desktop app.
+1. Make sure the **S2B Test Vault** is already open in the Obsidian desktop app.
 2. Execute a command:
 
    ```bash
-   obsidian vault="Smart2Brain Test Vault" command id=smart-second-brain:search-notes
+   obsidian vault="S2B Test Vault" command id=smart-second-brain:search-notes
    ```
 
 3. Poll until the UI is mounted instead of inspecting it immediately:
 
    ```bash
-   obsidian vault="Smart2Brain Test Vault" dev:dom selector='.s2b-search-modal' total
+   obsidian vault="S2B Test Vault" dev:dom selector='.s2b-search-modal' total
    ```
 
 4. Then inspect or capture it:
 
    ```bash
-   obsidian vault="Smart2Brain Test Vault" dev:dom selector='.s2b-search-modal .prompt-input-container' inner
-   obsidian vault="Smart2Brain Test Vault" dev:screenshot path="/tmp/search-modal.png"
-   obsidian vault="Smart2Brain Test Vault" dev:errors
+   obsidian vault="S2B Test Vault" dev:dom selector='.s2b-search-modal .prompt-input-container' inner
+   obsidian vault="S2B Test Vault" dev:screenshot path="/tmp/search-modal.png"
+   obsidian vault="S2B Test Vault" dev:errors
    ```
 
 Notes:
 
-- Use the vault name `Smart2Brain Test Vault`, not the repo-relative path. The CLI resolves the opened vault by name.
+- Use the vault name `S2B Test Vault`, not the repo-relative path. The CLI resolves the opened vault by name.
 - Prefer `command`, `dev:dom`, `dev:screenshot`, and `dev:errors` for manual checks.
 - `eval` and `dev:cdp` are more fragile and should be used only when DOM queries and screenshots are not enough.
 - Some commands return before the modal/view is fully mounted, so polling for a selector is the safest pattern.

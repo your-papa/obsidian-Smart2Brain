@@ -3,8 +3,8 @@ import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { gunzipSync } from "node:zlib";
 
-const VAULT_NAME = "Smart2Brain Test Vault";
-const CHAT_FILES_DIR = fileURLToPath(new URL("../Smart2Brain Test Vault/Chats/", import.meta.url));
+const VAULT_NAME = "S2B Test Vault";
+const CHAT_FILES_DIR = fileURLToPath(new URL("../S2B Test Vault/Chats/", import.meta.url));
 
 interface PersistedCheckpointRecord {
 	checkpoint?: {
