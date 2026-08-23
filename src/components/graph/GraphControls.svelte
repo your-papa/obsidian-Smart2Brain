@@ -1027,7 +1027,10 @@ $effect(() => {
     background: none;
     border: none;
     border-radius: 4px;
-    cursor: pointer;
+    /* Not a literal `pointer`: Obsidian's base `button` rule already resolves
+       to var(--cursor), and hardcoding here made these rows disagree with the
+       toolbar rail whenever "Use pointer cursor for clickable elements" is off. */
+    cursor: var(--cursor);
     color: var(--text-normal);
     text-align: left;
     transition: background-color 0.1s ease;
@@ -1089,7 +1092,7 @@ $effect(() => {
     width: 100%;
     background: none;
     border: none;
-    cursor: pointer;
+    cursor: var(--cursor);
     padding: 0;
   }
 
