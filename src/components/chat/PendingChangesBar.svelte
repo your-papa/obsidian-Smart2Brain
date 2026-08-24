@@ -405,12 +405,26 @@ function previewChange(evt: Event, entry: PendingChangeEntry) {
     border: 1px solid transparent;
     border-radius: 22px;
     overflow: hidden;
-    background: var(--background-secondary);
+    background: var(--pcb-bg);
+    /* Tracks `--input-bg` in Input.svelte — same value, same per-split flip, so
+       the bar and the composer always read as one stacked surface. */
+    --pcb-bg: var(--background-secondary);
     /* Cap the whole bar, not just the list, so a long run of changes can't grow
        past the composer. The summary row is a flex sibling that never shrinks,
        so it stays pinned and Accept/Reject All remain reachable at any length. */
     min-height: 0;
     max-height: 45vh;
+  }
+
+  /* In a sidebar the page itself is `--background-primary`, and in many themes
+     that is indistinguishable from `--background-secondary` — so the fill alone
+     stopped separating the bar from the chat view behind it. Flip the fill to
+     the page colour and let a real border define the card, exactly as
+     `.chat-input-wrapper` does for the composer directly below. */
+  :global(.mod-left-split) .pcb-container,
+  :global(.mod-right-split) .pcb-container {
+    --pcb-bg: var(--background-primary);
+    border-color: var(--background-modifier-border);
   }
 
   .pcb-summary {
@@ -421,7 +435,9 @@ function previewChange(evt: Event, entry: PendingChangeEntry) {
        controls have to stay reachable however many changes are pending. */
     flex-shrink: 0;
     padding: 6px 10px;
-    background: var(--background-secondary);
+    /* Inherits the container's per-split fill rather than re-stating
+       `--background-secondary`, which would paint over it in a sidebar. */
+    background: var(--pcb-bg);
     border: none;
     cursor: pointer;
     color: var(--text-normal);
