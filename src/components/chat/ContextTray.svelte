@@ -261,7 +261,7 @@ onDestroy(() => {
             use:icon={deactivated ? "eye-off" : "eye"}
             style="--icon-size: 12px"
           ></div>
-          <span
+          <span class="chip-label"
             >{note.file.basename}{#if !deactivated && note.context}<span
                 class="chip-meta"> · {note.context}</span
               >{/if}</span
@@ -363,15 +363,27 @@ onDestroy(() => {
     align-items: center;
   }
 
-  /* One accent-tinted palette for every chip, attachments included, mixed
-     against `--background-primary` — the fill the composer actually has now
-     (mixing into `--background-secondary` produced a grey-shifted tint over
-     the page-coloured card). Attachments used to be green, which read muddy
-     and collided with what green means one surface up: in the pending-changes
-     bar and tool cards green is DIFF-ADD semantics, so a green chip implied a
+  /* One accent-tinted HUE for every chip, mixed against `--background-primary`
+     — the fill the composer actually has now (mixing into
+     `--background-secondary` produced a grey-shifted tint over the
+     page-coloured card). Attachments used to be green, which read muddy and
+     collided with what green means one surface up: in the pending-changes bar
+     and tool cards green is DIFF-ADD semantics, so a green chip implied a
      pending mutation rather than "this file rides along with the message".
-     What distinguishes an attachment is its file-type icon and remove action;
-     what distinguishes a reference is the eye icon and its promote action. */
+
+     The two chip families are separated by WEIGHT within that one hue, not by
+     colour (see the `.attachment` override below). A hollow chip reads as a
+     pointer to something; a filled chip reads as containing something — which
+     is exactly the difference: a reference sends a path the model may choose
+     to read, an attachment inlines the file's bytes into the message. It also
+     tracks how each is created: references appear on their own as you move
+     around the vault (ambient, so quiet), attachments are a deliberate act
+     (louder). And promoting one to the other visibly fills the chip, so the
+     paperclip action shows its own result.
+
+     This carries real weight: the reference/attachment distinction drives
+     token cost and what reaches an untrusted provider, and it was previously
+     encoded only in a 12px icon plus a hover tooltip that mobile never shows. */
   /* Compact variant of the shared pill: inside the composer card the default
      4px vertical padding reads oversized next to the single text line below.
      Scoped to the tray so search-modal / history pills keep their size. */
@@ -379,14 +391,36 @@ onDestroy(() => {
     padding: 2px 8px;
   }
 
+  /* Ghost: the default for reference chips (visible note, selection, graph).
+     Fill is the page colour, so the chip is defined by its border alone —
+     the same "outline, not slab" logic the composer itself now follows. The
+     accent-tinted border and `--text-normal` label are what keep it clearly
+     active rather than disabled; hover brings in a faint tint so it still
+     answers the pointer. */
   .context-tray :global(.s2b-chip) {
-    --s2b-pill-bg: color-mix(in srgb, var(--interactive-accent) 6%, var(--background-primary));
-    --s2b-pill-border: color-mix(in srgb, var(--interactive-accent) 16%, var(--background-modifier-border));
+    --s2b-pill-bg: var(--background-primary);
+    --s2b-pill-border: color-mix(in srgb, var(--interactive-accent) 20%, var(--background-modifier-border));
     --s2b-pill-color: var(--text-normal);
-    --s2b-pill-bg-hover: color-mix(in srgb, var(--interactive-accent) 10%, var(--background-primary));
-    --s2b-pill-border-hover: color-mix(in srgb, var(--interactive-accent) 22%, var(--background-modifier-border));
+    --s2b-pill-bg-hover: color-mix(in srgb, var(--interactive-accent) 7%, var(--background-primary));
+    --s2b-pill-border-hover: color-mix(in srgb, var(--interactive-accent) 30%, var(--background-modifier-border));
   }
 
+  /* Filled: attachments carry content, so they carry pigment. 12% is enough
+     to read as solid next to a hollow chip at 11px without competing with the
+     accent border of the focused composer around it. */
+  .context-tray :global(.s2b-chip.attachment) {
+    --s2b-pill-bg: color-mix(in srgb, var(--interactive-accent) 12%, var(--background-primary));
+    --s2b-pill-border: color-mix(in srgb, var(--interactive-accent) 24%, var(--background-modifier-border));
+    --s2b-pill-bg-hover: color-mix(in srgb, var(--interactive-accent) 17%, var(--background-primary));
+    --s2b-pill-border-hover: color-mix(in srgb, var(--interactive-accent) 32%, var(--background-modifier-border));
+  }
+
+  /* Now that an ACTIVE reference chip is also page-filled (ghost), fill no
+     longer separates deactivated from active — so the remaining cues have to
+     carry it: no accent in the border at all, muted label, reduced opacity,
+     and a struck-through name. The strikethrough is the unambiguous one; it
+     says "excluded from the message" without relying on a tint difference
+     that some themes render nearly invisible. */
   .s2b-chip.deactivated {
     --s2b-pill-bg: var(--background-primary);
     --s2b-pill-border: color-mix(in srgb, var(--background-modifier-border) 90%, transparent);
@@ -395,6 +429,11 @@ onDestroy(() => {
     --s2b-pill-border-hover: color-mix(in srgb, var(--background-modifier-border) 90%, transparent);
     --s2b-pill-color-hover: var(--text-muted);
     opacity: 0.6;
+  }
+
+  .s2b-chip.deactivated .chip-label {
+    text-decoration: line-through;
+    text-decoration-color: color-mix(in srgb, currentColor 55%, transparent);
   }
 
   .s2b-chip.deactivated:hover {
