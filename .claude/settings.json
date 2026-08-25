@@ -22,7 +22,10 @@
       "Bash(obsidian vault=\"S2B Test Vault\" dev:dom *)",
       "Bash(obsidian vault=\"S2B Test Vault\" dev:screenshot *)",
       "Bash(obsidian vault=\"S2B Test Vault\" dev:errors)",
-      "Bash(gh api graphql *)"
+      "Bash(gh api graphql *)",
+      "Bash(grep *)",
+      "Bash(egrep *)",
+      "Bash(rg *)"
     ]
   }
 }
