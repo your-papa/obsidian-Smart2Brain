@@ -314,6 +314,20 @@ function resolveUpdateBases(threadId: string, filePath: string, diskContent: str
  * On total failure the LAST candidate's error is returned: that base is disk,
  * whose content is what the model can actually see, so its "could not find the
  * specified text" message is the one that will make sense to the model.
+ *
+ * Why pending is tried FIRST, given the model may have read disk (asked twice in
+ * review) — the two cases are disjoint, and neither is served by disk-first:
+ *
+ *   - The edits CONFLICT with the pending one (both rewrite the same text). Then
+ *     the model's `oldText` no longer exists in the pending base, that base fails
+ *     to match, and the loop falls through to disk on its own. The disk-derived
+ *     intent wins without any precedence rule.
+ *   - BOTH bases match. Then the target text survived the pending edit, so the
+ *     two edits are necessarily orthogonal — and only the pending base carries
+ *     both rounds. Disk-first would silently drop the earlier unreviewed edit,
+ *     which is exactly the data loss this rebase exists to prevent.
+ *
+ * Both are pinned by tests in test/agent/manageNotes.test.ts.
  */
 function applyEditsToFirstMatchingBase(
 	bases: string[],

@@ -722,6 +722,85 @@ describe("manageNotes tool", () => {
 			expect(staged.newContent).toBe("line one\nline two rewritten\nline three\n");
 		});
 
+		/**
+		 * Pending-first precedence, pinned (PR #426 review, second pass).
+		 *
+		 * When the model's edit CONFLICTS with the pending one (both touch the same
+		 * text), the pending base simply fails to match and the loop falls through
+		 * to disk — so the model's disk-derived intent wins on its own.
+		 *
+		 * When both bases match, the edits are necessarily orthogonal (the target
+		 * text survived the pending edit), and pending-first is what preserves BOTH
+		 * rounds. Disk-first would silently drop the earlier unreviewed edit, which
+		 * is the data loss this whole rebase exists to prevent.
+		 */
+		it("keeps both rounds when the follow-up edit is orthogonal to the pending one", async () => {
+			mockGetPendingUpdatesForPath.mockReturnValue([
+				{
+					...pendingEntry("test-thread-id"),
+					change: {
+						type: "update",
+						path: "Notes/doc.md",
+						originalContent: DISK,
+						// Pending touched line ONE; the follow-up below touches line three.
+						newContent: "line one edited\nline two\nline three\n",
+					},
+				},
+			]);
+
+			const result = await tool.invoke(
+				{
+					operations: [
+						{
+							type: "update",
+							path: "Notes/doc.md",
+							edits: [{ oldText: "line three", newText: "line three edited" }],
+						},
+					],
+				},
+				THREAD_CONFIG,
+			);
+
+			expect(result).toContain("superseded");
+			const staged = mockAddChanges.mock.calls[0][0][0];
+			// Both edits present — disk-first would have lost "line one edited".
+			expect(staged.newContent).toBe("line one edited\nline two\nline three edited\n");
+		});
+
+		it("lets a conflicting disk-derived edit win over the pending base", async () => {
+			mockGetPendingUpdatesForPath.mockReturnValue([
+				{
+					...pendingEntry("test-thread-id"),
+					change: {
+						type: "update",
+						path: "Notes/doc.md",
+						originalContent: DISK,
+						// Pending rewrote the very line the follow-up targets.
+						newContent: "line one\nPENDING VERSION\nline three\n",
+					},
+				},
+			]);
+
+			const result = await tool.invoke(
+				{
+					operations: [
+						{
+							type: "update",
+							path: "Notes/doc.md",
+							// Written against disk; no longer present in the pending base.
+							edits: [{ oldText: "line two", newText: "MODEL VERSION" }],
+						},
+					],
+				},
+				THREAD_CONFIG,
+			);
+
+			// Pending base can't match, so disk wins and the model's intent stands.
+			expect(result).not.toContain("superseded");
+			const staged = mockAddChanges.mock.calls[0][0][0];
+			expect(staged.newContent).toBe("line one\nMODEL VERSION\nline three\n");
+		});
+
 		it("reports the disk-base error when the edits match neither base", async () => {
 			mockGetPendingUpdatesForPath.mockReturnValue([pendingEntry("test-thread-id")]);
 
