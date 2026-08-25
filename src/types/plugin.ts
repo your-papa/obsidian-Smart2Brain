@@ -155,16 +155,35 @@ export const BUILT_IN_TOOL_IDS = [
 export type BuiltInToolId = (typeof BUILT_IN_TOOL_IDS)[number];
 
 /**
- * Reader for the file-backed prompt surface (per-agent base prompt). Returns the current
- * cached file content, or null when the file is absent. Implemented by the prompt-file layer
- * and injected into the data store so staleness detection stays synchronous inside the
- * reactive `staleGuidance` getter.
+ * A parsed prompt file (`Base.md` / `Memory.md`): the prompt text with the plugin-managed
+ * metadata frontmatter stripped, plus the shipped baseline version that frontmatter records.
+ *
+ * `version` is what makes "the default moved out from under YOUR edit" detectable. A
+ * customized body matches no shipped fingerprint, so on its own it cannot distinguish "you
+ * edited it and the default has since changed" (worth a notice) from "you edited it and
+ * nothing changed" (silence) — the in-file stamp records the baseline the edit started
+ * from, and travels with the note through sync, copies, and backups (unlike the plugin-data
+ * stamp it replaced). `undefined` means "unknown baseline" (e.g. the user removed the
+ * frontmatter), which stays silent rather than firing a notice we can't substantiate.
+ */
+export interface PromptFileSnapshot {
+	/** Prompt text with the metadata frontmatter stripped — what the model actually gets. */
+	body: string;
+	/** Shipped baseline version from the note's `version` frontmatter, if present. */
+	version: number | undefined;
+}
+
+/**
+ * Reader for the file-backed prompt surfaces (per-agent base + memory prompt). Returns the
+ * current cached parse, or null when the file is absent. Implemented by the prompt-file
+ * layer and injected into the data store so staleness detection stays synchronous inside
+ * the reactive `staleGuidance` getter.
  */
 export interface PromptFileReader {
-	/** Cached content of `System Prompts/<Agent Name>/Base.md`, or null if absent. */
-	getBasePrompt(agentId: string): string | null;
-	/** Cached content of `System Prompts/<Agent Name>/Memory.md`, or null if absent. */
-	getMemoryPrompt(agentId: string): string | null;
+	/** Cached parse of `System Prompts/<Agent Name>/Base.md`, or null if absent. */
+	getBasePromptFile(agentId: string): PromptFileSnapshot | null;
+	/** Cached parse of `System Prompts/<Agent Name>/Memory.md`, or null if absent. */
+	getMemoryPromptFile(agentId: string): PromptFileSnapshot | null;
 }
 
 /**
@@ -457,23 +476,11 @@ export interface AgentConfig {
 	 * eagerly to read/record is agent behavior.
 	 */
 	memoryEnabled?: boolean;
-	/**
-	 * Which shipped version each prompt file was last written from, keyed by prompt kind
-	 * ("base" / "memory"). Stamped whenever we write the file from a shipped default (seed,
-	 * silent update, reset) and refreshed when the user saves their own text.
-	 *
-	 * This is what makes "the default moved out from under YOUR edit" detectable. A
-	 * customized file matches no shipped fingerprint, so on its own it cannot distinguish
-	 * "you edited it and the default has since changed" (worth a notice) from "you edited it
-	 * and nothing changed" (silence) — the stamp records the baseline the edit started from.
-	 *
-	 * Absent for agents predating this field: treated as "unknown baseline", which stays
-	 * silent rather than firing a notice we can't substantiate.
-	 */
-	promptBaseVersions?: Partial<Record<PromptKindId, number | string>>;
+	// NOTE: the prompt baseline version is no longer agent config — it lives in the prompt
+	// note's own frontmatter (see PromptFileSnapshot), so it travels with the file.
 }
 
-/** The two file-backed prompt surfaces, as stable keys for {@link AgentConfig.promptBaseVersions}. */
+/** The two file-backed prompt surfaces, as stable ids ("base" / "memory"). */
 export type PromptKindId = "base" | "memory";
 
 /**

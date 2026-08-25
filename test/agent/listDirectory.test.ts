@@ -139,4 +139,54 @@ describe("listDirectory tool", () => {
 		expect(Object.keys(parsed.tree.folders)).toEqual(["Public"]);
 		expect(parsed.tree.folders.Public?.files.map((file) => file.name)).toEqual(["plan.md"]);
 	});
+
+	function mockDataWithAgentFolder(memoryEnabled: boolean) {
+		mockGetData.mockReturnValue({
+			agentFolder: "Agents",
+			getSelectedAgent: () => ({
+				chatModel: { provider: "openai" },
+				memoryEnabled,
+				toolsConfig: {
+					list_directory: {
+						name: "list_directory",
+						description: "List directories and files in the vault.",
+					},
+				},
+			}),
+		});
+	}
+
+	const agentTreeFiles = () => [
+		createFile("Agents/Memories/user-preferences.md"),
+		createFile("Agents/Skills/web/SKILL.md"),
+		createFile("Notes/todo.md"),
+	];
+
+	it("exposes the memory folder (and only it) from the agent tree when memory is enabled", async () => {
+		mockDataWithAgentFolder(true);
+		const tool = createListDirectoryTool(createMockApp(agentTreeFiles()));
+
+		const result = await tool.invoke({ recursive: true, maxDepth: 4 });
+		const parsed = JSON.parse(String(result)) as {
+			tree: { folders: Record<string, { folders?: Record<string, { files?: Array<{ name: string }> }> }> };
+		};
+
+		// Memory notes are excluded from the search index, so this listing is the
+		// agent's only way to discover them — the exemption is load-bearing.
+		expect(parsed.tree.folders.Agents?.folders?.Memories?.files?.map((f) => f.name)).toEqual([
+			"user-preferences.md",
+		]);
+		// The rest of the agent machinery stays hidden.
+		expect(parsed.tree.folders.Agents?.folders?.Skills).toBeUndefined();
+	});
+
+	it("hides the whole agent tree, memory folder included, when memory is disabled", async () => {
+		mockDataWithAgentFolder(false);
+		const tool = createListDirectoryTool(createMockApp(agentTreeFiles()));
+
+		const result = await tool.invoke({ recursive: true, maxDepth: 4 });
+		const parsed = JSON.parse(String(result)) as { tree: { folders: Record<string, unknown> } };
+
+		expect(Object.keys(parsed.tree.folders)).toEqual(["Notes"]);
+	});
 });

@@ -1,8 +1,7 @@
 import type { App, DataAdapter } from "obsidian";
-import type { AgentsConfig, PromptFileReader, PromptKindId } from "../types/plugin";
+import type { AgentsConfig, PromptFileReader, PromptFileSnapshot, PromptKindId } from "../types/plugin";
 import { agentPromptDir, agentRootDir, basePromptPath, memoryPromptPath, systemPromptsDir } from "../utils/agentPaths";
 import { Logger as Log } from "../utils/logging";
-import { getData } from "../stores/dataStore.svelte";
 import { type ShippedHistory, currentShippedVersion, shippedVersion } from "../utils/shippedDefaults";
 import { BASE_SYSTEM_PROMPT, DEFAULT_MEMORY_PROMPT, SHIPPED_BASE_PROMPTS, SHIPPED_MEMORY_PROMPTS } from "./prompts";
 
@@ -13,13 +12,13 @@ import { BASE_SYSTEM_PROMPT, DEFAULT_MEMORY_PROMPT, SHIPPED_BASE_PROMPTS, SHIPPE
  * and differ only in their filename within the shared subfolder, and their factory default.
  */
 interface PromptKind {
-	/** Stable key for this kind in `AgentConfig.promptBaseVersions`. */
+	/** Stable id, used in log labels and by the staleness surface list in dataStore. */
 	id: PromptKindId;
 	/** Human-readable label, used only in log messages. */
 	label: string;
 	/** Resolve the note path for an agent (name-derived; see `agentPaths`). */
 	path: (agentId: string) => string;
-	/** Factory default written when the note is absent, and used when the cache is empty. */
+	/** Factory default body written when the note is absent, and used when the cache is empty. */
 	fallback: string;
 	/** Every default we ever shipped for this kind, so seeding can tell an untouched old default (update silently) from a user edit (never touch). */
 	history: ShippedHistory;
@@ -50,16 +49,78 @@ const ALL_KINDS = [BASE_PROMPT, MEMORY_PROMPT];
 /** An agent config viewed as a bag of the one-shot migration transients. */
 type MigrationCarrier = Partial<Record<PromptKind["migratedField"], string>>;
 
+// --- note frontmatter ---------------------------------------------------------------------
+//
+// Each prompt note carries a small plugin-managed frontmatter block, mirroring how bundled
+// skills carry theirs in SKILL.md:
+//
+//     ---
+//     author: S2B
+//     version: 2
+//     ---
+//
+// `version` is the shipped baseline the body was last written from — the same role the old
+// `AgentConfig.promptBaseVersions` stamp played, but stored IN the note so it travels with
+// the file through vault sync, copies, and backups, and is visible to the user as Obsidian
+// properties. The keys are deliberately flat (not nested under `metadata:` like SKILL.md):
+// Obsidian's Properties UI renders flat keys natively and nested objects poorly, and unlike
+// a skill's frontmatter nothing here is model-facing, so there is no spec to match.
+//
+// Everything model-facing works on the BODY only: assembly, the diff modal, and the shipped
+// fingerprints all use the frontmatter-stripped text, so restamping the version never reads
+// as a content customization.
+
+const PROMPT_FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/;
+const VERSION_LINE_RE = /^version:\s*["']?(\d+)["']?\s*$/m;
+
+/** Parse a prompt note into its frontmatter-stripped body and baseline version. */
+export function parsePromptFile(raw: string): PromptFileSnapshot {
+	const match = raw.match(PROMPT_FRONTMATTER_RE);
+	if (!match) return { body: raw.trim(), version: undefined };
+	const versionMatch = match[1].match(VERSION_LINE_RE);
+	return {
+		body: raw.slice(match[0].length).trim(),
+		version: versionMatch ? Number(versionMatch[1]) : undefined,
+	};
+}
+
+/** Serialize a prompt body with the standard plugin-managed frontmatter block. */
+export function serializePromptFile(body: string, version: number | string): string {
+	return `---\nauthor: S2B\nversion: ${version}\n---\n\n${body}\n`;
+}
+
+/**
+ * Stamp `version` into a note's frontmatter while leaving the body — and any user-added
+ * frontmatter keys — untouched. A note without frontmatter gets the standard block prepended.
+ */
+function stampPromptVersion(raw: string, version: number | string): string {
+	const match = raw.match(PROMPT_FRONTMATTER_RE);
+	if (!match) return serializePromptFile(raw.trim(), version);
+	const block = match[1];
+	const newBlock = VERSION_LINE_RE.test(block)
+		? block.replace(VERSION_LINE_RE, `version: ${version}`)
+		: `${block}\nversion: ${version}`;
+	// Replacement via callback so `$`-sequences in user frontmatter can't act as patterns.
+	return raw.replace(PROMPT_FRONTMATTER_RE, () => `---\n${newBlock}\n---\n`);
+}
+
+/** The current shipped version for a kind. Always defined for the two real histories. */
+function currentVersionOf(kind: PromptKind): number | string | undefined {
+	return currentShippedVersion(kind.history);
+}
+
 /**
  * File-backed store for each agent's prompt subfolder (`System Prompts/<Agent Name>/`), holding
  * `Base.md` (the base system prompt) and `Memory.md` (memory-usage instructions) — the two
  * fragments concatenated into the assembled system prompt.
  *
  * The code constants `BASE_SYSTEM_PROMPT` / `DEFAULT_MEMORY_PROMPT` remain the factory defaults
- * the diff/reset UI compares against; the files are the editable copies. Content is read through
- * the vault DataAdapter (works for in-vault paths) and cached in memory so the synchronous,
- * reactive staleness getter and the frequently-called system-prompt assembly don't hit disk on
- * the hot path. Call {@link refresh} after any write / vault change to the agent folder.
+ * the diff/reset UI compares against; the files are the editable copies, each carrying a small
+ * plugin-managed frontmatter block recording its shipped baseline (see the frontmatter section
+ * above). Content is read through the vault DataAdapter (works for in-vault paths) and cached
+ * in memory — parsed, body + version — so the synchronous, reactive staleness getter and the
+ * frequently-called system-prompt assembly don't hit disk on the hot path. Call {@link refresh}
+ * after any write / vault change to the agent folder.
  *
  * Because both files for one agent share a folder, rename/duplicate/delete are single directory
  * operations ({@link renameAgentPromptDir}, {@link deleteAgentPrompts}), not per-file ones.
@@ -70,8 +131,8 @@ type MigrationCarrier = Partial<Record<PromptKind["migratedField"], string>>;
 export class PromptFilesService {
 	private adapter: DataAdapter;
 
-	/** kind → (agentId → file content). An absent key means "file missing, use the fallback". */
-	private caches = new Map<PromptKind, Map<string, string>>(ALL_KINDS.map((kind) => [kind, new Map()]));
+	/** kind → (agentId → parsed note). An absent key means "file missing, use the fallback". */
+	private caches = new Map<PromptKind, Map<string, PromptFileSnapshot>>(ALL_KINDS.map((kind) => [kind, new Map()]));
 
 	constructor(app: App) {
 		this.adapter = app.vault.adapter;
@@ -80,17 +141,17 @@ export class PromptFilesService {
 	/** A synchronous reader over the cache, injected into the data store for staleness detection. */
 	get reader(): PromptFileReader {
 		return {
-			getBasePrompt: (agentId) => this.cache(BASE_PROMPT).get(agentId) ?? null,
-			getMemoryPrompt: (agentId) => this.cache(MEMORY_PROMPT).get(agentId) ?? null,
+			getBasePromptFile: (agentId) => this.cache(BASE_PROMPT).get(agentId) ?? null,
+			getMemoryPromptFile: (agentId) => this.cache(MEMORY_PROMPT).get(agentId) ?? null,
 		};
 	}
 
-	/** Cached base prompt for an agent, or BASE_SYSTEM_PROMPT when the file is absent. */
+	/** Cached base prompt body for an agent, or BASE_SYSTEM_PROMPT when the file is absent. */
 	getBasePrompt(agentId: string): string {
 		return this.get(BASE_PROMPT, agentId);
 	}
 
-	/** Cached memory instructions for an agent, or DEFAULT_MEMORY_PROMPT when the file is absent. */
+	/** Cached memory instructions body for an agent, or DEFAULT_MEMORY_PROMPT when the file is absent. */
 	getMemoryPrompt(agentId: string): string {
 		return this.get(MEMORY_PROMPT, agentId);
 	}
@@ -101,18 +162,23 @@ export class PromptFilesService {
 	 * - Absent → write the kind's factory default, UNLESS a config→file migration stashed a
 	 *   customized prompt on the agent's transient — then the user's old customization is
 	 *   written instead (and the transient cleared) so the move never silently discards it.
-	 * - Present and matching an OLD shipped default → the user never edited it, so the moved
-	 *   default is applied silently (same contract as `SkillsService.reconcileBundledSkill`).
+	 * - Present with a body matching an OLD shipped default → the user never edited it, so the
+	 *   moved default is applied silently (same contract as `SkillsService.reconcileBundledSkill`).
 	 *   Without this, an untouched install would be stuck on the old prompt with only a
 	 *   notice asking the user to reset by hand.
-	 * - Present and anything else → the user's edit; never clobbered. If the shipped default
-	 *   has moved since, the staleness getter surfaces a notice — that path also catches a
-	 *   failed rewrite here, since the file then still fingerprints as an old default.
+	 * - Present with a body matching the CURRENT default but missing/stale frontmatter → the
+	 *   note is rewritten canonically (self-heal; also how pre-frontmatter files upgrade).
+	 * - Present with the user's own body → never clobbered. If the note carries no `version`
+	 *   baseline yet, one is stamped into the frontmatter at the current version — not
+	 *   backdated, which would fire a notice about a change the edit may already incorporate —
+	 *   so drift is detectable from now on. If the shipped default later moves, the staleness
+	 *   getter surfaces a notice.
 	 */
 	async seedDefaults(agents: AgentsConfig): Promise<void> {
 		await this.ensureDirs();
 
 		for (const kind of ALL_KINDS) {
+			const current = currentVersionOf(kind);
 			for (const agentId of Object.keys(agents)) {
 				const path = kind.path(agentId);
 				const agent = agents[agentId] as unknown as MigrationCarrier;
@@ -122,29 +188,30 @@ export class PromptFilesService {
 						// File already present — the migrated prompt is superseded by the
 						// on-disk file, so the transient is spent: clear it.
 						this.clearMigrated(kind, agent);
-						const content = await this.adapter.read(path);
-						const version = shippedVersion(content, kind.history);
-						if (version === null) {
-							// The user's own text. Leave it, but if this agent predates the
-							// stamp there is no baseline to compare a future bump against —
-							// seed it at the current version so drift is detectable from now
-							// on. (Backdating to the oldest version instead would fire a
-							// notice about a change the edit may already incorporate.)
-							this.stampBaseVersionIfAbsent(kind, agentId);
-						} else if (version !== currentShippedVersion(kind.history)) {
-							await this.adapter.write(path, kind.fallback);
-							this.stampBaseVersion(kind, agentId);
-							Log.info(`Updated ${kind.label} for ${agentId} from shipped v${version} to current`);
-						} else {
-							this.stampBaseVersion(kind, agentId);
+						const raw = await this.adapter.read(path);
+						const parsed = parsePromptFile(raw);
+						const matched = shippedVersion(parsed.body, kind.history);
+						if (matched === null) {
+							// The user's own text: leave the body alone, but back-fill a
+							// baseline into the frontmatter when the note has none.
+							if (parsed.version === undefined && current !== undefined) {
+								await this.adapter.write(path, stampPromptVersion(raw, current));
+							}
+						} else if (matched !== current && current !== undefined) {
+							await this.adapter.write(path, serializePromptFile(kind.fallback, current));
+							Log.info(`Updated ${kind.label} for ${agentId} from shipped v${matched} to current`);
+						} else if (parsed.version !== current && current !== undefined) {
+							// Body is already the current default; only the metadata is
+							// missing or stale. Rewrite canonically.
+							await this.adapter.write(path, serializePromptFile(kind.fallback, current));
 						}
 						continue;
 					}
 					await this.ensureParent(path);
-					await this.adapter.write(path, migrated ?? kind.fallback);
+					const body = migrated ?? kind.fallback;
 					// A migrated pre-file customization is the user's text, but it was written
 					// against the defaults current at migration time — stamp either way.
-					this.stampBaseVersion(kind, agentId);
+					await this.adapter.write(path, current !== undefined ? serializePromptFile(body, current) : body);
 					// Only clear AFTER a successful write — the customized prompt is now durable in
 					// the file. On a write failure we deliberately keep the transient so a later
 					// seedDefaults (e.g. next startup / folder change) can retry, rather than
@@ -160,12 +227,12 @@ export class PromptFilesService {
 	/** Re-read all prompt files into the caches. Cheap: a bounded set of files. */
 	async refresh(agents: AgentsConfig): Promise<void> {
 		for (const kind of ALL_KINDS) {
-			const next = new Map<string, string>();
+			const next = new Map<string, PromptFileSnapshot>();
 			for (const agentId of Object.keys(agents)) {
 				const path = kind.path(agentId);
 				try {
 					if (await this.adapter.exists(path)) {
-						next.set(agentId, await this.adapter.read(path));
+						next.set(agentId, parsePromptFile(await this.adapter.read(path)));
 					}
 				} catch (error) {
 					Log.error(`Failed to read ${kind.label} for ${agentId}:`, error);
@@ -175,12 +242,12 @@ export class PromptFilesService {
 		}
 	}
 
-	/** Write an agent's base prompt to its file and update the cache. */
+	/** Write an agent's base prompt body to its file (stamped at the current version) and update the cache. */
 	async writeBasePrompt(agentId: string, text: string): Promise<void> {
 		await this.write(BASE_PROMPT, agentId, text);
 	}
 
-	/** Write an agent's memory instructions to its file and update the cache. */
+	/** Write an agent's memory instructions body to its file (stamped at the current version) and update the cache. */
 	async writeMemoryPrompt(agentId: string, text: string): Promise<void> {
 		await this.write(MEMORY_PROMPT, agentId, text);
 	}
@@ -244,21 +311,31 @@ export class PromptFilesService {
 	/**
 	 * Copy one agent's prompt notes to another (used when duplicating an agent), so the copy
 	 * inherits the source's edited prompts rather than starting from the bare defaults.
+	 *
+	 * The note is copied VERBATIM: the baseline version lives in the file's frontmatter, so
+	 * the duplicate inherits the source's provenance automatically — including an older
+	 * baseline (the copied customization keeps the drift notice it is owed) and "no baseline"
+	 * for a note whose frontmatter the user removed. An agent with no source note gets the
+	 * current factory default.
 	 */
 	async copyAgentPrompts(fromId: string, toId: string): Promise<void> {
 		for (const kind of ALL_KINDS) {
-			await this.write(kind, toId, this.get(kind, fromId));
-			// The copy is the source's text verbatim, so it inherits the source's baseline —
-			// NOT the current version that `write` just stamped. Duplicating an agent whose
-			// customization was based on an older default must not silently clear the drift
-			// notice that customization is owed.
-			this.inheritBaseVersion(kind, fromId, toId);
+			const srcPath = kind.path(fromId);
+			if (await this.adapter.exists(srcPath)) {
+				const raw = await this.adapter.read(srcPath);
+				const dstPath = kind.path(toId);
+				await this.ensureParent(dstPath);
+				await this.adapter.write(dstPath, raw);
+				this.cache(kind).set(toId, parsePromptFile(raw));
+			} else {
+				await this.write(kind, toId, kind.fallback);
+			}
 		}
 	}
 
 	// --- shared per-kind implementations -------------------------------------------------
 
-	private cache(kind: PromptKind): Map<string, string> {
+	private cache(kind: PromptKind): Map<string, PromptFileSnapshot> {
 		let cache = this.caches.get(kind);
 		if (!cache) {
 			cache = new Map();
@@ -269,81 +346,22 @@ export class PromptFilesService {
 
 	private get(kind: PromptKind, agentId: string): string {
 		const cached = this.cache(kind).get(agentId);
-		return cached?.trim() ? cached : kind.fallback;
+		return cached?.body.trim() ? cached.body : kind.fallback;
 	}
 
+	/**
+	 * Write a body through the standard serializer, stamped at the CURRENT shipped version —
+	 * including when the user saves a customization: at that moment their edit is, by
+	 * definition, based on today's default. A later bump then makes `version !== current`
+	 * true and the drift notice fires exactly once.
+	 */
 	private async write(kind: PromptKind, agentId: string, text: string): Promise<void> {
 		const path = kind.path(agentId);
 		await this.ensureParent(path);
-		await this.adapter.write(path, text);
-		this.cache(kind).set(agentId, text);
-		this.stampBaseVersion(kind, agentId);
-	}
-
-	/**
-	 * Record which shipped version this agent's prompt is now based on. Called after every
-	 * write — seeding, the silent old-default update, a reset, and the user saving their own
-	 * text all funnel through here.
-	 *
-	 * The stamp is always the CURRENT shipped version, including when the user saves a
-	 * customization: at that moment their edit is, by definition, based on today's default.
-	 * A later bump then makes `stamp !== current` true and the drift notice fires exactly
-	 * once — which is the whole point of the field.
-	 */
-	/**
-	 * Stamp only when no baseline exists yet — for agents whose customized prompt predates
-	 * the field. Never overwrites an existing stamp, which would erase the very drift the
-	 * stamp is there to detect.
-	 */
-	private stampBaseVersionIfAbsent(kind: PromptKind, agentId: string): void {
-		try {
-			if (getData().agents[agentId]?.promptBaseVersions?.[kind.id] !== undefined) return;
-		} catch {
-			return;
-		}
-		this.stampBaseVersion(kind, agentId);
-	}
-
-	/**
-	 * Carry one agent's baseline for a kind over to another, used when duplicating an agent.
-	 * Overwrites whatever `write` stamped, because the copied text's real baseline is the
-	 * source's. A source with no stamp clears the target's too — "unknown baseline" is the
-	 * honest answer for copied text we have no provenance for, and it stays silent rather
-	 * than claiming the copy is current.
-	 */
-	private inheritBaseVersion(kind: PromptKind, fromId: string, toId: string): void {
-		try {
-			const data = getData();
-			const source = data.agents[fromId]?.promptBaseVersions?.[kind.id];
-			const target = data.agents[toId];
-			if (!target) return;
-			const existing = target.promptBaseVersions ?? {};
-			if (existing[kind.id] === source) return;
-			const next = { ...existing };
-			if (source === undefined) delete next[kind.id];
-			else next[kind.id] = source;
-			data.updateAgent(toId, { promptBaseVersions: next });
-		} catch (error) {
-			Log.debug(`Could not inherit ${kind.label} base version for ${toId}:`, error);
-		}
-	}
-
-	private stampBaseVersion(kind: PromptKind, agentId: string): void {
-		// Bookkeeping, never load-bearing for the prompt itself: a failure here must not
-		// abort the surrounding write, or a store hiccup would leave the user without the
-		// prompt file entirely. Worst case a stamp is missed and drift stays silent.
-		try {
-			const agent = getData().agents[agentId];
-			if (!agent) return;
-			const current = currentShippedVersion(kind.history);
-			if (current === undefined) return;
-			const existing = agent.promptBaseVersions ?? {};
-			if (existing[kind.id] === current) return;
-			// Reassign rather than mutate in place so $state reactivity fires.
-			getData().updateAgent(agentId, { promptBaseVersions: { ...existing, [kind.id]: current } });
-		} catch (error) {
-			Log.debug(`Could not stamp ${kind.label} base version for ${agentId}:`, error);
-		}
+		const body = text.trim();
+		const current = currentVersionOf(kind);
+		await this.adapter.write(path, current !== undefined ? serializePromptFile(body, current) : body);
+		this.cache(kind).set(agentId, { body, version: typeof current === "number" ? current : undefined });
 	}
 
 	private async ensure(kind: PromptKind, agentId: string): Promise<void> {

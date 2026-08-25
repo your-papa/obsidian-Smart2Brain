@@ -2,12 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("obsidian", () => import("../__mocks__/obsidian"));
 
-type TestAgent = {
-	id: string;
-	name?: string;
-	promptBaseVersions?: Partial<Record<"base" | "memory", number | string>>;
-};
-const state: { agentFolder: string; agents: Record<string, TestAgent> } = {
+const state: { agentFolder: string; agents: Record<string, { id: string; name?: string }> } = {
 	agentFolder: "Agents",
 	agents: { "default-agent": { id: "default-agent", name: "S2B Agent" } },
 };
@@ -19,17 +14,14 @@ vi.mock("../../src/stores/dataStore.svelte", () => ({
 		get agents() {
 			return state.agents;
 		},
-		updateAgent: (agentId: string, updates: Partial<TestAgent>) => {
-			state.agents[agentId] = { ...state.agents[agentId], ...updates };
-		},
 	}),
 }));
 
 /*
- * The real prompt histories hold exactly one entry each (nothing has shipped twice yet), so
- * the "file matches an OLD shipped default" branch cannot be driven from real data. This
- * file mocks the prompts module with a synthetic two-version history — the same situation
- * every install will be in the first time a default actually changes.
+ * This file mocks the prompts module with a synthetic two-version history so the
+ * "file matches an OLD shipped default" branch can be driven with short fixture strings
+ * regardless of what has actually shipped — the same situation every install is in when a
+ * default changes.
  */
 // The four strings are inlined in the factory rather than referenced from the consts below:
 // `vi.mock` is hoisted above every top-level declaration, so closing over them would throw
@@ -55,7 +47,7 @@ const CURRENT_BASE = "the base prompt we ship at v2";
 const OLD_MEMORY = "the memory prompt we shipped at v1";
 const CURRENT_MEMORY = "the memory prompt we ship at v2";
 
-import { PromptFilesService } from "../../src/agent/promptFiles";
+import { PromptFilesService, parsePromptFile, serializePromptFile } from "../../src/agent/promptFiles";
 
 /** In-memory DataAdapter covering the calls seedDefaults makes. */
 function makeAdapter(initial: Record<string, string> = {}) {
@@ -111,126 +103,167 @@ describe("PromptFilesService.seedDefaults — reconciling existing files against
 	});
 
 	it("silently updates files still holding an OLD shipped default", async () => {
-		const adapter = makeAdapter({ [BASE_PATH]: OLD_BASE, [MEMORY_PATH]: OLD_MEMORY });
+		const adapter = makeAdapter({
+			[BASE_PATH]: serializePromptFile(OLD_BASE, 1),
+			[MEMORY_PATH]: serializePromptFile(OLD_MEMORY, 1),
+		});
 		await makeService(adapter).seedDefaults(AGENTS);
 
-		expect(adapter.files.get(BASE_PATH)).toBe(CURRENT_BASE);
-		expect(adapter.files.get(MEMORY_PATH)).toBe(CURRENT_MEMORY);
+		expect(adapter.files.get(BASE_PATH)).toBe(serializePromptFile(CURRENT_BASE, 2));
+		expect(adapter.files.get(MEMORY_PATH)).toBe(serializePromptFile(CURRENT_MEMORY, 2));
 	});
 
 	it("recognizes an old default through CRLF and a trailing newline", async () => {
 		// A round-trip through the vault adapter or an editor can reformat the file without
 		// the user editing it; that must not demote the copy to "customized".
-		const adapter = makeAdapter({ [BASE_PATH]: `${OLD_BASE.replace(/\n/g, "\r\n")}\n` });
+		const adapter = makeAdapter({ [BASE_PATH]: `${serializePromptFile(OLD_BASE, 1).replace(/\n/g, "\r\n")}\n` });
 		await makeService(adapter).seedDefaults(AGENTS);
 
-		expect(adapter.files.get(BASE_PATH)).toBe(CURRENT_BASE);
+		expect(adapter.files.get(BASE_PATH)).toBe(serializePromptFile(CURRENT_BASE, 2));
 	});
 
 	it("leaves a file already on the current default untouched", async () => {
-		const adapter = makeAdapter({ [BASE_PATH]: CURRENT_BASE });
+		const adapter = makeAdapter({ [BASE_PATH]: serializePromptFile(CURRENT_BASE, 2) });
 		await makeService(adapter).seedDefaults(AGENTS);
 
 		expect(adapter.write).not.toHaveBeenCalledWith(BASE_PATH, expect.anything());
 	});
 
-	it("never rewrites a user-customized file", async () => {
-		const edited = `${CURRENT_BASE}\n\nMy own additions.`;
-		const adapter = makeAdapter({ [BASE_PATH]: edited, [MEMORY_PATH]: "entirely my own memory rules" });
+	// The upgrade path from the pre-frontmatter format: the body is the current default,
+	// only the metadata block is missing. Rewriting canonically is what stamps existing
+	// vaults without anyone touching them.
+	it("self-heals a current-default file that lacks the frontmatter block", async () => {
+		const adapter = makeAdapter({ [BASE_PATH]: CURRENT_BASE });
 		await makeService(adapter).seedDefaults(AGENTS);
 
-		expect(adapter.files.get(BASE_PATH)).toBe(edited);
-		expect(adapter.files.get(MEMORY_PATH)).toBe("entirely my own memory rules");
+		expect(adapter.files.get(BASE_PATH)).toBe(serializePromptFile(CURRENT_BASE, 2));
+	});
+
+	it("never touches a user-customized file that already carries a baseline", async () => {
+		const editedBase = serializePromptFile(`${CURRENT_BASE}\n\nMy own additions.`, 2);
+		const editedMemory = serializePromptFile("entirely my own memory rules", 2);
+		const adapter = makeAdapter({ [BASE_PATH]: editedBase, [MEMORY_PATH]: editedMemory });
+		await makeService(adapter).seedDefaults(AGENTS);
+
+		expect(adapter.write).not.toHaveBeenCalledWith(BASE_PATH, expect.anything());
+		expect(adapter.write).not.toHaveBeenCalledWith(MEMORY_PATH, expect.anything());
 	});
 
 	it("seeds the CURRENT default when the file is absent", async () => {
 		const adapter = makeAdapter();
 		await makeService(adapter).seedDefaults(AGENTS);
 
-		expect(adapter.files.get(BASE_PATH)).toBe(CURRENT_BASE);
-		expect(adapter.files.get(MEMORY_PATH)).toBe(CURRENT_MEMORY);
+		expect(adapter.files.get(BASE_PATH)).toBe(serializePromptFile(CURRENT_BASE, 2));
+		expect(adapter.files.get(MEMORY_PATH)).toBe(serializePromptFile(CURRENT_MEMORY, 2));
 	});
 });
 
 /*
- * A customized file matches no shipped fingerprint, so its content alone can't say whether
- * the default moved since the user wrote it. The stamp records the baseline their edit
- * started from — without it, flagging every no-match would fire a false "the default
- * changed" notice at everyone who has ever customized a prompt.
+ * A customized body matches no shipped fingerprint, so its content alone can't say whether
+ * the default moved since the user wrote it. The note's `version` frontmatter records the
+ * baseline their edit started from — without it, flagging every no-match would fire a false
+ * "the default changed" notice at everyone who has ever customized a prompt.
  */
-describe("PromptFilesService — promptBaseVersions stamp", () => {
+describe("PromptFilesService — baseline version in the note's frontmatter", () => {
 	beforeEach(() => {
 		state.agentFolder = "Agents";
 		state.agents = { "default-agent": { id: "default-agent", name: "S2B Agent" } };
 	});
 
 	it("stamps the current version when seeding a fresh file", async () => {
-		await makeService(makeAdapter()).seedDefaults(AGENTS);
+		const adapter = makeAdapter();
+		await makeService(adapter).seedDefaults(AGENTS);
 
-		expect(state.agents["default-agent"].promptBaseVersions).toEqual({ base: 2, memory: 2 });
+		expect(parsePromptFile(adapter.files.get(BASE_PATH) ?? "").version).toBe(2);
+		expect(parsePromptFile(adapter.files.get(MEMORY_PATH) ?? "").version).toBe(2);
 	});
 
 	it("stamps after the silent update of an old default", async () => {
-		const adapter = makeAdapter({ [BASE_PATH]: OLD_BASE });
+		const adapter = makeAdapter({ [BASE_PATH]: serializePromptFile(OLD_BASE, 1) });
 		await makeService(adapter).seedDefaults(AGENTS);
 
-		expect(state.agents["default-agent"].promptBaseVersions?.base).toBe(2);
+		expect(parsePromptFile(adapter.files.get(BASE_PATH) ?? "").version).toBe(2);
 	});
 
 	it("stamps the user's save, so their edit is baselined at today's default", async () => {
-		const svc = makeService(makeAdapter());
+		const adapter = makeAdapter();
+		const svc = makeService(adapter);
 		await svc.writeBasePrompt("default-agent", "my own prompt");
 
 		// Their text is theirs, but it was written against v2 — a later v3 is what should
 		// raise the drift notice, not this save.
-		expect(state.agents["default-agent"].promptBaseVersions?.base).toBe(2);
+		expect(parsePromptFile(adapter.files.get(BASE_PATH) ?? "")).toEqual({ body: "my own prompt", version: 2 });
 	});
 
-	it("back-fills a baseline for a customized file that predates the field", async () => {
+	it("back-fills a baseline into a customized file that has none", async () => {
 		const adapter = makeAdapter({ [BASE_PATH]: "customized before stamps existed" });
 		await makeService(adapter).seedDefaults(AGENTS);
 
-		// Seeded at the current version, not backdated: backdating would claim their edit
-		// predates a change it may already incorporate.
-		expect(state.agents["default-agent"].promptBaseVersions?.base).toBe(2);
-		expect(adapter.files.get(BASE_PATH)).toBe("customized before stamps existed");
+		// Stamped at the current version, not backdated: backdating would claim their edit
+		// predates a change it may already incorporate. The body is untouched.
+		expect(parsePromptFile(adapter.files.get(BASE_PATH) ?? "")).toEqual({
+			body: "customized before stamps existed",
+			version: 2,
+		});
+	});
+
+	it("back-fills the version without discarding user-added frontmatter keys", async () => {
+		const adapter = makeAdapter({
+			[BASE_PATH]: "---\ntags: [prompts]\n---\n\ncustomized with my own properties",
+		});
+		await makeService(adapter).seedDefaults(AGENTS);
+
+		const raw = adapter.files.get(BASE_PATH) ?? "";
+		expect(raw).toContain("tags: [prompts]");
+		expect(parsePromptFile(raw)).toEqual({ body: "customized with my own properties", version: 2 });
+	});
+
+	it("never overwrites an existing older baseline on seed", async () => {
+		const adapter = makeAdapter({
+			[BASE_PATH]: serializePromptFile("my customization, written against v1", 1),
+		});
+		await makeService(adapter).seedDefaults(AGENTS);
+
+		// Overwriting with 2 here would erase exactly the drift the stamp exists to detect.
+		expect(parsePromptFile(adapter.files.get(BASE_PATH) ?? "").version).toBe(1);
 	});
 
 	/*
-	 * A duplicated agent starts with its source's prompt text verbatim, so it inherits the
-	 * source's baseline too. Stamping the copy at the current version instead would silently
-	 * clear a drift notice the copied customization is owed — the same invariant as "never
-	 * overwrite an older stamp", one level removed.
+	 * Duplicating an agent copies the notes VERBATIM, so provenance travels in the file:
+	 * an older baseline keeps the drift notice the copied customization is owed, and a
+	 * note whose frontmatter the user removed stays honestly "unknown".
 	 */
 	it("carries the source's older baseline to a duplicated agent", async () => {
-		state.agents["default-agent"].promptBaseVersions = { base: 1, memory: 1 };
 		state.agents.copy = { id: "copy", name: "Copy" };
-		const adapter = makeAdapter({ [BASE_PATH]: "customization based on v1" });
+		const adapter = makeAdapter({ [BASE_PATH]: serializePromptFile("customization based on v1", 1) });
 		const svc = makeService(adapter);
 		await svc.refresh(AGENTS);
 
 		await svc.copyAgentPrompts("default-agent", "copy");
 
-		expect(state.agents.copy.promptBaseVersions?.base).toBe(1);
+		const copied = adapter.files.get("Agents/System Prompts/Copy/Base.md") ?? "";
+		expect(parsePromptFile(copied)).toEqual({ body: "customization based on v1", version: 1 });
 	});
 
-	it("leaves a duplicate unstamped when the source has no baseline", async () => {
+	it("keeps a duplicate's baseline unknown when the source note has no frontmatter", async () => {
 		state.agents.copy = { id: "copy", name: "Copy" };
-		const svc = makeService(makeAdapter());
+		const adapter = makeAdapter({ [BASE_PATH]: "customization with the frontmatter removed" });
+		const svc = makeService(adapter);
+		await svc.refresh(AGENTS);
 
 		await svc.copyAgentPrompts("default-agent", "copy");
 
-		// "Unknown baseline" is the honest answer for text with no provenance, and it stays
-		// silent — better than claiming the copy is current.
-		expect(state.agents.copy.promptBaseVersions?.base).toBeUndefined();
+		const copied = adapter.files.get("Agents/System Prompts/Copy/Base.md") ?? "";
+		expect(parsePromptFile(copied).version).toBeUndefined();
 	});
 
-	it("never overwrites an existing older stamp", async () => {
-		state.agents["default-agent"].promptBaseVersions = { base: 1 };
-		const adapter = makeAdapter({ [BASE_PATH]: "my customization, written against v1" });
-		await makeService(adapter).seedDefaults(AGENTS);
+	it("gives a duplicate of an agent with no prompt note the current default, stamped current", async () => {
+		state.agents.copy = { id: "copy", name: "Copy" };
+		const adapter = makeAdapter();
+		const svc = makeService(adapter);
 
-		// Overwriting with 2 here would erase exactly the drift the stamp exists to detect.
-		expect(state.agents["default-agent"].promptBaseVersions?.base).toBe(1);
+		await svc.copyAgentPrompts("default-agent", "copy");
+
+		expect(adapter.files.get("Agents/System Prompts/Copy/Base.md")).toBe(serializePromptFile(CURRENT_BASE, 2));
 	});
 });

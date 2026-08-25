@@ -3,6 +3,7 @@ import { z } from "zod";
 import { createObsidianFetch } from "../../lib/obsidianFetch";
 import { getData } from "../../stores/dataStore.svelte";
 import { Logger } from "../../utils/logging";
+import { resolveToolAgent } from "./toolAgentContext";
 
 const DEFAULT_MAX_RESULTS = 10;
 const MIN_MAX_RESULTS = 1;
@@ -220,9 +221,11 @@ interface WebSearchSettings {
 	maxResults?: number;
 }
 
-export function createWebSearchTool() {
+export function createWebSearchTool(agentId = "") {
 	const pluginData = getData();
-	const getToolConfig = () => pluginData.getSelectedAgent().toolsConfig.web_search;
+	// Resolve against the agent that owns this run, not the global selection — the
+	// global agent can differ in another tab, and subagents carry their own config.
+	const getToolConfig = () => resolveToolAgent(agentId).toolsConfig.web_search;
 	const fetchImpl = createObsidianFetch(globalThis.fetch);
 
 	const webSearchFn = async ({ query }: { query: string }): Promise<string> => {

@@ -40,8 +40,13 @@ import {
 } from "../../src/stores/dataStore.svelte";
 import { compilePrivacyMembershipDraft } from "../../src/lib/views";
 import type { StoredProviderState } from "../../src/stores/dataStore.svelte";
-import type { PromptFileReader } from "../../src/types/plugin";
-import { BASE_SYSTEM_PROMPT, DEFAULT_MEMORY_PROMPT } from "../../src/agent/prompts";
+import type { PromptFileReader, PromptFileSnapshot } from "../../src/types/plugin";
+import {
+	BASE_SYSTEM_PROMPT,
+	BASE_SYSTEM_PROMPT_VERSION,
+	DEFAULT_MEMORY_PROMPT,
+	DEFAULT_MEMORY_PROMPT_VERSION,
+} from "../../src/agent/prompts";
 import { fingerprint, shippedVersion } from "../../src/utils/shippedDefaults";
 
 /* --------------------------------------------------------------------------
@@ -619,14 +624,15 @@ describe("PluginDataStore – staleGuidance", () => {
 		};
 	}
 
-	// A reader over both file-backed prompt surfaces.
+	// A reader over both file-backed prompt surfaces. Values are parsed snapshots:
+	// the frontmatter-stripped body plus the baseline version the note's frontmatter records.
 	function makeReader(files: {
-		basePrompt?: Record<string, string>;
-		memoryPrompt?: Record<string, string>;
+		basePrompt?: Record<string, PromptFileSnapshot>;
+		memoryPrompt?: Record<string, PromptFileSnapshot>;
 	}): PromptFileReader {
 		return {
-			getBasePrompt: (agentId) => files.basePrompt?.[agentId] ?? null,
-			getMemoryPrompt: (agentId) => files.memoryPrompt?.[agentId] ?? null,
+			getBasePromptFile: (agentId) => files.basePrompt?.[agentId] ?? null,
+			getMemoryPromptFile: (agentId) => files.memoryPrompt?.[agentId] ?? null,
 		};
 	}
 
@@ -639,8 +645,10 @@ describe("PluginDataStore – staleGuidance", () => {
 		const { store } = makeStore(agentData() as never);
 		store.setPromptFileReader(
 			makeReader({
-				basePrompt: { [DEFAULT_AGENT_ID]: BASE_SYSTEM_PROMPT },
-				memoryPrompt: { [DEFAULT_AGENT_ID]: DEFAULT_MEMORY_PROMPT },
+				basePrompt: { [DEFAULT_AGENT_ID]: { body: BASE_SYSTEM_PROMPT, version: BASE_SYSTEM_PROMPT_VERSION } },
+				memoryPrompt: {
+					[DEFAULT_AGENT_ID]: { body: DEFAULT_MEMORY_PROMPT, version: DEFAULT_MEMORY_PROMPT_VERSION },
+				},
 			}),
 		);
 		expect(store.staleGuidance).toEqual([]);
@@ -653,15 +661,16 @@ describe("PluginDataStore – staleGuidance", () => {
 	});
 
 	it("does NOT flag a customization whose baseline is still the current default", () => {
-		const data = agentData();
-		// Stamped at the current version: they customized it, but the default hasn't moved
-		// since — there is nothing to tell them about.
-		data.agents[DEFAULT_AGENT_ID].promptBaseVersions = { base: 1, memory: 1 };
-		const { store } = makeStore(data as never);
+		const { store } = makeStore(agentData() as never);
+		// The note's frontmatter stamps the current version: they customized it, but the
+		// default hasn't moved since — there is nothing to tell them about. Uses the live
+		// version constants so this keeps meaning "current" across prompt revisions.
 		store.setPromptFileReader(
 			makeReader({
-				basePrompt: { [DEFAULT_AGENT_ID]: "my own custom prompt" },
-				memoryPrompt: { [DEFAULT_AGENT_ID]: "my own memory instructions" },
+				basePrompt: { [DEFAULT_AGENT_ID]: { body: "my own custom prompt", version: BASE_SYSTEM_PROMPT_VERSION } },
+				memoryPrompt: {
+					[DEFAULT_AGENT_ID]: { body: "my own memory instructions", version: DEFAULT_MEMORY_PROMPT_VERSION },
+				},
 			}),
 		);
 		expect(store.staleGuidance).toEqual([]);
@@ -669,11 +678,12 @@ describe("PluginDataStore – staleGuidance", () => {
 
 	it("does NOT flag a customization with no recorded baseline", () => {
 		const { store } = makeStore(agentData() as never);
+		// version: undefined = the user removed (or predates) the note's frontmatter.
 		store.setPromptFileReader(
-			makeReader({ basePrompt: { [DEFAULT_AGENT_ID]: "my own custom prompt" } }),
+			makeReader({ basePrompt: { [DEFAULT_AGENT_ID]: { body: "my own custom prompt", version: undefined } } }),
 		);
-		// No stamp ⇒ we cannot substantiate that the default moved under this edit. Staying
-		// silent beats asserting drift we can't prove.
+		// No baseline ⇒ we cannot substantiate that the default moved under this edit.
+		// Staying silent beats asserting drift we can't prove.
 		expect(store.staleGuidance).toEqual([]);
 	});
 
@@ -684,11 +694,10 @@ describe("PluginDataStore – staleGuidance", () => {
 	 * users who engaged with the prompt enough to edit it.
 	 */
 	it("flags a customization whose baseline has been superseded", () => {
-		const data = agentData();
-		data.agents[DEFAULT_AGENT_ID].promptBaseVersions = { base: 0 };
-		const { store } = makeStore(data as never);
+		const { store } = makeStore(agentData() as never);
+		// The note's frontmatter records a baseline older than the current shipped version.
 		store.setPromptFileReader(
-			makeReader({ basePrompt: { [DEFAULT_AGENT_ID]: "my own custom prompt" } }),
+			makeReader({ basePrompt: { [DEFAULT_AGENT_ID]: { body: "my own custom prompt", version: 0 } } }),
 		);
 
 		const stale = store.staleGuidance;
@@ -703,8 +712,18 @@ describe("PluginDataStore – staleGuidance", () => {
 		const { store } = makeStore(agentData() as never);
 		store.setPromptFileReader(
 			makeReader({
-				basePrompt: { [DEFAULT_AGENT_ID]: `${BASE_SYSTEM_PROMPT.replace(/\n/g, "\r\n")}\n` },
-				memoryPrompt: { [DEFAULT_AGENT_ID]: `${DEFAULT_MEMORY_PROMPT}\n\n` },
+				basePrompt: {
+					[DEFAULT_AGENT_ID]: {
+						body: `${BASE_SYSTEM_PROMPT.replace(/\n/g, "\r\n")}\n`,
+						version: BASE_SYSTEM_PROMPT_VERSION,
+					},
+				},
+				memoryPrompt: {
+					[DEFAULT_AGENT_ID]: {
+						body: `${DEFAULT_MEMORY_PROMPT}\n\n`,
+						version: DEFAULT_MEMORY_PROMPT_VERSION,
+					},
+				},
 			}),
 		);
 		// Round-tripping through the vault adapter or an editor can do this without the user
@@ -713,10 +732,9 @@ describe("PluginDataStore – staleGuidance", () => {
 		expect(store.staleGuidance).toEqual([]);
 	});
 
-	// Both histories hold exactly one entry today (nothing has shipped twice), so an "old
-	// default" can't be sourced from real data — the store is asked to compare against
-	// synthetic histories instead. This is the case that was previously untestable and that
-	// the memory prompt had no mechanism for at all.
+	// Exercised against synthetic histories so the test stays independent of how many
+	// versions have actually shipped. This is the case that was previously untestable and
+	// that the memory prompt had no mechanism for at all.
 	it("flags a prompt file that matches an OLD shipped default", () => {
 		const oldBase = "an older base prompt we used to ship";
 		const oldMemory = "older memory instructions we used to ship";

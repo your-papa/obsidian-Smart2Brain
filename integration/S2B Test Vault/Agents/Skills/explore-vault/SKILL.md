@@ -32,3 +32,5 @@ metadata:
    - **Two or three well-varied searches, then stop.** Report what you found and what you could not, rather than continuing to guess. Say which phrasings you tried.
 
 5. **Read the `message` field.** When a result includes one, it is authoritative about what actually ran. If it reports that semantic search is unavailable because no embedding index is configured, do **not** retry with `semantic` or `hybrid` — that cannot change during the conversation. Vary your terms instead.
+
+6. **Compute, don't estimate.** When the answer requires counting, aggregating, or date arithmetic over data you have gathered (e.g. "how many meetings in March", a total across notes), collect the raw values with the tools above, then run the calculation with `execute_javascript` instead of doing it in your head.

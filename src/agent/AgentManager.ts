@@ -53,7 +53,14 @@ import {
 } from "./Agent";
 import { ObsidianChatManager } from "./ObsidianChatManager";
 import type { ThreadSnapshot } from "./memory/ThreadStore";
-import { BASE_SYSTEM_PROMPT, DEFAULT_MEMORY_PROMPT, buildMemoryFolderHeader } from "./prompts";
+import {
+	BASE_SYSTEM_PROMPT,
+	DEFAULT_MEMORY_PROMPT,
+	NO_WRITE_TOOLS_GUARD,
+	buildCurrentDateSection,
+	buildMemoryFolderHeader,
+	localIsoDate,
+} from "./prompts";
 import { getBundledSkill } from "../skills/defaults";
 import { extractErrorMessage } from "../utils/errorMessage";
 import { LangSmithTelemetry, type Telemetry } from "./telemetry";
@@ -359,6 +366,14 @@ export class AgentManager {
 		const selectedAgent = agent ?? pluginData.getSelectedAgent();
 
 		let prompt = this.plugin.promptFilesService?.getBasePrompt(selectedAgent.id) ?? BASE_SYSTEM_PROMPT;
+
+		// The model has no reliable notion of "now"; without this, relative-time questions
+		// ("this week's daily notes") silently resolve against the training cutoff. Injected
+		// here rather than stored in the editable base-prompt note so it can't go stale; the
+		// runnable cache key carries the same local date (see buildRunnableCacheKey), so a
+		// cached runnable is rebuilt at most once per day.
+		prompt += `\n\n${buildCurrentDateSection()}`;
+
 		// Must test actual binding, not just the per-tool toggle: `manage_notes` also needs an
 		// enabled skill to attach it. Gating on the toggle alone would inject memory
 		// instructions telling the agent to record memories with a tool it doesn't have
@@ -401,8 +416,7 @@ export class AgentManager {
 		// Honesty guard when no write tool is enabled (the write policy otherwise lives
 		// inside the "edit-notes" core skill's body, loaded on demand).
 		if (!hasWriteTools) {
-			prompt +=
-				"\n\n# Write Access\n- No write tools are currently enabled.\n- Do not claim you can modify notes.\n- If the user asks for edits, explain the change you would make instead.";
+			prompt += NO_WRITE_TOOLS_GUARD;
 		}
 
 		// Note: per-plugin code-exec integrations need no prompt block here — each enabled
@@ -419,9 +433,12 @@ export class AgentManager {
 		// Skills default to enabled unless explicitly disabled by the agent
 		const agentSkills = selectedAgent.skills;
 		const enableState: Record<string, boolean> = {};
-		for (const [name] of skillsService.getCachedSkills()) {
-			// Check agent's skill settings, default to enabled if not specified
-			enableState[name] = agentSkills[name]?.enabled ?? true;
+		for (const [name, meta] of skillsService.getCachedSkills()) {
+			// Check agent's skill settings, default to enabled if not specified. A skill
+			// whose declared tools are ALL vetoed by the per-tool overrides is also hidden:
+			// advertising it (e.g. manage-skills while the manage_skills tool is disabled)
+			// teaches the model to call a tool that was never bound.
+			enableState[name] = (agentSkills[name]?.enabled ?? true) && this.skillHasUsableTools(selectedAgent, meta);
 		}
 
 		// Add available skills context XML (for skill discovery via load_skill tool).
@@ -777,6 +794,29 @@ export class AgentManager {
 	}
 
 	/**
+	 * Whether an enabled skill is left functional by the per-tool overrides: true when it
+	 * declares no `allowed-tools` (pure guidance) or at least one of its declared built-in
+	 * tools survives the `toolsConfig` veto. A skill whose every declared tool is vetoed
+	 * (e.g. the manage-skills core skill while the `manage_skills` tool is disabled — the
+	 * out-of-the-box default) must not be advertised in the skills XML or offered via
+	 * `load_skill`: its body instructs the model to call a tool that is never bound.
+	 * Unknown (non-built-in) ids don't count as declared tools, matching `attachedToolIds`.
+	 */
+	private skillHasUsableTools(agentCfg: AgentConfig, meta: SkillMetadata): boolean {
+		const spec = meta.frontmatter.allowedTools;
+		if (!spec) return true;
+		const builtIn = new Set<string>(BUILT_IN_TOOL_IDS);
+		let declaresBuiltInTool = false;
+		for (const raw of spec.split(/\s+/)) {
+			const id = raw.trim();
+			if (!id || !builtIn.has(id)) continue;
+			declaresBuiltInTool = true;
+			if (agentCfg.toolsConfig[id as BuiltInToolId]?.enabled ?? true) return true;
+		}
+		return !declaresBuiltInTool;
+	}
+
+	/**
 	 * Whether a built-in tool will actually be bound for this agent: some *enabled* skill
 	 * attaches it via `allowed-tools` AND its per-tool `toolsConfig` override hasn't vetoed
 	 * it. This conjunction is the single source of truth for "does the agent have this tool"
@@ -868,7 +908,7 @@ export class AgentManager {
 			["grep_notes", () => createGrepNotesTool(this.plugin.app, agentCfg.id)],
 			["manage_notes", () => createManageNotesTool(this.plugin.app, agentCfg.id)],
 			["fetch_url", () => createFetchUrlTool()],
-			["web_search", () => createWebSearchTool()],
+			["web_search", () => createWebSearchTool(agentCfg.id)],
 			["manage_skills", () => createManageSkillsTool(this.plugin.skillsService, this.plugin.app, agentCfg.id)],
 		];
 
@@ -886,11 +926,34 @@ export class AgentManager {
 			tools.push(createPluginApiExecTool(this.plugin.app, integ.pluginId, integ.displayName));
 		}
 
-		// Add load_skill tool if skillsService is available and has skills
+		// Add load_skill, offering exactly the skills this agent can actually use — the
+		// same gating as the `# Skills` XML in assembleSystemPrompt (enabled for the agent,
+		// backing plugin available, at least one declared tool bound). Without the filter
+		// the enum would advertise skills the prompt deliberately hides.
 		if (this.plugin.skillsService?.isDiscovered()) {
-			const skillsCache = this.plugin.skillsService.getCachedSkills();
-			if (skillsCache.size > 0) {
-				tools.push(createLoadSkillTool(this.plugin.skillsService));
+			const loadableSkills: string[] = [];
+			for (const [name, meta] of this.plugin.skillsService.getCachedSkills()) {
+				if (!(agentCfg.skills[name]?.enabled ?? true)) continue;
+				if (meta.linkedPluginId && !this.isPluginEnabled(meta.linkedPluginId)) continue;
+				if (meta.corePluginId && !this.isInternalPluginEnabled(meta.corePluginId)) continue;
+				if (!this.skillHasUsableTools(agentCfg, meta)) continue;
+				loadableSkills.push(name);
+			}
+			if (loadableSkills.length > 0) {
+				// A loaded skill body may reference a declared tool that is individually
+				// vetoed (e.g. the web skill's fetch_url mention with fetch_url disabled);
+				// the availability callback lets load_skill flag those in its output.
+				const boundBuiltInTools = new Set<string>();
+				for (const id of attached) {
+					if (agentCfg.toolsConfig[id]?.enabled ?? true) boundBuiltInTools.add(id);
+				}
+				tools.push(
+					createLoadSkillTool(this.plugin.skillsService, {
+						skillNames: loadableSkills,
+						isToolAvailable: (toolId) =>
+							!BUILT_IN_TOOL_IDS.includes(toolId as BuiltInToolId) || boundBuiltInTools.has(toolId),
+					}),
+				);
 			}
 		}
 
@@ -991,7 +1054,10 @@ export class AgentManager {
 		for (const [skillId, metadata] of cachedSkills) {
 			if (metadata.linkedPluginId) coveredPluginIds.add(metadata.linkedPluginId);
 			if (metadata.category === "custom") continue;
-			if (skillEnabled(skillId) && skillAvailable(metadata))
+			// Mirror the prompt-side gating: a skill whose declared tools are all vetoed
+			// (e.g. manage-skills with the manage_skills tool disabled) isn't advertised
+			// to the model, so counting it here would overstate what the agent can do.
+			if (skillEnabled(skillId) && skillAvailable(metadata) && this.skillHasUsableTools(agent, metadata))
 				coreEntries.push({
 					icon: iconFor(skillId, metadata),
 					rank: coreSkillRank({ id: skillId, corePluginId: metadata.corePluginId }),
@@ -1077,13 +1143,19 @@ export class AgentManager {
 						? `Delegate to the "${ref.name}" agent. ${promptHint}`
 						: `Delegate a task to the "${ref.name}" agent.`;
 				}
+				// Subagents use their own base system prompt. We intentionally omit the
+				// parent's skills-context XML — subagents run isolated and load their own
+				// skills only if their tools include load_skill. The no-write honesty guard
+				// is applied per subagent config: without it a read-only subagent claims to
+				// have edited notes, and the parent relays that claim to the user.
+				let subSystemPrompt = refBasePrompt;
+				if (!this.isToolBound(ref, "manage_notes")) {
+					subSystemPrompt += NO_WRITE_TOOLS_GUARD;
+				}
 				specs.push({
 					name,
 					description,
-					// Subagents use their own base system prompt. We intentionally omit
-					// the parent's skills-context XML — subagents run isolated and load
-					// their own skills only if their tools include load_skill.
-					systemPrompt: refBasePrompt,
+					systemPrompt: subSystemPrompt,
 					model,
 					tools,
 				});
@@ -1432,6 +1504,11 @@ export class AgentManager {
 			// which bumps this counter. Not the auth itself: a counter can't leak a
 			// secret if a cache key is ever logged.
 			authGen: this.registry.getAuthGeneration(),
+			// The assembled system prompt embeds today's date (see assembleSystemPrompt).
+			// A cached runnable holds the prompt it was built with, so without this term a
+			// session left open overnight would keep telling the model yesterday's date.
+			// Costs at most one rebuild per day per config.
+			today: localIsoDate(),
 		});
 	}
 
