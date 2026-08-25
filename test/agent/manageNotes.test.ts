@@ -680,6 +680,68 @@ describe("manageNotes tool", () => {
 			expect(staged.newContent).toBe("line one\nline two edited twice\nline three\n");
 		});
 
+		/**
+		 * Regression (PR #426 review): the read tools are unaware of staged
+		 * changes, so a model that re-reads the note holds DISK text. Rebasing
+		 * unconditionally onto the pending proposal made those edits miss and
+		 * aborted the whole batch instead of staging a reviewable proposal.
+		 */
+		it("falls back to disk when the edits match disk, not the pending proposal", async () => {
+			// The pending proposal REPLACED "line two" with "changed line", so the
+			// disk text no longer exists in it — the two bases are unambiguous.
+			mockGetPendingUpdatesForPath.mockReturnValue([
+				{
+					...pendingEntry("test-thread-id"),
+					change: {
+						type: "update",
+						path: "Notes/doc.md",
+						originalContent: DISK,
+						newContent: "line one\nchanged line\nline three\n",
+					},
+				},
+			]);
+
+			const result = await tool.invoke(
+				{
+					operations: [
+						{
+							type: "update",
+							path: "Notes/doc.md",
+							// Matches DISK content — what read_content would have returned.
+							edits: [{ oldText: "line two", newText: "line two rewritten" }],
+						},
+					],
+				},
+				THREAD_CONFIG,
+			);
+
+			expect(result).toContain("Proposed");
+			expect(result).not.toContain("superseded");
+			const staged = mockAddChanges.mock.calls[0][0][0];
+			expect(staged.originalContent).toBe(DISK);
+			expect(staged.newContent).toBe("line one\nline two rewritten\nline three\n");
+		});
+
+		it("reports the disk-base error when the edits match neither base", async () => {
+			mockGetPendingUpdatesForPath.mockReturnValue([pendingEntry("test-thread-id")]);
+
+			const result = await tool.invoke(
+				{
+					operations: [
+						{
+							type: "update",
+							path: "Notes/doc.md",
+							edits: [{ oldText: "nowhere at all", newText: "x" }],
+						},
+					],
+				},
+				THREAD_CONFIG,
+			);
+
+			expect(result).toContain("Could not find the specified text");
+			expect(mockAddChanges).not.toHaveBeenCalled();
+		});
+
 		it("falls back to disk when the pending proposal is stale against disk", async () => {
 			mockGetPendingUpdatesForPath.mockReturnValue([
 				pendingEntry("test-thread-id", "some older disk content\n"),
@@ -740,6 +802,35 @@ describe("manageNotes tool", () => {
 			const staged = mockAddChanges.mock.calls[0][0][0];
 			expect(staged.originalContent).toBe(DISK);
 			expect(staged.newContent).toBe("line one\nline two changed\nline three\n");
+		});
+
+		it("replaces against disk when the pattern only occurs there", async () => {
+			const file = makeFile("Notes/doc.md");
+			mockGetIndexableVaultFiles.mockReturnValue([file]);
+			// Pending proposal replaced "three" with "3", so "three" now exists
+			// only on disk — the replace must target the text the model can see.
+			mockGetPendingUpdatesForPath.mockReturnValue([
+				{
+					...pendingEntry("test-thread-id"),
+					change: {
+						type: "update",
+						path: "Notes/doc.md",
+						originalContent: DISK,
+						newContent: "line one\nline two\nline 3\n",
+					},
+				},
+			]);
+
+			const result = await tool.invoke(
+				{
+					operations: [{ type: "replace", find: "three", replace: "THREE" }],
+				},
+				THREAD_CONFIG,
+			);
+
+			expect(result).toContain("Proposed");
+			const staged = mockAddChanges.mock.calls[0][0][0];
+			expect(staged.newContent).toBe("line one\nline two\nline THREE\n");
 		});
 	});
 

@@ -266,36 +266,70 @@ function applySequentialEdits(
 }
 
 /**
- * The text a new update's edits should be applied against.
+ * The candidate texts a new update's edits may be applied against, best first.
  *
- * When THIS thread already has a pending update to the file, the model's
- * follow-up edits are written against what it remembers proposing — its earlier
- * `newText`s — not against disk (staged edits are invisible to reads, and the
- * store's dedup will auto-reject the older proposal the moment the new one is
- * staged, silently dropping those edits). Basing the new edits on the pending
- * proposal's `newContent` makes the superseding proposal contain BOTH rounds of
- * changes, and makes the model's `oldText`s actually match.
+ * When THIS thread already has a pending update to the file, the model may be
+ * writing its follow-up edits against EITHER of two texts, and the tool cannot
+ * tell which:
  *
- * Guarded on the pending proposal still being current against disk: if the note
- * was hand-edited after staging, its `newContent` no longer accounts for those
- * edits, and rebasing onto it would stage a proposal that silently reverts the
- * user's own work on accept. In that case fall back to disk (the old proposal
- * was un-appliable anyway — accept would fail its conflict check).
+ *   - the pending proposal's `newContent` — what it remembers proposing, when it
+ *     is continuing from its own earlier edit; or
+ *   - the on-disk content — what `read_content`/`grep_notes` actually return,
+ *     since those are unaware of staged changes.
+ *
+ * So both are offered and the caller takes the first one the edits apply to
+ * cleanly (see the `applySequentialEdits` loop). Pending content is tried first:
+ * when the edits match there, rebasing makes the superseding proposal carry BOTH
+ * rounds of changes, rather than the store's dedup silently dropping the earlier
+ * one. When they only match disk, staging against disk is correct and the
+ * earlier proposal is superseded as before.
+ *
+ * The pending candidate is offered only while the proposal is still current
+ * against disk: if the note was hand-edited after staging, its `newContent` no
+ * longer accounts for those edits, and rebasing onto it would stage a proposal
+ * that silently reverts the user's own work on accept. (Such a proposal is
+ * un-appliable anyway — accept would fail its conflict check.)
  */
-function resolveUpdateBase(
-	threadId: string,
-	filePath: string,
-	diskContent: string,
-): { base: string; rebasedOnPending: boolean } {
+function resolveUpdateBases(threadId: string, filePath: string, diskContent: string): string[] {
 	const store = getPendingChangesStore();
 	const prior = store
 		.getPendingUpdatesForPath(filePath)
 		.filter((e) => e.threadId === threadId)
 		.at(-1);
-	if (prior?.change.type === "update" && prior.change.originalContent === diskContent) {
-		return { base: prior.change.newContent, rebasedOnPending: prior.change.newContent !== diskContent };
+	if (
+		prior?.change.type === "update" &&
+		prior.change.originalContent === diskContent &&
+		prior.change.newContent !== diskContent
+	) {
+		return [prior.change.newContent, diskContent];
 	}
-	return { base: diskContent, rebasedOnPending: false };
+	return [diskContent];
+}
+
+/**
+ * Apply `edits` to the first candidate base they succeed against.
+ *
+ * Returns the resulting content plus whether the winning base was a pending
+ * proposal (i.e. anything other than the last candidate, which is always disk).
+ * On total failure the LAST candidate's error is returned: that base is disk,
+ * whose content is what the model can actually see, so its "could not find the
+ * specified text" message is the one that will make sense to the model.
+ */
+function applyEditsToFirstMatchingBase(
+	bases: string[],
+	edits: { oldText: string; newText: string; is_regex?: boolean; replace_all?: boolean }[],
+	path: string,
+	operationNumber: number,
+): { content: string; rebasedOnPending: boolean } | { error: string } {
+	let lastError = "";
+	for (let i = 0; i < bases.length; i++) {
+		const result = applySequentialEdits(bases[i], edits, path, operationNumber);
+		if (!("error" in result)) {
+			return { content: result.content, rebasedOnPending: i < bases.length - 1 };
+		}
+		lastError = result.error;
+	}
+	return { error: lastError };
 }
 
 function summarizeOperations(changes: PendingChange[]): string {
@@ -461,10 +495,14 @@ export async function stageNoteOperations(
 			}
 
 			const originalContent = await app.vault.read(result.file);
-			const { base, rebasedOnPending } = resolveUpdateBase(threadId, result.file.path, originalContent);
-			if (rebasedOnPending) rebasedPaths.add(result.file.path);
-			const editResult = applySequentialEdits(base, operation.edits, result.file.path, operationNumber);
+			const editResult = applyEditsToFirstMatchingBase(
+				resolveUpdateBases(threadId, result.file.path, originalContent),
+				operation.edits,
+				result.file.path,
+				operationNumber,
+			);
 			if ("error" in editResult) return editResult.error;
+			if (editResult.rebasedOnPending) rebasedPaths.add(result.file.path);
 
 			stagedChanges.push({
 				type: "update",
@@ -598,10 +636,15 @@ export async function stageNoteOperations(
 
 			notesSearched++;
 			const originalContent = await app.vault.read(file);
-			// Same rebase as the update branch: replace against this thread's pending
-			// proposed content where one exists, so a replace doesn't silently drop a
-			// pending edit when the store's dedup supersedes it.
-			const { base, rebasedOnPending } = resolveUpdateBase(threadId, file.path, originalContent);
+			// Same rebase as the update branch, and the same ambiguity: a `find` may
+			// occur in this thread's pending proposed content, in the on-disk content
+			// the read tools actually returned, or both. Prefer the pending base when
+			// the pattern is present there (so the replace doesn't silently drop a
+			// pending edit the store's dedup then supersedes); otherwise fall back to
+			// disk, which is what a replace targeting text the model just read means.
+			const bases = resolveUpdateBases(threadId, file.path, originalContent);
+			const base = bases.find((candidate) => matcher.test(candidate)) ?? bases[bases.length - 1];
+			const rebasedOnPending = base !== originalContent;
 			// Skip notes too large to regex safely (unbounded backtracking would
 			// freeze the UI). Only regex ops are affected — a literal find is a
 			// plain string scan with no backtracking. Counted and surfaced below
