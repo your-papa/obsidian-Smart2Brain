@@ -2,6 +2,7 @@ import { type DecorationSet, Decoration, EditorView, ViewPlugin, type ViewUpdate
 import { type EditorState, type Extension, StateEffect, StateField } from "@codemirror/state";
 import { diffLines, diffWords } from "diff";
 import { type App, Component, MarkdownRenderer, editorInfoField, setIcon } from "obsidian";
+import { type ChangeGroup, identifyGroups } from "../lib/diffGroups";
 import { navigateToPendingChange } from "../lib/pendingChangeNavigation";
 import { getData } from "../stores/dataStore.svelte";
 import { getPendingChangesStore } from "../stores/pendingChangesStore.svelte";
@@ -339,14 +340,6 @@ function getWidgetClasses(): WidgetClasses {
 	return widgetClasses;
 }
 
-/** A contiguous group of line-level changes in the diff. */
-interface ChangeGroup {
-	removedText: string;
-	addedText: string;
-	docOffset: number;
-	docLength: number;
-}
-
 function createGroupDecoration(
 	group: ChangeGroup,
 	entryId: string,
@@ -376,42 +369,6 @@ const removedLineDecoration = Decoration.line({ class: "s2b-diff-line-removed" }
 /** Neutral tint for removed lines in word-diff mode — marks the source lines
  * the card's diff refers to without the "deleted" connotation of red. */
 const mutedLineDecoration = Decoration.line({ class: "s2b-diff-line-muted" });
-
-/**
- * Identify contiguous change groups from a line-level diff.
- * Each group tracks its removed/added text and position relative to the first text.
- */
-function identifyGroups(fromText: string, toText: string): ChangeGroup[] {
-	const lineChanges = diffLines(fromText, toText);
-	const groups: ChangeGroup[] = [];
-	let docPos = 0;
-	let current: ChangeGroup | null = null;
-
-	for (const part of lineChanges) {
-		if (part.removed) {
-			if (!current) {
-				current = { removedText: "", addedText: "", docOffset: docPos, docLength: 0 };
-			}
-			current.removedText += part.value;
-			current.docLength += part.value.length;
-			docPos += part.value.length;
-		} else if (part.added) {
-			if (!current) {
-				current = { removedText: "", addedText: "", docOffset: docPos, docLength: 0 };
-			}
-			current.addedText += part.value;
-		} else {
-			if (current) {
-				groups.push(current);
-				current = null;
-			}
-			docPos += part.value.length;
-		}
-	}
-	if (current) groups.push(current);
-
-	return groups;
-}
 
 /**
  * Build a function that maps positions from originalContent-space to docText-space,
