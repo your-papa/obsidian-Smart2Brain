@@ -307,14 +307,33 @@ const introBody = $derived.by(() =>
 		? "Untrusted providers can only access the files listed below. Everything else stays private unless the provider is marked as trusted."
 		: "Untrusted providers can access vault files by default, except for the files listed below as private. Trusted providers always bypass this restriction.",
 );
-// This protects file *content*. File and folder names/paths in the vault are not
-// hidden from untrusted providers — they can appear in search results, directory
-// listings, and elsewhere regardless of a file's privacy status. Renaming/moving
-// files and folders is safe: rules that reference a path (folder, or a wikilink
-// inside a property value) follow the rename automatically, so this list won't
-// drift out of date.
+// A private file is withheld *entirely* from an untrusted provider — path included.
+// Every vault-facing read tool filters on `shouldBlockFile` before the path reaches a
+// result: `list_directory` reports only a count, `search_notes` drops the hit,
+// `grep_notes` never opens the file, `read_content`/`get_properties` refuse, and
+// `get_all_tags` omits tags that occur only in private notes (a tag name is itself
+// content). Indexing skips them (`VectorStoreService`) and the graph withholds their
+// titles from topic labelling.
+//
+// Three routes still expose a private path, so the note narrows to those rather than
+// making the old blanket "names are always visible" claim:
+//   1. Workspace context blocks — `[Currently visible notes]`, `[Selected text from
+//      <path>]`, `[Graph-selected notes]` are appended to the outgoing message in
+//      `chatStore.augmentWithVisibleNotes` with no privacy check. This is the one worth
+//      warning about: it is silent, and the selection block carries the selected *text*,
+//      not just the path.
+//   2. Verbatim content of a *non-private* file — a public note (or `.chat` transcript,
+//      which is gated by its own path, not by what it quotes) that contains
+//      `[[Private Note]]` passes that name through as ordinary body text.
+//   3. `exec_<plugin>` integrations, which bypass the filter wholesale — already covered
+//      by `IntegrationPrivacyWarningModal` at enable time, so it is not repeated here.
+// Attachments also bypass the filter, but attaching is an explicit user act on a named
+// file, so it is not a surprise the way (1) is.
 const pathVisibilityNote =
-	"This controls file content, not file or folder names — those can still appear to any provider. " +
+	"Private files are withheld from untrusted providers entirely — content, names and paths alike. " +
+	"Two exceptions: a private note that is open, selected, or graph-selected still has its path (and any " +
+	"selected text) sent with your message, and a private note's name can appear inside another note that " +
+	"links to it and isn't itself private. " +
 	"Rules here follow renames automatically, so you can freely rename or move files without breaking this list.";
 const managedTitle = $derived.by(() =>
 	privacyMode === "private-by-default" ? "Files exposed to untrusted providers" : "Private files",
