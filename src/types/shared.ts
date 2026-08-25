@@ -110,4 +110,31 @@ export interface PendingChangeEntry {
 	threadId: string;
 	/** Timestamp when the change was proposed */
 	createdAt: number;
+	/** Whether this entry's accept/reject outcome has been surfaced to the model
+	 * (in a later user turn's context block). Resolved-but-unreported entries are
+	 * reported exactly once; pending ones are re-reported until resolved. */
+	reportedToModel?: boolean;
+}
+
+/**
+ * The review outcome of one staged note change, as reported to the model in a
+ * user turn's context suffix. Stored in the message's `additional_kwargs` so the
+ * exact suffix can be reconstructed and stripped for display (the same pattern
+ * as visible notes / selection).
+ *
+ * `partially` = an update whose diff groups were resolved individually with at
+ * least one accepted and the rest rejected — some proposed text IS in the note.
+ */
+export interface ReviewOutcomeRef {
+	path: string;
+	outcome: "accepted" | "rejected" | "partially";
+}
+
+/** The review status of a thread's staged note changes at the moment a user
+ * turn was sent: freshly resolved outcomes plus paths still awaiting review.
+ * Persisted in the message's `additional_kwargs` (like visible notes) so the
+ * appended context block can be exactly reconstructed and stripped for display. */
+export interface ReviewStatusRef {
+	outcomes: ReviewOutcomeRef[];
+	pendingPaths: string[];
 }

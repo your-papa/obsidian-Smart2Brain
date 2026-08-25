@@ -263,6 +263,7 @@ describe("PendingChangesStore", () => {
 		it("should accept and apply a delete change", async () => {
 			const file = makeTFile("delete-me.md");
 			(plugin.app.vault.getAbstractFileByPath as ReturnType<typeof vi.fn>).mockReturnValue(file);
+			(plugin.app.vault.read as ReturnType<typeof vi.fn>).mockResolvedValue("content");
 
 			const [id] = store.addChanges(
 				[{ type: "delete", path: "delete-me.md", originalContent: "content" }],
@@ -274,6 +275,23 @@ describe("PendingChangesStore", () => {
 
 			expect(store.getEntry(id)?.status).toBe("accepted");
 			expect(plugin.app.vault.trash).toHaveBeenCalledWith(file, true);
+		});
+
+		it("should refuse a delete when the file was modified after staging", async () => {
+			const file = makeTFile("delete-me.md");
+			(plugin.app.vault.getAbstractFileByPath as ReturnType<typeof vi.fn>).mockReturnValue(file);
+			// The preview shows the staged snapshot; the note has since changed.
+			(plugin.app.vault.read as ReturnType<typeof vi.fn>).mockResolvedValue("edited since staging");
+
+			const [id] = store.addChanges(
+				[{ type: "delete", path: "delete-me.md", originalContent: "content" }],
+				"tc-1",
+				"thread-1",
+			);
+
+			await expect(store.acceptChange(id)).rejects.toThrow("was modified after the delete was proposed");
+			expect(store.getEntry(id)?.status).toBe("pending");
+			expect(plugin.app.vault.trash).not.toHaveBeenCalled();
 		});
 
 		it("should accept and apply a move change", async () => {
@@ -846,6 +864,118 @@ describe("PendingChangesStore", () => {
 			expect(store.getEntry(pendingId)).toBeUndefined();
 			expect(store.getEntry(resolvedId)).toBeUndefined();
 			expect(store.getPendingCount("Chats/gone.chat")).toBe(0);
+		});
+	});
+
+	/* --------------------------------------------------------------------------
+	 * takeReviewOutcomesForThread — model feedback
+	 * ------------------------------------------------------------------------*/
+
+	describe("takeReviewOutcomesForThread", () => {
+		it("reports resolved entries once and pending paths every time", async () => {
+			const file = makeTFile("a.md");
+			(plugin.app.vault.getAbstractFileByPath as ReturnType<typeof vi.fn>).mockReturnValue(file);
+			(plugin.app.vault.read as ReturnType<typeof vi.fn>).mockResolvedValue("x");
+
+			const [acceptedId] = store.addChanges(
+				[{ type: "update", path: "a.md", originalContent: "x", newContent: "y" }],
+				"tc-1",
+				"thread-1",
+			);
+			const [rejectedId] = store.addChanges([{ type: "create", path: "b.md", content: "B" }], "tc-2", "thread-1");
+			store.addChanges([{ type: "create", path: "c.md", content: "C" }], "tc-3", "thread-1");
+			// Another thread's entry must not leak into this thread's report.
+			store.addChanges([{ type: "create", path: "d.md", content: "D" }], "tc-4", "thread-2");
+
+			await store.acceptChange(acceptedId);
+			store.rejectChange(rejectedId);
+
+			const first = store.takeReviewOutcomesForThread("thread-1");
+			expect(first.outcomes).toEqual([
+				{ path: "a.md", outcome: "accepted" },
+				{ path: "b.md", outcome: "rejected" },
+			]);
+			expect(first.pendingPaths).toEqual(["c.md"]);
+
+			// Resolved outcomes are delivered exactly once; pending repeats.
+			const second = store.takeReviewOutcomesForThread("thread-1");
+			expect(second.outcomes).toEqual([]);
+			expect(second.pendingPaths).toEqual(["c.md"]);
+		});
+
+		it("reports a group-resolved entry with applied text as partially applied", async () => {
+			const original = "line1\nline2\nline3\n";
+			const updated = "line1\nCHANGED\nline3\nADDED\n";
+			const file = makeTFile("note.md");
+			(plugin.app.vault.getAbstractFileByPath as ReturnType<typeof vi.fn>).mockReturnValue(file);
+			(plugin.app.vault.read as ReturnType<typeof vi.fn>).mockResolvedValue(original);
+
+			const [id] = store.addChanges(
+				[{ type: "update", path: "note.md", originalContent: original, newContent: updated }],
+				"tc-1",
+				"thread-1",
+			);
+			await store.acceptChangeGroup(id, 0);
+			store.rejectChangeGroup(id, 0);
+			expect(store.getEntry(id)?.status).toBe("rejected");
+			expect(store.hasUnrevertedApplication(store.getEntry(id)!)).toBe(true);
+
+			const { outcomes } = store.takeReviewOutcomesForThread("thread-1");
+			expect(outcomes).toEqual([{ path: "note.md", outcome: "partially" }]);
+		});
+	});
+
+	/* --------------------------------------------------------------------------
+	 * load — orphaned-thread pruning
+	 * ------------------------------------------------------------------------*/
+
+	describe("load orphan pruning", () => {
+		/**
+		 * A `.chat` deleted outside the app (or while the plugin was unloaded) never
+		 * reaches `removeThread`. Its entries were invisible in every per-thread bar
+		 * yet still counted by `countOtherThreadsPendingUpdate` — a permanent
+		 * "another chat is editing this file" banner with no chat to resolve it from.
+		 */
+		it("drops entries whose chat file no longer exists", async () => {
+			const persisted = JSON.stringify([
+				{
+					id: "01a00000-0000-7000-8000-000000000001",
+					change: { type: "update", path: "note.md", originalContent: "a", newContent: "b" },
+					status: "pending",
+					toolCallId: "tc-1",
+					threadId: "Chats/alive.chat",
+					createdAt: 1,
+				},
+				{
+					id: "01a00000-0000-7000-8000-000000000002",
+					change: { type: "update", path: "note.md", originalContent: "a", newContent: "c" },
+					status: "pending",
+					toolCallId: "tc-2",
+					threadId: "Chats/gone.chat",
+					createdAt: 2,
+				},
+				{
+					// Non-.chat thread key (api staging path) — never existence-checked.
+					id: "01a00000-0000-7000-8000-000000000003",
+					change: { type: "create", path: "api.md", content: "X" },
+					status: "pending",
+					toolCallId: "tc-3",
+					threadId: "api-thread",
+					createdAt: 3,
+				},
+			]);
+			(plugin.app.vault.adapter.read as ReturnType<typeof vi.fn>).mockResolvedValue(persisted);
+			(plugin.app.vault.adapter.exists as ReturnType<typeof vi.fn>).mockImplementation(
+				async (path: string) => path !== "Chats/gone.chat",
+			);
+
+			await store.load();
+
+			expect(store.getPendingCount("Chats/alive.chat")).toBe(1);
+			expect(store.getPendingCount("Chats/gone.chat")).toBe(0);
+			expect(store.getPendingCount("api-thread")).toBe(1);
+			// The orphan no longer inflates cross-thread collision counts.
+			expect(store.countOtherThreadsPendingUpdate("note.md", "Chats/alive.chat")).toBe(0);
 		});
 	});
 

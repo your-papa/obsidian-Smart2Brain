@@ -1,6 +1,7 @@
 <script lang="ts">
 import type { AssistantTimelineEvent } from "../../stores/chatStore.svelte";
 import { getData } from "../../stores/dataStore.svelte";
+import { getPendingChangesStore } from "../../stores/pendingChangesStore.svelte";
 import { buildToolOutputRenderModel, type ToolOutputRenderModel } from "./toolOutputRenderModel";
 import {
 	buildStepsFromEvents,
@@ -73,6 +74,43 @@ function getTaskSummary(input: Record<string, unknown> | null | undefined): stri
 /** Output render model for a tool call, or undefined if it hasn't produced output. */
 function toOutputModel(tool: UnifiedToolCall): ToolOutputRenderModel | undefined {
 	return tool.output !== undefined ? buildToolOutputRenderModel(tool.name, tool.output, tool.input) : undefined;
+}
+
+/**
+ * Live review status of the entries a `manage_notes` call staged, as chips.
+ * Without this the card's "will be reviewed by the user" stays frozen forever;
+ * with it the transcript shows what actually happened to each proposal.
+ * Reads `store.revision`, so the chips update as the user accepts/rejects.
+ * Empty for calls with no matching entries (e.g. staged before this linkage
+ * existed, or a thread whose entries were pruned) — the card just shows its
+ * static summary then.
+ */
+function reviewStatusChips(toolCallId: string): Array<{ label: string; cls: string }> {
+	try {
+		const store = getPendingChangesStore();
+		void store.revision;
+		const entries = store.getEntriesByToolCallId(toolCallId);
+		if (entries.length === 0) return [];
+		let accepted = 0;
+		let rejected = 0;
+		let partial = 0;
+		let pending = 0;
+		for (const e of entries) {
+			if (e.status === "pending") pending++;
+			else if (e.status === "accepted") accepted++;
+			else if (store.hasUnrevertedApplication(e)) partial++;
+			else rejected++;
+		}
+		const chips: Array<{ label: string; cls: string }> = [];
+		if (accepted > 0) chips.push({ label: `${accepted} accepted`, cls: "tool-output-metric-chip-success" });
+		if (partial > 0) chips.push({ label: `${partial} partly applied`, cls: "tool-output-metric-chip-warning" });
+		if (rejected > 0) chips.push({ label: `${rejected} rejected`, cls: "tool-output-metric-chip-danger" });
+		if (pending > 0) chips.push({ label: `${pending} awaiting review`, cls: "tool-output-metric-chip-accent" });
+		return chips;
+	} catch {
+		// store not initialized (e.g. tests rendering the section standalone)
+		return [];
+	}
 }
 
 /**
@@ -444,7 +482,7 @@ const showThinkingHeader = $derived(steps.length > 0 || !!isStreaming);
   {#if hasFriendlyResult(outputModel)}
     <div class="tool-io-section">
       <div class="tool-io-output">
-        {@render outputBody(outputModel!)}
+        {@render outputBody(outputModel!, tool.id)}
       </div>
     </div>
   {:else if showRawIO && tool.status !== "running"}
@@ -494,7 +532,7 @@ const showThinkingHeader = $derived(steps.length > 0 || !!isStreaming);
         <div class="tool-subagent-output">
           <div class="tool-subagent-output-label">Result</div>
           <div class="tool-io-output">
-            {@render outputBody(outputModel!)}
+            {@render outputBody(outputModel!, tool.id)}
           </div>
         </div>
       {/if}
@@ -610,7 +648,7 @@ const showThinkingHeader = $derived(steps.length > 0 || !!isStreaming);
   {/each}
 {/snippet}
 
-{#snippet outputBody(model: ToolOutputRenderModel)}
+{#snippet outputBody(model: ToolOutputRenderModel, toolCallId: string = "")}
   {#if model.kind === "markdown"}
     <MarkdownRenderer
       content={model.markdown}
@@ -782,6 +820,9 @@ const showThinkingHeader = $derived(steps.length > 0 || !!isStreaming);
       <span class="tool-output-metric-chip">paths: {model.summary.paths}</span>
       {#each model.summary.breakdown as part (part)}
         <span class="tool-output-metric-chip tool-output-metric-chip-accent">{part}</span>
+      {/each}
+      {#each reviewStatusChips(toolCallId) as chip (chip.label)}
+        <span class="tool-output-metric-chip {chip.cls}">{chip.label}</span>
       {/each}
     </div>
     <div class="tool-output-message">{model.summary.message}</div>
@@ -1690,6 +1731,18 @@ const showThinkingHeader = $derived(steps.length > 0 || !!isStreaming);
   .tool-output-metric-chip-warning {
     color: var(--color-orange);
     background: color-mix(in srgb, var(--color-orange) 12%, transparent);
+  }
+
+  /* Live review-status chips on the manage_notes card (green/red mirror the
+     pending-changes bar's accept/reject colours). */
+  .tool-output-metric-chip-success {
+    color: var(--color-green);
+    background: color-mix(in srgb, var(--color-green) 12%, transparent);
+  }
+
+  .tool-output-metric-chip-danger {
+    color: var(--color-red);
+    background: color-mix(in srgb, var(--color-red) 12%, transparent);
   }
 
   .tool-output-group {

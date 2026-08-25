@@ -13,7 +13,7 @@ import type { AgentStreamChunk, CheckpointHistoryItem, ThreadHistory } from "../
 import type { AgentManager } from "../agent/AgentManager";
 import { BASE_SYSTEM_PROMPT } from "../agent/prompts";
 import type { ChatModelConfig } from "../providers/index";
-import type { ChatAttachment, ThreadError } from "../types/shared";
+import type { ChatAttachment, ReviewStatusRef, ThreadError } from "../types/shared";
 import type { AgentConfig } from "../types/plugin";
 import { getPendingChangesStore } from "./pendingChangesStore.svelte";
 import { formatVisibleNotesContext, type VisibleNoteRef } from "../hooks/useVisibleNotes.svelte";
@@ -764,6 +764,34 @@ export function formatGraphNotesContext(notes: GraphNoteRef[]): string {
 	return `[Graph-selected notes]\n${links.join("\n")}`;
 }
 
+/**
+ * Formats staged-change review outcomes into a context block for the agent.
+ * Without this the model never learns what the user decided: its tool result
+ * said "will be reviewed", and every later turn it would keep assuming its
+ * edits were (or will be) applied — including ones the user rejected.
+ */
+export function formatReviewOutcomesContext(status: ReviewStatusRef): string {
+	if (status.outcomes.length === 0 && status.pendingPaths.length === 0) return "";
+	const lines = ["[Status of your proposed note changes]"];
+	for (const o of status.outcomes) {
+		if (o.outcome === "accepted") {
+			lines.push(`- "${o.path}": accepted by the user and applied.`);
+		} else if (o.outcome === "rejected") {
+			lines.push(`- "${o.path}": rejected by the user — NOT applied. Do not assume this edit exists.`);
+		} else {
+			lines.push(
+				`- "${o.path}": partially applied — the user accepted some of the proposed changes and rejected the rest. Read the note if you need its exact current content.`,
+			);
+		}
+	}
+	if (status.pendingPaths.length > 0) {
+		lines.push(
+			`- Still awaiting the user's review (NOT applied yet): ${status.pendingPaths.map((p) => `"${p}"`).join(", ")}`,
+		);
+	}
+	return lines.join("\n");
+}
+
 /** Strips the augmented context suffix (visible notes + selection + graph notes) from a message.
  * Reconstructs the exact suffix that was appended by augmentWithVisibleNotes()
  * and removes it by exact string match from the end. This is safe even when user
@@ -774,6 +802,7 @@ function stripAugmentedSuffix(
 	visibleNotes?: VisibleNoteRef[],
 	selection?: SelectionRef,
 	graphNotes?: GraphNoteRef[],
+	reviewStatus?: ReviewStatusRef,
 ): string {
 	// Reconstruct the exact suffix in the same order it was appended
 	let suffix = "";
@@ -786,6 +815,10 @@ function stripAugmentedSuffix(
 	}
 	if (graphNotes?.length) {
 		const ctx = formatGraphNotesContext(graphNotes);
+		if (ctx) suffix += `\n\n${ctx}`;
+	}
+	if (reviewStatus) {
+		const ctx = formatReviewOutcomesContext(reviewStatus);
 		if (ctx) suffix += `\n\n${ctx}`;
 	}
 	if (suffix && content.endsWith(suffix)) {
@@ -1268,11 +1301,12 @@ export function baseMessagesToMessagePairs(
 			const visibleNotes = (msg.additional_kwargs?.visibleNotes as VisibleNoteRef[] | undefined) ?? undefined;
 			const selection = (msg.additional_kwargs?.selection as SelectionRef | undefined) ?? undefined;
 			const graphNotes = (msg.additional_kwargs?.graphNotes as GraphNoteRef[] | undefined) ?? undefined;
+			const reviewStatus = (msg.additional_kwargs?.reviewStatus as ReviewStatusRef | undefined) ?? undefined;
 
 			// Strip the augmented context blocks by reconstructing the exact suffix
 			// that was appended, then removing it from the end. This is safe even when
 			// user content or selected text contains bracket patterns like "[Selected text from".
-			userContent = stripAugmentedSuffix(userContent, visibleNotes, selection, graphNotes);
+			userContent = stripAugmentedSuffix(userContent, visibleNotes, selection, graphNotes, reviewStatus);
 
 			const pairId = genUUIDv7();
 
@@ -2027,12 +2061,15 @@ export class ChatSession {
 		return shouldSummarizeForEstimatedTokens(estimatedTokens, contextWindow);
 	}
 
-	/** Augments the user query with visible notes context from the provided refs. */
+	/** Augments the user query with visible notes context from the provided refs.
+	 * Order must match stripAugmentedSuffix exactly — the UI strips by exact
+	 * suffix reconstruction. */
 	private augmentWithVisibleNotes(
 		userContent: string,
 		visibleNotes?: VisibleNoteRef[],
 		selection?: SelectionRef,
 		graphNotes?: GraphNoteRef[],
+		reviewStatus?: ReviewStatusRef,
 	): string {
 		let result = userContent;
 		if (visibleNotes?.length) {
@@ -2044,6 +2081,10 @@ export class ChatSession {
 		}
 		if (graphNotes?.length) {
 			const ctx = formatGraphNotesContext(graphNotes);
+			if (ctx) result = `${result}\n\n${ctx}`;
+		}
+		if (reviewStatus) {
+			const ctx = formatReviewOutcomesContext(reviewStatus);
 			if (ctx) result = `${result}\n\n${ctx}`;
 		}
 		return result;
@@ -2061,7 +2102,19 @@ export class ChatSession {
 		const plugin = getPlugin();
 		const beforeCheckpointIds = new Set(this.graphState.nodes.keys());
 		const parentCheckpointId = this.graphState.activeCheckpointId ?? this.graphState.rootCheckpointId;
-		const augmented = this.augmentWithVisibleNotes(userContent, visibleNotes, selection, graphNotes);
+		// Review outcomes for changes the model staged earlier in this thread —
+		// collected at send time so the model stops assuming rejected edits exist.
+		// `take` marks resolved entries reported; if this send then fails before
+		// the checkpoint persists, those outcomes are lost to the model (it can
+		// still read the notes) — accepted over re-reporting them forever.
+		let reviewStatus: ReviewStatusRef | undefined;
+		try {
+			const { outcomes, pendingPaths } = getPendingChangesStore().takeReviewOutcomesForThread(String(this.id));
+			if (outcomes.length > 0 || pendingPaths.length > 0) reviewStatus = { outcomes, pendingPaths };
+		} catch {
+			// store not initialized — send without the block
+		}
+		const augmented = this.augmentWithVisibleNotes(userContent, visibleNotes, selection, graphNotes, reviewStatus);
 
 		checkpointDebug("send.parent", {
 			threadId: this.id,
@@ -2083,6 +2136,7 @@ export class ChatSession {
 					selection,
 					graphNotes,
 					undefined,
+					reviewStatus,
 				) as AsyncIterable<AgentStreamChunk>,
 			{
 				generateTitle: userContent,

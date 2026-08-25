@@ -450,6 +450,29 @@ function createReadingDiffActionBar(
 	});
 	bar.appendChild(acceptBtn);
 
+	// Stale parity with the chat bar and the edit-mode bar: accepting a group
+	// whose note changed after staging always fails the store's conflict check.
+	// Async (disk read) — the reading view isn't an editing surface, so disk is
+	// the right source here; the bar is recreated on every section re-render
+	// (file modify, store change), which keeps the answer current.
+	try {
+		void getPendingChangesStore()
+			.hasConflict(entryId)
+			.then((conflict) => {
+				if (!conflict) return;
+				acceptBtn.disabled = true;
+				acceptBtn.setAttribute(
+					"title",
+					"Cannot accept — the note changed after this was proposed. Reject it and ask the agent to re-stage.",
+				);
+			})
+			.catch(() => {
+				/* vault read failed — leave the button as-is */
+			});
+	} catch {
+		/* store not initialized */
+	}
+
 	const rejectBtn = document.createElement("button");
 	rejectBtn.className = "s2b-diff-reject-btn";
 	rejectBtn.textContent = "Reject";

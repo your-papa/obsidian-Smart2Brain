@@ -6,6 +6,7 @@ const mockAddChanges = vi.fn().mockReturnValue(["mock-id"]);
 const mockIsPathAllowed = vi.fn().mockReturnValue(true);
 const mockCountOtherThreads = vi.fn().mockReturnValue(0);
 const mockShouldBlockFile = vi.fn().mockReturnValue(false);
+const mockGetPendingUpdatesForPath = vi.fn().mockReturnValue([]);
 
 vi.mock("../../src/stores/pendingChangesStore.svelte", () => ({
 	getPendingChangesStore: () => ({
@@ -13,6 +14,7 @@ vi.mock("../../src/stores/pendingChangesStore.svelte", () => ({
 		isPathAllowed: mockIsPathAllowed,
 		countOtherThreadsPendingUpdate: mockCountOtherThreads,
 		shouldBlockFile: (...args: unknown[]) => mockShouldBlockFile(...args),
+		getPendingUpdatesForPath: (...args: unknown[]) => mockGetPendingUpdatesForPath(...args),
 	}),
 }));
 
@@ -97,6 +99,7 @@ describe("manageNotes tool", () => {
 		mockIsPathAllowed.mockReturnValue(true);
 		mockCountOtherThreads.mockReturnValue(0);
 		mockShouldBlockFile.mockReturnValue(false);
+		mockGetPendingUpdatesForPath.mockReturnValue([]);
 		mockGetIndexableVaultFiles.mockReturnValue([]);
 		setManageNotesPermissions();
 		app = createMockApp();
@@ -629,6 +632,114 @@ describe("manageNotes tool", () => {
 
 			expect(result).toContain("zero-width");
 			expect(mockAddChanges).not.toHaveBeenCalled();
+		});
+	});
+
+	describe("same-thread re-staging rebases onto pending content", () => {
+		const DISK = "line one\nline two\nline three\n";
+		const PROPOSED = "line one\nline two edited\nline three\n";
+
+		function pendingEntry(threadId: string, originalContent = DISK) {
+			return {
+				id: "prior-id",
+				status: "pending",
+				toolCallId: "tc-prior",
+				threadId,
+				createdAt: 1,
+				change: { type: "update", path: "Notes/doc.md", originalContent, newContent: PROPOSED },
+			};
+		}
+
+		beforeEach(() => {
+			const file = makeFile("Notes/doc.md");
+			mockResolveVaultFileDetailed.mockReturnValue({ status: "found", file });
+			vi.mocked(app.vault.read).mockResolvedValue(DISK);
+		});
+
+		it("applies edits against this thread's pending newContent and says so", async () => {
+			mockGetPendingUpdatesForPath.mockReturnValue([pendingEntry("test-thread-id")]);
+
+			const result = await tool.invoke(
+				{
+					operations: [
+						{
+							type: "update",
+							path: "Notes/doc.md",
+							// Matches only the PENDING proposal's text, not disk.
+							edits: [{ oldText: "line two edited", newText: "line two edited twice" }],
+						},
+					],
+				},
+				THREAD_CONFIG,
+			);
+
+			expect(result).toContain("superseded");
+			const staged = mockAddChanges.mock.calls[0][0][0];
+			// Conflict baseline stays disk; the proposal carries both rounds of edits.
+			expect(staged.originalContent).toBe(DISK);
+			expect(staged.newContent).toBe("line one\nline two edited twice\nline three\n");
+		});
+
+		it("falls back to disk when the pending proposal is stale against disk", async () => {
+			mockGetPendingUpdatesForPath.mockReturnValue([
+				pendingEntry("test-thread-id", "some older disk content\n"),
+			]);
+
+			const result = await tool.invoke(
+				{
+					operations: [
+						{
+							type: "update",
+							path: "Notes/doc.md",
+							edits: [{ oldText: "line two edited", newText: "x" }],
+						},
+					],
+				},
+				THREAD_CONFIG,
+			);
+
+			// The edit targeted the pending proposal's text, which is not the base here.
+			expect(result).toContain("Could not find the specified text");
+			expect(mockAddChanges).not.toHaveBeenCalled();
+		});
+
+		it("ignores pending updates from other threads", async () => {
+			mockGetPendingUpdatesForPath.mockReturnValue([pendingEntry("some-other-thread")]);
+
+			const result = await tool.invoke(
+				{
+					operations: [
+						{
+							type: "update",
+							path: "Notes/doc.md",
+							edits: [{ oldText: "line two", newText: "line 2" }],
+						},
+					],
+				},
+				THREAD_CONFIG,
+			);
+
+			expect(result).not.toContain("superseded");
+			const staged = mockAddChanges.mock.calls[0][0][0];
+			expect(staged.newContent).toBe("line one\nline 2\nline three\n");
+		});
+
+		it("rebases a vault-wide replace the same way", async () => {
+			const file = makeFile("Notes/doc.md");
+			mockGetIndexableVaultFiles.mockReturnValue([file]);
+			mockGetPendingUpdatesForPath.mockReturnValue([pendingEntry("test-thread-id")]);
+
+			const result = await tool.invoke(
+				{
+					operations: [{ type: "replace", find: "edited", replace: "changed" }],
+				},
+				THREAD_CONFIG,
+			);
+
+			expect(result).toContain("superseded");
+			const staged = mockAddChanges.mock.calls[0][0][0];
+			expect(staged.originalContent).toBe(DISK);
+			expect(staged.newContent).toBe("line one\nline two changed\nline three\n");
 		});
 	});
 

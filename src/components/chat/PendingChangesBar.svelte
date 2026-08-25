@@ -7,6 +7,7 @@ import type { PendingChangeEntry } from "../../types/shared";
 import type { RevertSkip } from "../../stores/pendingChangesStore.svelte";
 import { icon } from "../../utils/utils";
 import { VIEW_TYPE_CHAT } from "../../views/chat/Chat";
+import { ConfirmModal } from "../modal/ConfirmModal";
 import MarkdownRenderer from "../ui/MarkdownRenderer.svelte";
 import PendingDiffHunks from "./PendingDiffHunks.svelte";
 
@@ -38,15 +39,87 @@ const pendingCount = $derived(pendingEntries.length);
 const appliedEntries = $derived(actionableEntries.filter((e) => e.status !== "pending"));
 const appliedCount = $derived(appliedEntries.length);
 
-/** Headline for the summary row, which now covers two distinct kinds of entry. */
+/** Headline for the summary row, which now covers two distinct kinds of entry.
+ * Spells out the pending batch's composition — "2 updates, 1 delete pending"
+ * reads very differently from "3 pending changes" when Accept All sits one
+ * click away and the destructive rows are hidden behind the collapse. */
 const summaryLabel = $derived.by(() => {
 	const parts: string[] = [];
-	if (pendingCount > 0) parts.push(`${pendingCount} pending change${pendingCount !== 1 ? "s" : ""}`);
+	if (pendingCount > 0) {
+		const counts = { create: 0, update: 0, delete: 0, move: 0 };
+		for (const e of pendingEntries) counts[e.change.type]++;
+		const composition = (Object.keys(counts) as Array<keyof typeof counts>)
+			.filter((type) => counts[type] > 0)
+			.map((type) => `${counts[type]} ${type}${counts[type] !== 1 ? "s" : ""}`)
+			.join(", ");
+		parts.push(`${composition} pending`);
+	}
 	if (appliedCount > 0) parts.push(`${appliedCount} partially applied`);
 	return parts.join(", ");
 });
 
 let isExpanded = $state(false);
+
+/** True while an Accept All / Reject All batch is running — disables both
+ * buttons so a double-click can't queue a second batch (the store's guard
+ * makes re-entry a silent no-op, but the button shouldn't invite it). */
+let batchRunning = $state(false);
+
+/**
+ * Entries whose target no longer matches what was staged (edited externally,
+ * or deleted). Accepting one will fail its conflict check, so surface the
+ * staleness up front instead of letting Accept error as the first signal.
+ * Async (`hasConflict` reads the vault), hence state + explicit recompute
+ * rather than a `$derived`.
+ */
+let staleEntryIds = $state(new Set<string>());
+
+async function recomputeStale() {
+	const ids = new Set<string>();
+	for (const entry of threadId ? getPendingChangesStore().getPendingForThread(threadId) : []) {
+		if (entry.change.type === "create") continue;
+		try {
+			if (await store.hasConflict(entry.id)) ids.add(entry.id);
+		} catch {
+			// vault read failed — leave the entry unmarked rather than crying wolf
+		}
+	}
+	staleEntryIds = ids;
+}
+
+$effect(() => {
+	void store.revision;
+	void threadId;
+	void recomputeStale();
+});
+
+// Store revision only tracks store mutations; external edits to a staged note
+// arrive as vault events. Recompute on modify/delete of any staged path.
+$effect(() => {
+	const app = getPlugin().app;
+	const touchesStagedPath = (path: string) =>
+		threadId &&
+		getPendingChangesStore()
+			.getPendingForThread(threadId)
+			.some((e) => e.change.path === path);
+	const modifyRef = app.vault.on("modify", (file) => {
+		if (touchesStagedPath(file.path)) void recomputeStale();
+	});
+	const deleteRef = app.vault.on("delete", (file) => {
+		if (touchesStagedPath(file.path)) void recomputeStale();
+	});
+	return () => {
+		app.vault.offref(modifyRef);
+		app.vault.offref(deleteRef);
+	};
+});
+
+/** Explains a badge on click/keypress — `title` tooltips don't exist on touch,
+ * so every badge needs a tap path to its explanation. */
+function explainBadge(evt: Event, text: string) {
+	evt.stopPropagation();
+	new Notice(text, 8000);
+}
 
 /**
  * Ids of entries whose preview is open.
@@ -108,8 +181,17 @@ function changeTypeBadgeClass(type: string): string {
 	}
 }
 
+/** Vault path as Obsidian shows notes natively: no `.md` extension. The folder
+ * prefix stays — it disambiguates same-named notes, and staged changes can
+ * target any folder. */
+function displayPath(path: string): string {
+	return path.replace(/\.md$/, "");
+}
+
 function changePathLabel(entry: PendingChangeEntry): string {
-	return entry.change.type === "move" ? `${entry.change.path} -> ${entry.change.newPath}` : entry.change.path;
+	return entry.change.type === "move"
+		? `${displayPath(entry.change.path)} → ${displayPath(entry.change.newPath)}`
+		: displayPath(entry.change.path);
 }
 
 /** Whether this move takes a note out of a private location into a public one.
@@ -166,8 +248,30 @@ function describeSkip(skip: RevertSkip): string {
 }
 
 async function handleAcceptAll() {
-	if (!threadId) return;
+	if (!threadId || batchRunning) return;
 	const count = pendingCount;
+
+	// One click on a collapsed bar can apply deletions and privacy-affecting
+	// moves the user never looked at. Those two get a confirm; ordinary
+	// creates/updates keep the frictionless path.
+	const deletes = pendingEntries.filter((e) => e.change.type === "delete").length;
+	const deprivatizing = pendingEntries.filter((e) => store.isDeprivatizingMove(e.change)).length;
+	if (deletes > 0 || deprivatizing > 0) {
+		const risks: string[] = [];
+		if (deletes > 0) risks.push(`${deletes} note deletion${deletes !== 1 ? "s" : ""}`);
+		if (deprivatizing > 0)
+			risks.push(`${deprivatizing} move${deprivatizing !== 1 ? "s" : ""} out of a private location`);
+		const modal = new ConfirmModal(
+			getPlugin().app,
+			"Accept all changes?",
+			`This batch includes ${risks.join(" and ")}. Apply all ${count} change${count !== 1 ? "s" : ""}?`,
+			"Accept All",
+		);
+		modal.open();
+		if (!(await modal.promise).confirmed) return;
+	}
+
+	batchRunning = true;
 	try {
 		const failures = await store.acceptAll(threadId);
 		if (failures.length === 0) {
@@ -177,22 +281,29 @@ async function handleAcceptAll() {
 		}
 	} catch (e) {
 		new Notice(`Error applying changes: ${e instanceof Error ? e.message : String(e)}`);
+	} finally {
+		batchRunning = false;
 	}
 }
 
 async function handleRejectAll() {
-	if (!threadId) return;
+	if (!threadId || batchRunning) return;
 	// Capture before the call — both counts are zero afterwards.
 	const hadPending = pendingCount > 0;
-	const skipped = await store.rejectAll(threadId);
-	if (skipped.length === 0) {
-		new Notice(hadPending ? "Rejected all pending changes" : "Restored the partially applied notes");
-	} else {
-		// A partially-accepted note that couldn't be restored is left as it is. Say
-		// so per reason — otherwise "Rejected all" reads as "everything was undone"
-		// while those files still hold the accepted groups.
-		const head = hadPending ? "Rejected all pending changes." : "Finished undoing applied changes.";
-		new Notice(`${head} ${skipped.map(describeSkip).join(" ")}`);
+	batchRunning = true;
+	try {
+		const skipped = await store.rejectAll(threadId);
+		if (skipped.length === 0) {
+			new Notice(hadPending ? "Rejected all pending changes" : "Restored the partially applied notes");
+		} else {
+			// A partially-accepted note that couldn't be restored is left as it is. Say
+			// so per reason — otherwise "Rejected all" reads as "everything was undone"
+			// while those files still hold the accepted groups.
+			const head = hadPending ? "Rejected all pending changes." : "Finished undoing applied changes.";
+			new Notice(`${head} ${skipped.map(describeSkip).join(" ")}`);
+		}
+	} finally {
+		batchRunning = false;
 	}
 }
 
@@ -224,10 +335,23 @@ function previewChange(evt: Event, entry: PendingChangeEntry) {
 
 {#if actionableEntries.length > 0}
   <div class="pcb-container">
-    <!-- Summary bar -->
-    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <!-- Summary bar. A div with button semantics, not a <button>: it CONTAINS
+         the Accept/Reject All buttons, and interactive elements can't nest. -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="pcb-summary" onclick={() => (isExpanded = !isExpanded)}>
+    <div
+      class="pcb-summary"
+      role="button"
+      tabindex="0"
+      aria-expanded={isExpanded}
+      aria-label={isExpanded ? "Collapse pending changes" : "Expand pending changes"}
+      onclick={() => (isExpanded = !isExpanded)}
+      onkeydown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          isExpanded = !isExpanded;
+        }
+      }}
+    >
       <div class="pcb-summary-left">
         <div class="pcb-icon" use:icon={"file-diff"} style="--icon-size: var(--icon-xs)"></div>
         <span class="pcb-count">
@@ -244,6 +368,7 @@ function previewChange(evt: Event, entry: PendingChangeEntry) {
             }}
             title="Accept all changes"
             type="button"
+            disabled={batchRunning}
           >
             <div use:icon={"check"} style="--icon-size: 12px"></div>
             <span>Accept All</span>
@@ -259,6 +384,7 @@ function previewChange(evt: Event, entry: PendingChangeEntry) {
             ? "Reject all changes, restoring any partially applied notes"
             : "Restore the partially applied notes to their original content"}
           type="button"
+          disabled={batchRunning}
         >
           <div use:icon={"x"} style="--icon-size: 12px"></div>
           <span>{pendingCount > 0 ? "Reject All" : "Undo Applied"}</span>
@@ -306,17 +432,44 @@ function previewChange(evt: Event, entry: PendingChangeEntry) {
                   {changeTypeLabel(entry)}
                 </span>
                 {#if entry.status !== "pending"}
+                  {@const appliedText =
+                    "Some of this change was applied to the note. Undo it to restore the note's original content."}
                   <!-- Not a proposal awaiting review: its groups were all resolved
                        individually and some accepted text is still in the note. -->
                   <span
                     class="pcb-applied"
-                    title="Some of this change was applied to the note. Undo it to restore the note's original content."
+                    title={appliedText}
+                    role="button"
+                    tabindex="0"
+                    onclick={(e) => explainBadge(e, appliedText)}
+                    onkeydown={(e) => e.key === "Enter" && explainBadge(e, appliedText)}
                   >
                     <span use:icon={"circle-alert"} style="--icon-size: 11px"></span>
                     Partly applied
                   </span>
                 {/if}
-                {#if entry.change.type === "update"}
+                {#if staleEntryIds.has(entry.id)}
+                  {@const staleText =
+                    entry.change.type === "delete"
+                      ? "This note changed after the delete was proposed — the preview no longer matches what would be deleted. Accepting will fail; reject and ask the agent to re-stage it."
+                      : "This note changed after the change was proposed, so accepting it will fail. Reject it and ask the agent to re-apply its edit on the current content."}
+                  <span
+                    class="pcb-stale"
+                    title={staleText}
+                    role="button"
+                    tabindex="0"
+                    onclick={(e) => explainBadge(e, staleText)}
+                    onkeydown={(e) => e.key === "Enter" && explainBadge(e, staleText)}
+                  >
+                    <span use:icon={"triangle-alert"} style="--icon-size: 11px"></span>
+                    Stale
+                  </span>
+                {/if}
+                {#if entry.change.type !== "create"}
+                  <!-- Everything except a create targets a note that exists on disk
+                       right now — link it. For a delete, the live note is a better
+                       review surface than the staged snapshot; for a move, it shows
+                       what would be relocated. -->
                   <!-- svelte-ignore a11y_mouse_events_have_key_events -->
                   <a
                     class="internal-link pcb-path"
@@ -333,18 +486,29 @@ function previewChange(evt: Event, entry: PendingChangeEntry) {
                   <span class="pcb-path">{changePathLabel(entry)}</span>
                 {/if}
                 {#if isDeprivatizing(entry)}
-                <span
-                  class="pcb-deprivatizing"
-                  title="This note is currently private. Moving it to this location takes it out of the privacy filter, so it will be indexed, searchable, and available to untrusted providers from then on."
-                >
-                  <span use:icon={"shield-off"} style="--icon-size: 11px"></span>
-                  Leaves private
-                </span>
-              {/if}
-              {#if otherThreadCount(entry) > 0}
+                  {@const deprivatizingText =
+                    "This note is currently private. Moving it to this location takes it out of the privacy filter, so it will be indexed, searchable, and available to untrusted providers from then on."}
+                  <span
+                    class="pcb-deprivatizing"
+                    title={deprivatizingText}
+                    role="button"
+                    tabindex="0"
+                    onclick={(e) => explainBadge(e, deprivatizingText)}
+                    onkeydown={(e) => e.key === "Enter" && explainBadge(e, deprivatizingText)}
+                  >
+                    <span use:icon={"shield-off"} style="--icon-size: 11px"></span>
+                    Leaves private
+                  </span>
+                {/if}
+                {#if otherThreadCount(entry) > 0}
+                  {@const crossThreadText = `${otherThreadCount(entry)} other chat${otherThreadCount(entry) !== 1 ? "s" : ""} also ${otherThreadCount(entry) !== 1 ? "have" : "has"} a pending edit to this file. Whichever is accepted first wins; the others may then fail to apply.`}
                   <span
                     class="pcb-cross-thread"
-                    title={`${otherThreadCount(entry)} other chat${otherThreadCount(entry) !== 1 ? "s" : ""} also ${otherThreadCount(entry) !== 1 ? "have" : "has"} a pending edit to this file. Whichever is accepted first wins; the others may then fail to apply.`}
+                    title={crossThreadText}
+                    role="button"
+                    tabindex="0"
+                    onclick={(e) => explainBadge(e, crossThreadText)}
+                    onkeydown={(e) => e.key === "Enter" && explainBadge(e, crossThreadText)}
                   >
                     <span use:icon={"users"} style="--icon-size: 11px"></span>
                     {otherThreadCount(entry)}
@@ -353,15 +517,22 @@ function previewChange(evt: Event, entry: PendingChangeEntry) {
               </div>
               <div class="pcb-entry-actions">
                 {#if entry.status === "pending"}
+                  <!-- Accept is disabled while stale: the store's conflict check
+                       makes it fail unconditionally, so an enabled button is just
+                       an error with extra steps. If the note reverts to the staged
+                       content, the vault-event recompute re-enables it. -->
                   <button
                     class="pcb-action-icon pcb-action-accept"
                     onclick={(e) => {
                       e.stopPropagation();
                       handleAccept(entry);
                     }}
-                    title="Accept change"
+                    title={staleEntryIds.has(entry.id)
+                      ? "Cannot accept — the note changed after this was proposed. Reject it and ask the agent to re-stage."
+                      : "Accept change"}
                     aria-label="Accept change to {entry.change.path}"
                     type="button"
+                    disabled={staleEntryIds.has(entry.id)}
                   >
                     <div use:icon={"check"} style="--icon-size: 12px"></div>
                   </button>
@@ -399,7 +570,7 @@ function previewChange(evt: Event, entry: PendingChangeEntry) {
 
             {#if isPreviewOpen && showsDiff}
               <div class="pcb-preview">
-                <PendingDiffHunks {entry} />
+                <PendingDiffHunks {entry} stale={staleEntryIds.has(entry.id)} />
               </div>
             {:else if isPreviewOpen && previewContent !== null}
               <div class="pcb-preview">
@@ -511,6 +682,12 @@ function previewChange(evt: Event, entry: PendingChangeEntry) {
     transition: background 100ms ease;
   }
 
+  .pcb-action[disabled] {
+    opacity: 0.5;
+    cursor: default;
+    pointer-events: none;
+  }
+
   .pcb-action-accept {
     color: var(--color-green);
   }
@@ -537,6 +714,18 @@ function previewChange(evt: Event, entry: PendingChangeEntry) {
     cursor: pointer;
     background: transparent;
     transition: background 100ms ease;
+  }
+
+  /* Disabled accept on a stale row: keep it visible (its absence would read as
+     "this row can't be accepted ever") but clearly inert. pointer-events stays
+     on so the explanatory title tooltip still shows on hover. */
+  .pcb-action-icon[disabled] {
+    opacity: 0.35;
+    cursor: not-allowed;
+  }
+
+  .pcb-action-icon[disabled]:hover {
+    background: transparent;
   }
 
   .pcb-chevron {
@@ -592,9 +781,11 @@ function previewChange(evt: Event, entry: PendingChangeEntry) {
     min-width: 0;
   }
 
+  /* Reads as a note title, not code: the row's UI font, no monospace, and the
+     label itself already drops the `.md` extension (see displayPath) — matching
+     how Obsidian names notes everywhere else. */
   .pcb-path {
-    font-family: var(--font-monospace);
-    font-size: var(--font-smallest);
+    font-size: var(--font-ui-smaller);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -623,6 +814,22 @@ function previewChange(evt: Event, entry: PendingChangeEntry) {
      themes (Cupertino among them), which silently renders the badge
      transparent. */
   .pcb-deprivatizing {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    flex-shrink: 0;
+    padding: 1px 5px;
+    border-radius: var(--radius-s);
+    font-size: 10px;
+    font-weight: var(--font-semibold);
+    background: color-mix(in srgb, var(--color-red) 20%, transparent);
+    color: var(--color-red);
+    cursor: help;
+  }
+
+  /* Same shape family; red — accepting a stale entry is guaranteed to fail its
+     conflict check, and for a delete the preview misrepresents what would go. */
+  .pcb-stale {
     display: inline-flex;
     align-items: center;
     gap: 3px;

@@ -265,6 +265,39 @@ function applySequentialEdits(
 	return { content };
 }
 
+/**
+ * The text a new update's edits should be applied against.
+ *
+ * When THIS thread already has a pending update to the file, the model's
+ * follow-up edits are written against what it remembers proposing — its earlier
+ * `newText`s — not against disk (staged edits are invisible to reads, and the
+ * store's dedup will auto-reject the older proposal the moment the new one is
+ * staged, silently dropping those edits). Basing the new edits on the pending
+ * proposal's `newContent` makes the superseding proposal contain BOTH rounds of
+ * changes, and makes the model's `oldText`s actually match.
+ *
+ * Guarded on the pending proposal still being current against disk: if the note
+ * was hand-edited after staging, its `newContent` no longer accounts for those
+ * edits, and rebasing onto it would stage a proposal that silently reverts the
+ * user's own work on accept. In that case fall back to disk (the old proposal
+ * was un-appliable anyway — accept would fail its conflict check).
+ */
+function resolveUpdateBase(
+	threadId: string,
+	filePath: string,
+	diskContent: string,
+): { base: string; rebasedOnPending: boolean } {
+	const store = getPendingChangesStore();
+	const prior = store
+		.getPendingUpdatesForPath(filePath)
+		.filter((e) => e.threadId === threadId)
+		.at(-1);
+	if (prior?.change.type === "update" && prior.change.originalContent === diskContent) {
+		return { base: prior.change.newContent, rebasedOnPending: prior.change.newContent !== diskContent };
+	}
+	return { base: diskContent, rebasedOnPending: false };
+}
+
 function summarizeOperations(changes: PendingChange[]): string {
 	const counts = {
 		create: 0,
@@ -360,6 +393,10 @@ export async function stageNoteOperations(
 	// conflicting diffs for one file (the second would be un-appliable), but the
 	// skip must be surfaced — otherwise a multi-op batch silently under-applies.
 	const conflictSkippedPaths = new Set<string>();
+	// Files whose new proposal was based on this thread's earlier pending update
+	// (see resolveUpdateBase) — surfaced so the model knows the superseding
+	// proposal carries both rounds of edits.
+	const rebasedPaths = new Set<string>();
 
 	for (let i = 0; i < operations.length; i++) {
 		const operation = operations[i];
@@ -424,17 +461,16 @@ export async function stageNoteOperations(
 			}
 
 			const originalContent = await app.vault.read(result.file);
-			const editResult = applySequentialEdits(
-				originalContent,
-				operation.edits,
-				result.file.path,
-				operationNumber,
-			);
+			const { base, rebasedOnPending } = resolveUpdateBase(threadId, result.file.path, originalContent);
+			if (rebasedOnPending) rebasedPaths.add(result.file.path);
+			const editResult = applySequentialEdits(base, operation.edits, result.file.path, operationNumber);
 			if ("error" in editResult) return editResult.error;
 
 			stagedChanges.push({
 				type: "update",
 				path: result.file.path,
+				// Disk content, NOT the edit base: accept-time conflict detection
+				// compares against what is actually in the vault.
 				originalContent,
 				newContent: editResult.content,
 			});
@@ -562,11 +598,15 @@ export async function stageNoteOperations(
 
 			notesSearched++;
 			const originalContent = await app.vault.read(file);
+			// Same rebase as the update branch: replace against this thread's pending
+			// proposed content where one exists, so a replace doesn't silently drop a
+			// pending edit when the store's dedup supersedes it.
+			const { base, rebasedOnPending } = resolveUpdateBase(threadId, file.path, originalContent);
 			// Skip notes too large to regex safely (unbounded backtracking would
 			// freeze the UI). Only regex ops are affected — a literal find is a
 			// plain string scan with no backtracking. Counted and surfaced below
 			// so the skip is visible, not a silent wrong answer.
-			if (operation.is_regex && originalContent.length > matcher.maxInputLength) {
+			if (operation.is_regex && base.length > matcher.maxInputLength) {
 				notesTooLarge++;
 				tooLargeSkippedTotal++;
 				continue;
@@ -576,16 +616,17 @@ export async function stageNoteOperations(
 			// every boundary. This is a property of the pattern, not the file — the
 			// first note that exhibits it proves the pattern is wrong for a replace —
 			// so abort the whole operation rather than silently skipping notes.
-			if (operation.is_regex && matcher.hasZeroWidthMatch(originalContent)) {
+			if (operation.is_regex && matcher.hasZeroWidthMatch(base)) {
 				return `Error in operation ${operationNumber}: The regex "${operation.find}" matches an empty (zero-width) position in "${file.path}", so replacing it would insert text at every boundary rather than substitute. Use a pattern that matches concrete text.`;
 			}
-			if (!matcher.test(originalContent)) continue;
+			if (!matcher.test(base)) continue;
 
 			const newContent = operation.is_regex
-				? originalContent.replace(matcher.globalRegex(), operation.replace)
-				: originalContent.split(operation.find).join(operation.replace);
+				? base.replace(matcher.globalRegex(), operation.replace)
+				: base.split(operation.find).join(operation.replace);
 
-			if (newContent === originalContent) continue;
+			if (newContent === base) continue;
+			if (rebasedOnPending) rebasedPaths.add(file.path);
 
 			seenPaths.add(file.path);
 			if (store.countOtherThreadsPendingUpdate(file.path, threadId) > 0) {
@@ -634,6 +675,9 @@ export async function stageNoteOperations(
 			try {
 				// Sequential await respects the store's per-file lock ordering.
 				await store.acceptChange(entryIds[i]);
+				// This result already tells the model the write was applied — keep
+				// the next turn's review-outcome block from repeating it.
+				store.markReportedToModel([entryIds[i]]);
 				autoAppliedCount++;
 			} catch (e) {
 				const path = change.type === "move" ? change.newPath : change.path;
@@ -657,6 +701,10 @@ export async function stageNoteOperations(
 	}
 	if (autoApplyFailures.length > 0) {
 		summary += ` ${autoApplyFailures.length} memory write(s) could not be applied: ${autoApplyFailures.join("; ")}.`;
+	}
+	if (rebasedPaths.size > 0) {
+		const paths = [...rebasedPaths].map((p) => `"${p}"`).join(", ");
+		summary += ` Note: this thread already had a pending (not yet reviewed) update to ${paths}; the new proposal was built on top of it and contains both rounds of edits — the older proposal was superseded.`;
 	}
 	if (crossThreadPaths.size > 0) {
 		const paths = [...crossThreadPaths].map((p) => `"${p}"`).join(", ");
@@ -693,9 +741,19 @@ export function createManageNotesTool(app: App, agentId = "") {
 	const toolConfig = getManageNotesToolConfig(agentId);
 
 	return tool(
-		async ({ operations }: ManageNotesInput, config: RunnableConfig & { runId?: string }) => {
+		async (
+			{ operations }: ManageNotesInput,
+			config: RunnableConfig & { runId?: string; toolCall?: { id?: string } },
+		) => {
 			const threadId = resolveThreadIdFromConfig(config);
-			return stageNoteOperations(app, operations, threadId, config?.runId, agentId);
+			// `config.toolCall.id` is the MODEL's tool-call id — the same id the chat
+			// timeline shows for this call — set by LangChain when ToolNode invokes
+			// the tool with a ToolCall object. Keying the staged entries by it lets
+			// the chat's tool card look its entries up and show live review status.
+			// (`config.runId` is deleted by StructuredTool.call before the func runs,
+			// so the old `config?.runId` here was always undefined and every batch
+			// fell through to a fresh UUID.)
+			return stageNoteOperations(app, operations, threadId, config?.toolCall?.id ?? config?.runId, agentId);
 		},
 		{
 			name: toolConfig.name,

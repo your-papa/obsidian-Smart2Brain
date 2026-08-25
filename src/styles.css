@@ -841,6 +841,17 @@
 	background-color: rgba(0, 180, 0, 0.35);
 }
 
+/* Stale entry: the accept is guaranteed to fail its conflict check, so the
+   in-note bars disable it with an explanatory title (parity with the chat bar). */
+.s2b-diff-accept-btn[disabled] {
+	opacity: 0.45;
+	cursor: not-allowed;
+}
+
+.s2b-diff-accept-btn[disabled]:hover {
+	background-color: rgba(0, 180, 0, 0.2);
+}
+
 .s2b-diff-reject-btn {
 	background-color: rgba(220, 50, 47, 0.2);
 	color: var(--text-normal);

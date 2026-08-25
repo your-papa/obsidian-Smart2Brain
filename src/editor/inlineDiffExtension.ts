@@ -18,7 +18,7 @@ const refreshPendingChanges = StateEffect.define();
  * the "Pending change" label, a view-mode toggle, and Accept / Reject buttons.
  * The diff detail below is always shown (no collapse).
  */
-function createEditActionBar(entryId: string, groupIndex: number, groupTotal: number): HTMLElement {
+function createEditActionBar(entryId: string, groupIndex: number, groupTotal: number, stale: boolean): HTMLElement {
 	const bar = document.createElement("div");
 	bar.className = "s2b-diff-action-bar-widget";
 
@@ -98,6 +98,16 @@ function createEditActionBar(entryId: string, groupIndex: number, groupTotal: nu
 	const acceptBtn = document.createElement("button");
 	acceptBtn.className = "s2b-diff-accept-btn";
 	acceptBtn.textContent = "Accept";
+	// Stale parity with the chat bar: once the document no longer matches the
+	// staged original, the store's conflict check makes every group accept fail
+	// unconditionally, so offer the explanation instead of the error.
+	if (stale) {
+		acceptBtn.disabled = true;
+		acceptBtn.setAttribute(
+			"title",
+			"Cannot accept — the note changed after this was proposed. Reject it and ask the agent to re-stage.",
+		);
+	}
 	acceptBtn.addEventListener("click", (e) => {
 		e.preventDefault();
 		e.stopPropagation();
@@ -228,6 +238,7 @@ interface WidgetClasses {
 		mode: DiffViewMode,
 		app: App | null,
 		sourcePath: string,
+		stale: boolean,
 	) => WidgetType;
 	CrossThreadBannerWidget: new (otherCount: number) => WidgetType;
 }
@@ -258,6 +269,7 @@ function getWidgetClasses(): WidgetClasses {
 			readonly mode: DiffViewMode,
 			readonly app: App | null,
 			readonly sourcePath: string,
+			readonly stale: boolean,
 		) {
 			super();
 		}
@@ -278,7 +290,7 @@ function getWidgetClasses(): WidgetClasses {
 			const container = document.createElement("div");
 			container.className = "s2b-diff-edit-group";
 
-			container.appendChild(createEditActionBar(this.entryId, this.groupIndex, this.groupTotal));
+			container.appendChild(createEditActionBar(this.entryId, this.groupIndex, this.groupTotal, this.stale));
 			container.appendChild(this.buildDetail());
 
 			return container;
@@ -296,7 +308,10 @@ function getWidgetClasses(): WidgetClasses {
 				this.removedText === other.removedText &&
 				this.addedText === other.addedText &&
 				this.mode === other.mode &&
-				this.sourcePath === other.sourcePath
+				this.sourcePath === other.sourcePath &&
+				// Part of identity so a staleness flip re-renders the bar (CM6 reuses
+				// the DOM of eq widgets, so toDOM would otherwise never re-run).
+				this.stale === other.stale
 			);
 		}
 
@@ -348,6 +363,7 @@ function createGroupDecoration(
 	mode: DiffViewMode,
 	app: App | null,
 	sourcePath: string,
+	stale: boolean,
 ): Decoration {
 	const widget = new (getWidgetClasses().PendingGroupWidget)(
 		entryId,
@@ -358,6 +374,7 @@ function createGroupDecoration(
 		mode,
 		app,
 		sourcePath,
+		stale,
 	);
 	return Decoration.widget({ widget, side: -1, block: true });
 }
@@ -474,6 +491,13 @@ function buildDecorations(state: EditorState, entryOverride?: PendingChangeEntry
 		const groups = identifyGroups(change.originalContent, change.newContent);
 		if (groups.length === 0) return Decoration.none;
 
+		// The document no longer matches the staged original (user edits, or an
+		// external change loaded into the editor). Every group accept would fail
+		// the store's disk conflict check, so the action bars disable Accept.
+		// Doc-based rather than a disk read: it's synchronous, and the editor's
+		// content is what the user is looking at while reviewing here.
+		const stale = docText !== change.originalContent;
+
 		const mapPos = buildPositionMapper(change.originalContent, docText);
 		const decorations = [];
 
@@ -514,7 +538,7 @@ function buildDecorations(state: EditorState, entryOverride?: PendingChangeEntry
 			// Compact collapsible action bar for the group, anchored above its
 			// first line (side: -1 so it sorts before the line decoration).
 			decorations.push(
-				createGroupDecoration(group, entry.id, gi, groups.length, mode, app, filePath).range(lineStart),
+				createGroupDecoration(group, entry.id, gi, groups.length, mode, app, filePath, stale).range(lineStart),
 			);
 
 			// Line-background tints — additive, no document reflow. Only lines that
@@ -576,9 +600,14 @@ const pendingDiffField = StateField.define<DecorationSet>({
 	},
 	update(deco, tr) {
 		const refreshRequested = tr.effects.some((e) => e.is(refreshPendingChanges));
-		if (refreshRequested || tr.docChanged) {
+		if (refreshRequested) {
 			return buildDecorations(tr.state);
 		}
+		// Doc changes only MAP the existing set (O(changes), keeps positions
+		// valid) — rebuilding here ran two full-document diffLines passes on
+		// every keystroke while a pending change was open. The companion plugin
+		// debounces a refresh effect after typing pauses, which also flips the
+		// bars' stale state (the mapped set still carries pre-edit staleness).
 		return deco.map(tr.changes);
 	},
 	provide: (f) => EditorView.decorations.from(f),
@@ -599,6 +628,7 @@ const inlineDiffSideEffects = ViewPlugin.fromClass(
 		private initialized = false;
 		private refreshAttempts = 0;
 		private lastFilePath: string | null = null;
+		private docRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 
 		constructor(view: EditorView) {
 			this.view = view;
@@ -634,6 +664,9 @@ const inlineDiffSideEffects = ViewPlugin.fromClass(
 		update(update: ViewUpdate) {
 			if (!this.initialized) return;
 
+			// Viewport and geometry changes deliberately do NOT refresh: the
+			// decoration set is document-anchored, so scrolling can't change it —
+			// refreshing there ran two full diffLines passes per scroll frame.
 			const filePath = getEditorFilePath(this.view.state);
 			if (filePath !== this.lastFilePath) {
 				this.lastFilePath = filePath;
@@ -641,14 +674,21 @@ const inlineDiffSideEffects = ViewPlugin.fromClass(
 				return;
 			}
 
-			// docChanged is handled directly by the field; only viewport/geometry
-			// changes (which the field can't observe) need a nudge.
-			if (update.viewportChanged || update.geometryChanged) {
-				this.refreshHandler();
+			// The field only MAPS the set through doc changes; schedule the real
+			// rebuild for after typing pauses so the diffs run once per pause, not
+			// once per keystroke. The mapped set stays visually correct meanwhile;
+			// the rebuild re-verifies group text and updates the bars' stale state.
+			if (update.docChanged) {
+				if (this.docRefreshTimer) clearTimeout(this.docRefreshTimer);
+				this.docRefreshTimer = setTimeout(() => {
+					this.docRefreshTimer = null;
+					this.refreshHandler();
+				}, 250);
 			}
 		}
 
 		destroy() {
+			if (this.docRefreshTimer) clearTimeout(this.docRefreshTimer);
 			document.removeEventListener("s2b-pending-changes-updated", this.refreshHandler);
 			document.removeEventListener("s2b-diff-mode-changed", this.refreshHandler);
 		}

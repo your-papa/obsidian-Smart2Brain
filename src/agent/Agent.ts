@@ -16,7 +16,7 @@ import { getPlugin } from "../stores/state.svelte";
 import type { VisibleNoteRef } from "../hooks/useVisibleNotes.svelte";
 import type { SelectionRef } from "../hooks/useSelection.svelte";
 import type { GraphNoteRef } from "../stores/chatStore.svelte";
-import type { ChatAttachment, ThreadError } from "../types/shared";
+import type { ChatAttachment, ReviewStatusRef, ThreadError } from "../types/shared";
 import {
 	AiTransportDowngradeRequiredError,
 	bindAsyncIterableToTransportContext,
@@ -92,6 +92,9 @@ export interface AgentRunOptions {
 	selection?: SelectionRef;
 	/** Notes selected from the Smart Graph */
 	graphNotes?: GraphNoteRef[];
+	/** Review status of earlier staged note changes, appended as a context block
+	 * to the query by chatStore; persisted here so the UI can strip it again. */
+	reviewStatus?: ReviewStatusRef;
 }
 
 /** Options for editing a message (forks from checkpoint with new user message) */
@@ -739,6 +742,7 @@ export class Agent {
 		selection?: SelectionRef,
 		graphNotes?: GraphNoteRef[],
 		lcSource?: string,
+		reviewStatus?: ReviewStatusRef,
 	): HumanMessage {
 		const additional_kwargs: Record<string, unknown> = {};
 		if (attachments?.length) additional_kwargs.attachments = attachments;
@@ -746,6 +750,7 @@ export class Agent {
 		if (selection) additional_kwargs.selection = selection;
 		if (graphNotes?.length) additional_kwargs.graphNotes = graphNotes;
 		if (lcSource) additional_kwargs.lc_source = lcSource;
+		if (reviewStatus) additional_kwargs.reviewStatus = reviewStatus;
 		const hasKwargs = Object.keys(additional_kwargs).length > 0;
 		// Cast content — the HumanMessage constructor handles both string and
 		// MessageContentComplex[] at runtime, but the TS types are overly strict.
@@ -815,6 +820,7 @@ export class Agent {
 			options.selection,
 			options.graphNotes,
 			options.lcSource,
+			options.reviewStatus,
 		);
 
 		const transportContext = createAiTransportContext("default", `agent.run:${runId}`);
@@ -1169,6 +1175,7 @@ export class Agent {
 			options.selection,
 			options.graphNotes,
 			options.lcSource,
+			options.reviewStatus,
 		);
 
 		yield* this.runStream({

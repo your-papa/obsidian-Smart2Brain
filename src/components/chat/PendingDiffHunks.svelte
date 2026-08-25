@@ -15,9 +15,14 @@ import { icon } from "../../utils/utils";
  */
 interface Props {
 	entry: PendingChangeEntry;
+	/** The entry no longer matches the note on disk (see the bar's stale badge).
+	 * Group accepts hit the same conflict check as whole-entry accepts, so they
+	 * are disabled too; rejecting a group only rewrites the proposal and stays
+	 * available. */
+	stale?: boolean;
 }
 
-const { entry }: Props = $props();
+const { entry, stale = false }: Props = $props();
 const store = getPendingChangesStore();
 
 /**
@@ -72,9 +77,12 @@ function rejectGroup(groupIndex: number) {
                 <button
                   class="pdh-action-icon pdh-action-accept"
                   onclick={() => acceptGroup(groupIndex)}
-                  title="Accept this change"
+                  title={stale
+                    ? "Cannot accept — the note changed after this was proposed. Reject it and ask the agent to re-stage."
+                    : "Accept this change"}
                   aria-label="Accept change {groupIndex + 1} of {groups.length}"
                   type="button"
+                  disabled={stale}
                 >
                   <div use:icon={"check"} style="--icon-size: 12px"></div>
                 </button>
@@ -153,6 +161,15 @@ function rejectGroup(groupIndex: number) {
     cursor: pointer;
     background: transparent;
     transition: background 100ms ease;
+  }
+
+  .pdh-action-icon[disabled] {
+    opacity: 0.35;
+    cursor: not-allowed;
+  }
+
+  .pdh-action-icon[disabled]:hover {
+    background: transparent;
   }
 
   .pdh-action-accept {
