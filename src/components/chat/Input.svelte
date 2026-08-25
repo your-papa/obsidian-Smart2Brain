@@ -1167,7 +1167,7 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
          the two top-anchored elements sit on one line. The old `pt-2` put it
          at 12px — a visibly large gap that also read as misaligned against
          the button. -->
-    <div class="composer-tray-row flex flex-row flex-wrap items-start gap-1.5 pt-0.5">
+    <div class="composer-tray-row flex flex-row flex-wrap items-start gap-1.5 pt-0.5 min-w-0">
       <ContextTray
         bind:this={contextTrayRef}
         graphPaths={registry.graphSelection}

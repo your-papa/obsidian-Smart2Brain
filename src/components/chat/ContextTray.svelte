@@ -240,7 +240,7 @@ onDestroy(() => {
 </script>
 
 {#if hasAny}
-  <div class="context-tray inline-flex flex-row flex-wrap items-start gap-1.5">
+  <div class="context-tray flex flex-row flex-wrap items-start gap-1.5 min-w-0 max-w-full">
     <!-- Visible notes (auto references) -->
     {#each visibleNotes as note (note.file.path)}
       {@const deactivated = deactivatedPaths.has(note.file.path)}
@@ -351,7 +351,7 @@ onDestroy(() => {
         onfocus={(evt) => previewLink(evt, attachment.vaultPath)}
       >
         <div class="chip-icon" use:icon={attachmentIcon(attachment)} style="--icon-size: 12px"></div>
-        <span>{attachment.name}</span>
+        <span class="chip-label">{attachment.name}</span>
       </button>
     {/each}
   </div>
@@ -361,6 +361,15 @@ onDestroy(() => {
   .s2b-chip {
     display: inline-flex;
     align-items: center;
+    /* Every chip caps its own width and can be squeezed below its intrinsic
+       text size. `.s2b-pill` sets `white-space: nowrap`, so without this a
+       long filename grows the pill until it pushes past the composer's edge —
+       `.chip-label`'s `text-overflow` can only engage once the chip itself is
+       allowed to be narrower than its content. `min(100%, 18rem)` keeps a
+       single chip inside the tray on a narrow composer while still letting
+       short names size naturally. */
+    max-width: min(100%, 18rem);
+    min-width: 0;
   }
 
   /* One accent-tinted HUE for every chip, mixed against `--background-primary`
@@ -493,10 +502,16 @@ onDestroy(() => {
      without this the body renders `--interactive-normal` grey next to a
      tinted action and the chip reads as two unrelated buttons. The scoped
      selector is what wins that fight. */
+  /* The chip's cap has to reach the label, and the label lives inside this
+     inner button on `.visible` / `.graph-group` chips. Without `min-width: 0`
+     the button floors at its content width and the ellipsis never engages. */
   .chip-body {
     background: var(--s2b-pill-bg);
     color: inherit;
+    min-width: 0;
+    flex-shrink: 1;
   }
+
 
   .chip-body:hover {
     background: var(--s2b-pill-bg-hover);
@@ -505,6 +520,9 @@ onDestroy(() => {
   .chip-action {
     display: inline-flex;
     align-items: center;
+    /* Fixed-size target: it must not absorb the squeeze that belongs to the
+       label when the chip hits its width cap. */
+    flex-shrink: 0;
     /* Vertical padding tracks the compact tray pill above. */
     padding: 2px 7px 2px 5px;
     border: 1px solid var(--s2b-pill-border);
