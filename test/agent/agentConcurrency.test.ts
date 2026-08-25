@@ -225,7 +225,7 @@ describe("PendingChangesStore.acceptAll — per-thread concurrency", () => {
 		expect(failuresB).toHaveLength(0);
 	});
 
-	it("second acceptAll on the SAME thread while first is in flight returns the in-progress error", async () => {
+	it("second acceptAll on the SAME thread while first is in flight is a silent no-op", async () => {
 		const plugin = createMockPlugin();
 		// Slow down vault.modify so the first acceptAll is still running when the second starts.
 		// We use a deferred promise so we can resolve it after modify has been called.
@@ -248,14 +248,18 @@ describe("PendingChangesStore.acceptAll — per-thread concurrency", () => {
 		const first = store.acceptAll("thread-C");
 		const second = store.acceptAll("thread-C");
 
-		// Second should return the in-progress rejection immediately
+		// Second returns immediately with no failures — the first run is already
+		// doing exactly what was asked; the UI disables the button while awaiting,
+		// so re-entry must not report a phantom failure.
 		const secondResult = await second;
-		expect(secondResult).toContain("Batch operation already in progress");
+		expect(secondResult).toHaveLength(0);
 
 		// Now unblock modify so `first` can finish
 		modifyResolve();
 		const firstResult = await first;
 		expect(firstResult).toHaveLength(0);
+		// The no-op second run must not have applied the staged change again.
+		expect(plugin.app.vault.modify).toHaveBeenCalledTimes(1);
 	});
 });
 

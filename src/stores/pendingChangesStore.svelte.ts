@@ -2,7 +2,7 @@ import { type EventRef, normalizePath, TFile } from "obsidian";
 import { type Change, diffLines } from "diff";
 import { z } from "zod";
 import type SecondBrainPlugin from "../main";
-import type { PendingChange, PendingChangeEntry } from "../types/shared";
+import type { PendingChange, PendingChangeEntry, ReviewOutcomeRef } from "../types/shared";
 import { shouldProcessVaultPath } from "../utils/fileFiltering";
 import { genUUIDv7 } from "../utils/uuid7Validator";
 import { Logger } from "../utils/logging";
@@ -31,6 +31,7 @@ const pendingChangeEntrySchema = z.object({
 	toolCallId: z.string(),
 	threadId: z.string(),
 	createdAt: z.number(),
+	reportedToModel: z.boolean().optional(),
 });
 
 const pendingChangesArraySchema = z.array(pendingChangeEntrySchema);
@@ -140,6 +141,7 @@ export class PendingChangesStore {
 				this.#entries = [];
 			}
 		}
+		await this.#pruneOrphanedThreads();
 		this.#renameHandler = this.#plugin.app.vault.on("rename", (file, oldPath) => {
 			this.#handleFileRename(oldPath, file.path);
 		});
@@ -155,12 +157,61 @@ export class PendingChangesStore {
 		return normalizePath(`${this.#plugin.manifest.dir}/${STORAGE_FILE}`);
 	}
 
+	/**
+	 * Drop entries whose chat no longer exists. `removeThread` only runs through
+	 * the in-app delete path, so a `.chat` file deleted externally (or while the
+	 * plugin was unloaded) leaves orphans behind: invisible in every per-thread
+	 * bar, yet still counted by `countOtherThreadsPendingUpdate` — a note banner
+	 * claiming "another chat is editing this file" with no chat to resolve it
+	 * from, forever.
+	 *
+	 * Scoped to threadIds that look like chat files. The api staging path can
+	 * pass arbitrary thread keys that were never vault paths; existence checks
+	 * against those would always "fail" and wrongly sweep live entries.
+	 */
+	async #pruneOrphanedThreads(): Promise<void> {
+		const chatThreadIds = new Set(
+			this.#entries.map((e) => e.threadId).filter((threadId) => threadId.endsWith(".chat")),
+		);
+		if (chatThreadIds.size === 0) return;
+
+		const orphaned: string[] = [];
+		for (const threadId of chatThreadIds) {
+			if (!(await this.#plugin.app.vault.adapter.exists(normalizePath(threadId)))) {
+				orphaned.push(threadId);
+			}
+		}
+		if (orphaned.length === 0) return;
+
+		Logger.warn(`[PendingChanges] Pruning entries for ${orphaned.length} deleted chat(s): ${orphaned.join(", ")}`);
+		// removeThread carries the stranded-content warning and the save/notify.
+		for (const threadId of orphaned) {
+			this.removeThread(threadId);
+		}
+	}
+
 	private scheduleSave(): void {
 		if (this.#saveTimer) clearTimeout(this.#saveTimer);
 		this.#saveTimer = setTimeout(
 			() => void this.saveToDisk().catch((e) => Logger.error("[PendingChanges] Failed to save:", e)),
 			SAVE_DEBOUNCE_MS,
 		);
+	}
+
+	/**
+	 * Persist immediately, cancelling any debounced save. Used after transitions
+	 * that already wrote to the vault (accept, group accept, revert): the vault
+	 * write is durable the moment it happens, so a crash inside the debounce
+	 * window would resurrect the entry as `pending` on reload — and its next
+	 * accept would then fail the conflict check against content we ourselves
+	 * wrote. Staging bursts keep the debounce; they have no vault side effect.
+	 */
+	private flushSave(): void {
+		if (this.#saveTimer) {
+			clearTimeout(this.#saveTimer);
+			this.#saveTimer = null;
+		}
+		void this.saveToDisk().catch((e) => Logger.error("[PendingChanges] Failed to save:", e));
 	}
 
 	private async saveToDisk(): Promise<void> {
@@ -300,6 +351,16 @@ export class PendingChangesStore {
 				if (!(file instanceof TFile)) {
 					throw new TypeError(`Cannot apply delete — file not found: ${change.path}`);
 				}
+				// Conflict detection, matching update: the review surfaces (bar preview,
+				// hover) show the STAGED snapshot, so trashing whatever is there now
+				// would delete content the user never reviewed. Trash is recoverable,
+				// but the review step should not misrepresent what it destroys.
+				const currentContent = await app.vault.read(file);
+				if (currentContent !== change.originalContent) {
+					throw new Error(
+						`File "${change.path}" was modified after the delete was proposed. Review the note and re-stage the delete.`,
+					);
+				}
 				await app.vault.trash(file, true);
 			} else if (change.type === "move") {
 				const file = app.vault.getAbstractFileByPath(normalizedPath);
@@ -323,7 +384,7 @@ export class PendingChangesStore {
 		// snapshot from earlier group accepts is settled — see `hasUnrevertedApplication`.
 		// Leaving it set would let `rejectAll` revert a change they just accepted.
 		if (change.type === "update") change.initialOriginalContent = undefined;
-		this.scheduleSave();
+		this.flushSave();
 		this.notifyChange();
 	}
 
@@ -422,7 +483,7 @@ export class PendingChangesStore {
 				}
 			});
 
-			this.scheduleSave();
+			this.flushSave();
 			this.notifyChange();
 		} finally {
 			this.#processingGroups.delete(entryId);
@@ -450,11 +511,21 @@ export class PendingChangesStore {
 		this.notifyChange();
 	}
 
+	/** Whether a batch accept/reject is currently running for this thread. The UI
+	 * reads this (via `revision`-tracked derivations after `notifyChange`, or its
+	 * own in-flight state) to disable the batch buttons rather than depending on
+	 * the re-entrancy guard below, which is a silent no-op. */
+	isBatchProcessing(threadId: string): boolean {
+		return this.#batchProcessing.has(threadId);
+	}
+
 	/** Accept all pending changes for a thread. Returns paths that failed. */
 	async acceptAll(threadId: string): Promise<string[]> {
 		// Keyed by thread so concurrent chats accepting their own (disjoint) changes
-		// don't spuriously block each other.
-		if (this.#batchProcessing.has(threadId)) return ["Batch operation already in progress"];
+		// don't spuriously block each other. Re-entry is a silent no-op — the first
+		// run is still doing exactly what was asked; callers disable the button
+		// while awaiting rather than reporting a phantom failure.
+		if (this.#batchProcessing.has(threadId)) return [];
 		this.#batchProcessing.add(threadId);
 		try {
 			// Snapshot the list before iterating to avoid picking up entries added mid-loop
@@ -556,7 +627,7 @@ export class PendingChangesStore {
 
 		const skipped = await this.revertAppliedGroups(entry);
 		entry.status = "rejected";
-		this.scheduleSave();
+		this.flushSave();
 		this.notifyChange();
 		return skipped;
 	}
@@ -568,28 +639,37 @@ export class PendingChangesStore {
 	 *  file keeps its current content. Callers should surface these: a silent skip reads as
 	 *  "everything was undone" when it wasn't. */
 	async rejectAll(threadId: string): Promise<RevertSkip[]> {
-		// Two distinct sets, deliberately:
-		//
-		//  - anything still `pending`, which must be marked rejected; and
-		//  - anything with `initialOriginalContent` set, which has partially-applied
-		//    content ON DISK that must be undone regardless of its status.
-		//
-		// The second set is not a subset of the first. Accepting one diff group and
-		// then rejecting the remaining ones drives `newContent` back to
-		// `originalContent`, so `rejectChangeGroup` already flipped the entry to
-		// `rejected` — while the accepted group is still written to the note. Filtering
-		// on `pending` alone skipped exactly those entries, leaving the applied text in
-		// the vault while the UI reported that everything had been rejected.
-		const targets = this.getActionableForThread(threadId);
-		const skippedReverts: RevertSkip[] = [];
-		for (const entry of targets) {
-			const skipped = await this.revertAppliedGroups(entry);
-			if (skipped) skippedReverts.push(skipped);
-			entry.status = "rejected";
+		// Same per-thread guard as acceptAll — and the same Set, so an accept-all
+		// and a reject-all for one thread can't interleave their vault writes.
+		if (this.#batchProcessing.has(threadId)) return [];
+		this.#batchProcessing.add(threadId);
+		try {
+			// Two distinct sets, deliberately:
+			//
+			//  - anything still `pending`, which must be marked rejected; and
+			//  - anything with `initialOriginalContent` set, which has partially-applied
+			//    content ON DISK that must be undone regardless of its status.
+			//
+			// The second set is not a subset of the first. Accepting one diff group and
+			// then rejecting the remaining ones drives `newContent` back to
+			// `originalContent`, so `rejectChangeGroup` already flipped the entry to
+			// `rejected` — while the accepted group is still written to the note. Filtering
+			// on `pending` alone skipped exactly those entries, leaving the applied text in
+			// the vault while the UI reported that everything had been rejected.
+			const targets = this.getActionableForThread(threadId);
+			const skippedReverts: RevertSkip[] = [];
+			for (const entry of targets) {
+				const skipped = await this.revertAppliedGroups(entry);
+				if (skipped) skippedReverts.push(skipped);
+				entry.status = "rejected";
+			}
+			// Reverts are vault writes — flush like the other write paths.
+			this.flushSave();
+			this.notifyChange();
+			return skippedReverts;
+		} finally {
+			this.#batchProcessing.delete(threadId);
 		}
-		this.scheduleSave();
-		this.notifyChange();
-		return skippedReverts;
 	}
 
 	/** Get all entries for a thread. */
@@ -634,6 +714,59 @@ export class PendingChangesStore {
 		);
 	}
 
+	/**
+	 * The review outcomes to surface to the model in the next user turn, plus the
+	 * paths still awaiting review. Resolved entries are marked reported so each
+	 * outcome reaches the model exactly once; pending paths are returned every
+	 * call until they resolve (the model must keep treating them as not applied).
+	 *
+	 * Only consults entries the model itself staged in this thread — outcomes for
+	 * other chats' proposals would be noise it has no proposal to correlate with.
+	 */
+	takeReviewOutcomesForThread(threadId: string): { outcomes: ReviewOutcomeRef[]; pendingPaths: string[] } {
+		const outcomes: ReviewOutcomeRef[] = [];
+		const pendingPaths: string[] = [];
+		let changed = false;
+		for (const entry of this.#entries) {
+			if (entry.threadId !== threadId) continue;
+			if (entry.status === "pending") {
+				pendingPaths.push(entry.change.path);
+				continue;
+			}
+			if (entry.reportedToModel) continue;
+			outcomes.push({
+				path: entry.change.path,
+				// Rejected with applied text still on disk = some groups were
+				// accepted first — the note DOES contain part of the proposal.
+				outcome:
+					entry.status === "accepted"
+						? "accepted"
+						: this.hasUnrevertedApplication(entry)
+							? "partially"
+							: "rejected",
+			});
+			entry.reportedToModel = true;
+			changed = true;
+		}
+		if (changed) this.scheduleSave();
+		return { outcomes, pendingPaths };
+	}
+
+	/** Mark entries as already surfaced to the model, so the next turn's outcome
+	 * block skips them. Used for memory auto-applies, whose outcome the tool
+	 * result itself already reported ("applied automatically"). */
+	markReportedToModel(entryIds: string[]): void {
+		let changed = false;
+		for (const id of entryIds) {
+			const entry = this.#entries.find((e) => e.id === id);
+			if (entry && !entry.reportedToModel) {
+				entry.reportedToModel = true;
+				changed = true;
+			}
+		}
+		if (changed) this.scheduleSave();
+	}
+
 	/** Get a single entry by ID. */
 	getEntry(entryId: string): PendingChangeEntry | undefined {
 		return this.#entries.find((e) => e.id === entryId);
@@ -642,6 +775,12 @@ export class PendingChangesStore {
 	/** Get entry by tool call ID. */
 	getEntryByToolCallId(toolCallId: string): PendingChangeEntry | undefined {
 		return this.#entries.find((e) => e.toolCallId === toolCallId);
+	}
+
+	/** All entries one tool call staged — the chat's `manage_notes` card uses
+	 * this to show live review status for its own proposals. */
+	getEntriesByToolCallId(toolCallId: string): PendingChangeEntry[] {
+		return this.#entries.filter((e) => e.toolCallId === toolCallId);
 	}
 
 	/** Get count of pending changes for a thread. */

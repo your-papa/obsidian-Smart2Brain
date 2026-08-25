@@ -7,12 +7,14 @@ const mockAddChanges = vi.fn();
 const mockIsPathAllowed = vi.fn().mockReturnValue(true);
 const mockShouldBlockFile = vi.fn().mockReturnValue(false);
 const mockCountOtherThreads = vi.fn().mockReturnValue(0);
+const mockGetPendingUpdatesForPath = vi.fn().mockReturnValue([]);
 vi.mock("../../src/stores/pendingChangesStore.svelte", () => ({
 	getPendingChangesStore: () => ({
 		addChanges: mockAddChanges,
 		isPathAllowed: mockIsPathAllowed,
 		shouldBlockFile: mockShouldBlockFile,
 		countOtherThreadsPendingUpdate: mockCountOtherThreads,
+		getPendingUpdatesForPath: (...args: unknown[]) => mockGetPendingUpdatesForPath(...args),
 	}),
 }));
 
@@ -83,6 +85,7 @@ describe("manageNotes tool (update operations)", () => {
 		vi.clearAllMocks();
 		mockIsPathAllowed.mockReturnValue(true);
 		mockShouldBlockFile.mockReturnValue(false);
+		mockGetPendingUpdatesForPath.mockReturnValue([]);
 		mockCountOtherThreads.mockReturnValue(0);
 		app = createMockApp();
 		tool = createManageNotesTool(app);

@@ -29,7 +29,7 @@ import {
 	type AuthObject,
 	getProviderDefinition,
 } from "../providers/index";
-import type { ChatAttachment } from "../types/shared";
+import type { ChatAttachment, ReviewStatusRef } from "../types/shared";
 import { gzipString, toArrayBuffer } from "../utils/gzip";
 import { Logger } from "../utils/logging";
 import { basePromptPath, memoriesDir, memoryPromptPath } from "../utils/agentPaths";
@@ -1527,6 +1527,7 @@ export class AgentManager {
 		selection?: SelectionRef,
 		graphNotes?: GraphNoteRef[],
 		lcSource?: string,
+		reviewStatus?: ReviewStatusRef,
 	): AsyncGenerator<AgentManagerStreamChunk, void, unknown> {
 		const resolvedThreadId = this.normalizeThreadId(threadId);
 		const { agent, resolved, chatModel, runMetadata, resolvedAgentId } = await this.prepareAgentForStream(agentId);
@@ -1544,6 +1545,7 @@ export class AgentManager {
 				selection,
 				graphNotes,
 				lcSource,
+				reviewStatus,
 			}),
 			signal,
 			chatModel,
