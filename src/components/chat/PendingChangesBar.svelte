@@ -8,6 +8,7 @@ import type { RevertSkip } from "../../stores/pendingChangesStore.svelte";
 import { icon } from "../../utils/utils";
 import { VIEW_TYPE_CHAT } from "../../views/chat/Chat";
 import MarkdownRenderer from "../ui/MarkdownRenderer.svelte";
+import PendingDiffHunks from "./PendingDiffHunks.svelte";
 
 interface Props {
 	threadPath: string | null;
@@ -48,13 +49,14 @@ const summaryLabel = $derived.by(() => {
 let isExpanded = $state(false);
 
 /**
- * Ids of entries whose content preview is open.
+ * Ids of entries whose preview is open.
  *
- * An `update` can be reviewed in the note itself — the inline-diff decorations
- * render there, which is what the path link jumps to. A `create` has no note to
- * jump to yet and a `delete` is about to lose one, so their content was
- * reviewable nowhere: the row showed only a path. These two render their body
- * inline here instead.
+ * A `create` has no note to jump to yet and a `delete` is about to lose one,
+ * so those render their full content inline. An `update` can also be reviewed
+ * in the note itself (the inline-diff decorations, which the path link jumps
+ * to), but that means leaving the chat — and on mobile the hover page-preview
+ * doesn't exist at all — so it additionally gets an in-chat per-hunk diff
+ * (PendingDiffHunks) behind the same toggle.
  */
 let previewedEntryIds = $state(new Set<string>());
 
@@ -64,11 +66,18 @@ function togglePreview(entryId: string) {
 	previewedEntryIds = next;
 }
 
-/** The content a row can preview inline, or null when the note itself is the review surface. */
+/** The content a row can preview inline, or null when the row previews a diff (update) or nothing (move). */
 function previewContentOf(entry: PendingChangeEntry): string | null {
 	if (entry.change.type === "create") return entry.change.content;
 	if (entry.change.type === "delete") return entry.change.originalContent;
 	return null;
+}
+
+/** Whether a row previews an in-chat diff instead of full content. Only pending
+ * updates: a resolved-but-partly-applied entry has originalContent == newContent
+ * (no groups left to show), and its remaining action is Undo, not review. */
+function hasDiffPreview(entry: PendingChangeEntry): boolean {
+	return entry.change.type === "update" && entry.status === "pending";
 }
 
 function changeTypeLabel(entry: PendingChangeEntry): string {
@@ -263,19 +272,30 @@ function previewChange(evt: Event, entry: PendingChangeEntry) {
       <div class="pcb-list">
         {#each actionableEntries as entry (entry.id)}
           {@const previewContent = previewContentOf(entry)}
+          {@const showsDiff = hasDiffPreview(entry)}
           {@const isPreviewOpen = previewedEntryIds.has(entry.id)}
           <div class="pcb-entry">
             <div class="pcb-entry-header">
               <div class="pcb-entry-left">
-                {#if previewContent !== null}
+                {#if previewContent !== null || showsDiff}
                   <button
                     class="pcb-preview-toggle"
                     class:pcb-preview-toggle-open={isPreviewOpen}
                     onclick={() => togglePreview(entry.id)}
-                    title={isPreviewOpen ? "Hide content" : "Show content"}
-                    aria-label={isPreviewOpen
-                      ? `Hide content of ${entry.change.path}`
-                      : `Show content of ${entry.change.path}`}
+                    title={showsDiff
+                      ? isPreviewOpen
+                        ? "Hide changes"
+                        : "Show changes"
+                      : isPreviewOpen
+                        ? "Hide content"
+                        : "Show content"}
+                    aria-label={showsDiff
+                      ? isPreviewOpen
+                        ? `Hide changes to ${entry.change.path}`
+                        : `Show changes to ${entry.change.path}`
+                      : isPreviewOpen
+                        ? `Hide content of ${entry.change.path}`
+                        : `Show content of ${entry.change.path}`}
                     aria-expanded={isPreviewOpen}
                     type="button"
                   >
@@ -377,7 +397,11 @@ function previewChange(evt: Event, entry: PendingChangeEntry) {
               </div>
             </div>
 
-            {#if previewContent !== null && isPreviewOpen}
+            {#if isPreviewOpen && showsDiff}
+              <div class="pcb-preview">
+                <PendingDiffHunks {entry} />
+              </div>
+            {:else if isPreviewOpen && previewContent !== null}
               <div class="pcb-preview">
                 {#if previewContent.trim() === ""}
                   <div class="pcb-preview-empty">This note is empty.</div>
