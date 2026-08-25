@@ -1,0 +1,28 @@
+{
+  "worktree": {
+    "bgIsolation": "none"
+  },
+  "permissions": {
+    "allow": [
+      "Bash(bun run test)",
+      "Bash(bun run test *)",
+      "Bash(bun run check)",
+      "Bash(bun run format)",
+      "Bash(bun run lint)",
+      "Bash(bun run build)",
+      "Bash(bun run bench:layout)",
+      "Bash(bun run bench:layout *)",
+      "Bash(bunx vitest run *)",
+      "Bash(bunx biome lint *)",
+      "Bash(bunx biome check *)",
+      "Bash(bunx biome format *)",
+      "Bash(bunx tsc --noEmit *)",
+      "Bash(bunx btca ask *)",
+      "Bash(obsidian vault=\"S2B Test Vault\" command *)",
+      "Bash(obsidian vault=\"S2B Test Vault\" dev:dom *)",
+      "Bash(obsidian vault=\"S2B Test Vault\" dev:screenshot *)",
+      "Bash(obsidian vault=\"S2B Test Vault\" dev:errors)",
+      "Bash(gh api graphql *)"
+    ]
+  }
+}

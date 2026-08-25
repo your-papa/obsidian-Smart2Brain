@@ -35,7 +35,11 @@ workspace.json
 .btca
 
 .opencode
-.claude/
+# Ignore agent-local state, but share the project's permission allowlist.
+# A negation cannot re-include a file under an excluded directory, so the
+# directory itself must stay unignored and its contents excluded instead.
+.claude/*
+!.claude/settings.json
 
 # Obsidian data and local state
 /data.json
