@@ -2473,17 +2473,20 @@ function handleHoverPreview(event: MouseEvent, path: string, targetEl: HTMLEleme
     align-items: center;
     gap: 10px;
     padding: 6px 8px 6px 14px;
-    /* Secondary background + native shadow token, so the bar reads as a floating
-       surface the way Obsidian's own popovers do rather than as a flat card that
-       tracks the canvas colour. */
-    background: var(--background-secondary);
+    /* Page fill + border, no shadow — the plugin's surface language after the
+       composer went flat: a surface is defined by its outline, not by
+       elevation. This bar previously used `--background-secondary` +
+       `--shadow-l` to read as a floating popover, which made it the one
+       shadowed slab left in the plugin. The bar is opaque, so separation from
+       the canvas behind it comes from the border alone, exactly like the
+       composer against the page. */
+    background: var(--background-primary);
     border: 1px solid var(--background-modifier-border);
     /* `--radius-l` (12px) rather than the composer's literal 22px: that 22px is
        half the composer's height — a pill — not a house rounding, and it only
        reads as one at that height. 12px is Obsidian's own value for floating
        panels, and being a token it tracks whatever the user's theme defines. */
     border-radius: var(--radius-l);
-    box-shadow: var(--shadow-l);
     z-index: 12;
     white-space: nowrap;
     animation: s2b-selection-bar-in 120ms ease-out;
@@ -2519,6 +2522,28 @@ function handleHoverPreview(event: MouseEvent, path: string, targetEl: HTMLEleme
     display: flex;
     align-items: center;
     gap: 4px;
+  }
+
+  /* Quiet toolbar buttons. Obsidian's stock `button` styling
+     (`--interactive-normal` fill + `--input-shadow`) is its FORM treatment —
+     Settings pages, dialogs — where each button is a standalone control on a
+     page. In a toolbar Obsidian's own convention is transparent-at-rest
+     controls that highlight on hover (view-header actions, search-view
+     toggles), and the composer's action row already treats its labelled
+     triggers the same way. With the bar itself flat, the stock fill also
+     re-imported the raised-slab look at button scale: several small
+     `--input-shadow`s inside a deliberately shadowless bar. The bar's border
+     and divider do the grouping; buttons need no individual fill to read as
+     actionable in a bar that only appears once something is selected.
+     (Scoped to the floating bar — the mobile selection sheet styles its own
+     rows.) */
+  .graph-selection-bar :global(button) {
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .graph-selection-bar :global(button:hover) {
+    background: var(--background-modifier-hover);
   }
 
   /* Separates the count and its view control from the verbs acting on the notes. */
