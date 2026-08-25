@@ -71,30 +71,66 @@ let batchRunning = $state(false);
  * staleness up front instead of letting Accept error as the first signal.
  * Async (`hasConflict` reads the vault), hence state + explicit recompute
  * rather than a `$derived`.
+ *
+ * Staleness only changes when DISK changes, so vault reads happen in exactly
+ * two places: a full pass when the thread changes (or on mount), and a
+ * targeted pass for the one path a vault event named. Store mutations can't
+ * change disk — a fresh stage reads disk as its original, and a group accept
+ * advances originalContent to exactly what it wrote — so the revision effect
+ * below only PRUNES resolved ids, without a single read. (The previous
+ * version re-read every staged file on every store revision: a 100-entry
+ * vault-wide replace did 100 reads per accept click.)
  */
 let staleEntryIds = $state(new Set<string>());
+/** Invalidates in-flight recomputes: reads are async, so a slow older pass
+ * must not overwrite the result of a newer one. Last started wins. */
+let staleToken = 0;
 
-async function recomputeStale() {
-	const ids = new Set<string>();
+/** Re-evaluate staleness against disk. `paths` limits the pass to entries
+ * targeting those vault paths (others keep their current verdict); omitted =
+ * full pass over the thread's pending entries. */
+async function recomputeStale(paths?: ReadonlySet<string>) {
+	const token = ++staleToken;
+	const ids = paths ? new Set(staleEntryIds) : new Set<string>();
 	for (const entry of threadId ? getPendingChangesStore().getPendingForThread(threadId) : []) {
 		if (entry.change.type === "create") continue;
+		if (paths && !paths.has(entry.change.path)) continue;
 		try {
 			if (await store.hasConflict(entry.id)) ids.add(entry.id);
+			else ids.delete(entry.id);
 		} catch {
 			// vault read failed — leave the entry unmarked rather than crying wolf
 		}
 	}
-	staleEntryIds = ids;
+	if (token === staleToken) staleEntryIds = ids;
 }
 
+// Full pass only when the surveyed thread changes (covers mount, where
+// entries may have gone stale while the plugin was unloaded).
 $effect(() => {
-	void store.revision;
 	void threadId;
 	void recomputeStale();
 });
 
-// Store revision only tracks store mutations; external edits to a staged note
-// arrive as vault events. Recompute on modify/delete of any staged path.
+// Store mutations: prune ids whose entry is no longer pending — synchronous,
+// no vault reads (see the state doc above for why none are needed).
+$effect(() => {
+	void store.revision;
+	if (!threadId) return;
+	const pendingIds = new Set(
+		getPendingChangesStore()
+			.getPendingForThread(threadId)
+			.map((e) => e.id),
+	);
+	// Only assign on an actual removal: this effect reads staleEntryIds, so an
+	// unconditional write would re-trigger it (harmlessly, but noisily).
+	if ([...staleEntryIds].some((id) => !pendingIds.has(id))) {
+		staleEntryIds = new Set([...staleEntryIds].filter((id) => pendingIds.has(id)));
+	}
+});
+
+// External edits to a staged note arrive as vault events, scoped to the one
+// path the event names.
 $effect(() => {
 	const app = getPlugin().app;
 	const touchesStagedPath = (path: string) =>
@@ -103,10 +139,10 @@ $effect(() => {
 			.getPendingForThread(threadId)
 			.some((e) => e.change.path === path);
 	const modifyRef = app.vault.on("modify", (file) => {
-		if (touchesStagedPath(file.path)) void recomputeStale();
+		if (touchesStagedPath(file.path)) void recomputeStale(new Set([file.path]));
 	});
 	const deleteRef = app.vault.on("delete", (file) => {
-		if (touchesStagedPath(file.path)) void recomputeStale();
+		if (touchesStagedPath(file.path)) void recomputeStale(new Set([file.path]));
 	});
 	return () => {
 		app.vault.offref(modifyRef);
@@ -249,13 +285,23 @@ function describeSkip(skip: RevertSkip): string {
 
 async function handleAcceptAll() {
 	if (!threadId || batchRunning) return;
-	const count = pendingCount;
+	// Stale entries can never apply (their conflict check fails unconditionally),
+	// so exclude them up front — the result then reads "skipped", not "failed".
+	const acceptable = pendingEntries.filter((e) => !staleEntryIds.has(e.id));
+	const staleCount = pendingCount - acceptable.length;
+	const count = acceptable.length;
+	if (count === 0) {
+		new Notice(
+			"All pending changes are stale — the notes changed after they were proposed. Reject them and ask the agent to re-stage.",
+		);
+		return;
+	}
 
 	// One click on a collapsed bar can apply deletions and privacy-affecting
 	// moves the user never looked at. Those two get a confirm; ordinary
 	// creates/updates keep the frictionless path.
-	const deletes = pendingEntries.filter((e) => e.change.type === "delete").length;
-	const deprivatizing = pendingEntries.filter((e) => store.isDeprivatizingMove(e.change)).length;
+	const deletes = acceptable.filter((e) => e.change.type === "delete").length;
+	const deprivatizing = acceptable.filter((e) => store.isDeprivatizingMove(e.change)).length;
 	if (deletes > 0 || deprivatizing > 0) {
 		const risks: string[] = [];
 		if (deletes > 0) risks.push(`${deletes} note deletion${deletes !== 1 ? "s" : ""}`);
@@ -273,11 +319,14 @@ async function handleAcceptAll() {
 
 	batchRunning = true;
 	try {
-		const failures = await store.acceptAll(threadId);
+		const failures = await store.acceptAll(threadId, staleEntryIds);
+		const skippedNote = staleCount > 0 ? `, skipped ${staleCount} stale` : "";
 		if (failures.length === 0) {
-			new Notice(`Applied all ${count} changes`);
+			new Notice(`Applied ${count === 1 ? "the change" : `all ${count} changes`}${skippedNote}`);
 		} else {
-			new Notice(`Applied ${count - failures.length} changes, ${failures.length} failed: ${failures.join(", ")}`);
+			new Notice(
+				`Applied ${count - failures.length} changes${skippedNote}, ${failures.length} failed: ${failures.join(", ")}`,
+			);
 		}
 	} catch (e) {
 		new Notice(`Error applying changes: ${e instanceof Error ? e.message : String(e)}`);
@@ -592,34 +641,23 @@ function previewChange(evt: Event, entry: PendingChangeEntry) {
   .pcb-container {
     display: flex;
     flex-direction: column;
-    /* Matches `.chat-input-wrapper`, which this bar sits directly above: a
-       transparent 1px border (so the box still reserves the same layout space
-       as a bordered one) and the wrapper's literal 22px pill. 22px is hardcoded
-       rather than a --radius-* token because Obsidian's largest, --radius-l, is
-       only 12px — still visibly squarer than the composer next to it. */
-    border: 1px solid transparent;
+    /* Matches `.chat-input-wrapper`, which this bar sits directly above: the
+       page-coloured fill defined by a real border, and the wrapper's literal
+       22px pill. 22px is hardcoded rather than a --radius-* token because
+       Obsidian's largest, --radius-l, is only 12px — still visibly squarer
+       than the composer next to it. */
+    border: 1px solid var(--background-modifier-border);
     border-radius: 22px;
     overflow: hidden;
     background: var(--pcb-bg);
-    /* Tracks `--input-bg` in Input.svelte — same value, same per-split flip, so
-       the bar and the composer always read as one stacked surface. */
-    --pcb-bg: var(--background-secondary);
+    /* Tracks `--input-bg` in Input.svelte — same value, so the bar and the
+       composer always read as one stacked surface. */
+    --pcb-bg: var(--background-primary);
     /* Cap the whole bar, not just the list, so a long run of changes can't grow
        past the composer. The summary row is a flex sibling that never shrinks,
        so it stays pinned and Accept/Reject All remain reachable at any length. */
     min-height: 0;
     max-height: 45vh;
-  }
-
-  /* In a sidebar the page itself is `--background-primary`, and in many themes
-     that is indistinguishable from `--background-secondary` — so the fill alone
-     stopped separating the bar from the chat view behind it. Flip the fill to
-     the page colour and let a real border define the card, exactly as
-     `.chat-input-wrapper` does for the composer directly below. */
-  :global(.mod-left-split) .pcb-container,
-  :global(.mod-right-split) .pcb-container {
-    --pcb-bg: var(--background-primary);
-    border-color: var(--background-modifier-border);
   }
 
   .pcb-summary {
@@ -630,8 +668,8 @@ function previewChange(evt: Event, entry: PendingChangeEntry) {
        controls have to stay reachable however many changes are pending. */
     flex-shrink: 0;
     padding: 6px 10px;
-    /* Inherits the container's per-split fill rather than re-stating
-       `--background-secondary`, which would paint over it in a sidebar. */
+    /* Inherits the container's fill rather than re-stating a colour that
+       would paint over it. */
     background: var(--pcb-bg);
     border: none;
     cursor: pointer;
@@ -714,6 +752,13 @@ function previewChange(evt: Event, entry: PendingChangeEntry) {
     cursor: pointer;
     background: transparent;
     transition: background 100ms ease;
+  }
+
+  /* 12px icons + 2px padding are pointer-sized; on touch, bump the hit areas
+     to guideline size. Obsidian marks mobile with body.is-mobile. */
+  :global(.is-mobile) .pcb-action-icon,
+  :global(.is-mobile) .pcb-preview-toggle {
+    padding: 8px;
   }
 
   /* Disabled accept on a stale row: keep it visible (its absence would read as

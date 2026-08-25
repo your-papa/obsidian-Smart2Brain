@@ -39,9 +39,9 @@ function createEditActionBar(entryId: string, groupIndex: number, groupTotal: nu
 	}
 
 	// Prev/next chevrons: step through this chat thread's pending changes across
-	// files, reusing the SAME shared cursor as the chat-bar arrows and palette
-	// commands so all three entry points stay in sync. The entry's threadId is
-	// resolved lazily on click (the bar only knows the entryId).
+	// files, reusing the SAME shared cursor as the palette commands and the
+	// reading-view bars so all entry points stay in sync. The entry's threadId
+	// is resolved lazily on click (the bar only knows the entryId).
 	const makeNavBtn = (iconName: string, ariaLabel: string, direction: "next" | "prev"): HTMLButtonElement => {
 		const btn = document.createElement("button");
 		btn.className = "s2b-diff-nav-btn";

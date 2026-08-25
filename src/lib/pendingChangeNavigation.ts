@@ -261,17 +261,17 @@ export async function revealAndScroll(plugin: SecondBrainPlugin, path: string, l
 
 /**
  * Advance the thread's navigation cursor in `direction` (wrapping around) and
- * reveal+scroll to that change group. Shared by the in-note diff bars, the
- * PendingChangesBar arrows, and the command-palette commands so all stay in
- * sync. Steps through each changed spot (group) within a file before moving to
- * the next file.
+ * reveal+scroll to that change group. Shared by the in-note diff bars (edit +
+ * reading view) and the command-palette commands so all stay in sync. Steps
+ * through each changed spot (group) within a file before moving to the next
+ * file.
  *
  * `origin`, when given, is the stop the step is taken RELATIVE TO — the in-note
  * action bars pass their own `(entryId, groupIndex)` so their chevrons move
  * relative to the change they're attached to, not the thread's shared cursor.
- * Without it (palette commands, chat-bar arrows) the shared per-thread cursor is
- * used. Either way the resulting stop becomes the new shared cursor, keeping all
- * entry points in sync. If the origin isn't found among the current stops (e.g.
+ * Without it (palette commands) the shared per-thread cursor is used. Either
+ * way the resulting stop becomes the new shared cursor, keeping all entry
+ * points in sync. If the origin isn't found among the current stops (e.g.
  * it was just accepted/rejected) we fall back to the shared cursor.
  *
  * Returns the stop navigated to, or null when the thread has no pending changes

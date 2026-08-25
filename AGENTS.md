@@ -84,7 +84,7 @@ August 2026; recover it from git history if useful, but do not trust it.)
 
 ### Cross-cutting
 
-- **Staged writes:** Tools that mutate notes go through `pendingChangesStore` for user review rather than applying immediately.
+- **Staged writes:** Tools that mutate notes go through `pendingChangesStore` for user review rather than applying immediately. The review loop is closed in both directions: the outcomes (accepted / rejected / partially applied, plus still-pending paths) are injected into the model's next user turn as a context block via the same augment/strip mechanism as visible notes, and a same-thread re-stage of an already-pending update is rebased onto the pending proposal's `newContent` so the superseding proposal carries both rounds of edits. Entries are keyed by the model's tool-call id (`config.toolCall.id`), which lets the chat's `manage_notes` card show live review-status chips. A proposal whose note changed after staging can never be accepted (unconditional conflict check at apply time, including deletes); every review surface — chat bar, in-chat hunks, edit-mode and reading-view action bars — detects this and disables Accept with an explanation instead of letting it error.
 - **Worker offload:** Graph projection/clustering and HNSW operations run in workers (`hnswWorker.ts`, `computeWorker.ts`) to keep the UI fluid.
 - **Capability-driven multimodal:** Vision/PDF support is resolved per model at runtime — do not hard-code provider assumptions.
 - **Secrets:** `dataStore` holds secret IDs, not raw values; raw values resolve through `secretStorage.ts`.

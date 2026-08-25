@@ -26,6 +26,15 @@ const { entry, stale = false }: Props = $props();
 const store = getPendingChangesStore();
 
 /**
+ * Combined removed+added size above which a hunk is not word-diffed inline.
+ * A whole-file rewrite is one giant group; `diffWords` over it plus thousands
+ * of highlight spans would stall the chat view for a preview nobody can read
+ * at that size anyway — the note (which virtualizes) is the review surface.
+ * Accept/Reject on the hunk keep working either way.
+ */
+const MAX_HUNK_PREVIEW_CHARS = 20000;
+
+/**
  * Recomputed on every store mutation: a group accept/reject rewrites
  * originalContent/newContent, which renumbers the remaining groups — stale
  * indices would target the wrong group, so the hunks must track the store.
@@ -99,20 +108,27 @@ function rejectGroup(groupIndex: number) {
             {/if}
           </div>
         {/if}
-        <!-- Word-level old->new diff, same idiom as the in-note card. The each
-             body stays on one line: the container is pre-wrap, so template
-             whitespace between spans would render as stray spaces. -->
-        <div class="pdh-hunk-body">{#each diffWords(trimTrailingNewline(group.removedText), trimTrailingNewline(group.addedText)) as part, partIndex (partIndex)}<span
-              class={part.removed ? "s2b-diff-word-removed" : part.added ? "s2b-diff-word-added" : ""}
-              >{part.value}</span
-            >{/each}</div>
+        {#if group.removedText.length + group.addedText.length > MAX_HUNK_PREVIEW_CHARS}
+          <div class="pdh-too-large">
+            This change is too large to preview here — open the note to review it.
+          </div>
+        {:else}
+          <!-- Word-level old->new diff, same idiom as the in-note card. The each
+               body stays on one line: the container is pre-wrap, so template
+               whitespace between spans would render as stray spaces. -->
+          <div class="pdh-hunk-body">{#each diffWords(trimTrailingNewline(group.removedText), trimTrailingNewline(group.addedText)) as part, partIndex (partIndex)}<span
+                class={part.removed ? "s2b-diff-word-removed" : part.added ? "s2b-diff-word-added" : ""}
+                >{part.value}</span
+              >{/each}</div>
+        {/if}
       </div>
     {/each}
   </div>
 {/if}
 
 <style>
-  .pdh-empty {
+  .pdh-empty,
+  .pdh-too-large {
     color: var(--text-faint);
     font-size: var(--font-ui-smaller);
     font-style: italic;
@@ -161,6 +177,12 @@ function rejectGroup(groupIndex: number) {
     cursor: pointer;
     background: transparent;
     transition: background 100ms ease;
+  }
+
+  /* 12px icon + 2px padding is a 16px target — fine for a pointer, far below
+     touch guidelines. Obsidian marks mobile with body.is-mobile. */
+  :global(.is-mobile) .pdh-action-icon {
+    padding: 8px;
   }
 
   .pdh-action-icon[disabled] {
