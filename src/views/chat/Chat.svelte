@@ -269,7 +269,6 @@ function portalComposer(node: HTMLElement) {
         {registry}
         {threadPath}
         dropTargetMode="view"
-        externalDragActive={isDragging}
         onDragStateChange={(state) => {
           isDragging = state.isDragging;
           dragMessage = state.dragMessage;
@@ -286,21 +285,29 @@ function portalComposer(node: HTMLElement) {
     {/if}
 
     {#if isDragging}
+      <!-- One dashed frame around the whole pane, because the whole pane is the
+           drop target. The dashed border is the conventional "this region
+           accepts drops" signal, so it belongs on the region — previously it
+           was wrapped around a small floating pill, which read as "drop onto
+           this chicklet" and left the actual target unmarked. The label sits
+           inside the frame and no longer carries a border of its own. -->
       <div
-        class="chat-drop-overlay absolute inset-0 z-30 pointer-events-none flex items-center justify-center p-6"
+        class="chat-drop-overlay absolute inset-0 z-30 pointer-events-none flex items-center justify-center p-2 {dragHasIssue
+          ? 'chat-drop-overlay-issue'
+          : 'chat-drop-overlay-active'}"
       >
-        <div
-          class="chat-drop-overlay-panel flex items-center gap-3 rounded-2xl px-5 py-4 text-sm font-medium shadow-lg {dragHasIssue
-            ? 'chat-drop-overlay-panel-issue'
-            : 'chat-drop-overlay-panel-active'}"
-        >
+        <div class="chat-drop-frame flex items-center justify-center rounded-[16px]">
           <div
-            class="h-icon-s w-icon-s"
-            style="--icon-size: var(--icon-s)"
-            data-testid="chat-drop-overlay-icon"
-            use:icon={dragHasIssue ? "alert-triangle" : "upload"}
-          ></div>
-          <span data-testid="chat-drop-overlay-message">{dragMessage}</span>
+            class="chat-drop-overlay-panel flex items-center gap-3 rounded-2xl px-5 py-4 text-sm font-medium"
+          >
+            <div
+              class="h-icon-s w-icon-s"
+              style="--icon-size: var(--icon-s)"
+              data-testid="chat-drop-overlay-icon"
+              use:icon={dragHasIssue ? "alert-triangle" : "upload"}
+            ></div>
+            <span data-testid="chat-drop-overlay-message">{dragMessage}</span>
+          </div>
         </div>
       </div>
     {/if}
@@ -344,21 +351,6 @@ function portalComposer(node: HTMLElement) {
     margin-top: -12px;
     padding-top: 12px;
     z-index: 10;
-  }
-
-  .chat-root::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    opacity: 0;
-    transition: opacity 140ms ease;
-    background: radial-gradient(
-        circle at top,
-        color-mix(in srgb, var(--interactive-accent) 16%, transparent),
-        transparent 58%
-      ),
-      color-mix(in srgb, var(--chat-bg) 72%, transparent);
   }
 
   .chat-root {
@@ -497,25 +489,41 @@ function portalComposer(node: HTMLElement) {
       );
   }
 
-  .chat-root:has(.chat-drop-overlay)::before {
-    opacity: 1;
+  /* The frame IS the drop affordance: dashed border marking the boundary, plus
+     a uniform wash across the interior so the whole enclosed area reads as one
+     active region. This replaces the radial glow that used to sit at the top of
+     the view (`.chat-root::before`, no longer triggered) — a gradient anchored
+     to one edge suggested the target was up there rather than everywhere.
+     16px radius matches the composer and message bubbles. */
+  .chat-drop-frame {
+    position: absolute;
+    inset: 0;
+    border: 2px dashed var(--s2b-drop-border);
+    background: var(--s2b-drop-wash);
+    backdrop-filter: blur(2px);
   }
 
+  .chat-drop-overlay-active {
+    --s2b-drop-border: color-mix(in srgb, var(--interactive-accent) 55%, transparent);
+    --s2b-drop-wash: color-mix(in srgb, var(--interactive-accent) 5%, transparent);
+    --s2b-drop-label-color: var(--text-accent);
+    --s2b-drop-label-bg: color-mix(in srgb, var(--interactive-accent) 14%, var(--background-primary));
+  }
+
+  /* Same geometry as the active state, error palette — so nothing shifts or
+     jumps if validity changes mid-drag; only the colours cross-fade. */
+  .chat-drop-overlay-issue {
+    --s2b-drop-border: color-mix(in srgb, var(--text-error) 45%, transparent);
+    --s2b-drop-wash: color-mix(in srgb, var(--text-error) 5%, transparent);
+    --s2b-drop-label-color: var(--text-error);
+    --s2b-drop-label-bg: color-mix(in srgb, var(--background-modifier-error) 70%, var(--background-primary));
+  }
+
+  /* Label: no border of its own — the frame owns that. Keeps a solid fill so
+     it stays legible over whatever conversation content is behind it. */
   .chat-drop-overlay-panel {
-    border: 1px dashed transparent;
-    backdrop-filter: blur(6px);
-  }
-
-  .chat-drop-overlay-panel-active {
-    color: var(--text-accent);
-    background: color-mix(in srgb, var(--interactive-accent) 14%, var(--background-primary));
-    border-color: color-mix(in srgb, var(--interactive-accent) 55%, transparent);
-  }
-
-  .chat-drop-overlay-panel-issue {
-    color: var(--text-error);
-    background: color-mix(in srgb, var(--background-modifier-error) 70%, var(--background-primary));
-    border-color: color-mix(in srgb, var(--text-error) 45%, transparent);
+    color: var(--s2b-drop-label-color);
+    background: var(--s2b-drop-label-bg);
   }
 
 </style>

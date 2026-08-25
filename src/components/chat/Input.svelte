@@ -32,7 +32,6 @@ interface Props {
 	onMessageSent?: () => void;
 	onDragStateChange?: (state: DragOverlayState) => void;
 	dropTargetMode?: "input" | "view";
-	externalDragActive?: boolean;
 }
 
 type DragOverlayState = {
@@ -57,7 +56,6 @@ const {
 	onMessageSent,
 	onDragStateChange,
 	dropTargetMode = "input",
-	externalDragActive = false,
 }: Props = $props();
 
 // Pinned to this tab's own thread — never follows a global pointer.
@@ -204,7 +202,13 @@ const canSendMessage = $derived(inputValue.trim().length > 0 || attachments.leng
 const canSummarizeNow = $derived.by(() => {
 	return Boolean(session && session.messageState === MessageState.idle && session.messages.length > 0);
 });
-const showDragActive = $derived(dropTargetMode === "view" ? externalDragActive : isDragging);
+// Only the composer's OWN drag state tints the composer. In `view` mode the
+// whole pane is the drop target and Chat.svelte draws one dashed frame around
+// it — the composer sits inside that frame, so tinting it too painted a second,
+// competing target for a drop that behaves identically either way. (It also put
+// a solid accent slab where the composer is deliberately a flat, bordered
+// surface.) The frame communicates the target; the composer stays itself.
+const showDragActive = $derived(dropTargetMode === "input" && isDragging);
 
 $effect(() => {
 	onDragStateChange?.({
