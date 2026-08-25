@@ -62,15 +62,29 @@ function pick(action: () => void) {
     width: max-content;
   }
 
-  /* Prominent accent-tinted circle, not a muted glyph. */
+  /* Prominent accent-tinted circle, not a muted glyph. Explicit square
+     dimensions (matching the send button at the row's other end) instead of
+     `.clickable-icon`'s default padding, which is wider than tall — that
+     rendered this as an oval next to send's true circle. The tint mixes with
+     `--background-primary`, the fill the composer actually has. */
   :global(.attach-context-button.clickable-icon) {
-    background: color-mix(in srgb, var(--interactive-accent) 14%, var(--background-secondary));
+    background: color-mix(in srgb, var(--interactive-accent) 14%, var(--background-primary));
     color: var(--interactive-accent);
     border-radius: 999px;
+    width: 1.75rem;
+    height: 1.75rem;
+    padding: 0;
+    flex: 0 0 auto;
+  }
+
+  /* Same touch-size bump the send button gets on mobile. */
+  :global(.is-mobile .attach-context-button.clickable-icon) {
+    width: 2.75rem;
+    height: 2.75rem;
   }
 
   :global(.attach-context-button.clickable-icon:hover) {
-    background: color-mix(in srgb, var(--interactive-accent) 24%, var(--background-secondary));
+    background: color-mix(in srgb, var(--interactive-accent) 24%, var(--background-primary));
     color: var(--interactive-accent);
   }
 

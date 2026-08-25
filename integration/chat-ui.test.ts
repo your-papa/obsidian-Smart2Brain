@@ -40,7 +40,7 @@ describe("chat view UI", () => {
 	});
 
 	it("should render the message input area with placeholder", () => {
-		expect(domCount('[aria-placeholder="Type a message..."]')).toBeGreaterThanOrEqual(1);
+		expect(domCount('[aria-placeholder="Ask about your notes..."]')).toBeGreaterThanOrEqual(1);
 	});
 
 	it("should show the agent selector button", () => {

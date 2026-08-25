@@ -49,7 +49,6 @@ export enum AssistantState {
 export enum MessageState {
 	idle = 0,
 	answering = 1,
-	editing = 2,
 }
 
 const HIDDEN_HUMAN_MESSAGE_SOURCES = new Set(["summarization", "manual_summarization"]);

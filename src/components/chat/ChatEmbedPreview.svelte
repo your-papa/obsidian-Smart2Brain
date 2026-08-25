@@ -60,7 +60,7 @@ const formattedDate = $derived(
 							<CollapsibleUserBubble
 								content={pair.userMessage.content}
 								attachments={pair.userMessage.attachments}
-								class="max-w-[85%] rounded-t-lg rounded-bl-lg bg-[color-mix(in_srgb,var(--color-accent)_20%,transparent)] px-3 py-2"
+								class="max-w-[85%] rounded-[16px] bg-[color-mix(in_srgb,var(--color-accent)_20%,transparent)] px-3 py-2"
 							/>
 						</div>
 					{/if}

@@ -56,7 +56,7 @@ function handleClick(evt: MouseEvent) {
   {#if isTruncated && !isExpanded}
     <!-- Fade gradient overlay -->
     <div
-      class="absolute bottom-0 left-0 right-0 h-8 pointer-events-none rounded-bl-lg"
+      class="absolute bottom-0 left-0 right-0 h-8 pointer-events-none rounded-b-[16px]"
       style="background: linear-gradient(to top, color-mix(in srgb, var(--color-accent) 20%, var(--background-primary)), transparent);"
     ></div>
   {/if}

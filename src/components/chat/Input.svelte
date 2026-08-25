@@ -47,6 +47,8 @@ const acceptedFileTypes =
 const MAX_FILE_SIZE_BYTES = 15 * 1024 * 1024; // 15 MB per file
 const MAX_TOTAL_ATTACHMENTS_BYTES = 25 * 1024 * 1024; // 25 MB per message
 const FULLSCREEN_TRANSITION_MS = 220;
+/** Usage % below which the context circle stays hidden (see the action row). */
+const CONTEXT_USAGE_VISIBLE_THRESHOLD = 50;
 
 const {
 	registry,
@@ -380,6 +382,17 @@ function handleMobileTapFocus(event: TouchEvent) {
 	markdownEditor.focus();
 }
 
+/** A click on the composer card's empty padding focuses the editor, so the
+ * whole card acts as the text target — the editor box hugs its content
+ * (`min-h-[24px]`) instead of padding the card out with clickable dead space.
+ * Controls and the editor itself are excluded: buttons/chips keep their own
+ * behavior, and clicks inside CM must keep placing the caret. */
+function handleWrapperClick(event: MouseEvent) {
+	const target = event.target as HTMLElement;
+	if (target.closest("button, a, .s2b-chip, .markdown-editor-container")) return;
+	markdownEditor?.focus();
+}
+
 function initializeEditor() {
 	if (!editorContainer) return;
 
@@ -387,7 +400,9 @@ function initializeEditor() {
 
 	markdownEditor = new EmbeddableMarkdownEditor(plugin.app, editorContainer, {
 		value: inputValue,
-		placeholder: "Type a message...",
+		// Orients first-time users toward the product's actual job — chatting
+		// with the vault — instead of the generic "Type a message...".
+		placeholder: "Ask about your notes...",
 		cls: "chat-markdown-editor",
 		enterVimInsertMode: true,
 		onPaste: (event) => {
@@ -1095,12 +1110,11 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
 >
   {#if selectedChatModel && models.unavailableProviders.includes(selectedChatModel.provider)}
     <button
-      class="flex flex-row items-center gap-1 text-xs cursor-pointer border-none bg-transparent p-0"
-      style="color: var(--text-error);"
+      class="provider-unreachable-banner flex flex-row items-center gap-1.5 text-xs cursor-pointer"
       onclick={models.refetchProviders}
       title="Click to retry connection"
     >
-      <div class="h-icon-xs" use:icon={"alert-triangle"} style="--icon-size: var(--icon-xs)"></div>
+      <div class="h-icon-xs shrink-0" use:icon={"alert-triangle"} style="--icon-size: var(--icon-xs)"></div>
       <span>Cannot connect to {selectedChatModel.provider} — click to retry</span>
     </button>
   {/if}
@@ -1113,8 +1127,11 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
        reflow when the mobile keyboard opens. The fullscreen expand/collapse
        animation is unaffected: it lives on `.chat-input-container`, which has
        its own explicit transition list. -->
+  <!-- svelte-ignore a11y_click_events_have_key_events -- the click is a
+       pointer-only convenience (focus the editor from the card's padding);
+       keyboard users reach the editor by Tab, so no key handler is needed. -->
   <div
-    class="chat-input-wrapper flex flex-col gap-3 border border-solid border-bg-modifier-border rounded-[14px] pb-2 px-3 transition-[background-color,border-color] duration-200 ease-in-out relative isolate {isFullscreen
+    class="chat-input-wrapper flex flex-col gap-3 border border-solid pb-2 px-3 transition-[background-color,border-color] duration-200 ease-in-out relative isolate {isFullscreen
       ? 'flex-1 min-h-0'
       : ''} {showDragActive
       ? 'border-[--interactive-accent] chat-input-wrapper-drag-active'
@@ -1123,6 +1140,7 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
     ondragover={dropTargetMode === "input" ? handleDragOver : undefined}
     ondragleave={dropTargetMode === "input" ? handleDragLeave : undefined}
     ondrop={dropTargetMode === "input" ? handleDrop : undefined}
+    onclick={handleWrapperClick}
     role="region"
   >
     {#if !isMobileUI()}
@@ -1140,7 +1158,12 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
         tooltip={isFullscreen ? "Exit fullscreen (Esc)" : "Fullscreen editor"}
       />
     {/if}
-    <div class="flex flex-row flex-wrap items-start gap-1.5 pt-2">
+    <!-- `pt-0.5` (2px) on top of the wrapper's 4px `padding-top` puts the tray
+         6px below the border, matching the fullscreen toggle's `top-1.5` so
+         the two top-anchored elements sit on one line. The old `pt-2` put it
+         at 12px — a visibly large gap that also read as misaligned against
+         the button. -->
+    <div class="composer-tray-row flex flex-row flex-wrap items-start gap-1.5 pt-0.5">
       <ContextTray
         bind:this={contextTrayRef}
         graphPaths={registry.graphSelection}
@@ -1157,15 +1180,15 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
     <!-- Markdown Editor Container -->
     <div
       bind:this={editorContainer}
-      class="markdown-editor-container w-full overflow-y-auto {isFullscreen
+      class="markdown-editor-container w-full overflow-y-auto py-1 {isFullscreen
         ? 'flex-1'
-        : 'min-h-[40px] max-h-[200px]'}"
+        : 'min-h-[24px] max-h-[200px]'}"
       id="chat-view-user-input-element"
       data-testid="message-input"
     ></div>
 
     <!-- Actions row: attachment, agent+model, send -->
-    <div class="flex items-center gap-2 flex-wrap">
+    <div class="chat-actions-row flex items-center gap-2">
       <input
         bind:this={attachmentInputEl}
         type="file"
@@ -1182,7 +1205,12 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
       <AgentPopover {threadPath} />
       <ModelSelectButton {threadPath} />
       <div class="ml-auto flex items-center gap-2">
-        {#if !isMobileUI()}
+        <!-- Threshold-gated: at low usage the ring is an empty grey track that
+             reads as a loading spinner next to the send button, and the number
+             it encodes isn't actionable. Appearing at 50% is itself the signal
+             ("context is filling up"), and puts the popover's Summarize action
+             in reach exactly when a user starts wanting it. -->
+        {#if !isMobileUI() && contextUsage.usagePercent >= CONTEXT_USAGE_VISIBLE_THRESHOLD}
           <ContextUsageCircle
             usagePercent={contextUsage.usagePercent}
             used={contextUsage.estimatedUsedTokens}
@@ -1214,19 +1242,18 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
                 : "Send message"}
             onClick={attemptSend}
             dataTestId="send-message-button"
-            styles="send-message-button p-0 rounded-md border-none cursor-pointer flex items-center justify-center shrink-0 transition-all duration-200 disabled:cursor-not-allowed"
+            styles="send-message-button p-0 border-none cursor-pointer flex items-center justify-center shrink-0 transition-all duration-200 disabled:cursor-not-allowed"
             style={sendButtonStyle}
-            iconId={isEditing ? "check" : "send-horizontal"}
+            iconId={isEditing ? "check" : "arrow-up"}
           />
         {:else if session.messageState === MessageState.answering}
           <Button
             ariaLabel="stop streaming"
             tooltip="Stop streaming"
             onClick={() => session?.stopStreaming()}
-            styles="send-message-button p-0 rounded-md border-none cursor-pointer flex items-center justify-center shrink-0 transition-all duration-200"
+            styles="send-message-button p-0 border-none cursor-pointer flex items-center justify-center shrink-0 transition-all duration-200"
             style={sendButtonStyle}
             iconId="square"
-            iconSize="xs"
           />
         {/if}
       </div>
@@ -1234,7 +1261,7 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
 
     {#if dropTargetMode === "input" && isDragging}
       <div
-        class="absolute inset-0 z-20 rounded-[14px] pointer-events-none flex items-center justify-center gap-2 text-sm font-medium {dragHasIssue
+        class="absolute inset-0 z-20 rounded-[22px] pointer-events-none flex items-center justify-center gap-2 text-sm font-medium {dragHasIssue
           ? 'text-[--text-error]'
           : 'text-[--text-accent]'}"
       >
@@ -1255,12 +1282,27 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
 <style>
   .chat-input-container {
     background: transparent !important;
-    --input-bg: var(--background-secondary);
+    /* Same fill as the page, everywhere. The composer is defined by its
+       border, not by a contrasting slab — see `.chat-input-wrapper`. */
+    --input-bg: var(--background-primary);
   }
 
-  :global(.mod-left-split .chat-input-container),
-  :global(.mod-right-split .chat-input-container) {
-    --input-bg: var(--background-primary);
+  /* Same card language as the other pre-composer bars (PendingChangesBar,
+     EditingMessageBar): page fill, real border, the composer stack's 22px
+     pill. An error state shouldn't be the one surface in the stack rendered
+     as bare floating text — it deserves more structure than routine bars,
+     not less. Red is kept to the text/icon and a tinted border rather than a
+     filled red slab: this is a retryable connectivity hiccup, not data loss. */
+  .provider-unreachable-banner {
+    padding: 6px 12px;
+    border: 1px solid color-mix(in srgb, var(--text-error) 35%, var(--background-modifier-border));
+    border-radius: 22px;
+    background: var(--input-bg);
+    color: var(--text-error);
+  }
+
+  .provider-unreachable-banner:hover {
+    background: color-mix(in srgb, var(--text-error) 6%, var(--input-bg));
   }
 
   /* The scroller runs 24px past this container's top edge (see
@@ -1279,18 +1321,15 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
     background: linear-gradient(to bottom, transparent 0%, var(--background-primary) 24px) !important;
   }
 
-  /* Overrides for the utility classes on the element itself
-     (`rounded-[14px] gap-3 border-bg-modifier-border`). All platform-neutral:
-     the shape and internal rhythm aren't platform-specific, so keeping
-     desktop squarer or looser would just be an inconsistency.
+  /* The wrapper's shape and internal rhythm live here, not in utility classes
+     on the element (the markup carries only layout/transition utilities, so
+     this block and the markup can't disagree about the design). All
+     platform-neutral: keeping desktop squarer or looser than mobile would
+     just be an inconsistency.
 
-     `border-color: transparent` drops the resting border and lets the fill
-     define the card. Only safe where the fill actually contrasts with the
-     page: in the main view `--input-bg` is `--background-secondary` (#282828)
-     against a `--background-primary` (#1C1C1C) page. In a sidebar
-     `--input-bg` IS `--background-primary`, identical to the page behind it,
-     so there the border is the only thing separating the composer from the
-     background and has to stay — see the split rule below.
+     The fill matches the page (`--input-bg` is `--background-primary`), so
+     the border is the only thing separating the composer from the background
+     and always has to be drawn — in the main view as well as in a sidebar.
 
      Plain selector, NOT `:not(:focus-within)` — that has the same specificity
      as the `:focus-within` rule further down and, coming earlier in the file,
@@ -1299,17 +1338,71 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
   .chat-input-wrapper {
     background: var(--input-bg);
     border-radius: 22px;
-    border-color: transparent;
+    border-color: var(--background-modifier-border);
     gap: 8px;
+    /* Query container for the action row's progressive collapse (see the
+       `@container` rules below). The real constraint on that row is how wide
+       the COMPOSER is, which is not the viewport and not `.mod-*-split`: a
+       sidebar can be dragged wide, and a narrow window's main view is just as
+       cramped as a sidebar. Querying the wrapper itself is the only measure
+       that tracks the actual available space in every one of those cases. */
+    container-type: inline-size;
+    container-name: chat-composer;
     /* The `pb-2 px-3` utilities on the element leave `padding-top` at 0, which
        started the text inside the 22px corner's curve — it read as if the
        first line was crowding the border. Clear the curve. */
     padding-top: 4px;
   }
 
-  :global(.mod-left-split) .chat-input-wrapper,
-  :global(.mod-right-split) .chat-input-wrapper {
-    border-color: var(--background-modifier-border);
+  /* The row is `nowrap`: wrapping dropped the send button onto a second line
+     and grew the composer taller, which is worse than any amount of label
+     truncation. With nowrap, overflow has to be absorbed by something, so
+     pin every fixed-size control and let ONLY the model name shrink (it sets
+     `flex-shrink: 1` + `min-width: 0` in ModelSelectButton). Without these
+     `flex-shrink: 0` guards the browser is free to squeeze the icon buttons
+     and the agent pill instead, which would deform the touch targets. */
+  .chat-actions-row > :global(*) {
+    flex-shrink: 0;
+  }
+
+  .chat-actions-row :global(.model-select-btn) {
+    flex-shrink: 1;
+    min-width: 0;
+  }
+
+  /* Progressive collapse of the action row as the composer narrows.
+     These breakpoints shed elements entirely, in priority order (least useful
+     first), before/alongside the truncation above:
+
+       1. <340px — drop the context-usage circle. It's the only thing in the
+          row that isn't a control; you never need it to send a message. Also
+          already hidden on mobile for exactly this reason.
+       2. <260px — collapse the agent to its icon. The agent's icon is
+          user-chosen and genuinely identifying, and the agent changes far
+          less often than the model, so icon-only stays legible. This mirrors
+          the existing `.is-mobile` rule in AgentPopover.
+
+     The model name is deliberately NOT collapsed at either step: unlike the
+     agent, its icon is generic, so an icon-only model button would tell you
+     nothing about which model you're about to spend tokens on. It truncates
+     with an ellipsis instead (`max-width` in ModelSelectButton) and is the
+     last label standing. */
+  @container chat-composer (max-width: 340px) {
+    .chat-actions-row :global(.context-usage-trigger) {
+      display: none;
+    }
+  }
+
+  @container chat-composer (max-width: 260px) {
+    .chat-actions-row :global(.agent-pill-label) {
+      display: none;
+    }
+
+    /* The 190px trigger cap exists to bound the LABEL; with the label gone it
+       would just leave dead space around the icon. */
+    .chat-actions-row :global(.agent-popover-trigger) {
+      max-width: none;
+    }
   }
 
   /* Circular, matching the attach button (already `999px`) and the reference
@@ -1430,6 +1523,16 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
     aspect-ratio: 1;
   }
 
+  /* Lucide ships at `stroke-width: 2`, which reads thin for a glyph reversed
+     out of a filled accent circle at 28px — light-on-dark makes strokes
+     optically thinner than the same weight dark-on-light. 2.5 matches the
+     attach button, the other icon in this row that needed the same
+     correction. Applies to all three states (arrow-up / check / square), so
+     the button's weight doesn't shift as it changes state. */
+  :global(.send-message-button .svg-icon) {
+    stroke-width: 2.5;
+  }
+
   /* Bump the send target to a comfortable touch size on mobile. */
   :global(.is-mobile .send-message-button) {
     width: 2.75rem !important;
@@ -1470,8 +1573,32 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
     opacity: 1;
   }
 
+  /* The toggle is absolutely positioned over the wrapper's top-right corner,
+     outside the flow — reserve that corner in the tray row so a wrapping chip
+     can't land underneath it, where the toggle would swallow the chip's
+     clicks (its paperclip/close actions live exactly at a chip's right edge).
+     2.5rem = the 6px right offset + 1.75rem button + a 6px gap. Only the
+     row's FIRST line can collide (the toggle band ends where a second chip
+     line begins), so the over-reservation on later lines is the price of
+     doing this in CSS. Mobile never renders the toggle — no reservation. */
+  .composer-tray-row {
+    padding-right: 2.5rem;
+  }
+
+  :global(.is-mobile) .composer-tray-row {
+    padding-right: 0;
+  }
+
   /* Markdown editor styling */
   .markdown-editor-container {
+    /* The text column starts 6px right of the wrapper's 12px rail (CM6's
+       `.cm-line` keeps `padding: 0 2px 0 6px`; its horizontal padding is
+       load-bearing for list hanging-indents — see the `.cm-content` note
+       below). That offset is kept deliberately: bordered controls (chips, the
+       attach button) can sit on the 12px rail because their border is their
+       visual edge, but bare text at the same x hugs the card border. Strict
+       geometric alignment here reads WORSE than the 6px optical inset. */
+
     /* Reset some CM6 styles for chat input look */
     :global(.cm-editor) {
       background: transparent !important;
