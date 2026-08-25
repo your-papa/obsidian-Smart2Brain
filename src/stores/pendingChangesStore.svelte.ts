@@ -511,16 +511,15 @@ export class PendingChangesStore {
 		this.notifyChange();
 	}
 
-	/** Whether a batch accept/reject is currently running for this thread. The UI
-	 * reads this (via `revision`-tracked derivations after `notifyChange`, or its
-	 * own in-flight state) to disable the batch buttons rather than depending on
-	 * the re-entrancy guard below, which is a silent no-op. */
-	isBatchProcessing(threadId: string): boolean {
-		return this.#batchProcessing.has(threadId);
-	}
-
-	/** Accept all pending changes for a thread. Returns paths that failed. */
-	async acceptAll(threadId: string): Promise<string[]> {
+	/** Accept all pending changes for a thread. Returns paths that failed.
+	 *
+	 * `excludeEntryIds` lets the caller skip entries it already knows can't be
+	 * applied (the bar passes its stale set, so a batch reads "applied N,
+	 * skipped M stale" instead of stale entries erroring into the failure
+	 * list). Purely an optimization of the message — an outdated exclusion is
+	 * harmless either way: a wrongly-included stale entry still fails its own
+	 * conflict check, and a wrongly-excluded fresh one just stays pending. */
+	async acceptAll(threadId: string, excludeEntryIds?: ReadonlySet<string>): Promise<string[]> {
 		// Keyed by thread so concurrent chats accepting their own (disjoint) changes
 		// don't spuriously block each other. Re-entry is a silent no-op — the first
 		// run is still doing exactly what was asked; callers disable the button
@@ -529,7 +528,9 @@ export class PendingChangesStore {
 		this.#batchProcessing.add(threadId);
 		try {
 			// Snapshot the list before iterating to avoid picking up entries added mid-loop
-			const pending = [...this.#entries.filter((e) => e.threadId === threadId && e.status === "pending")];
+			const pending = this.#entries.filter(
+				(e) => e.threadId === threadId && e.status === "pending" && !excludeEntryIds?.has(e.id),
+			);
 			const failures: string[] = [];
 			for (const entry of pending) {
 				try {
@@ -770,11 +771,6 @@ export class PendingChangesStore {
 	/** Get a single entry by ID. */
 	getEntry(entryId: string): PendingChangeEntry | undefined {
 		return this.#entries.find((e) => e.id === entryId);
-	}
-
-	/** Get entry by tool call ID. */
-	getEntryByToolCallId(toolCallId: string): PendingChangeEntry | undefined {
-		return this.#entries.find((e) => e.toolCallId === toolCallId);
 	}
 
 	/** All entries one tool call staged — the chat's `manage_notes` card uses

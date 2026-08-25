@@ -150,11 +150,19 @@ describe("PendingChangesStore", () => {
 		});
 
 		it("should retrieve entries by tool call ID", () => {
-			store.addChanges([{ type: "create", path: "a.md", content: "A" }], "tc-unique", "thread-1");
+			store.addChanges(
+				[
+					{ type: "create", path: "a.md", content: "A" },
+					{ type: "create", path: "b.md", content: "B" },
+				],
+				"tc-unique",
+				"thread-1",
+			);
+			store.addChanges([{ type: "create", path: "c.md", content: "C" }], "tc-other", "thread-1");
 
-			const entry = store.getEntryByToolCallId("tc-unique");
-			expect(entry).toBeDefined();
-			expect(entry?.toolCallId).toBe("tc-unique");
+			const entries = store.getEntriesByToolCallId("tc-unique");
+			expect(entries).toHaveLength(2);
+			expect(entries.map((e) => e.change.path)).toEqual(["a.md", "b.md"]);
 		});
 
 		it("should return pending updates for a specific path", () => {
