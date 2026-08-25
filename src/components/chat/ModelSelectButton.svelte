@@ -67,35 +67,37 @@ function openModelSelectionModal() {
 </Button>
 
 <style>
+  /* `flex-shrink` (not just `min-width: 0`) makes this the one control in the
+     action row that gives up width under pressure. The row is `nowrap`, so
+     something has to absorb a narrow composer; the alternatives are all worse
+     — the attach/send buttons are fixed-size touch targets, and the agent
+     collapses to an icon at its own breakpoint. An over-long model name
+     ellipsises instead of pushing the send button onto a second line. */
   :global(.model-select-btn) {
     display: flex;
     align-items: center;
     gap: 0.25rem;
     min-width: 0;
+    flex-shrink: 1;
   }
 
+  /* No max-width: the name shows in full whenever the row has room, and is
+     capped only by actual width pressure — the action row is `nowrap` with
+     this button as its only shrinkable item (see Input.svelte), so when the
+     composer narrows, flex squeezes the button and `min-width: 0` +
+     `text-overflow` turn the surplus into an ellipsis. A fixed cap here
+     truncated long names even when the row had plenty of free space. */
   .model-name {
-    max-width: 120px;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     font-size: 0.8rem;
-    color: var(--text-muted);
-  }
-
-  /* On mobile the row is just attach + (icon-only) agent pill + this + send, all
-     at the 44px touch floor, so there's far more free width than the old fixed
-     84px cap used. Measured on-device at a 402px viewport: row 23..379, label
-     ending at 228 while the send button only starts at 330 — ~100px sitting
-     unused while names like "Free Models Router" truncated.
-
-     `45vw` tracks the viewport (≈181px there, landing just short of the send
-     button with a small gutter) and the 190px ceiling stops it crowding the row
-     on wider tablets. The button is `min-width: 0` inside a `flex-wrap` row, so
-     it still shrinks rather than pushing send off-screen if a future control
-     joins the row. */
-  :global(.is-mobile) .model-name {
-    max-width: min(45vw, 190px);
+    /* `--text-normal`, matching the agent pill beside it: the two text
+       triggers in the row are the same kind of control and should read as
+       one family. Muted is this app's label colour, and a muted model name
+       read as a caption rather than something clickable. */
+    color: var(--text-normal);
   }
 
   .model-name.no-model {

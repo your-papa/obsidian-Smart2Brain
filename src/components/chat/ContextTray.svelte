@@ -363,24 +363,28 @@ onDestroy(() => {
     align-items: center;
   }
 
-  /* Active-note / graph: accent-tinted reference chips */
-  .s2b-chip.visible,
-  .s2b-chip.selection,
-  .context-tray :global(.s2b-chip):not(.attachment) {
-    --s2b-pill-bg: color-mix(in srgb, var(--interactive-accent) 6%, var(--background-secondary));
-    --s2b-pill-border: color-mix(in srgb, var(--interactive-accent) 16%, var(--background-modifier-border));
-    --s2b-pill-color: var(--text-normal);
-    --s2b-pill-bg-hover: color-mix(in srgb, var(--interactive-accent) 9%, var(--background-secondary));
-    --s2b-pill-border-hover: color-mix(in srgb, var(--interactive-accent) 22%, var(--background-modifier-border));
+  /* One accent-tinted palette for every chip, attachments included, mixed
+     against `--background-primary` — the fill the composer actually has now
+     (mixing into `--background-secondary` produced a grey-shifted tint over
+     the page-coloured card). Attachments used to be green, which read muddy
+     and collided with what green means one surface up: in the pending-changes
+     bar and tool cards green is DIFF-ADD semantics, so a green chip implied a
+     pending mutation rather than "this file rides along with the message".
+     What distinguishes an attachment is its file-type icon and remove action;
+     what distinguishes a reference is the eye icon and its promote action. */
+  /* Compact variant of the shared pill: inside the composer card the default
+     4px vertical padding reads oversized next to the single text line below.
+     Scoped to the tray so search-modal / history pills keep their size. */
+  .context-tray :global(.s2b-pill) {
+    padding: 2px 8px;
   }
 
-  /* Content attachments: green */
-  .s2b-chip.attachment {
-    --s2b-pill-bg: color-mix(in srgb, var(--color-green) 12%, var(--background-secondary));
-    --s2b-pill-border: color-mix(in srgb, var(--color-green) 22%, var(--background-modifier-border));
+  .context-tray :global(.s2b-chip) {
+    --s2b-pill-bg: color-mix(in srgb, var(--interactive-accent) 6%, var(--background-primary));
+    --s2b-pill-border: color-mix(in srgb, var(--interactive-accent) 16%, var(--background-modifier-border));
     --s2b-pill-color: var(--text-normal);
-    --s2b-pill-bg-hover: color-mix(in srgb, var(--color-green) 16%, var(--background-secondary));
-    --s2b-pill-border-hover: color-mix(in srgb, var(--color-green) 28%, var(--background-modifier-border));
+    --s2b-pill-bg-hover: color-mix(in srgb, var(--interactive-accent) 10%, var(--background-primary));
+    --s2b-pill-border-hover: color-mix(in srgb, var(--interactive-accent) 22%, var(--background-modifier-border));
   }
 
   .s2b-chip.deactivated {
@@ -421,11 +425,6 @@ onDestroy(() => {
     border-bottom-right-radius: 0;
   }
 
-  .s2b-chip.graph-group .chip-action:hover {
-    background: var(--s2b-pill-bg-hover);
-    color: var(--text-normal);
-  }
-
   .chip-chevron {
     opacity: 0.55;
     margin-left: 2px;
@@ -449,15 +448,26 @@ onDestroy(() => {
     min-width: 0;
   }
 
+  /* Restates the pill fill (same `--s2b-pill-bg` the adjacent `.chip-action`
+     paints) because it can't be left to `.s2b-pill`: the body is a <button>,
+     and Obsidian's app.css button rule outspecifies the unscoped pill class —
+     without this the body renders `--interactive-normal` grey next to a
+     tinted action and the chip reads as two unrelated buttons. The scoped
+     selector is what wins that fight. */
   .chip-body {
-    background: none;
+    background: var(--s2b-pill-bg);
     color: inherit;
+  }
+
+  .chip-body:hover {
+    background: var(--s2b-pill-bg-hover);
   }
 
   .chip-action {
     display: inline-flex;
     align-items: center;
-    padding: 4px 8px 4px 6px;
+    /* Vertical padding tracks the compact tray pill above. */
+    padding: 2px 7px 2px 5px;
     border: 1px solid var(--s2b-pill-border);
     border-left: none;
     border-top-right-radius: 999px;
@@ -468,8 +478,11 @@ onDestroy(() => {
     transition: background 0.15s ease, color 0.15s ease;
   }
 
+  /* Hover uses the chip's own tint family via the var, not a hardcoded green:
+     this action sits on the accent-tinted visible-note chip, and green is the
+     attachment palette — flashing it here implied a different chip type. */
   .chip-action:hover {
-    background: color-mix(in srgb, var(--color-green) 16%, var(--background-secondary));
+    background: var(--s2b-pill-bg-hover);
     color: var(--text-normal);
   }
 

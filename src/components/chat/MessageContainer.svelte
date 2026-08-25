@@ -795,7 +795,7 @@ $effect(() => {
                   <CollapsibleUserBubble
                     content={messagePair.userMessage.content}
                     attachments={messagePair.userMessage.attachments}
-                    class="max-w-[80%] rounded-t-lg rounded-bl-lg px-4 py-2 {isBeingEdited
+                    class="max-w-[80%] rounded-[16px] px-4 py-2 {isBeingEdited
                       ? 's2b-user-bubble-editing'
                       : 'bg-[color-mix(in_srgb,var(--color-accent)_20%,transparent)]'}"
                   />

@@ -95,6 +95,19 @@
 	text-align: left;
 }
 
+/* Many pills are <button>s (context-tray chips, graph members), and Obsidian's
+   app.css button background outspecifies the bare `.s2b-pill` class — those
+   pills rendered `--interactive-normal` grey while span pills showed the
+   intended fill. Re-state fill and hover at button specificity; this file
+   loads after app.css, so the equal-specificity tie breaks our way. */
+button.s2b-pill {
+	background: var(--s2b-pill-bg, color-mix(in srgb, var(--background-secondary) 92%, var(--background-primary)));
+}
+
+button.s2b-pill--interactive:hover {
+	background: var(--s2b-pill-bg-hover, var(--background-modifier-hover));
+}
+
 .s2b-pill--interactive {
 	cursor: pointer;
 	transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, opacity 0.15s ease;
