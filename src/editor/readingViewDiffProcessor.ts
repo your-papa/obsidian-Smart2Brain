@@ -52,6 +52,7 @@ export function computeOriginalAffectedLines(originalContent: string, newContent
 	const changes = diffLines(originalContent, newContent);
 	const totalOriginalLines = countOriginalLines(changes);
 	let oldLine = 0; // 0-based
+	let prevRemoved = false;
 
 	for (const part of changes) {
 		if (part.value === "") continue;
@@ -62,13 +63,21 @@ export function computeOriginalAffectedLines(originalContent: string, newContent
 				affected.add(oldLine + i);
 			}
 			oldLine += lines;
+			prevRemoved = true;
 		} else if (part.added) {
-			// A pure insertion removes no original line. Anchor it to exactly ONE
-			// line (the following line, or the line before at EOF) so a single
-			// rendered section owns it — see insertionAnchorLine.
-			affected.add(insertionAnchorLine(oldLine, totalOriginalLines));
+			// Only a PURE insertion needs an anchor line. An added part preceded by
+			// a removed part is a REPLACEMENT: its home is the removed lines, which
+			// are already in the set — and `oldLine` has already advanced past them,
+			// so anchoring here would falsely mark the line AFTER the replaced run
+			// (the next rendered section, when the run ends its section — e.g. any
+			// single-line heading edit).
+			if (!prevRemoved) {
+				affected.add(insertionAnchorLine(oldLine, totalOriginalLines));
+			}
+			prevRemoved = false;
 		} else {
 			oldLine += lines;
+			prevRemoved = false;
 		}
 	}
 
@@ -166,10 +175,16 @@ interface ExtractionState {
 	suffixText: string;
 	oldLine: number;
 	seenChange: boolean;
+	/** First original line of the immediately-preceding removed part, or null
+	 * when the previous part wasn't a removal. An added part that follows a
+	 * removed one is a REPLACEMENT and belongs to the section owning this line
+	 * (see extractSectionTexts). */
+	lastRemovedStart: number | null;
 }
 
 /** Process a removed diff part, collecting lines within the section range. */
 function processRemovedPart(lines: string[], lineStart: number, lineEnd: number, state: ExtractionState): void {
+	state.lastRemovedStart = state.oldLine;
 	for (const line of lines) {
 		if (state.oldLine >= lineStart && state.oldLine <= lineEnd) {
 			state.seenChange = true;
@@ -205,6 +220,7 @@ function extractSectionTexts(changes: Change[], lineStart: number, lineEnd: numb
 		suffixText: "",
 		oldLine: 0,
 		seenChange: false,
+		lastRemovedStart: null,
 	};
 	const totalOriginalLines = countOriginalLines(changes);
 
@@ -215,17 +231,32 @@ function extractSectionTexts(changes: Change[], lineStart: number, lineEnd: numb
 		if (part.removed) {
 			processRemovedPart(partLines, lineStart, lineEnd, state);
 		} else if (part.added) {
-			// Match the insertion to the section that owns its single anchor line
-			// (the following line, or the line before at EOF) — see
-			// insertionAnchorLine. Mirrors computeOriginalAffectedLines /
-			// checkPartForSection so all three agree on which section owns it.
-			const anchor = insertionAnchorLine(state.oldLine, totalOriginalLines);
-			if (anchor >= lineStart && anchor <= lineEnd) {
-				state.seenChange = true;
-				state.sectionNew += part.value;
+			// A REPLACEMENT (added part right after a removed one) belongs with the
+			// removed run — attributed to the section owning the run's FIRST line,
+			// so exactly one section claims it even when the run spans sections.
+			// The anchor heuristic is for PURE insertions only: by the time we get
+			// here oldLine has advanced past any removed lines, so anchoring a
+			// replacement would land on the line AFTER the run — outside the section
+			// whenever the run ends it (every single-line heading edit), silently
+			// dropping the new text from the card and handing it to the next
+			// section. Mirrors computeOriginalAffectedLines / checkPartForSection so
+			// all three agree on which section owns which change.
+			if (state.lastRemovedStart !== null) {
+				if (state.lastRemovedStart >= lineStart && state.lastRemovedStart <= lineEnd) {
+					state.seenChange = true;
+					state.sectionNew += part.value;
+				}
+			} else {
+				const anchor = insertionAnchorLine(state.oldLine, totalOriginalLines);
+				if (anchor >= lineStart && anchor <= lineEnd) {
+					state.seenChange = true;
+					state.sectionNew += part.value;
+				}
 			}
+			state.lastRemovedStart = null;
 		} else {
 			processUnchangedPart(partLines, lineStart, lineEnd, state);
+			state.lastRemovedStart = null;
 		}
 	}
 
@@ -382,9 +413,9 @@ function createReadingDiffActionBar(
 	}
 
 	// Prev/next chevrons: step through this chat thread's pending changes across
-	// files, reusing the SAME shared cursor as the edit-mode bar, the chat-bar
-	// arrows, and the palette commands. Mirrors createEditActionBar in
-	// inlineDiffExtension.ts (reading + edit views have parallel action bars).
+	// files, reusing the SAME shared cursor as the edit-mode bar and the palette
+	// commands. Mirrors createEditActionBar in inlineDiffExtension.ts (reading +
+	// edit views have parallel action bars).
 	const makeNavBtn = (iconName: string, ariaLabel: string, direction: "next" | "prev"): HTMLButtonElement => {
 		const btn = document.createElement("button");
 		btn.className = "s2b-diff-nav-btn";
@@ -515,18 +546,27 @@ function checkPartForSection(
 	sectionStart: number,
 	sectionEnd: number,
 	totalOriginalLines: number,
+	lastRemovedStart: number | null,
 ): number {
 	if (part.removed) {
 		if (rangeOverlapsSection(oldLine, lineCount, sectionStart, sectionEnd)) {
 			return groupIndex;
 		}
 	} else if (part.added) {
-		// Mirror computeOriginalAffectedLines: match the insertion's single anchor
-		// line (following line, or line before at EOF) so group-index detection
-		// stays consistent with the affected set and only one section claims it.
-		const anchor = insertionAnchorLine(oldLine, totalOriginalLines);
-		if (anchor >= sectionStart && anchor <= sectionEnd) {
-			return groupIndex;
+		// Mirror computeOriginalAffectedLines / extractSectionTexts: a REPLACEMENT
+		// (added right after removed) is owned by the section holding the removed
+		// run's first line; only a PURE insertion uses the single anchor line
+		// (following line, or line before at EOF), so exactly one section claims
+		// each change either way.
+		if (lastRemovedStart !== null) {
+			if (lastRemovedStart >= sectionStart && lastRemovedStart <= sectionEnd) {
+				return groupIndex;
+			}
+		} else {
+			const anchor = insertionAnchorLine(oldLine, totalOriginalLines);
+			if (anchor >= sectionStart && anchor <= sectionEnd) {
+				return groupIndex;
+			}
 		}
 	}
 	return -1;
@@ -540,6 +580,7 @@ function computeGroupIndexForSection(changes: Change[], sectionLineStart: number
 	let oldLine = 0;
 	let groupIndex = -1;
 	let inGroup = false;
+	let lastRemovedStart: number | null = null;
 	const totalOriginalLines = countOriginalLines(changes);
 
 	for (const part of changes) {
@@ -559,11 +600,18 @@ function computeGroupIndexForSection(changes: Change[], sectionLineStart: number
 				sectionLineStart,
 				sectionLineEnd,
 				totalOriginalLines,
+				lastRemovedStart,
 			);
 			if (result >= 0) return result;
-			if (part.removed) oldLine += partLineCount;
+			if (part.removed) {
+				lastRemovedStart = oldLine;
+				oldLine += partLineCount;
+			} else {
+				lastRemovedStart = null;
+			}
 		} else {
 			inGroup = false;
+			lastRemovedStart = null;
 			oldLine += partLineCount;
 		}
 	}
