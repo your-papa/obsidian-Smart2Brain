@@ -29,6 +29,7 @@ import type {
 	PluginData,
 	PrivacyMode,
 	PromptFileReader,
+	PromptFileSnapshot,
 	PromptKindId,
 	RecentNoteEntry,
 	SearchAlgorithm,
@@ -265,7 +266,7 @@ export function getReadContentDescription(hasImageProcessor: boolean, hasPdfProc
 }
 
 const SEARCH_NOTES_DESC_SHARED =
-	"Search through your Obsidian notes, or return recently opened notes. Returns structured JSON with matching file names, paths, tags, match reasons, short match snippets or headings, privacy flags, and metadata (properties/frontmatter). Use this to identify relevant notes before using other tools.";
+	"Search through your Obsidian notes, or return recently opened notes. Returns structured JSON with matching file names, paths, tags, match reasons, short match snippets or headings, and metadata (properties/frontmatter), plus a count of results hidden by privacy rules. Use this to identify relevant notes before using other tools.";
 
 /** An embedding index exists, so all three retrieval strategies are usable. */
 export const SEARCH_NOTES_DESC_EMBEDDINGS = `${SEARCH_NOTES_DESC_SHARED} Pick the retrieval strategy with \`algorithm\`: \`lexical\` (default, fast, exact keyword matching) is usually the right first attempt — escalate to \`semantic\` or \`hybrid\` when wording rather than content is the obstacle.`;
@@ -344,7 +345,11 @@ export const DEFAULT_TOOLS_CONFIG: ToolsConfig = {
 		},
 	},
 	fetch_url: {
-		enabled: false,
+		// Enabled by default, matching web_search: the web core skill ships enabled and
+		// its instructions direct the model to follow up promising search results with
+		// fetch_url — a default-off tool there means the model calls a tool that doesn't
+		// exist. Users who want an offline agent disable the web skill, which unbinds both.
+		enabled: true,
 		name: "fetch_url",
 		description:
 			"Fetch a public web page or text resource over HTTP(S) and return its main content. HTML is converted to markdown with scripts, styles, and navigation chrome removed while headings, lists, tables, code blocks, and links are preserved. JSON, plain text, and other text-based responses are returned as-is. Use this when the user asks about a specific URL or when external information is needed that the vault does not contain.",
@@ -2424,22 +2429,21 @@ const PROMPT_SURFACES = [
 		kind: "system-prompt",
 		label: "system prompt",
 		history: SHIPPED_BASE_PROMPTS,
-		read: (reader: PromptFileReader, agentId: string) => reader.getBasePrompt(agentId),
+		read: (reader: PromptFileReader, agentId: string) => reader.getBasePromptFile(agentId),
 	},
 	{
 		id: "memory",
 		kind: "memory-prompt",
 		label: "memory instructions",
 		history: SHIPPED_MEMORY_PROMPTS,
-		read: (reader: PromptFileReader, agentId: string) => reader.getMemoryPrompt(agentId),
+		read: (reader: PromptFileReader, agentId: string) => reader.getMemoryPromptFile(agentId),
 	},
 ] as const satisfies readonly {
-	/** Key into `AgentConfig.promptBaseVersions` for this surface. */
 	id: PromptKindId;
 	kind: StaleGuidance["kind"];
 	label: string;
 	history: ShippedHistory;
-	read: (reader: PromptFileReader, agentId: string) => string | null;
+	read: (reader: PromptFileReader, agentId: string) => PromptFileSnapshot | null;
 }[];
 
 /**
@@ -2459,17 +2463,18 @@ function detectStaleGuidance(agent: AgentConfig, reader: PromptFileReader | null
 	const stale: StaleGuidance[] = [];
 
 	for (const surface of PROMPT_SURFACES) {
-		const content = surface.read(reader, agent.id);
-		if (content === null) continue;
+		const file = surface.read(reader, agent.id);
+		if (file === null) continue;
 		const current = currentShippedVersion(surface.history);
-		const version = shippedVersion(content, surface.history);
+		const version = shippedVersion(file.body, surface.history);
 
 		if (version === null) {
-			// The user's own text. It matches no shipped fingerprint, so the content alone
+			// The user's own text. It matches no shipped fingerprint, so the body alone
 			// can't say whether the default has moved since they wrote it — that's what the
-			// stamp recorded. Only flag when we have a baseline AND it has been superseded;
-			// an absent stamp stays silent rather than asserting drift we can't substantiate.
-			const stamp = agent.promptBaseVersions?.[surface.id];
+			// note's `version` frontmatter records. Only flag when we have a baseline AND it
+			// has been superseded; an absent baseline (e.g. the user removed the frontmatter)
+			// stays silent rather than asserting drift we can't substantiate.
+			const stamp = file.version;
 			if (stamp === undefined || stamp === current) continue;
 			stale.push({
 				agentId: agent.id,

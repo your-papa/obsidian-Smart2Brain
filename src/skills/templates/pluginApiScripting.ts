@@ -8,7 +8,7 @@
  * directly). Instead it is the seed content for a generated, plugin-specific
  * skill the user can then edit and iterate on independently. The template tells
  * the agent to introspect the API, do the task, and then persist a verified
- * replacement — via the `manage_skills` tool (staged for review) when available,
+ * replacement — via the `manage_skills` tool (applies immediately) when available,
  * or otherwise by emitting a SKILL.md code block the user copies over this file
  * — turning a throwaway introspection session into a durable, documented skill.
  */

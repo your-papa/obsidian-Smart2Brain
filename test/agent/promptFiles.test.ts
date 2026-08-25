@@ -16,16 +16,21 @@ vi.mock("../../src/stores/dataStore.svelte", () => ({
 		get agents() {
 			return state.agents;
 		},
-		// Used by the promptBaseVersions stamp on every write; see promptFilesReconcile.test.ts
-		// for the tests that assert the stamping behaviour itself.
-		updateAgent: (agentId: string, updates: Record<string, unknown>) => {
-			state.agents[agentId] = { ...state.agents[agentId], ...updates };
-		},
 	}),
 }));
 
-import { PromptFilesService } from "../../src/agent/promptFiles";
-import { BASE_SYSTEM_PROMPT, DEFAULT_MEMORY_PROMPT } from "../../src/agent/prompts";
+import { PromptFilesService, parsePromptFile, serializePromptFile } from "../../src/agent/promptFiles";
+import {
+	BASE_SYSTEM_PROMPT,
+	BASE_SYSTEM_PROMPT_VERSION,
+	DEFAULT_MEMORY_PROMPT,
+	DEFAULT_MEMORY_PROMPT_VERSION,
+} from "../../src/agent/prompts";
+
+// Canonical on-disk form of the two factory defaults: body wrapped in the plugin-managed
+// frontmatter block stamping the current shipped version.
+const BASE_FILE = serializePromptFile(BASE_SYSTEM_PROMPT, BASE_SYSTEM_PROMPT_VERSION);
+const MEMORY_FILE = serializePromptFile(DEFAULT_MEMORY_PROMPT, DEFAULT_MEMORY_PROMPT_VERSION);
 
 /** In-memory DataAdapter covering the calls promptFiles makes. */
 function makeAdapter(initial: Record<string, string> = {}) {
@@ -114,7 +119,7 @@ describe("PromptFilesService", () => {
 
 		await svc.seedDefaults(AGENTS);
 
-		expect(adapter.files.get(DEFAULT_PATH)).toBe(BASE_SYSTEM_PROMPT);
+		expect(adapter.files.get(DEFAULT_PATH)).toBe(BASE_FILE);
 	});
 
 	// The agentFolder setter's createFolder is fire-and-forget, and DataAdapter.mkdir does not create
@@ -133,39 +138,59 @@ describe("PromptFilesService", () => {
 		expect(dirIdx).toBeGreaterThanOrEqual(0);
 		// Root must be created no later than the nested dir.
 		expect(rootIdx).toBeLessThan(dirIdx);
-		expect(adapter.files.get("Meta/Agents/System Prompts/S2B Agent/Base.md")).toBe(BASE_SYSTEM_PROMPT);
+		expect(adapter.files.get("Meta/Agents/System Prompts/S2B Agent/Base.md")).toBe(BASE_FILE);
 	});
 
-	it("does not clobber an edited base prompt on seed", async () => {
+	it("preserves an edited base prompt's body on seed, back-filling only the baseline stamp", async () => {
 		const adapter = makeAdapter({ [DEFAULT_PATH]: "my edited prompt" });
 		const svc = makeService(adapter);
 
 		await svc.seedDefaults(AGENTS);
 
-		expect(adapter.files.get(DEFAULT_PATH)).toBe("my edited prompt");
+		// The user's text is never clobbered; a stampless note gains the frontmatter baseline.
+		const parsed = parsePromptFile(adapter.files.get(DEFAULT_PATH) ?? "");
+		expect(parsed.body).toBe("my edited prompt");
+		expect(parsed.version).toBe(BASE_SYSTEM_PROMPT_VERSION);
 	});
 
-	it("refresh loads file content into the cache, falling back to the default when absent", async () => {
-		const adapter = makeAdapter({ [DEFAULT_PATH]: "custom base prompt" });
+	it("refresh loads parsed file content into the cache, falling back to the default when absent", async () => {
+		const adapter = makeAdapter({
+			[DEFAULT_PATH]: serializePromptFile("custom base prompt", BASE_SYSTEM_PROMPT_VERSION),
+		});
 		const svc = makeService(adapter);
 
 		await svc.refresh(AGENTS);
 
-		// Present file → returned verbatim; reader sees it too.
+		// Present file → frontmatter-stripped body; reader sees body + version.
 		expect(svc.getBasePrompt("default-agent")).toBe("custom base prompt");
-		expect(svc.reader.getBasePrompt("default-agent")).toBe("custom base prompt");
+		expect(svc.reader.getBasePromptFile("default-agent")).toEqual({
+			body: "custom base prompt",
+			version: BASE_SYSTEM_PROMPT_VERSION,
+		});
 		// Absent file → BASE_SYSTEM_PROMPT default, null from the raw reader.
 		expect(svc.getBasePrompt("other-agent")).toBe(BASE_SYSTEM_PROMPT);
-		expect(svc.reader.getBasePrompt("other-agent")).toBeNull();
+		expect(svc.reader.getBasePromptFile("other-agent")).toBeNull();
 	});
 
-	it("writeBasePrompt updates both the file and the cache", async () => {
+	it("reads a note without frontmatter as an unknown baseline", async () => {
+		const adapter = makeAdapter({ [DEFAULT_PATH]: "customized, frontmatter removed" });
+		const svc = makeService(adapter);
+
+		await svc.refresh(AGENTS);
+
+		expect(svc.reader.getBasePromptFile("default-agent")).toEqual({
+			body: "customized, frontmatter removed",
+			version: undefined,
+		});
+	});
+
+	it("writeBasePrompt writes the stamped note and caches the body", async () => {
 		const adapter = makeAdapter();
 		const svc = makeService(adapter);
 
 		await svc.writeBasePrompt("default-agent", "new base prompt");
 
-		expect(adapter.files.get(DEFAULT_PATH)).toBe("new base prompt");
+		expect(adapter.files.get(DEFAULT_PATH)).toBe(serializePromptFile("new base prompt", BASE_SYSTEM_PROMPT_VERSION));
 		expect(svc.getBasePrompt("default-agent")).toBe("new base prompt");
 	});
 
@@ -193,7 +218,7 @@ describe("PromptFilesService", () => {
 
 		await svc.resetBasePrompt("default-agent");
 
-		expect(adapter.files.get(DEFAULT_PATH)).toBe(BASE_SYSTEM_PROMPT);
+		expect(adapter.files.get(DEFAULT_PATH)).toBe(BASE_FILE);
 	});
 
 	it("respects a custom agent folder", async () => {
@@ -215,7 +240,9 @@ describe("PromptFilesService", () => {
 
 		await svc.seedDefaults(agents);
 
-		expect(adapter.files.get(DEFAULT_PATH)).toBe("MY CUSTOM");
+		// Written stamped at the current version — the migrated text was, by definition,
+		// customized against the defaults current at migration time.
+		expect(adapter.files.get(DEFAULT_PATH)).toBe(serializePromptFile("MY CUSTOM", BASE_SYSTEM_PROMPT_VERSION));
 		expect(
 			(agents as Record<string, { migratedBasePrompt?: string }>)["default-agent"].migratedBasePrompt,
 		).toBeUndefined();
@@ -243,8 +270,9 @@ describe("PromptFilesService", () => {
 
 		await svc.seedDefaults(agents);
 
-		// Existing file wins (never clobbered); the superseded transient is consumed.
-		expect(adapter.files.get(DEFAULT_PATH)).toBe("already edited");
+		// Existing file wins (body never clobbered — only the baseline stamp is back-filled);
+		// the superseded transient is consumed.
+		expect(parsePromptFile(adapter.files.get(DEFAULT_PATH) ?? "").body).toBe("already edited");
 		expect(
 			(agents as Record<string, { migratedBasePrompt?: string }>)["default-agent"].migratedBasePrompt,
 		).toBeUndefined();
@@ -332,8 +360,8 @@ describe("PromptFilesService", () => {
 		expect(adapter.files.has("Agents/System Prompts/Doomed/Base.md")).toBe(false);
 		expect(adapter.files.has("Agents/System Prompts/Doomed/Memory.md")).toBe(false);
 		expect(adapter.dirs.has("Agents/System Prompts/Doomed")).toBe(false);
-		expect(svc.reader.getBasePrompt("a1")).toBeNull();
-		expect(svc.reader.getMemoryPrompt("a1")).toBeNull();
+		expect(svc.reader.getBasePromptFile("a1")).toBeNull();
+		expect(svc.reader.getMemoryPromptFile("a1")).toBeNull();
 	});
 
 	// --- Memory prompt: same lifecycle as the base prompt, same folder, different default -----
@@ -344,16 +372,18 @@ describe("PromptFilesService", () => {
 
 		await svc.seedDefaults(AGENTS);
 
-		expect(adapter.files.get(MEMORY_DEFAULT_PATH)).toBe(DEFAULT_MEMORY_PROMPT);
+		expect(adapter.files.get(MEMORY_DEFAULT_PATH)).toBe(MEMORY_FILE);
 	});
 
-	it("does not clobber an edited memory prompt on seed", async () => {
+	it("preserves an edited memory prompt's body on seed", async () => {
 		const adapter = makeAdapter({ [MEMORY_DEFAULT_PATH]: "my edited memory instructions" });
 		const svc = makeService(adapter);
 
 		await svc.seedDefaults(AGENTS);
 
-		expect(adapter.files.get(MEMORY_DEFAULT_PATH)).toBe("my edited memory instructions");
+		const parsed = parsePromptFile(adapter.files.get(MEMORY_DEFAULT_PATH) ?? "");
+		expect(parsed.body).toBe("my edited memory instructions");
+		expect(parsed.version).toBe(DEFAULT_MEMORY_PROMPT_VERSION);
 	});
 
 	it("refresh loads memory-prompt content into the cache independently of the base prompt", async () => {
@@ -367,9 +397,9 @@ describe("PromptFilesService", () => {
 
 		expect(svc.getBasePrompt("default-agent")).toBe("custom base prompt");
 		expect(svc.getMemoryPrompt("default-agent")).toBe("custom memory prompt");
-		expect(svc.reader.getMemoryPrompt("default-agent")).toBe("custom memory prompt");
+		expect(svc.reader.getMemoryPromptFile("default-agent")?.body).toBe("custom memory prompt");
 		expect(svc.getMemoryPrompt("other-agent")).toBe(DEFAULT_MEMORY_PROMPT);
-		expect(svc.reader.getMemoryPrompt("other-agent")).toBeNull();
+		expect(svc.reader.getMemoryPromptFile("other-agent")).toBeNull();
 	});
 
 	it("writeMemoryPrompt updates both the file and the cache, without touching the base prompt", async () => {
@@ -379,7 +409,9 @@ describe("PromptFilesService", () => {
 
 		await svc.writeMemoryPrompt("default-agent", "new memory prompt");
 
-		expect(adapter.files.get(MEMORY_DEFAULT_PATH)).toBe("new memory prompt");
+		expect(adapter.files.get(MEMORY_DEFAULT_PATH)).toBe(
+			serializePromptFile("new memory prompt", DEFAULT_MEMORY_PROMPT_VERSION),
+		);
 		expect(svc.getMemoryPrompt("default-agent")).toBe("new memory prompt");
 		expect(svc.getBasePrompt("default-agent")).toBe("base stays put");
 	});
@@ -390,7 +422,7 @@ describe("PromptFilesService", () => {
 
 		await svc.resetMemoryPrompt("default-agent");
 
-		expect(adapter.files.get(MEMORY_DEFAULT_PATH)).toBe(DEFAULT_MEMORY_PROMPT);
+		expect(adapter.files.get(MEMORY_DEFAULT_PATH)).toBe(MEMORY_FILE);
 	});
 
 	// v6→v7 migration stashes a customized prompt on `migratedMemoryPrompt`; seedDefaults must
@@ -403,7 +435,9 @@ describe("PromptFilesService", () => {
 
 		await svc.seedDefaults(agents);
 
-		expect(adapter.files.get(MEMORY_DEFAULT_PATH)).toBe("MY MEMORY");
+		expect(adapter.files.get(MEMORY_DEFAULT_PATH)).toBe(
+			serializePromptFile("MY MEMORY", DEFAULT_MEMORY_PROMPT_VERSION),
+		);
 		expect(
 			(agents as Record<string, { migratedMemoryPrompt?: string }>)["default-agent"].migratedMemoryPrompt,
 		).toBeUndefined();
@@ -414,10 +448,12 @@ describe("PromptFilesService", () => {
 		const svc = makeService(adapter);
 
 		await svc.ensureMemoryPrompt("default-agent");
-		expect(adapter.files.get(MEMORY_DEFAULT_PATH)).toBe(DEFAULT_MEMORY_PROMPT);
+		expect(adapter.files.get(MEMORY_DEFAULT_PATH)).toBe(MEMORY_FILE);
 
 		await svc.writeMemoryPrompt("default-agent", "edited");
 		await svc.ensureMemoryPrompt("default-agent");
-		expect(adapter.files.get(MEMORY_DEFAULT_PATH)).toBe("edited");
+		expect(adapter.files.get(MEMORY_DEFAULT_PATH)).toBe(
+			serializePromptFile("edited", DEFAULT_MEMORY_PROMPT_VERSION),
+		);
 	});
 });

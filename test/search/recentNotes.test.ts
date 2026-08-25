@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockRecentNotes: Array<{ path: string; lastOpenedAt: number }> = [];
+let mockAgentFolder = "";
 
 vi.mock("../../src/stores/dataStore.svelte", () => ({
-	getData: () => ({ recentNotes: mockRecentNotes }),
+	getData: () => ({ recentNotes: mockRecentNotes, agentFolder: mockAgentFolder }),
 }));
 
 import type { App } from "obsidian";
@@ -68,6 +69,22 @@ describe("getRecentNoteBoost", () => {
 describe("getRecentNotes", () => {
 	beforeEach(() => {
 		mockRecentNotes.length = 0;
+		mockAgentFolder = "";
+	});
+
+	it("filters agent-machinery files even when they were recorded as opened", () => {
+		// `file-open` records every file, including skill/prompt notes the user opened
+		// from the agent editor. Those are excluded from search, so recency must not
+		// resurface them.
+		mockAgentFolder = "Agents";
+		setRecentNotes([
+			{ path: "Agents/Skills/web/SKILL.md", ageMs: HOUR },
+			{ path: "Notes/fresh.md", ageMs: 2 * HOUR },
+		]);
+
+		const paths = getRecentNotes(createApp()).map((result) => result.path);
+
+		expect(paths).toEqual(["Notes/fresh.md"]);
 	});
 
 	it("excludes notes opened outside the window", () => {

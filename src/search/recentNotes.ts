@@ -9,6 +9,7 @@ import { getAllTags } from "obsidian";
 import type { App, TFile } from "obsidian";
 import { compileFilter, matchesSearchFilter } from "./searchFilters";
 import { getData } from "../stores/dataStore.svelte";
+import { isAgentFilePath } from "../utils/fileFiltering";
 import { RECENT_NOTE_WINDOW_MS } from "../types/plugin";
 import type { SearchFilter, SearchResult } from "../vectorstore/types";
 
@@ -99,6 +100,11 @@ export function getRecentlyOpenedNotes(app: App, filter?: SearchFilter): SearchR
 
 		const file = getAbstractFileByPath.call(app.vault, entry.path);
 		if (!isRecentNoteFile(file)) continue;
+		// `file-open` records every file, including agent machinery (a user opening a
+		// skill or prompt note from the editor). Those are excluded from indexing and
+		// search, so recency must not resurface them either. Filtered at read time
+		// rather than record time so already-persisted entries are covered too.
+		if (isAgentFilePath(file.path)) continue;
 
 		const cache = app.metadataCache.getFileCache(file as TFile);
 		const docTags = getCachedTags(cache);

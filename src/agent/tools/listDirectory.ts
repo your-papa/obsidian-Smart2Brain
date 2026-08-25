@@ -1,10 +1,11 @@
 import { tool } from "@langchain/core/tools";
-import type { App } from "obsidian";
+import { type App, normalizePath } from "obsidian";
 import { z } from "zod";
 import { DEFAULT_TOOLS_CONFIG } from "../../stores/dataStore.svelte";
 import { getPendingChangesStore } from "../../stores/pendingChangesStore.svelte";
 import { isPathInFolder, normalizeFolderPrefix, normalizeVaultPath } from "../../utils/pathUtils";
 import { isAgentFilePath } from "../../utils/fileFiltering";
+import { memoriesDir } from "../../utils/agentPaths";
 import { resolveToolAgent, resolveToolProvider } from "./toolAgentContext";
 
 interface DirectoryTreeFileEntry {
@@ -41,6 +42,11 @@ interface DirectoryScanOptions {
 	includeFolders: boolean;
 	currentProvider?: string;
 	store: ReturnType<typeof getPendingChangesStore>;
+	/** Normalized memory-folder path when the owning agent has memory enabled.
+	 *  Files inside it are exempt from the agent-machinery skip below — the memory
+	 *  folder is excluded from vault search, so `list_directory` is the agent's ONLY
+	 *  way to discover its own memory notes (the memory prompt directs it here). */
+	visibleMemoryFolder?: string;
 }
 
 interface DirectoryScanResult {
@@ -191,10 +197,14 @@ function isDirectoryFileVisible(
 	rootPath: string,
 	store: DirectoryScanOptions["store"],
 	currentProvider?: string,
+	visibleMemoryFolder?: string,
 ): "include" | "skip" | "private" {
 	if (!isPathInFolder(filePath, rootPath)) return "skip";
 	// Skills live in a vault folder but are plugin machinery, not user notes — hide them.
-	if (isAgentFilePath(filePath)) return "skip";
+	// Exception: the agent's memory folder, when memory is enabled. It is excluded from
+	// the search index, so this listing is the agent's only discovery path for memories.
+	const isMemoryFile = visibleMemoryFolder ? isPathInFolder(filePath, visibleMemoryFolder) : false;
+	if (!isMemoryFile && isAgentFilePath(filePath)) return "skip";
 	if (!store.isPathAllowed(filePath)) return "skip";
 	if (currentProvider && store.shouldBlockFile(filePath, currentProvider)) return "private";
 	return "include";
@@ -246,7 +256,13 @@ function collectDirectoryEntries(app: App, options: DirectoryScanOptions): Direc
 	};
 
 	for (const file of app.vault.getFiles()) {
-		const visibility = isDirectoryFileVisible(file.path, options.rootPath, options.store, options.currentProvider);
+		const visibility = isDirectoryFileVisible(
+			file.path,
+			options.rootPath,
+			options.store,
+			options.currentProvider,
+			options.visibleMemoryFolder,
+		);
 		if (visibility === "skip") continue;
 		if (visibility === "private") {
 			result.skippedPrivateFiles++;
@@ -311,6 +327,11 @@ export function createListDirectoryTool(app: App, agentId = "") {
 
 			const store = getPendingChangesStore();
 			const currentProvider = resolveToolProvider(agentId);
+			// Resolved per call, not at factory time: memoryEnabled and the agent folder
+			// can both change mid-session.
+			const visibleMemoryFolder = resolveToolAgent(agentId).memoryEnabled
+				? normalizePath(memoriesDir())
+				: undefined;
 			const scanOptions: DirectoryScanOptions = {
 				rootPath,
 				recursive: effectiveRecursive,
@@ -319,6 +340,7 @@ export function createListDirectoryTool(app: App, agentId = "") {
 				includeFolders,
 				currentProvider,
 				store,
+				visibleMemoryFolder,
 			};
 			const scanResult = collectDirectoryEntries(app, scanOptions);
 			const result = buildDirectoryListResult(
