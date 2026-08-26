@@ -30,7 +30,7 @@ const isRowDisabled = $derived(disabled || isDisabled);
 </script>
 
 <div
-  class="setting-item {isHeading ? 'setting-item-heading' : ''} {isRowDisabled
+  class="setting-item s2b-setting-item {isHeading ? 'setting-item-heading' : ''} {isRowDisabled
     ? 'opacity-50 pointer-events-none'
     : ''} {compact ? 'setting-item--compact' : ''} {className}"
 >
@@ -87,5 +87,33 @@ const isRowDisabled = $derived(disabled || isDisabled);
      the name always hints that there is something to reveal. */
   .setting-item--compact .setting-item-name {
     cursor: help;
+  }
+
+  /* Phone: core stacks a setting's control full-width under its info column
+     (`.is-phone .modal .setting-item:not(:is(.mod-toggle, …))`), which is right
+     for wide controls — inputs, selects, text buttons — but wrong for compact
+     ones: native rows built via Obsidian's Setting API keep toggles and small
+     actions inline on the right (the .mod-toggle/.mod-action exemptions).
+     Our rows take arbitrary snippets, so detect the compact case structurally
+     instead: every direct child of the control is a toggle or an icon button.
+     Global because the snippet-rendered children carry other components' scopes. */
+  :global(
+    .is-phone .modal .s2b-setting-item:has(.setting-item-control :is(.checkbox-container, .clickable-icon)):not(
+      :has(.setting-item-control :is(input:not([type="checkbox"]), select, textarea, .dropdown, button:not(.clickable-icon)))
+    )
+  ) {
+    flex-direction: row;
+    align-items: center;
+  }
+
+  :global(
+    .is-phone .modal .s2b-setting-item:has(.setting-item-control :is(.checkbox-container, .clickable-icon)):not(
+      :has(.setting-item-control :is(input:not([type="checkbox"]), select, textarea, .dropdown, button:not(.clickable-icon)))
+    ) > .setting-item-control
+  ) {
+    width: auto;
+    flex: 0 0 auto;
+    margin-top: 0;
+    padding-top: 0;
   }
 </style>

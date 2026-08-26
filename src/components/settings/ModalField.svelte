@@ -48,6 +48,14 @@ let { label, desc, for: forId, inline = false, class: className = "", children, 
     gap: 6px;
   }
 
+  /* Phone: `.setting-item` rows inside a setting-group card get `0 16px`
+     horizontal padding from core; a plain modal field has none, so its text
+     sits flush against the card edge when the two are mixed in one group.
+     Match the rows. */
+  :global(.is-phone .modal .setting-items) .modal-field {
+    padding: 0 16px;
+  }
+
   .modal-field--inline {
     flex-direction: row;
     align-items: center;

@@ -1300,6 +1300,22 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
     flex-shrink: 0;
   }
 
+  /* Phone: core stretches both `.setting-item-control` buttons and inputs toward
+     100%, which lets the icon trigger eat the row and crush the name input to its
+     min-content. Pin the trigger to its square and give the freed space back to
+     the input. `!important` because core's `.is-phone .modal .setting-item-control`
+     rules out-specify these single-class selectors. */
+  :global(.is-phone .modal .setting-item-control button.agent-icon-trigger) {
+    width: var(--input-height) !important;
+    flex: 0 0 auto !important;
+  }
+
+  :global(.is-phone .modal .setting-item-control input.agent-overview-name-input) {
+    flex: 1 1 auto !important;
+    width: auto !important;
+    min-width: 0;
+  }
+
   .agent-icon-trigger-preview {
     display: flex;
     align-items: center;
@@ -1409,6 +1425,13 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
   .mcp-empty-state {
     margin: 0;
     padding: 8px 0;
+  }
+
+  /* Phone: core insets `.setting-item` rows (incl. the section heading) by 16px
+     inside the group card, so the flush empty state reads outdented there. */
+  :global(.is-phone) .skill-empty-state,
+  :global(.is-phone) .mcp-empty-state {
+    padding: 8px 16px;
   }
   :global(.skill-entity),
   :global(.mcp-entity) {
