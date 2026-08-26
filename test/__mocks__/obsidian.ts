@@ -104,6 +104,31 @@ export class Modal {
 	onClose = vi.fn();
 }
 
+/**
+ * Base for the suggester modals (`ModelSuggestModal` and friends). Present so importing a
+ * module that transitively pulls in a suggester — e.g. anything reaching AgentManager —
+ * doesn't fail at class-definition time; the suggester behaviour itself isn't exercised.
+ */
+export class SuggestModal<T> {
+	app: App;
+	containerEl = document.createElement("div");
+	inputEl = document.createElement("input");
+	limit = 0;
+	emptyStateText = "";
+
+	constructor(app: App) {
+		this.app = app;
+	}
+
+	open = vi.fn();
+	close = vi.fn();
+	setPlaceholder = vi.fn();
+	setInstructions = vi.fn();
+	getSuggestions = vi.fn((_query: string): T[] => []);
+	renderSuggestion = vi.fn();
+	onChooseSuggestion = vi.fn();
+}
+
 export class Notice {
 	message: string;
 	timeout?: number;

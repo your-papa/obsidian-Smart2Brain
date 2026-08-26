@@ -156,6 +156,35 @@ describe("PromptFilesService.seedDefaults — reconciling existing files against
 		expect(adapter.files.get(BASE_PATH)).toBe(serializePromptFile(CURRENT_BASE, 2));
 		expect(adapter.files.get(MEMORY_PATH)).toBe(serializePromptFile(CURRENT_MEMORY, 2));
 	});
+
+	/*
+	 * Reconciling an UNTOUCHED note must not cost the user their own properties. They never
+	 * edited the prompt text, so they had no reason to expect us to rewrite the file at all —
+	 * serializing from scratch here would silently drop every key but author/version.
+	 */
+	it("keeps user-added properties when silently updating an old default", async () => {
+		const adapter = makeAdapter({
+			[BASE_PATH]: `---\nauthor: S2B\nversion: 1\ntags: [prompts]\ncssclass: wide\n---\n\n${OLD_BASE}\n`,
+		});
+		await makeService(adapter).seedDefaults(AGENTS);
+
+		const raw = adapter.files.get(BASE_PATH) ?? "";
+		expect(raw).toContain("tags: [prompts]");
+		expect(raw).toContain("cssclass: wide");
+		expect(parsePromptFile(raw)).toEqual({ body: CURRENT_BASE, version: 2 });
+	});
+
+	it("keeps user-added properties when re-stamping a current-default body", async () => {
+		// Body already current, metadata stale — the canonical re-stamp path.
+		const adapter = makeAdapter({
+			[BASE_PATH]: `---\ntags: [prompts]\n---\n\n${CURRENT_BASE}\n`,
+		});
+		await makeService(adapter).seedDefaults(AGENTS);
+
+		const raw = adapter.files.get(BASE_PATH) ?? "";
+		expect(raw).toContain("tags: [prompts]");
+		expect(parsePromptFile(raw)).toEqual({ body: CURRENT_BASE, version: 2 });
+	});
 });
 
 /*
