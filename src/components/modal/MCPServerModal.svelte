@@ -11,13 +11,16 @@ import Button from "../ui/Button.svelte";
 import Dropdown from "../ui/Dropdown.svelte";
 import Icon from "../ui/Icon.svelte";
 import Text from "../ui/Text.svelte";
-import Toggle from "../ui/Toggle.svelte";
 import { confirmDelete } from "./ConfirmModal";
-import ModalField from "../settings/ModalField.svelte";
 import SettingContainer from "../settings/SettingContainer.svelte";
 import SettingGroup from "../settings/SettingGroup.svelte";
 import TextArea from "../ui/TextArea.svelte";
-import type { MCPServerAccessors, MCPServerModal, MCPServerModalCallback } from "./MCPServerModal";
+import type {
+	MCPServerAccessors,
+	MCPServerModal,
+	MCPServerModalCallback,
+	MCPServerModalDeleteCallback,
+} from "./MCPServerModal";
 
 interface Props {
 	modal: MCPServerModal;
@@ -25,6 +28,7 @@ interface Props {
 	serverId: string | null;
 	existingConfig: MCPServerConfig | null;
 	onSave: MCPServerModalCallback;
+	onDelete: MCPServerModalDeleteCallback | null;
 	accessors: MCPServerAccessors;
 }
 
@@ -34,6 +38,7 @@ const {
 	serverId: capturedServerId,
 	existingConfig: capturedExistingConfig,
 	onSave,
+	onDelete,
 	accessors,
 }: Props = $props();
 
@@ -52,7 +57,10 @@ function generateServerId(input: string): string {
 
 // Form state - initialized from captured initial values
 let name = $state(initialConfig?.displayName ?? "");
-let enabled = $state(initialConfig?.enabled ?? true);
+// Enabled is deliberately NOT edited here — the server list in the agent editor
+// owns that toggle. Carry the existing value through so saving an edit to a
+// disabled server doesn't silently re-enable it; new servers start enabled.
+const enabled = (() => initialConfig?.enabled ?? true)();
 // stdio is desktop-only; if a mobile user opens an existing stdio server
 // (e.g. synced from desktop), fall back to http so the dropdown selection
 // stays valid rather than showing an absent option.
@@ -74,6 +82,38 @@ let headers = $state(
 		.map(([k, v]) => `${k}: ${v}`)
 		.join("\n"),
 );
+
+// JSON import. There's no separate import UI: pasting a config snippet into any
+// text field is detected and unpacked into the form, the same way the chat
+// composer reacts to pasted files rather than hiding them behind a panel.
+// Because that silently rewrites fields the user may have already filled, the
+// pre-paste values are snapshotted so the banner can offer a one-click undo.
+type FormSnapshot = {
+	name: string;
+	transport: MCPTransportType;
+	command: string;
+	args: string;
+	envVars: string;
+	url: string;
+	headers: string;
+};
+let importNotice = $state<string | null>(null);
+let importError = $state<string | null>(null);
+let importUndo = $state<FormSnapshot | null>(null);
+
+function snapshotForm(): FormSnapshot {
+	return { name, transport, command, args, envVars, url, headers };
+}
+
+function restoreForm(snapshot: FormSnapshot) {
+	name = snapshot.name;
+	transport = snapshot.transport;
+	command = snapshot.command;
+	args = snapshot.args;
+	envVars = snapshot.envVars;
+	url = snapshot.url;
+	headers = snapshot.headers;
+}
 
 // Test connection state
 let isTesting = $state(false);
@@ -152,6 +192,182 @@ function parseHeaders(input: string): Record<string, string> {
 	return result;
 }
 
+/**
+ * Populate the form from a pasted MCP config snippet.
+ *
+ * Servers publish their setup as a JSON block, but the schema differs by host:
+ * Claude Desktop and Cursor nest under `mcpServers`, VS Code under `servers`
+ * (or `mcp.servers`) and spells the transport `type` rather than `transport`.
+ * A bare single-server object (no wrapper) is accepted too, since that's what
+ * people often copy out of a README. Everything is normalised onto our own
+ * `MCPServerConfig` shape.
+ *
+ * This only fills the fields — it doesn't save. The user still reviews and
+ * confirms, so a malformed or hostile snippet can't configure a server behind
+ * their back.
+ */
+function applyImportedJson(text: string): string | null {
+	const raw = text.trim();
+	if (!raw) return "Paste a configuration first";
+
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(raw);
+	} catch (err) {
+		return `Invalid JSON: ${err instanceof Error ? err.message : "could not parse"}`;
+	}
+	if (!parsed || typeof parsed !== "object") {
+		return "Configuration must be a JSON object";
+	}
+
+	const root = parsed as Record<string, unknown>;
+	// Unwrap `{ mcp: { servers: {...} } }` (VS Code settings.json) before
+	// looking for the server map.
+	const mcpWrapper = root.mcp;
+	const scope = (
+		mcpWrapper && typeof mcpWrapper === "object" ? (mcpWrapper as Record<string, unknown>) : root
+	) as Record<string, unknown>;
+
+	const serverMapCandidate = scope.mcpServers ?? scope.servers;
+	let entryKey: string | null = null;
+	let entry: Record<string, unknown>;
+
+	if (serverMapCandidate && typeof serverMapCandidate === "object") {
+		const entries = Object.entries(serverMapCandidate as Record<string, unknown>).filter(
+			([, v]) => v && typeof v === "object",
+		);
+		if (entries.length === 0) {
+			return "No server entries found in the configuration";
+		}
+		if (entries.length > 1) {
+			return "Configuration contains multiple servers — paste one at a time";
+		}
+		entryKey = entries[0][0];
+		entry = entries[0][1] as Record<string, unknown>;
+	} else if (typeof scope.url === "string" || typeof scope.command === "string") {
+		// Bare single-server object with no wrapper.
+		entry = scope;
+	} else {
+		return "Could not find an MCP server definition (expected an `mcpServers` or `servers` object)";
+	}
+
+	// `transport` is ours, `type` is VS Code's; fall back to inferring from
+	// whichever of url/command is present.
+	const declared = typeof entry.transport === "string" ? entry.transport : entry.type;
+	const hasUrl = typeof entry.url === "string" && entry.url.trim().length > 0;
+	const hasCommand = typeof entry.command === "string" && entry.command.trim().length > 0;
+	// sse is a remote transport we don't model separately; treat it as http so
+	// the URL still lands somewhere useful rather than being dropped silently.
+	const isStdio = declared === "stdio" || (!declared && !hasUrl && hasCommand);
+
+	if (isStdio && !Platform.isDesktopApp) {
+		return "This is a local (stdio) server, which is desktop-only";
+	}
+	if (!isStdio && !hasUrl) {
+		return "Remote server entry is missing a `url`";
+	}
+	if (isStdio && !hasCommand) {
+		return "Local server entry is missing a `command`";
+	}
+
+	// Only name an unnamed form — never clobber a name the user already typed.
+	// A bare (unwrapped) entry has no key to derive a name from, so the field can
+	// legitimately stay empty here; the caller prompts for it rather than letting
+	// the user discover it via a validation error on save.
+	if (!name.trim()) {
+		const displayName = typeof entry.displayName === "string" ? entry.displayName : null;
+		name = displayName ?? entryKey ?? "";
+	}
+
+	if (isStdio) {
+		transport = "stdio";
+		command = (entry.command as string).trim();
+		args = Array.isArray(entry.args) ? entry.args.filter((a): a is string => typeof a === "string").join(" ") : "";
+		envVars = stringifyRecord(entry.env, "=");
+	} else {
+		transport = "http";
+		url = (entry.url as string).trim();
+		headers = stringifyRecord(entry.headers, ": ");
+	}
+
+	// A pasted config describes a different server than the one just probed.
+	testSuccess = false;
+	testError = null;
+	discoveredTools = [];
+	return null;
+}
+
+/** Render a string-valued record back into the modal's one-per-line textarea format. */
+function stringifyRecord(value: unknown, separator: string): string {
+	if (!value || typeof value !== "object") return "";
+	return Object.entries(value as Record<string, unknown>)
+		.filter(([k, v]) => k && (typeof v === "string" || typeof v === "number" || typeof v === "boolean"))
+		.map(([k, v]) => `${k}${separator}${String(v)}`)
+		.join("\n");
+}
+
+/**
+ * Does this pasted text look like a config snippet rather than a field value?
+ *
+ * Deliberately narrow: only text that starts with `{` and parses as a JSON
+ * object qualifies. A URL, a command, a bearer token or a stray brace all fail
+ * this and paste through untouched, so the detection can never eat a normal
+ * paste. Anything that passes is JSON the user could not have meant as the
+ * literal contents of a single field.
+ */
+function looksLikeConfigJson(text: string): boolean {
+	const trimmed = text.trim();
+	if (!trimmed.startsWith("{")) return false;
+	try {
+		const parsed = JSON.parse(trimmed);
+		return !!parsed && typeof parsed === "object" && !Array.isArray(parsed);
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Intercept a paste of a whole config snippet into any field.
+ *
+ * Returns true when the paste was consumed as an import, in which case the
+ * caller prevents the default paste so the raw JSON never lands in the field.
+ */
+function handleConfigPaste(event: ClipboardEvent): boolean {
+	const text = event.clipboardData?.getData("text") ?? "";
+	if (!looksLikeConfigJson(text)) return false;
+
+	// It's a config snippet, so it never lands in the field as raw text.
+	event.preventDefault();
+
+	// Snapshot before the parse mutates anything, but only commit it as the undo
+	// target once the import actually succeeds.
+	const before = snapshotForm();
+	const error = applyImportedJson(text);
+	if (error) {
+		// It was JSON, just not a config we understand — say so rather than
+		// silently dropping the paste.
+		importError = error;
+		importNotice = null;
+		importUndo = null;
+		return true;
+	}
+
+	importError = null;
+	importUndo = before;
+	importNotice = name.trim()
+		? "Imported from pasted JSON."
+		: "Imported from pasted JSON — enter a name for this server.";
+	return true;
+}
+
+function undoImport() {
+	if (!importUndo) return;
+	restoreForm(importUndo);
+	importUndo = null;
+	importNotice = null;
+	importError = null;
+}
+
 function validateForm(): string | null {
 	if (!name.trim()) {
 		return "Name is required";
@@ -221,10 +437,9 @@ function handleSave() {
 }
 
 async function handleDelete() {
-	if (capturedServerId && capturedExistingConfig) {
+	if (capturedServerId && capturedExistingConfig && onDelete) {
 		if (!(await confirmDelete(plugin.app, capturedExistingConfig.displayName || capturedServerId))) return;
-		// Pass the deleted server info to callback with enabled: false to indicate deletion
-		onSave(capturedServerId, { ...capturedExistingConfig, enabled: false });
+		onDelete(capturedServerId);
 		modal.close();
 	}
 }
@@ -328,12 +543,37 @@ async function handleTestConnection() {
 }
 </script>
 
-<div class="mcp-modal-content">
-  <!-- Short controls use the native horizontal settings row (name/desc left,
-       control right). The wide inputs below stay on ModalField's stacked
-       variant, which exists because a URL or a KEY=VALUE textarea needs the
-       full modal width rather than the right-hand column. -->
-  <SettingGroup heading="Server">
+<!-- Paste is caught here rather than per-input: the event bubbles, so one
+     listener covers every field (including ones added later) without threading
+     an `onpaste` prop through the shared Text/TextArea primitives. Non-config
+     pastes fall through untouched. -->
+<div class="mcp-modal-content" onpastecapture={(e) => handleConfigPaste(e)}>
+  <!-- Import feedback. Only ever shown as the result of a paste, so the modal
+       carries no import affordance of its own when nothing was pasted. -->
+  {#if importNotice}
+    <div class="mcp-banner success">
+      <Icon name="check-circle" />
+      <span>{importNotice}</span>
+      {#if importUndo}
+        <button type="button" class="mcp-banner-action" onclick={undoImport}>Undo</button>
+      {/if}
+    </div>
+  {:else if importError}
+    <div class="mcp-banner error">
+      <Icon name="alert-circle" />
+      <span>{importError}</span>
+      <button type="button" class="mcp-banner-action" onclick={() => (importError = null)}>
+        Dismiss
+      </button>
+    </div>
+  {/if}
+
+  <!-- One card, one idiom: every field is a native settings row. Wide controls
+       (URL, textareas) opt into `mcp-row--stacked`, which drops the control onto
+       its own full-width line under the label instead of squeezing it into the
+       right-hand column — the reason the old markup reached for ModalField,
+       whose larger label weight made those fields read as headings. -->
+  <SettingGroup>
     <SettingContainer name="Name" desc="A name for this MCP server">
       <Text
         id="mcp-server-name"
@@ -344,55 +584,50 @@ async function handleTestConnection() {
       />
     </SettingContainer>
 
-    <SettingContainer name="Enabled" desc="Whether this server is active and provides tools">
-      <Toggle checked={enabled} onchange={(checked) => (enabled = checked)} />
-    </SettingContainer>
-
-    <SettingContainer name="Transport type" desc="How to connect to the MCP server">
-      <Dropdown
-        id="mcp-server-transport"
-        type="options"
-        dropdown={transportOptions}
-        selected={transport}
-        onchange={(v) => (transport = v)}
-      />
-    </SettingContainer>
-  </SettingGroup>
-
-  {#if transport === "stdio"}
-    <SettingGroup heading="Command Configuration">
-      <ModalField
-        label="Command"
-        desc="The executable to run (e.g., npx, node, python)"
-        for="mcp-server-command"
-      >
-        <Text
-          id="mcp-server-command"
-          inputType="text"
-          value={command}
-          placeholder="npx"
-          onblur={(v) => (command = v)}
+    <!-- Only worth asking when there's a real choice: stdio is desktop-only, so
+         on mobile this is a single-option dropdown. -->
+    {#if transportOptions.length > 1}
+      <SettingContainer name="Transport" desc="How to connect to this server">
+        <Dropdown
+          id="mcp-server-transport"
+          type="options"
+          dropdown={transportOptions}
+          selected={transport}
+          onchange={(v) => (transport = v)}
         />
-      </ModalField>
+      </SettingContainer>
+    {/if}
 
-      <ModalField
-        label="Arguments"
-        desc="Command arguments, space-separated (use quotes for args with spaces)"
-        for="mcp-server-arguments"
+    {#if transport === "stdio"}
+      <SettingContainer
+        class="mcp-row--stacked"
+        name="Command"
+        desc="The executable to run, plus its arguments — or paste the server's JSON config to fill this form"
       >
-        <Text
-          id="mcp-server-arguments"
-          inputType="text"
-          value={args}
-          placeholder="-y @anthropic/mcp-server-filesystem /path/to/dir"
-          onblur={(v) => (args = v)}
-        />
-      </ModalField>
+        <div class="mcp-command-row">
+          <Text
+            id="mcp-server-command"
+            inputType="text"
+            class="mcp-command-input"
+            value={command}
+            placeholder="npx"
+            onblur={(v) => (command = v)}
+          />
+          <Text
+            id="mcp-server-arguments"
+            inputType="text"
+            class="mcp-args-input"
+            value={args}
+            placeholder="-y @modelcontextprotocol/server-filesystem /path"
+            onblur={(v) => (args = v)}
+          />
+        </div>
+      </SettingContainer>
 
-      <ModalField
-        label="Environment Variables (optional)"
-        desc="One per line in KEY=VALUE format"
-        for="mcp-server-env"
+      <SettingContainer
+        class="mcp-row--stacked"
+        name="Environment variables"
+        desc="Optional — one per line, KEY=VALUE"
       >
         <TextArea
           id="mcp-server-env"
@@ -400,13 +635,16 @@ async function handleTestConnection() {
           bind:value={envVars}
           placeholder={"API_KEY=your-key\nDEBUG=true"}
         />
-      </ModalField>
-    </SettingGroup>
-  {/if}
-
-  {#if transport === "http"}
-    <SettingGroup heading="Server Configuration">
-      <ModalField label="Server URL" desc="The URL of the MCP server" for="mcp-server-url">
+      </SettingContainer>
+    {:else}
+      <!-- Import is advertised in the description rather than with a control:
+           ⌘V into any field already does it, so a button would occupy permanent
+           space to duplicate a shortcut people reach for by reflex. -->
+      <SettingContainer
+        class="mcp-row--stacked"
+        name="Server URL"
+        desc="The URL of the MCP server — or paste the server's JSON config to fill this form"
+      >
         <Text
           id="mcp-server-url"
           inputType="text"
@@ -414,12 +652,12 @@ async function handleTestConnection() {
           placeholder="https://mcp.example.com/mcp"
           onblur={(v) => (url = v)}
         />
-      </ModalField>
+      </SettingContainer>
 
-      <ModalField
-        label="Headers (optional)"
-        desc="One per line in Header-Name: value format"
-        for="mcp-server-headers"
+      <SettingContainer
+        class="mcp-row--stacked"
+        name="Headers"
+        desc="Optional — one per line, Header-Name: value"
       >
         <TextArea
           id="mcp-server-headers"
@@ -427,9 +665,19 @@ async function handleTestConnection() {
           bind:value={headers}
           placeholder={"Authorization: Bearer token\nX-Custom-Header: value"}
         />
-      </ModalField>
-    </SettingGroup>
-  {/if}
+      </SettingContainer>
+    {/if}
+  </SettingGroup>
+
+  <!-- Test sits directly above its own results, so the outcome appears where the
+       user just clicked rather than at the far end of the modal. -->
+  <div class="mcp-test-row">
+    <Button
+      buttonText={isTesting ? "Testing…" : "Test connection"}
+      onClick={handleTestConnection}
+      disabled={isTesting}
+    />
+  </div>
 
   <!-- Test Results -->
   {#if testSuccess && discoveredTools.length > 0}
@@ -467,17 +715,14 @@ async function handleTestConnection() {
   {/if}
 
   <!-- Actions. `modal-button-container` is Obsidian's own footer class, so these
-       sit where a core modal's buttons do. Delete/Test are pushed to the left
-       edge since they are not the confirm action. -->
+       sit where a core modal's buttons do. Only the three verbs that resolve the
+       modal live here — Delete at the left edge, away from the confirm button so
+       a destructive click isn't adjacent to the one people aim for. Testing is a
+       form action, not a way out of the modal, so it sits with the fields above. -->
   <div class="modal-button-container mcp-actions">
     {#if isEditing}
       <Button buttonText="Delete" styles="mod-warning" onClick={handleDelete} />
     {/if}
-    <Button
-      buttonText={isTesting ? "Testing..." : "Test Connection"}
-      onClick={handleTestConnection}
-      disabled={isTesting}
-    />
     <div class="flex-1"></div>
     <Button buttonText="Cancel" onClick={() => modal.close()} />
     <Button buttonText={isEditing ? "Save" : "Add Server"} cta={true} onClick={handleSave} />
@@ -490,6 +735,106 @@ async function handleTestConnection() {
     flex-direction: column;
     gap: 16px;
     padding: 8px 0;
+  }
+
+  /* Import banner. Transient feedback for a paste — colour comes from Obsidian's
+     own text vars so it tracks the theme. `color-mix` against a hex keeps the
+     tint working in themes that leave the `-hsl` colour vars undefined. */
+  .mcp-banner {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-radius: var(--radius-s);
+    font-size: var(--font-ui-small);
+  }
+
+  .mcp-banner.success {
+    background: color-mix(in srgb, var(--text-success, #4caf50) 12%, transparent);
+    color: var(--text-success, #4caf50);
+  }
+
+  .mcp-banner.error {
+    background: color-mix(in srgb, var(--text-error, #f44336) 12%, transparent);
+    color: var(--text-error, #f44336);
+  }
+
+  .mcp-banner span {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  /* Inline text action — deliberately not a Button: it sits inside coloured
+     text and should inherit that colour rather than render as a control. */
+  .mcp-banner-action {
+    flex: 0 0 auto;
+    padding: 2px 6px;
+    border: none;
+    box-shadow: none;
+    background: transparent;
+    color: inherit;
+    font-size: var(--font-ui-smaller);
+    font-weight: 600;
+    text-decoration: underline;
+    cursor: pointer;
+  }
+
+  .mcp-banner-action:hover {
+    background: var(--background-modifier-hover);
+  }
+
+  .mcp-test-row {
+    display: flex;
+    justify-content: flex-start;
+  }
+
+  /* Wide-control settings row: keep the native label/description column, but let
+     the control take the full width on its own line beneath it. Obsidian already
+     does exactly this on phones; this opts specific desktop rows into the same
+     shape so a URL or textarea isn't crushed into the right-hand column. */
+  :global(.mcp-row--stacked) {
+    display: block;
+  }
+
+  /* Fully global: `.setting-item-control` belongs to SettingContainer's scope,
+     so a scoped descendant selector here would never match it. */
+  :global(.mcp-row--stacked .setting-item-control) {
+    width: 100%;
+    justify-content: flex-start;
+    margin-top: 8px;
+    padding-top: 0;
+  }
+
+  /* Inputs default to their intrinsic width, which is what truncated the URL. */
+  :global(.mcp-row--stacked .setting-item-control input[type="text"]) {
+    width: 100%;
+  }
+
+  /* Command + args on one line: the executable is short and fixed-ish, the
+     argument list is long, so give the args the remaining space. */
+  .mcp-command-row {
+    display: flex;
+    gap: 8px;
+    width: 100%;
+  }
+
+  .mcp-command-row :global(.mcp-command-input) {
+    flex: 0 1 30%;
+    min-width: 0;
+  }
+
+  .mcp-command-row :global(.mcp-args-input) {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  /* Phone: two inputs side by side get too narrow to read. */
+  :global(.is-phone) .mcp-command-row {
+    flex-direction: column;
+  }
+
+  :global(.is-phone) .mcp-command-row :global(.mcp-command-input) {
+    flex: 1 1 auto;
   }
 
   :global(.mcp-textarea) {

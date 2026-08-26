@@ -675,17 +675,18 @@ function openEditMCPServer(serverId: string) {
 		serverId,
 		config,
 		(newServerId: string, updatedConfig: MCPServerConfig) => {
+			// A rename re-keys the entry: drop the old id, then write the new one.
 			if (newServerId !== serverId) {
 				pluginData.deleteAgentMCPServer(agentId, serverId);
 			}
-			if (!updatedConfig.enabled && newServerId === serverId) {
-				pluginData.deleteAgentMCPServer(agentId, serverId);
-			} else {
-				pluginData.setAgentMCPServer(agentId, newServerId, updatedConfig);
-			}
+			pluginData.setAgentMCPServer(agentId, newServerId, updatedConfig);
 			void applyChanges();
 		},
 		{ hasServer: (candidateId: string) => Boolean(selectedAgent?.mcpServers[candidateId]) },
+		(deletedServerId: string) => {
+			pluginData.deleteAgentMCPServer(agentId, deletedServerId);
+			void applyChanges();
+		},
 	).open();
 }
 
@@ -1416,21 +1417,15 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
     padding-bottom: 0 !important;
   }
 
-  /* Muted text like `ManagedEntitySection`'s empty state. The horizontal inset is
-     0 to match `.skill-entity` / `.mcp-entity`, which zero out their own side
-     padding just below — the empty state stands in for those rows, so a native
-     `.setting-item` inset here would indent the message relative to the list it
-     replaces. Vertical padding keeps it off the heading above. */
+  /* Muted text like `ManagedEntitySection`'s empty state. Aligns with the
+     "Skills" / "MCP servers" heading rows above it rather than the card edge:
+     the message stands in for the whole list block, so it should line up with
+     that block's heading. (The `.skill-entity` / `.mcp-entity` rows zero their
+     own side padding because they carry their own internal inset — an empty
+     paragraph has none, so matching them would outdent it.) */
   .skill-empty-state,
   .mcp-empty-state {
     margin: 0;
-    padding: 8px 0;
-  }
-
-  /* Phone: core insets `.setting-item` rows (incl. the section heading) by 16px
-     inside the group card, so the flush empty state reads outdented there. */
-  :global(.is-phone) .skill-empty-state,
-  :global(.is-phone) .mcp-empty-state {
     padding: 8px 16px;
   }
   :global(.skill-entity),

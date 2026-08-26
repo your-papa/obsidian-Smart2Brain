@@ -12,6 +12,12 @@ import { applyModalLayout } from "./modalLayout";
  */
 export type MCPServerModalCallback = (serverId: string, config: MCPServerConfig) => void;
 
+/**
+ * Callback signature for deleting a server from the modal.
+ * @param serverId - The server ID to delete
+ */
+export type MCPServerModalDeleteCallback = (serverId: string) => void;
+
 export interface MCPServerAccessors {
 	hasServer: (serverId: string) => boolean;
 }
@@ -23,6 +29,7 @@ export class MCPServerModal extends Modal {
 	private serverId: string | null;
 	private existingConfig: MCPServerConfig | null;
 	private onSave: MCPServerModalCallback;
+	private onDelete: MCPServerModalDeleteCallback | null;
 	private accessors: MCPServerAccessors;
 
 	/**
@@ -31,6 +38,9 @@ export class MCPServerModal extends Modal {
 	 * @param existingConfig - The existing config if editing, or null for new
 	 * @param onSave - Callback when saved, receives serverId and config
 	 * @param accessors - Helper accessors for agent-scoped server data
+	 * @param onDelete - Callback when deleted, receives the server ID. Deletion is
+	 *   signalled through this dedicated callback rather than through a config
+	 *   field, so a merely *disabled* server can still be edited and saved.
 	 */
 	constructor(
 		plugin: SecondBrainPlugin,
@@ -38,12 +48,14 @@ export class MCPServerModal extends Modal {
 		existingConfig: MCPServerConfig | null,
 		onSave: MCPServerModalCallback,
 		accessors: MCPServerAccessors,
+		onDelete?: MCPServerModalDeleteCallback,
 	) {
 		super(plugin.app);
 		this.plugin = plugin;
 		this.serverId = serverId;
 		this.existingConfig = existingConfig;
 		this.onSave = onSave;
+		this.onDelete = onDelete ?? null;
 		this.accessors = accessors;
 	}
 
@@ -64,6 +76,7 @@ export class MCPServerModal extends Modal {
 				serverId: this.serverId,
 				existingConfig: this.existingConfig,
 				onSave: this.onSave,
+				onDelete: this.onDelete,
 				accessors: this.accessors,
 			},
 		});
