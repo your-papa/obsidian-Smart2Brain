@@ -92,6 +92,10 @@ $effect(() => {
 		raf = requestAnimationFrame(tick);
 	};
 	raf = requestAnimationFrame(tick);
+	// When the strip scrolls horizontally (single-row mobile layout), keep the
+	// active tab fully visible. `nearest` makes this a no-op when it already is,
+	// so the wrapped desktop layout is unaffected.
+	triggerEls.get(value)?.scrollIntoView({ behavior: "smooth", inline: "nearest", block: "nearest" });
 	return () => cancelAnimationFrame(raf);
 });
 
@@ -177,6 +181,27 @@ function registerTrigger(node: HTMLElement, id: T) {
 	   it statically — must be :global. */
 	:global(.s2b-sliding-tabs) {
 		position: relative;
+	}
+
+	/* Phone: the strip wraps into 2–3 rows at ~390px and pushes the actual settings
+	   most of a screen down. Swap wrapping for a single scrollable row — the native
+	   mobile pattern for tab bars. The indicator already accounts for scrollLeft in
+	   measure(), so the pill tracks the active tab while the strip scrolls. */
+	:global(.is-mobile .s2b-sliding-tabs) {
+		flex-wrap: nowrap;
+		justify-content: flex-start;
+		overflow-x: auto;
+		-webkit-overflow-scrolling: touch;
+		scrollbar-width: none;
+	}
+
+	:global(.is-mobile .s2b-sliding-tabs)::-webkit-scrollbar {
+		display: none;
+	}
+
+	:global(.is-mobile .s2b-sliding-tabs [data-tabs-trigger]) {
+		flex-shrink: 0;
+		white-space: nowrap;
 	}
 
 	/* Strip Obsidian's default <button> chrome so only the sliding accent pill shows

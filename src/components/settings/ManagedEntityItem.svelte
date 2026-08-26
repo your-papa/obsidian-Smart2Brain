@@ -149,6 +149,42 @@ function handleRadioClick(event: MouseEvent) {
     border-radius: 14px;
   }
 
+  /* Mobile: Obsidian's core `.is-mobile .setting-item` stacks the control under
+     the info column — right for form rows with wide controls, wrong for these
+     list rows, whose actions are a compact icon cluster. Stacking them burns a
+     full row per item (name, then a lonely strip of icons). Keep the native
+     mobile list pattern instead: content left, accessories right. `!important`
+     mirrors -main's own flex-direction override below — core's `.is-mobile
+     .setting-item` rule outranks a single scoped class. */
+  :global(.is-mobile) .managed-entity-item {
+    flex-direction: row !important;
+    align-items: center;
+  }
+
+  /* Restored to a row, the info column must also get its grow back — core's
+     mobile stacking sizes `.setting-item-info` for a full-width layout, which
+     in a row collapses it to min-content (names wrap per word, badges drop to
+     their own line). */
+  :global(.is-mobile) .managed-entity-item .managed-entity-item-main {
+    flex: 1 1 auto !important;
+    min-width: 0;
+    width: auto;
+  }
+
+  /* Core's mobile stacking also stretches `.setting-item-control` full-width
+     with a top inset AND gives it `flex: 1 0 auto` — the grow is what actually
+     breaks the row layout (the icon cluster expands and squeezes the info column
+     to zero width, so names wrap per word). Undo all of it so the actions hug
+     the right edge at their natural size. */
+  :global(.is-mobile) .managed-entity-item .managed-entity-item-actions,
+  :global(.is-mobile) .managed-entity-item .managed-entity-item-trailing {
+    width: auto !important;
+    margin-top: 0;
+    padding-top: 0;
+    justify-content: flex-end;
+    flex: 0 0 auto !important;
+  }
+
   .managed-entity-item::before {
     content: "";
     position: absolute;
