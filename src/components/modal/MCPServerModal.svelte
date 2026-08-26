@@ -521,6 +521,13 @@ async function handleTestConnection() {
     gap: 8px;
   }
 
+  /* Phone: core stacks `.modal-button-container` into a column; the row-oriented
+     `align-items: center` above would shrink each button to its label width.
+     Stretch restores the native full-width stacked footer buttons. */
+  :global(.is-phone) .mcp-actions {
+    align-items: stretch;
+  }
+
   /* Test Results Styles */
   .mcp-test-results {
     padding: 12px;
