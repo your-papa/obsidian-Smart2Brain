@@ -161,6 +161,16 @@ let lassoMode = $state(false);
 let selectedPaths: string[] = $state([]);
 let immersePaths: Set<string> | null = $state(null);
 let isImmersed: boolean = $derived(immersePaths !== null);
+/**
+ * What the user immersed *into*, when that was topics rather than a raw lasso.
+ *
+ * Snapshotted at immerse time because the thing it names stops existing the
+ * moment we immerse: the subset gets re-segmented into its own topics under its
+ * own cluster ids, so `focusedClusters` (cleared anyway by the reset) could not
+ * be resolved back to these names afterwards. Null means the selection wasn't a
+ * topic selection, and the bar falls back to counting notes.
+ */
+let immerseTopicLabels: string[] | null = $state(null);
 let focusedClusters: Set<number> = $state(new Set());
 
 // Whether a chat view is currently *visible* to the user. Graph selection is
@@ -1329,9 +1339,37 @@ function handleClearSelection() {
 	handleSelectionChange([]);
 }
 
+/**
+ * Name the topics the current selection consists of, or null if it isn't one.
+ *
+ * "Is one" is deliberately strict — the focused topics' members must be exactly
+ * the selected paths. Clicking a topic label selects its notes, but the user can
+ * then add or remove notes by hand, and a selection that merely *overlaps* a
+ * topic isn't that topic.
+ */
+function resolveImmerseTopicLabels(): string[] | null {
+	if (focusedClusters.size === 0) return null;
+	const topicPaths = new Set(canvasComponent?.getNodePathsForClusters(focusedClusters) ?? []);
+	const selected = new Set(selectedPaths);
+	if (topicPaths.size !== selected.size || ![...topicPaths].every((path) => selected.has(path))) return null;
+	// Same naming ladder (and same fallbacks) the canvas uses for a topic node,
+	// so the bar calls a topic exactly what its pill did — including the
+	// `UNSORTED_CLUSTER` sentinel, which is negative and so indexes no segment.
+	return [...focusedClusters].map((cluster) =>
+		cluster === UNSORTED_CLUSTER
+			? "Unsorted"
+			: (effectiveClusterLabels[cluster] ?? segments[cluster]?.label ?? `Topic ${cluster}`),
+	);
+}
+
 async function handleImmerse() {
 	if (selectedPaths.length === 0) return;
 	immersePaths = new Set(selectedPaths);
+	// Read the topic names *before* the reset below clears `focusedClusters`.
+	// Only a pure topic selection earns a name: if the user lassoed extra notes
+	// on top of a focused topic, the paths no longer match the topic's members
+	// and calling the immersion by that topic's name would misdescribe it.
+	immerseTopicLabels = resolveImmerseTopicLabels();
 	// Immersing rebuilds the graph to contain ONLY these notes, so "selected"
 	// stops meaning anything — every remaining node is in the set. Clearing just
 	// `selectedPaths` + the canvas (as this did) left the focused clusters/segments
@@ -1343,6 +1381,7 @@ async function handleImmerse() {
 
 async function handleExitImmerse() {
 	immersePaths = null;
+	immerseTopicLabels = null;
 	// Leaving immerse restores the full graph; any selection made inside the
 	// immersed subset refers to a different node set, so drop it too.
 	handleClearSelection();
@@ -2252,6 +2291,18 @@ function handleHoverPreview(event: MouseEvent, path: string, targetEl: HTMLEleme
     {#if selectedPaths.length > 0}
       <strong>{selectedPaths.length}</strong>
       {selectedPaths.length === 1 ? "note" : "notes"} selected{isImmersed ? " · immersed" : ""}
+    {:else if immerseTopicLabels}
+      <!-- Immersed into topics: name them. The count is what the graph already
+           shows, whereas the name is the one thing that isn't on screen once
+           the topic's own pill is gone.
+
+           Phrased as a sentence rather than the "· immersed" suffix the other
+           two branches use: that mid-dot joins two independent facts (what is
+           selected, what mode you are in), which is right when the left side is
+           a count. A topic name isn't independent of the mode — it's the thing
+           immersed into — so it reads as the object of the verb instead. -->
+      Immersed into
+      <strong title={immerseTopicLabels.join(", ")}>{immerseTopicLabels.join(", ")}</strong>
     {:else}
       <strong>{graphData.nodes.length}</strong>
       {graphData.nodes.length === 1 ? "note" : "notes"} · immersed
@@ -2509,10 +2560,25 @@ function handleHoverPreview(event: MouseEvent, path: string, targetEl: HTMLEleme
     font-size: var(--font-ui-small);
     font-weight: var(--font-medium);
     color: var(--text-muted);
+    /* Counts are a couple of characters; topic names are free text and can be
+       long enough to stretch the bar across the canvas.
+
+       The cap lives on the whole sentence rather than on the <strong>: an
+       inline-block with `overflow: hidden` takes its BOTTOM MARGIN EDGE as its
+       baseline, not its text baseline, so capping the <strong> that way dropped
+       the name ~2.5px below the muted words beside it (measured) — and
+       `vertical-align: baseline` cannot correct it, because that displaced edge
+       *is* the baseline. Truncating at this level keeps <strong> plain inline
+       text, so it stays flush, and the ellipsis still lands. */
+    display: block;
+    max-width: 30ch;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
-  /* The number is the thing being acted on, so it carries the emphasis while the
-     surrounding words stay muted. */
+  /* The number (or topic name) is the thing being acted on, so it carries the
+     emphasis while the surrounding words stay muted. */
   .selection-count :global(strong) {
     color: var(--text-normal);
     font-weight: var(--font-semibold);
