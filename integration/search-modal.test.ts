@@ -330,7 +330,7 @@ describe("search modal", () => {
 		expect(state.total).toBeGreaterThan(initialLeafCount);
 	}, 30_000);
 
-	it("should keep selections across queries when pressing Shift+Enter", async () => {
+	it("should clear selections when the query changes", async () => {
 		setActiveSearchQuery("Rocket Science");
 
 		await waitForCondition(
@@ -341,9 +341,10 @@ describe("search modal", () => {
 
 		dispatchActiveSearchKey({ key: "Enter", code: "Enter", shiftKey: true });
 
+		// Selected rows are the only selection indicator — there is no summary chip.
 		await waitForCondition(
-			() => domText(activeSearchSelector(".s2b-search-selection-summary")).includes("Selected:"),
-			"selection summary to show first selection",
+			() => domCount(activeSearchSelector(".s2b-search-result-item-selected")) > 0,
+			"row to render as selected",
 			{ timeoutMs: 10_000, intervalMs: 250 },
 		);
 
@@ -351,24 +352,19 @@ describe("search modal", () => {
 
 		await waitForCondition(
 			() => domText(activeSearchSelector(".s2b-search-result-name")).includes("Tag Fixture"),
-			"tag fixture to appear for second selection",
+			"tag fixture to appear after the query change",
 			{ timeoutMs: 20_000 },
 		);
 
-		dispatchActiveSearchKey({ key: "Enter", code: "Enter", shiftKey: true });
-
+		// A selection held across a query change would be invisible state: the rows
+		// carrying it are no longer on screen.
 		await waitForCondition(
-			() => domText(activeSearchSelector(".s2b-search-selection-summary")).includes("2 selected"),
-			"selection summary to preserve selection across queries",
+			() => domCount(activeSearchSelector(".s2b-search-result-item-selected")) === 0,
+			"selection to be cleared by the query change",
 			{ timeoutMs: 10_000, intervalMs: 250 },
 		);
 
-		expect(domText(activeSearchSelector(".s2b-search-selection-summary"))).toContain("2 selected");
-		expect(
-			obsidianEval(
-				`Array.from(document.querySelectorAll(${JSON.stringify(activeSearchSelector(".s2b-search-result-item-selected"))})).length`,
-			).replace(/^=>\s*/u, ""),
-		).not.toBe("0");
+		expect(domCount(activeSearchSelector(".s2b-search-result-item-selected"))).toBe(0);
 	}, 30_000);
 
 	it.skip("should create a new note from the query when pressing Mod+Shift+Enter", async () => {

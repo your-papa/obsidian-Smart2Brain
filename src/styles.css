@@ -78,20 +78,14 @@
 	max-height: 400px;
 }
 
-.s2b-search-selection-summary {
-	margin: 6px 8px 0;
-	padding: 6px 10px;
-	border: 1px solid color-mix(in srgb, var(--interactive-accent) 24%, var(--background-modifier-border));
-	border-radius: 999px;
-	background: color-mix(in srgb, var(--interactive-accent) 10%, transparent);
-	color: var(--text-accent);
-	font-size: var(--font-ui-smaller);
-	cursor: pointer;
-	white-space: nowrap;
-	overflow: hidden;
-	text-overflow: ellipsis;
-}
+/* Obsidian positions the prompt modal itself (`position: absolute` plus a `top`
+   offset that pins it near the top of the window). Do NOT give
+   `.s2b-search-modal` `position: relative` — that re-resolves the offset against
+   the flex-centred `.modal-container` and drops the whole modal into the middle
+   of the screen. */
 
+/* Selected rows are the sole selection indicator: the selection is cleared when
+   the query changes, so everything selected is always on screen. */
 .s2b-search-modal .suggestion-item.s2b-search-result-item-selected {
 	background: color-mix(in srgb, var(--interactive-accent) 8%, var(--background-secondary));
 	box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--interactive-accent) 25%, transparent);

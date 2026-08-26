@@ -178,7 +178,8 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 	private activeFilters: { type: "path" | "tag"; value: string }[] = [];
 	private inlineChipsEl: HTMLElement | null = null;
 	private inlineInputContentEl: HTMLElement | null = null;
-	private selectionSummaryEl: HTMLElement | null = null;
+	/** Query text the current selection was made under; null when nothing is selected. */
+	private selectionQuery: string | null = null;
 	/** Mobile-only tap bar: exposes semantic-toggle + ask-agent, which are
 	   otherwise bound only to Tab / Alt+Enter (unreachable without a keyboard). */
 	private pendingPostOpenFrameId: number | null = null;
@@ -508,19 +509,6 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		return `Create \"${preview}\"`;
 	}
 
-	private getSelectionSummaryText(): string {
-		const selectedResults = this.getSelectedResults();
-		const visibleNames = selectedResults.slice(0, 3).map((result) => result.name);
-		const remainingCount = selectedResults.length - visibleNames.length;
-
-		const namesLabel = visibleNames.join(", ");
-		const moreLabel = remainingCount > 0 ? ` +${remainingCount} more` : "";
-
-		return selectedResults.length === 1
-			? `Selected: ${namesLabel}. Click to clear.`
-			: `${selectedResults.length} selected: ${namesLabel}${moreLabel}. Click to clear.`;
-	}
-
 	private updateInstructions(): void {
 		const pluginData = getData();
 		if (!pluginData.searchShowKeyboardHints) {
@@ -634,7 +622,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		}
 
 		this.setFocusedIndex(toIndex);
-		this.updateSelectionSummary();
+		this.selectionQuery = this.currentQuery;
 		this.updateInstructions();
 		this.syncRenderedSelectionState();
 		return true;
@@ -704,7 +692,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 			this.selectedResultsByPath.set(result.path, result);
 		}
 
-		this.updateSelectionSummary();
+		this.selectionQuery = this.currentQuery;
 		this.updateInstructions();
 		this.syncRenderedSelectionState();
 	}
@@ -715,7 +703,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		}
 
 		this.selectedResultsByPath.clear();
-		this.updateSelectionSummary();
+		this.selectionQuery = null;
 		this.updateInstructions();
 		this.syncRenderedSelectionState();
 	}
@@ -759,39 +747,6 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 			getData().recordRecentlyOpenedNote(result.path);
 			this.app.workspace.openLinkText(result.path, "", destination === "tab" || index > 0 ? "tab" : false);
 		}
-	}
-
-	private createSelectionSummary(): void {
-		const inputContainer = this.modalEl.querySelector<HTMLElement>(".prompt-input-container");
-		const containerParent = inputContainer?.parentElement;
-		if (!inputContainer || !containerParent || this.selectionSummaryEl) {
-			return;
-		}
-
-		this.selectionSummaryEl = document.createElement("div");
-		this.selectionSummaryEl.className = "s2b-search-selection-summary";
-		this.selectionSummaryEl.hidden = true;
-		containerParent.insertBefore(this.selectionSummaryEl, inputContainer.nextSibling);
-		this.selectionSummaryEl.addEventListener("click", () => {
-			this.clearSelection();
-			this.getInputEl()?.focus();
-		});
-	}
-
-	private updateSelectionSummary(): void {
-		if (!this.selectionSummaryEl) {
-			return;
-		}
-
-		const count = this.selectedResultsByPath.size;
-		if (count === 0) {
-			this.selectionSummaryEl.hidden = true;
-			this.selectionSummaryEl.textContent = "";
-			return;
-		}
-
-		this.selectionSummaryEl.hidden = false;
-		this.selectionSummaryEl.textContent = this.getSelectionSummaryText();
 	}
 
 	private openSearchResult(result: SearchResult, destination: false | "tab"): void {
@@ -1041,6 +996,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 	onOpen(): void {
 		this.isClosed = false;
 		this.selectedResultsByPath.clear();
+		this.selectionQuery = null;
 		this.currentQuery = "";
 		this.lastRequestedSearchKey = "";
 		this.activeFilters = [];
@@ -1060,6 +1016,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 	onClose(): void {
 		this.isClosed = true;
 		this.selectedResultsByPath.clear();
+		this.selectionQuery = null;
 		this.noteIconCache.clear();
 		this.tagIconCache.clear();
 		this.resolvedIconColorCache.clear();
@@ -1067,8 +1024,6 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		this.tagIconElementCache.clear();
 		this.tagPillElementCache.clear();
 		this.badgeIconElementCache.clear();
-		this.selectionSummaryEl?.remove();
-		this.selectionSummaryEl = null;
 		this.stopGlowAnimation();
 		this.inlineChipsEl?.remove();
 		this.inlineChipsEl = null;
@@ -1111,8 +1066,6 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 
 			this.buildAutocompleteCaches();
 			this.setupInlineChips();
-			this.createSelectionSummary();
-			this.updateSelectionSummary();
 			if (this.activeFilters.length > 0) {
 				this.renderInlineChips();
 			}
@@ -1919,6 +1872,20 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 				this.searchTimeout = null;
 			}
 			return autocompleteSuggestions;
+		}
+
+		// A selection only makes sense against the result set it was made in: the
+		// rows are the sole indicator, so selections held over from an earlier query
+		// would be invisible state the user cannot review. Drop them once the typed
+		// query moves on.
+		//
+		// Keyed on the query TEXT, not on `buildSearchKey` — that folds in the active
+		// filters and algorithm, and adding a `#tag` / `/folder` chip (or toggling
+		// semantic) must not wipe a selection. Hand-picking notes out of a tag
+		// listing is exactly the workflow multi-select is kept for. Placed after the
+		// autocomplete return above so mid-token typing (`#ma…`) doesn't clear either.
+		if (this.selectionQuery !== null && query !== this.selectionQuery) {
+			this.clearSelection();
 		}
 
 		if (!query.trim()) {
