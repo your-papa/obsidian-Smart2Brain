@@ -1,4 +1,4 @@
-import type { Modal } from "obsidian";
+import { type Modal, Platform } from "obsidian";
 
 interface ModalLayoutOptions {
 	width?: string;
@@ -13,12 +13,20 @@ interface ModalLayoutOptions {
 export function applyModalLayout(modal: Modal, options: ModalLayoutOptions): () => void {
 	const { width, maxWidth, height, maxHeight, contentPadding, contentOverflow, contentFill = true } = options;
 
-	const modalStyleMap = new Map<string, string | undefined>([
-		["width", width],
-		["max-width", maxWidth],
-		["height", height],
-		["max-height", maxHeight],
-	]);
+	// Phones get Obsidian's native full-screen modal sheet; forcing a desktop-ish
+	// width/height (e.g. `min(720px, 94vw)` × `90vh`) turns it into a floating box
+	// that neither fills the screen nor respects the keyboard inset. Only the
+	// content-level tweaks (fill/overflow/padding) apply there.
+	const sizeOverrides = Platform.isPhone
+		? []
+		: ([
+				["width", width],
+				["max-width", maxWidth],
+				["height", height],
+				["max-height", maxHeight],
+			] as const);
+
+	const modalStyleMap = new Map<string, string | undefined>(sizeOverrides);
 
 	for (const [property, value] of modalStyleMap) {
 		if (value === undefined) {
