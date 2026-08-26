@@ -8,6 +8,7 @@ import {
 	compilePrivacyMembershipDraft,
 	createEmptyPrivacyFilter,
 	extractPrivacyMembershipRulesFilter,
+	matchesPrivacyMembershipDraftPath,
 	parsePrivacyMembershipFilter,
 	resolveViewFilter,
 	resolvePrivacyMembershipDraft,
@@ -81,9 +82,15 @@ function ensureGroup(filter: ViewFilter): ViewFilter {
 	return { type: "all", conditions: [filter] };
 }
 
-const initialParsed = parsePrivacyMembershipFilter(data.privacyFilter);
 let privacyFilter = $state<ViewFilter>(ensureGroup(data.privacyFilter ?? createEmptyPrivacyFilter()));
-let showFilters = $state(initialParsed.draft.autoIncludeRules.length > 0);
+/**
+ * The rules builder starts collapsed, even when rules are already configured.
+ * The file list is what the modal is for; an expanded builder pushed it down the
+ * panel on exactly the vaults that have the most files to scan. Configured rules
+ * stay discoverable through the Filters toggle, which carries both an active
+ * state and a count.
+ */
+let showFilters = $state(false);
 /** Whether the mode explanation + path-visibility caveat are expanded. */
 let showModeDetails = $state(false);
 
@@ -143,11 +150,6 @@ const excludedFiles = $derived.by(() =>
 		? []
 		: [...parsedMembership.draft.excludedPaths].sort((left, right) => left.localeCompare(right)),
 );
-const totalVaultFiles = $derived.by(() => app.vault.getFiles().filter((file) => !isAgentFilePath(file.path)).length);
-const accessibleFileCount = $derived.by(() =>
-	privacyMode === "private-by-default" ? includedFiles.length : totalVaultFiles - includedFiles.length,
-);
-const privateFileCount = $derived.by(() => totalVaultFiles - accessibleFileCount);
 const hasFilters = $derived.by(() => parsedMembership.isAdvanced || parsedMembership.draft.autoIncludeRules.length > 0);
 const includedEntries = $derived.by(() =>
 	includedFiles.map((path) => ({
@@ -171,11 +173,15 @@ const excludedEntries = $derived.by(() =>
 /**
  * Everything the rules do NOT select: the vault minus the managed set. Derived
  * rather than stored, so it always agrees with the rules as they are edited.
- * These rows are read-only — a file leaves this side by being added to the
- * managed set, which is what the other tab is for.
+ * Rows here are editable too: a file moves to the managed side either by having
+ * its explicit exclusion lifted (`isExcluded` — a rule or manual entry already
+ * covers it) or, failing that, by being added as a manual path. Both directions
+ * are reachable from whichever tab the user happens to be looking at, so
+ * flipping one file never means switching tabs to find it again.
  */
 const complementEntries = $derived.by(() => {
 	const managed = resolvedPrivacy.paths;
+	const excluded = new Set(parsedMembership.isAdvanced ? [] : parsedMembership.draft.excludedPaths);
 	return [...privacyUniverse]
 		.filter((path) => !managed.has(path))
 		.sort((left, right) => left.localeCompare(right))
@@ -184,6 +190,7 @@ const complementEntries = $derived.by(() => {
 			displayName: path.split("/").pop() ?? path,
 			contextLabel: getParentPath(path) || null,
 			searchable: path.toLowerCase(),
+			isExcluded: excluded.has(path),
 		}));
 });
 
@@ -217,7 +224,9 @@ function updateDraft(mutator: (draft: ReturnType<typeof clonePrivacyMembershipDr
 	const currentParsedMembership = parsePrivacyMembershipFilter(privacyFilter);
 	const draft = clonePrivacyMembershipDraft(currentParsedMembership.draft);
 	mutator(draft);
-	showFilters = showFilters || draft.autoIncludeRules.length > 0;
+	// Deliberately does not open the rules panel. Every row action routes through
+	// here, so keying the panel off "rules exist" made a per-file click expand the
+	// builder underneath the list the user was working in.
 	updatePrivacyFilter(compilePrivacyMembershipDraft(draft));
 }
 
@@ -244,6 +253,21 @@ function excludePath(path: string) {
 function restoreExcludedPath(path: string) {
 	updateDraft((draft) => {
 		draft.excludedPaths = draft.excludedPaths.filter((entry) => entry !== path);
+	});
+}
+
+/**
+ * Move a complement-side file into the managed set. Lifting the exclusion is
+ * enough when a rule or manual entry already selects the path; otherwise nothing
+ * covers it and it has to be added manually. Doing both unconditionally is safe
+ * and keeps this a single action for the user either way.
+ */
+function addPathToManaged(path: string) {
+	updateDraft((draft) => {
+		draft.excludedPaths = draft.excludedPaths.filter((entry) => entry !== path);
+		if (!draft.manualPaths.includes(path) && !matchesPrivacyMembershipDraftPath(app, draft, path)) {
+			draft.manualPaths = [...draft.manualPaths, path];
+		}
 	});
 }
 
@@ -288,6 +312,38 @@ function getIncludedFileActions(entry: { isManual?: boolean }): Array<{
 			];
 }
 
+/**
+ * Complement-side rows. The managed tab's actions push a file *out* of the
+ * managed set; these pull one *in*, so the labels are that tab's mirror image:
+ * in private-by-default the complement is the private half ("Make accessible"),
+ * in public-by-default it is the exposed half ("Make private"). A file that is
+ * here only because it was explicitly kept out gets the matching "Restore …"
+ * label, so the button reads as undoing the earlier choice rather than as a new
+ * unrelated one.
+ */
+function getComplementFileActions(entry: { isExcluded?: boolean }): Array<{
+	label: string;
+	onClick: (path: string) => void;
+}> {
+	if (parsedMembership.isAdvanced) return [];
+
+	if (entry.isExcluded) {
+		return [
+			{
+				label: privacyMode === "private-by-default" ? "Restore access" : "Restore private",
+				onClick: restoreExcludedPath,
+			},
+		];
+	}
+
+	return [
+		{
+			label: privacyMode === "private-by-default" ? "Make accessible" : "Make private",
+			onClick: addPathToManaged,
+		},
+	];
+}
+
 function getExcludedFileActions(): Array<{ label: string; onClick: (path: string) => void }> {
 	if (parsedMembership.isAdvanced) return [];
 
@@ -299,9 +355,6 @@ function getExcludedFileActions(): Array<{ label: string; onClick: (path: string
 	];
 }
 
-const introTitle = $derived.by(() =>
-	privacyMode === "private-by-default" ? "Private by default" : "Public by default",
-);
 const introBody = $derived.by(() =>
 	privacyMode === "private-by-default"
 		? "Untrusted providers can only access the files listed below. Everything else stays private unless the provider is marked as trusted."
@@ -342,7 +395,6 @@ const managedTitle = $derived.by(() =>
 const complementTitle = $derived.by(() =>
 	privacyMode === "private-by-default" ? "Private files" : "Files exposed to untrusted providers",
 );
-const sectionTitle = $derived(showingManaged ? managedTitle : complementTitle);
 const managedEmptyText = $derived.by(() =>
 	privacyMode === "private-by-default"
 		? "No files are exposed to untrusted providers yet."
@@ -384,14 +436,15 @@ const excludedTitle = $derived.by(() => (privacyMode === "private-by-default" ? 
 
 <div class="privacy-modal-shell">
   <div class="privacy-modal-content">
-    <!-- The mode switch and a one-line count are what this panel is for; the
-         explanations sit behind the info disclosure. Four stacked paragraphs of
-         always-on prose pushed the file list — the thing being edited — most of
-         the way off the modal. -->
+    <!-- One row: neutral heading + info disclosure on the left, the mode toggle
+         on the right. The toggle's active segment already states the mode, and
+         the tabs below already carry both counts, so this panel repeats
+         neither — an earlier revision titled itself with the selected mode and
+         summarised the counts, saying everything twice within one screenful. -->
     <div class="privacy-mode-panel">
       <div class="privacy-mode-copy">
         <div class="privacy-mode-headline">
-          <div class="privacy-mode-title">{introTitle}</div>
+          <div class="privacy-mode-title">Default access for untrusted providers</div>
           <button
             type="button"
             class="clickable-icon privacy-mode-info-toggle"
@@ -402,10 +455,6 @@ const excludedTitle = $derived.by(() => (privacyMode === "private-by-default" ? 
             <span use:iconDirective={"info"}></span>
           </button>
         </div>
-        <p class="privacy-mode-summary">
-          {accessibleFileCount} of {totalVaultFiles} file{totalVaultFiles === 1 ? "" : "s"} readable
-          by untrusted providers · {privateFileCount} private
-        </p>
         {#if showModeDetails}
           <p>{introBody}</p>
           <p class="privacy-mode-note">{pathVisibilityNote}</p>
@@ -435,65 +484,87 @@ const excludedTitle = $derived.by(() => (privacyMode === "private-by-default" ? 
     </div>
 
     <!-- Which half of the vault the list below shows. Editing always applies to
-         the managed side, so the add/filter controls only appear there. -->
-    <div class="privacy-list-switch" role="tablist" aria-label="File list">
-      <button
-        type="button"
-        class="privacy-list-switch-button"
-        class:privacy-list-switch-button--active={showingManaged}
-        aria-pressed={showingManaged}
-        onclick={() => (listSide = "managed")}
-      >
-        {managedTitle}
-        <span class="privacy-list-switch-count">{includedEntries.length}</span>
-      </button>
-      <button
-        type="button"
-        class="privacy-list-switch-button"
-        class:privacy-list-switch-button--active={!showingManaged}
-        aria-pressed={!showingManaged}
-        onclick={() => (listSide = "complement")}
-      >
-        {complementTitle}
-        <span class="privacy-list-switch-count">{complementEntries.length}</span>
-      </button>
-    </div>
+         the managed side, so the add/filter controls only appear there. These
+         tabs are the list's heading: the panel below deliberately renders no
+         title of its own, since it would just repeat the selected tab verbatim.
 
-    <FileSetEditor
-      {app}
-      {sourcePath}
-      hoverSource="smart-second-brain-privacy-editor"
-      {sectionTitle}
-      includedEntries={activeEntries}
-      {includedEmptyText}
-      searchPlaceholder="Filter files"
-      maxVisibleEntries={showingManaged ? undefined : COMPLEMENT_ROW_LIMIT}
-      addButtonText="Add files"
-      {pickerModalTitle}
-      {pickerText}
-      pickerExistingPaths={!parsedMembership.isAdvanced ? parsedMembership.draft.manualPaths : []}
-      pickerIncludedPaths={includedFiles}
-      onAddPaths={showingManaged && !parsedMembership.isAdvanced ? handleAddPaths : undefined}
-      showFilterToggle={showingManaged}
-      filtersButtonText="Filters"
-      filterToggleAriaLabel="Toggle privacy filters"
-      isFilterActive={hasFilters}
-      filterCount={parsedMembership.isAdvanced ? 1 : parsedMembership.draft.autoIncludeRules.length}
-      onToggleFilters={() => (showFilters = !showFilters)}
-      showFilterPanel={showingManaged && showFilters}
-      filterPanelLabel="Filters"
-      filterBuilderFilter={parsedMembership.isAdvanced
-  		? ensureGroup(cloneViewFilter(privacyFilter))
-  		: buildPrivacyMembershipRulesEditorFilter(parsedMembership.draft.autoIncludeRules)}
-      {availableFolders}
-      {availableTags}
-      {availableProperties}
-      onFilterChange={handleRulesFilterChange}
-      excludedEntries={showingManaged ? excludedEntries : []}
-      {excludedTitle}
-      resolveIncludedActions={showingManaged ? getIncludedFileActions : undefined}
-      resolveExcludedActions={getExcludedFileActions}
-    />
+         Tabs and panel are wrapped together so the content column's `gap` falls
+         around the pair rather than between them — they have to touch for the
+         active tab to merge into the panel. -->
+    <div class="privacy-list-section">
+      <div class="privacy-list-switch" role="tablist" aria-label="File list">
+        <button
+          type="button"
+          role="tab"
+          id="privacy-list-tab-managed"
+          aria-controls="privacy-list-panel"
+          class="privacy-list-switch-button"
+          class:privacy-list-switch-button--active={showingManaged}
+          aria-selected={showingManaged}
+          onclick={() => (listSide = "managed")}
+        >
+          {managedTitle}
+          <span class="privacy-list-switch-count">{includedEntries.length}</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          id="privacy-list-tab-complement"
+          aria-controls="privacy-list-panel"
+          class="privacy-list-switch-button"
+          class:privacy-list-switch-button--active={!showingManaged}
+          aria-selected={!showingManaged}
+          onclick={() => (listSide = "complement")}
+        >
+          {complementTitle}
+          <span class="privacy-list-switch-count">{complementEntries.length}</span>
+        </button>
+      </div>
+
+      <div
+        class="privacy-list-panel"
+        role="tabpanel"
+        id="privacy-list-panel"
+        aria-labelledby={showingManaged ? "privacy-list-tab-managed" : "privacy-list-tab-complement"}
+      >
+        <FileSetEditor
+          {app}
+          {sourcePath}
+          hoverSource="smart-second-brain-privacy-editor"
+          sectionTitle={null}
+          includedEntries={activeEntries}
+          {includedEmptyText}
+          searchPlaceholder="Filter files"
+          maxVisibleEntries={showingManaged ? undefined : COMPLEMENT_ROW_LIMIT}
+          addButtonText="Add files"
+          {pickerModalTitle}
+          {pickerText}
+          pickerExistingPaths={!parsedMembership.isAdvanced ? parsedMembership.draft.manualPaths : []}
+          pickerIncludedPaths={includedFiles}
+          onAddPaths={showingManaged && !parsedMembership.isAdvanced ? handleAddPaths : undefined}
+          showFilterToggle={showingManaged}
+          filtersButtonText="Filters"
+          filterToggleAriaLabel="Toggle privacy filters"
+          isFilterActive={hasFilters}
+          filterCount={parsedMembership.isAdvanced ? 1 : parsedMembership.draft.autoIncludeRules.length}
+          onToggleFilters={() => (showFilters = !showFilters)}
+          showFilterPanel={showingManaged && showFilters}
+          filterPanelLabel="Filters"
+          filterBuilderFilter={parsedMembership.isAdvanced
+      		? ensureGroup(cloneViewFilter(privacyFilter))
+      		: buildPrivacyMembershipRulesEditorFilter(parsedMembership.draft.autoIncludeRules)}
+          {availableFolders}
+          {availableTags}
+          {availableProperties}
+          onFilterChange={handleRulesFilterChange}
+          revealActionsOnHover
+          excludedEntries={showingManaged ? excludedEntries : []}
+          {excludedTitle}
+          resolveIncludedActions={showingManaged ? getIncludedFileActions : getComplementFileActions}
+          resolveExcludedActions={getExcludedFileActions}
+        />
+      </div>
+    </div>
   </div>
 
   <div class="modal-button-container">
@@ -519,8 +590,18 @@ const excludedTitle = $derived.by(() => (privacyMode === "private-by-default" ? 
   }
 
   .privacy-mode-panel {
+    /* Single source of truth for the toggle pill's height, so the heading's
+       line box can match it without the two drifting apart when either is
+       restyled. Derived from the pill's own box: button line box (0.85rem text
+       at ~1.2 + 8px padding top and bottom) + 4px pill padding + 1px border,
+       doubled for both edges. */
+    --s2b-privacy-toggle-height: calc(0.85rem * 1.2 + 16px + 8px + 2px);
     display: flex;
     flex-wrap: wrap;
+    /* Top-aligned: the copy column grows tall when the info details expand, and
+       centring floated the toggle into the middle of that block. The single-line
+       case is handled instead by matching the heading's line box to the toggle's
+       height below, so the two still align when collapsed. */
     align-items: flex-start;
     justify-content: space-between;
     gap: 12px;
@@ -541,10 +622,15 @@ const excludedTitle = $derived.by(() => (privacyMode === "private-by-default" ? 
     margin: 0;
   }
 
+  /* Matches the toggle pill's height (its buttons' line box + 4px padding and
+     1px border, top and bottom) so the heading sits on the toggle's centreline
+     while both stay top-anchored — the alignment survives the details expanding
+     underneath, which centring the whole panel row did not. */
   .privacy-mode-headline {
     display: flex;
     align-items: center;
     gap: 6px;
+    min-height: var(--s2b-privacy-toggle-height);
   }
 
   /* `.clickable-icon` already supplies the transparent-at-rest → hover-highlight
@@ -554,15 +640,43 @@ const excludedTitle = $derived.by(() => (privacyMode === "private-by-default" ? 
     height: 14px;
   }
 
-  .privacy-mode-summary {
-    color: var(--text-muted);
-    font-size: var(--font-smaller);
+  /*
+   * The tabs are the list's heading, so they sit flush on top of the panel and
+   * the active one merges into it — the shared surface is what tells you which
+   * set is shown, replacing the duplicate title that used to sit inside the
+   * panel restating the selected tab.
+   */
+  /*
+   * Owns the flex sizing the panel used to take directly from the content
+   * column, and imposes no gap of its own, so the strip and the panel touch.
+   */
+  .privacy-list-section {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
   }
 
   .privacy-list-switch {
     display: flex;
     gap: 6px;
     flex-wrap: wrap;
+    /* Overlaps the panel's top border so the active tab shares that single
+       1px line instead of stacking a second one against it. */
+    margin-bottom: -1px;
+  }
+
+  .privacy-list-panel {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+  }
+
+  /* Square the corner the tab strip lands on; the rest keeps its rounding. */
+  .privacy-list-panel :global(.file-set-editor-panel) {
+    border-top-left-radius: 0;
+    background: var(--background-primary);
   }
 
   .privacy-list-switch-button {
@@ -571,11 +685,13 @@ const excludedTitle = $derived.by(() => (privacyMode === "private-by-default" ? 
     gap: 6px;
     padding: 6px 10px;
     border: 1px solid var(--background-modifier-border);
-    border-radius: var(--radius-s);
+    /* Bottom corners stay square so the active tab can sit flush on the panel. */
+    border-radius: var(--radius-s) var(--radius-s) 0 0;
     background: var(--background-secondary);
     color: var(--text-muted);
     font-size: var(--font-ui-small);
     cursor: pointer;
+    position: relative;
   }
 
   .privacy-list-switch-button:hover {
@@ -583,9 +699,25 @@ const excludedTitle = $derived.by(() => (privacyMode === "private-by-default" ? 
     color: var(--text-normal);
   }
 
+  /*
+   * The active tab shares the panel's background and drops the border between
+   * them, so the two read as one surface. It keeps a bottom border matching that
+   * fill (rather than `border-bottom: 0`) so its height stays identical to the
+   * inactive tab and the strip does not jog when the selection changes.
+   */
   .privacy-list-switch-button--active {
-    border-color: var(--interactive-accent);
-    background: color-mix(in srgb, var(--interactive-accent) 15%, var(--background-secondary));
+    border-color: var(--background-modifier-border);
+    border-bottom-color: var(--background-primary);
+    background: var(--background-primary);
+    color: var(--text-normal);
+    font-weight: 500;
+    /* Paints over the panel's top border, which the -1px overlap otherwise
+       draws straight through the tab's open bottom edge. */
+    z-index: 1;
+  }
+
+  .privacy-list-switch-button--active:hover {
+    background: var(--background-primary);
     color: var(--text-normal);
   }
 

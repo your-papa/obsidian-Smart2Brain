@@ -13,6 +13,9 @@ interface FileSetListEntry {
 	contextLabel?: string | null;
 	isManual?: boolean;
 	hasAuto?: boolean;
+	/** Set only on complement-side rows: the file is out of the managed set
+	 *  because of an explicit exclusion, not merely because no rule selects it. */
+	isExcluded?: boolean;
 	searchable?: string;
 }
 
@@ -27,7 +30,12 @@ interface Props {
 	app: App;
 	sourcePath?: string;
 	hoverSource?: string;
-	sectionTitle?: string;
+	/**
+	 * Heading above the list. Pass `null` when the surrounding UI already names
+	 * the set — a tab strip, say — so the panel does not repeat the label
+	 * directly beneath it.
+	 */
+	sectionTitle?: string | null;
 	includedEntries: FileSetListEntry[];
 	includedEmptyText: string;
 	filteredEmptyText?: string;
@@ -61,6 +69,12 @@ interface Props {
 	 * reaches entries beyond it. Undefined means no cap.
 	 */
 	maxVisibleEntries?: number;
+	/**
+	 * Hide row action buttons until the row is hovered/focused. Worth setting on
+	 * long lists where every row has the same action and the buttons would
+	 * otherwise out-shout the filenames.
+	 */
+	revealActionsOnHover?: boolean;
 	excludedEntries?: FileSetListEntry[];
 	excludedTitle?: string;
 	resolveIncludedActions?: ((entry: FileSetListEntry) => FileSetAction[]) | undefined;
@@ -99,6 +113,7 @@ let {
 	availableProperties = [],
 	onFilterChange,
 	maxVisibleEntries,
+	revealActionsOnHover = false,
 	excludedEntries = [],
 	excludedTitle = "Excluded files",
 	resolveIncludedActions,
@@ -137,9 +152,11 @@ function handleAddButtonClick() {
 </script>
 
 <div class="file-set-editor-panel">
-  <div class="file-set-editor-header">
-    <div class="file-set-editor-title">{sectionTitle}</div>
-  </div>
+  {#if sectionTitle}
+    <div class="file-set-editor-header">
+      <div class="file-set-editor-title">{sectionTitle}</div>
+    </div>
+  {/if}
 
   {#if hasAddButton || showFilterToggle}
     <div class="file-set-editor-toolbar">
@@ -206,7 +223,7 @@ function handleAddButtonClick() {
           {#each filteredIncludedEntries as entry (entry.path)}
             {@const actionItems = resolveIncludedActions?.(entry) ?? []}
             {#if actionItems.length > 0}
-              <FileSetEntryRow {app} {entry} {sourcePath} {hoverSource}>
+              <FileSetEntryRow {app} {entry} {sourcePath} {hoverSource} {revealActionsOnHover}>
                 {#snippet actions()}
                   {#each actionItems as action, index (`${entry.path}-${action.label}-${index}`)}
                     <Button
@@ -241,7 +258,7 @@ function handleAddButtonClick() {
         {#each excludedEntries as entry (entry.path)}
           {@const actionItems = resolveExcludedActions?.(entry) ?? []}
           {#if actionItems.length > 0}
-            <FileSetEntryRow {app} {entry} {sourcePath} {hoverSource} compact>
+            <FileSetEntryRow {app} {entry} {sourcePath} {hoverSource} {revealActionsOnHover} compact>
               {#snippet actions()}
                 {#each actionItems as action, index (`${entry.path}-${action.label}-${index}`)}
                   <Button

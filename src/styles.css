@@ -47,6 +47,32 @@
 	}
 }
 
+/* Note access policy modal — the title carries the same shield-check mark, in
+   the same accent colour, as the settings row that opens it. Lives here rather
+   than in the Svelte component because the title element belongs to Obsidian's
+   modal chrome, outside the mounted component's scope. */
+.s2b-privacy-modal-title {
+	display: flex;
+	align-items: center;
+	justify-content: flex-start;
+	gap: 8px;
+	/* Obsidian's .modal-title carries auto side-margins that centre it; zero the
+	   inline ones so the icon+text pair sits at the leading edge. The close
+	   button is absolutely positioned top-right, so leave room for it. */
+	margin-inline: 0;
+	padding-inline-end: 2rem;
+}
+
+.s2b-privacy-modal-title-icon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 16px;
+	height: 16px;
+	color: var(--text-accent);
+	flex-shrink: 0;
+}
+
 /* Search Modal Styles */
 .s2b-search-modal .prompt-results {
 	max-height: 400px;
