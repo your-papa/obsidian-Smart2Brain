@@ -3,6 +3,7 @@ import { mount, unmount } from "svelte";
 import type SecondBrainPlugin from "../../main";
 import type { MCPServerConfig } from "../../types/plugin";
 import MCPServerModalComponent from "./MCPServerModal.svelte";
+import { applyModalLayout } from "./modalLayout";
 
 /**
  * Callback signature for MCPServerModal
@@ -17,6 +18,7 @@ export interface MCPServerAccessors {
 
 export class MCPServerModal extends Modal {
 	private component: ReturnType<typeof MCPServerModalComponent> | null = null;
+	private restoreLayout: (() => void) | null = null;
 	private plugin: SecondBrainPlugin;
 	private serverId: string | null;
 	private existingConfig: MCPServerConfig | null;
@@ -46,20 +48,13 @@ export class MCPServerModal extends Modal {
 	}
 
 	onOpen() {
-		// Set modal dimensions
-		this.modalEl.style.width = "min(550px, 90vw)";
-		this.modalEl.style.maxWidth = "90vw";
-		this.modalEl.style.height = "auto";
-		this.modalEl.style.maxHeight = "85vh";
-		this.modalEl.style.display = "flex";
-		this.modalEl.style.flexDirection = "column";
-
-		// Make contentEl fill available space
-		this.contentEl.style.display = "flex";
-		this.contentEl.style.flexDirection = "column";
-		this.contentEl.style.flex = "1";
-		this.contentEl.style.minHeight = "0";
-		this.contentEl.style.overflow = "auto";
+		this.restoreLayout = applyModalLayout(this, {
+			width: "min(550px, 90vw)",
+			maxWidth: "90vw",
+			height: "auto",
+			maxHeight: "85vh",
+			contentOverflow: "auto",
+		});
 
 		this.component = mount(MCPServerModalComponent, {
 			target: this.contentEl,
@@ -75,18 +70,8 @@ export class MCPServerModal extends Modal {
 	}
 
 	onClose() {
-		this.modalEl.style.removeProperty("width");
-		this.modalEl.style.removeProperty("max-width");
-		this.modalEl.style.removeProperty("height");
-		this.modalEl.style.removeProperty("max-height");
-		this.modalEl.style.removeProperty("display");
-		this.modalEl.style.removeProperty("flex-direction");
-
-		this.contentEl.style.removeProperty("display");
-		this.contentEl.style.removeProperty("flex-direction");
-		this.contentEl.style.removeProperty("flex");
-		this.contentEl.style.removeProperty("min-height");
-		this.contentEl.style.removeProperty("overflow");
+		this.restoreLayout?.();
+		this.restoreLayout = null;
 
 		if (this.component) {
 			unmount(this.component);
