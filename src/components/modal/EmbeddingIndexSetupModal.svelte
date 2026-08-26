@@ -21,11 +21,15 @@ interface Props {
 	plugin: SecondBrainPlugin;
 	currentSelection: SelectedModel | null;
 	onSave: (selectedModel: SelectedModel, batchSize: number) => void;
+	/** Resolves true when an index was imported, false when cancelled or rejected.
+	 * Omitted when importing isn't available (desktop-only), which hides the row. */
+	onImport?: () => Promise<boolean>;
 }
 
-const { modal, plugin, currentSelection, onSave }: Props = $props();
+const { modal, plugin, currentSelection, onSave, onImport }: Props = $props();
 const availableModels = useAvailableModels();
 let selectedModel = $state<SelectedModel | null>(null);
+let isImporting = $state(false);
 
 $effect(() => {
 	if (!selectedModel && currentSelection) {
@@ -109,6 +113,27 @@ function handleSave() {
 	onSave(selectedModel, normalizeEmbeddingBatchSize(batchSize, selectedModel.provider));
 	modal.close();
 }
+
+// A successful import selects the imported index outright, so there is nothing
+// left to configure here and the modal closes. Cancelling the file dialog (or
+// picking a file that gets rejected — that reports itself through a notice) must
+// leave the modal open, so the user can still build an index instead.
+async function handleImport() {
+	if (!onImport || isImporting) {
+		return;
+	}
+
+	isImporting = true;
+	try {
+		if (await onImport()) {
+			modal.close();
+		}
+	} catch (importError) {
+		error = importError instanceof Error ? importError.message : String(importError);
+	} finally {
+		isImporting = false;
+	}
+}
 </script>
 
 <div class="embedding-index-setup-modal">
@@ -145,6 +170,20 @@ function handleSave() {
         }}
       />
     </SettingContainer>
+
+    {#if onImport}
+      <SettingContainer
+        name="Import Existing Index"
+        desc="Load an index exported from another vault instead of building one. Rebuilding is only needed if the export is outdated."
+      >
+        <Button
+          iconId="upload"
+          buttonText={isImporting ? "Importing…" : "Import"}
+          disabled={isImporting}
+          onClick={() => void handleImport()}
+        />
+      </SettingContainer>
+    {/if}
 
     {#if error}
       <div class="setting-item">

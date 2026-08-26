@@ -10,6 +10,11 @@ export interface EmbeddingIndexSetupModalOptions {
 	purpose: "search" | "graph";
 	currentSelection: SelectedModel | null;
 	onSave: (selectedModel: SelectedModel, batchSize: number) => void;
+	/** Import an already-built index from a `.msgpack` export instead of building
+	 * one. Resolves true when an index was imported, false when the user cancelled
+	 * or the file was rejected. Omitted where importing isn't possible (it needs
+	 * Electron's file dialog and Node `fs`, so desktop only), which hides the row. */
+	onImport?: () => Promise<boolean>;
 }
 
 export class EmbeddingIndexSetupModal extends Modal {
@@ -47,6 +52,7 @@ export class EmbeddingIndexSetupModal extends Modal {
 				plugin: SecondBrainPlugin;
 				currentSelection: SelectedModel | null;
 				onSave: (selectedModel: SelectedModel, batchSize: number) => void;
+				onImport?: () => Promise<boolean>;
 			}>,
 			{
 				target: this.contentEl,
@@ -58,6 +64,7 @@ export class EmbeddingIndexSetupModal extends Modal {
 						plugin: this.plugin,
 						currentSelection: this.options.currentSelection,
 						onSave: this.options.onSave,
+						onImport: this.options.onImport,
 					},
 				},
 			},

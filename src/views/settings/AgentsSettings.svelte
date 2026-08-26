@@ -119,9 +119,7 @@ function getAgentSkillsSummary(agentId: string): { icons: string[]; overflow: nu
     hasItems={agentIds.length > 0}
   >
     {#snippet actions()}
-      <div class="flex items-center justify-end">
-        <Button buttonText="Add agent" cta={true} onClick={createNewAgent} />
-      </div>
+      <Button buttonText="Add agent" cta={true} onClick={createNewAgent} />
     {/snippet}
 
     {#each agentIds as agentId (agentId)}
