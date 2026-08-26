@@ -7,11 +7,13 @@ export class AddSecretModal extends Modal {
 	private component: ReturnType<typeof AddSecretModalComponent> | null = null;
 	private plugin: SecondBrainPlugin;
 	private onSecretAdded: (secretId: string) => void;
+	private suggestedId?: string;
 
-	constructor(plugin: SecondBrainPlugin, onSecretAdded: (secretId: string) => void) {
+	constructor(plugin: SecondBrainPlugin, onSecretAdded: (secretId: string) => void, suggestedId?: string) {
 		super(plugin.app);
 		this.plugin = plugin;
 		this.onSecretAdded = onSecretAdded;
+		this.suggestedId = suggestedId;
 		this.setTitle("Add New Secret");
 	}
 
@@ -21,6 +23,7 @@ export class AddSecretModal extends Modal {
 			props: {
 				modal: this,
 				onSecretAdded: this.onSecretAdded,
+				suggestedId: this.suggestedId,
 			},
 		});
 	}

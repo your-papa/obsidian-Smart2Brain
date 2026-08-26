@@ -10,6 +10,7 @@ import type { ChatModel } from "../../stores/chatStore.svelte";
 import type SecondBrainPlugin from "../../main";
 import { ModelSelectionModal, type SelectedModel } from "./ModelSelectionModal";
 import { NATIVE_PDF_PROVIDERS } from "../../agent/Agent";
+import { suggestSecretId } from "../../lib/secretStorage";
 import SecretSelect from "../settings/SecretSelect.svelte";
 import SettingContainer from "../settings/SettingContainer.svelte";
 import SettingGroup from "../settings/SettingGroup.svelte";
@@ -569,6 +570,7 @@ function openProcessorSelectionModal(currentProcessor: ChatModel | null, onSelec
         >
           <SecretSelect
             value={pluginData.webSearchApiKeyId}
+            suggestedId={suggestSecretId(plugin.app, pluginData.webSearchProvider, "apiKey")}
             onChange={(secretId) => (pluginData.webSearchApiKeyId = secretId)}
           />
         </SettingContainer>

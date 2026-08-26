@@ -1,7 +1,9 @@
 <script lang="ts">
 import type { Snippet } from "svelte";
 import { createAuthStateQuery, invalidateAuthState } from "../../lib/query";
+import { suggestSecretId } from "../../lib/secretStorage";
 import { type AuthFieldDefinition, getProviderDefinition } from "../../providers/index";
+import { getPlugin } from "../../stores/state.svelte";
 import { getData } from "../../stores/dataStore.svelte";
 import Text from "../ui/Text.svelte";
 import SecretSelect from "./SecretSelect.svelte";
@@ -17,9 +19,14 @@ interface Props {
 const { provider, afterRequired }: Props = $props();
 
 const data = getData();
+const plugin = getPlugin();
 
 // Local state for advanced disclosure
 let showAdvanced = $state(false);
+
+// Name the suggested secret after the instance's display name, so a renamed
+// "Work OpenAI" yields "work-openai-api-key" rather than the raw instance ID.
+let providerLabel = $derived(data.getProviderMeta(provider)?.displayName ?? provider);
 
 // Query for provider auth state
 const query = createAuthStateQuery(() => provider);
@@ -112,6 +119,7 @@ function getFieldStyles(fieldKey: string): string {
         <SettingItem name={field.label} desc={field.description}>
             <SecretSelect
                 value={getFieldValue(fieldKey)}
+                suggestedId={suggestSecretId(plugin.app, providerLabel, fieldKey)}
                 onChange={(value) => handleSecretChange(fieldKey, value)}
             />
         </SettingItem>

@@ -7,6 +7,7 @@ import Button from "../../components/ui/Button.svelte";
 import Text from "../../components/ui/Text.svelte";
 import Toggle from "../../components/ui/Toggle.svelte";
 import { createObsidianFetch } from "../../lib/obsidianFetch";
+import { suggestSecretId } from "../../lib/secretStorage";
 import { getData } from "../../stores/dataStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
 import { VIEW_TYPE_ONBOARDING } from "../onboarding/OnboardingView";
@@ -213,6 +214,7 @@ async function handleCheckLangSmithConnection() {
     >
       <SecretSelect
         value={pluginData.langSmithApiKeyId}
+        suggestedId={suggestSecretId(plugin.app, "LangSmith", "apiKey")}
         onChange={(secretId) => (pluginData.langSmithApiKeyId = secretId)}
       />
     </SettingItem>

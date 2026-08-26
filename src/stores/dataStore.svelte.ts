@@ -2702,14 +2702,7 @@ async function resolveVaultSlug(vaultName: string): Promise<string> {
 	return `${base}-${n}`;
 }
 
-/**
- * Convert a provider display name to a stable, URL-safe ID.
- * "LM Studio" → "lm-studio", "My OpenAI" → "my-openai"
- */
-export function slugifyProviderName(name: string): string {
-	return name
-		.trim()
-		.toLowerCase()
-		.replace(/[^a-z0-9]+/g, "-")
-		.replace(/^-+|-+$/g, "");
-}
+// Re-exported from utils/slugify so existing importers keep working; the
+// implementation lives there to stay reachable from lib/secretStorage without
+// an import cycle (dataStore already imports secretStorage).
+export { slugifyProviderName } from "../utils/slugify";

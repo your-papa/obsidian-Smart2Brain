@@ -10,9 +10,14 @@ import Dropdown from "../ui/Dropdown.svelte";
 interface Props {
 	value: string;
 	onChange: (secretId: string) => void;
+	/**
+	 * ID to pre-fill in the Add Secret modal, derived from this picker's context
+	 * (e.g. "anthropic-api-key"). Build it with `suggestSecretId`.
+	 */
+	suggestedId?: string;
 }
 
-const { value, onChange }: Props = $props();
+const { value, onChange, suggestedId }: Props = $props();
 
 const plugin = getPlugin();
 
@@ -76,12 +81,16 @@ function handleSelect(secretId: string) {
 
 // Open modal to add a new secret
 function handleAddSecret() {
-	new AddSecretModal(plugin, (newSecretId) => {
-		refreshSecrets();
-		hasNotifiedMissing = false;
-		refreshAttempt = 0;
-		onChange(newSecretId);
-	}).open();
+	new AddSecretModal(
+		plugin,
+		(newSecretId) => {
+			refreshSecrets();
+			hasNotifiedMissing = false;
+			refreshAttempt = 0;
+			onChange(newSecretId);
+		},
+		suggestedId,
+	).open();
 }
 
 // Dropdown options

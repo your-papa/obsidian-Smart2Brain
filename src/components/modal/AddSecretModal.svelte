@@ -1,4 +1,5 @@
 <script lang="ts">
+import { untrack } from "svelte";
 import { getPlugin } from "../../stores/state.svelte";
 import { isValidSecretId, setSecret } from "../../lib/secretStorage";
 import SettingContainer from "../settings/SettingContainer.svelte";
@@ -9,13 +10,17 @@ import type { AddSecretModal } from "./AddSecretModal";
 interface Props {
 	modal: AddSecretModal;
 	onSecretAdded: (secretId: string) => void;
+	/** Pre-filled ID derived from the opening context (provider, tool, ...). Still editable. */
+	suggestedId?: string;
 }
 
-const { modal, onSecretAdded }: Props = $props();
+const { modal, onSecretAdded, suggestedId }: Props = $props();
 
 const plugin = getPlugin();
 
-let secretId = $state("");
+// Seeded once, then owned by the input: the suggestion is a starting point the
+// user is free to edit, not a value to stay in sync with.
+let secretId = $state(untrack(() => suggestedId) ?? "");
 let secretValue = $state("");
 let error = $state("");
 
@@ -75,24 +80,20 @@ function openKeychainSettings() {
 
 	<SettingContainer
 		name="Secret ID"
-		desc="Unique identifier for this secret (lowercase letters, numbers, dashes)"
+		desc={suggestedId
+			? "Suggested from where you opened this. Edit it to reuse an ID across providers."
+			: "Unique identifier for this secret (lowercase letters, numbers, dashes)"}
 	>
 		<Text
 			inputType="text"
 			placeholder="my-api-key"
-			value={secretId}
+			bind:value={secretId}
 			styles={secretId.length > 0 && !isValidId ? "!border-[--background-modifier-error]" : ""}
-			onblur={(value) => (secretId = value)}
 		/>
 	</SettingContainer>
 
 	<SettingContainer name="Secret Value" desc="The API key or secret value to store securely">
-		<Text
-			inputType="password"
-			placeholder="sk-..."
-			value={secretValue}
-			onblur={(value) => (secretValue = value)}
-		/>
+		<Text inputType="password" placeholder="sk-..." bind:value={secretValue} />
 	</SettingContainer>
 
 	{#if error}
