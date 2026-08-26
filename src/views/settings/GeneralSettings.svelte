@@ -51,7 +51,7 @@ function handleOpenProviderSetup() {
     {#snippet nameSuffix()}
       <span
         class="privacy-trust-icon privacy-trust-icon--label"
-        use:icon={"shield"}
+        use:icon={"shield-check"}
         aria-hidden="true"
       ></span>
     {/snippet}

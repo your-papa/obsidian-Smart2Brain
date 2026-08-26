@@ -26,7 +26,7 @@ const skipReasonLabels: Record<SkipReason, string> = {
 
 const skipReasonIcons: Record<SkipReason, string> = {
 	excluded: "folder-x",
-	privacy: "shield",
+	privacy: "shield-check",
 	"too-large": "file-warning",
 	"not-indexed": "clock",
 	"read-error": "alert-triangle",

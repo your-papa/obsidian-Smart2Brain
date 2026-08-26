@@ -51,7 +51,7 @@ const failureMessage = $derived(query.data && !query.data.success ? query.data.m
       title="Trusted with private notes"
       aria-label="Trusted with private notes"
     >
-      <span class="provider-status-icon" use:icon={"shield"}></span>
+      <span class="provider-status-icon" use:icon={"shield-check"}></span>
     </span>
   {/if}
 </span>

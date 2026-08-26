@@ -169,7 +169,7 @@ async function removeProvider(purgeEmbeddings = false) {
           aria-label="Trusted with private notes"
         >
           <span class="provider-icon-indicator provider-icon-indicator-accent">
-            <span class="provider-trust-icon" use:icon={"shield"}></span>
+            <span class="provider-trust-icon" use:icon={"shield-check"}></span>
           </span>
         </span>
       {/if}
