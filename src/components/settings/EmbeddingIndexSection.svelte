@@ -96,6 +96,9 @@ function openAddIndexModal() {
 				getVectorStoreService().ensureIndex(`${selectedModel.provider}:${selectedModel.model}`);
 			}
 		},
+		// Import needs a native file dialog + node fs, so it's offered on desktop
+		// only; leaving it undefined hides the row rather than showing a dead control.
+		onImport: Platform.isDesktopApp ? importFromFile : undefined,
 	}).open();
 }
 
@@ -169,14 +172,20 @@ async function exportIndex(targetIndexId: string) {
 	await getVectorStoreService().exportIndex(targetIndexId);
 }
 
-async function importFromFile() {
-	if (!isVectorStoreInitialized()) return;
+/** Returns whether an index was actually imported: `importIndex` yields null both
+ * when the user cancels the file dialog and when the file is rejected (it reports
+ * why through its own notice), and callers need to distinguish "nothing happened"
+ * from "done" to decide whether to stay open. */
+async function importFromFile(): Promise<boolean> {
+	if (!isVectorStoreInitialized()) return false;
 	const service = getVectorStoreService();
 	const indexId = await service.importIndex(purpose);
 	if (indexId) {
 		const sep = indexId.indexOf(":");
 		pluginData.setEmbedIndex(purpose, indexId.slice(0, sep), indexId.slice(sep + 1));
+		return true;
 	}
+	return false;
 }
 
 function formatDate(timestamp: number | null): string {
@@ -203,34 +212,26 @@ function getSelectionGroupLabel(): string {
   hasItems={indexes.length > 0}
 >
   {#snippet actions()}
-    <div class="flex items-center gap-2 justify-end">
-      {#if indexProgress.isIndexing}
-        <div class="index-progress-summary">
-          <ProgressBar progress={indexProgress.percentage} />
-          <span>
-            {indexProgress.indexed}/{indexProgress.total}
-            {#if indexProgress.skipped > 0}
-              ({indexProgress.skipped} skipped)
-            {/if}
-            {#if indexProgress.etaMs !== null}
-              (~{formatEta(indexProgress.etaMs)} left)
-            {/if}
-          </span>
-        </div>
-        <Button buttonText="Cancel" onClick={cancelIndexing} />
-      {:else}
-        <!-- Index import uses a native file dialog + node fs; desktop only. -->
-        {#if Platform.isDesktopApp}
-        <Button
-          iconId="upload"
-          ariaLabel="Import index from file"
-          tooltip="Import index from file"
-          onClick={() => void importFromFile()}
-        />
-        {/if}
-        <Button buttonText="Add index" cta={true} onClick={openAddIndexModal} />
-      {/if}
-    </div>
+    {#if indexProgress.isIndexing}
+      <div class="index-progress-summary">
+        <ProgressBar progress={indexProgress.percentage} />
+        <span>
+          {indexProgress.indexed}/{indexProgress.total}
+          {#if indexProgress.skipped > 0}
+            ({indexProgress.skipped} skipped)
+          {/if}
+          {#if indexProgress.etaMs !== null}
+            (~{formatEta(indexProgress.etaMs)} left)
+          {/if}
+        </span>
+      </div>
+      <Button buttonText="Cancel" onClick={cancelIndexing} />
+    {:else}
+      <!-- Importing an existing index lives inside the setup modal, as the
+           alternative to building one — not as a bare icon competing with the
+           primary action here. -->
+      <Button buttonText="Add index" cta={true} onClick={openAddIndexModal} />
+    {/if}
   {/snippet}
 
   {#if indexes.length > 0}

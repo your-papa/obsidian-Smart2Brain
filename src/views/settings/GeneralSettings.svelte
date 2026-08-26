@@ -31,9 +31,7 @@ function handleOpenProviderSetup() {
   hasItems={configuredProviderIds.length > 0}
 >
   {#snippet actions()}
-    <div class="flex items-center justify-end w-full">
-      <Button buttonText="Add provider" cta={true} onClick={handleOpenProviderSetup} />
-    </div>
+    <Button buttonText="Add provider" cta={true} onClick={handleOpenProviderSetup} />
   {/snippet}
 
   {#if configuredProviderIds.length > 0}

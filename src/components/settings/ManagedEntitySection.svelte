@@ -88,6 +88,21 @@ const shouldRenderChildren = $derived(hasItems ?? !!children);
     display: flex;
     align-items: center;
     justify-content: flex-end;
+    gap: 8px;
+  }
+
+  /* Phone: core stretches a `.setting-item-control` button to `width: 100%`, but
+     that resolves against this wrapper — which, as a `justify-end` flex row, is
+     only as wide as its content. The button then "fills" ~92px and reads as a
+     stray pill rather than the native full-width action. Give the wrapper the
+     row's full width and let the button (the only flexible child; icon buttons
+     are `.clickable-icon` and stay fixed) take what's left. */
+  :global(.is-phone) .managed-entity-section-actions {
+    width: 100%;
+  }
+
+  :global(.is-phone) .managed-entity-section-actions :global(button:not(.clickable-icon)) {
+    flex: 1 1 auto;
   }
 
   .managed-entity-section-header {
