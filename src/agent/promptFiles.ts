@@ -96,12 +96,34 @@ export function serializePromptFile(body: string, version: number | string): str
 function stampPromptVersion(raw: string, version: number | string): string {
 	const match = raw.match(PROMPT_FRONTMATTER_RE);
 	if (!match) return serializePromptFile(raw.trim(), version);
-	const block = match[1];
+	// Normalize CRLF first: a file round-tripped through an editor can carry \r, and keeping
+	// it would leave a stray carriage return inside the rewritten YAML values.
+	const block = match[1].replace(/\r\n/g, "\n");
 	const newBlock = VERSION_LINE_RE.test(block)
 		? block.replace(VERSION_LINE_RE, `version: ${version}`)
 		: `${block}\nversion: ${version}`;
 	// Replacement via callback so `$`-sequences in user frontmatter can't act as patterns.
 	return raw.replace(PROMPT_FRONTMATTER_RE, () => `---\n${newBlock}\n---\n`);
+}
+
+/**
+ * Replace a note's BODY with `body`, stamped at `version`, keeping every other frontmatter
+ * key the note already had.
+ *
+ * Used by the two reconcile paths that rewrite an untouched note (silent update to a newer
+ * shipped default; canonical re-stamp of a current-default body). Serializing from scratch
+ * there would emit only `author`/`version` and so silently delete properties the user added
+ * to a note they never edited the text of — a plain data loss, and exactly the case where
+ * they had no reason to expect us to touch the file at all.
+ */
+function replacePromptBody(raw: string, body: string, version: number | string): string {
+	const match = raw.match(PROMPT_FRONTMATTER_RE);
+	if (!match) return serializePromptFile(body, version);
+	// Stamp the version into the EXISTING block, then swap the body in behind it.
+	const stamped = stampPromptVersion(raw, version);
+	const stampedMatch = stamped.match(PROMPT_FRONTMATTER_RE);
+	if (!stampedMatch) return serializePromptFile(body, version);
+	return `${stampedMatch[0].trimEnd()}\n\n${body}\n`;
 }
 
 /** The current shipped version for a kind. Always defined for the two real histories. */
@@ -198,12 +220,14 @@ export class PromptFilesService {
 								await this.adapter.write(path, stampPromptVersion(raw, current));
 							}
 						} else if (matched !== current && current !== undefined) {
-							await this.adapter.write(path, serializePromptFile(kind.fallback, current));
+							// An untouched old default: swap in the new body, but keep any
+							// frontmatter keys the user added to the note (see replacePromptBody).
+							await this.adapter.write(path, replacePromptBody(raw, kind.fallback, current));
 							Log.info(`Updated ${kind.label} for ${agentId} from shipped v${matched} to current`);
 						} else if (parsed.version !== current && current !== undefined) {
 							// Body is already the current default; only the metadata is
-							// missing or stale. Rewrite canonically.
-							await this.adapter.write(path, serializePromptFile(kind.fallback, current));
+							// missing or stale. Re-stamp in place.
+							await this.adapter.write(path, replacePromptBody(raw, kind.fallback, current));
 						}
 						continue;
 					}

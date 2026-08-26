@@ -87,6 +87,7 @@ import {
 	skillIcon,
 	coreSkillRank,
 	toExecToolId,
+	toRuntimeToolName,
 } from "./integrations/pluginIntegrations";
 
 import { getRegistry } from "../providers/registry";
@@ -794,15 +795,33 @@ export class AgentManager {
 	}
 
 	/**
-	 * Whether an enabled skill is left functional by the per-tool overrides: true when it
-	 * declares no `allowed-tools` (pure guidance) or at least one of its declared built-in
-	 * tools survives the `toolsConfig` veto. A skill whose every declared tool is vetoed
-	 * (e.g. the manage-skills core skill while the `manage_skills` tool is disabled — the
-	 * out-of-the-box default) must not be advertised in the skills XML or offered via
-	 * `load_skill`: its body instructs the model to call a tool that is never bound.
-	 * Unknown (non-built-in) ids don't count as declared tools, matching `attachedToolIds`.
+	 * Whether an enabled skill can still do anything for this agent — the single predicate
+	 * behind "advertise this skill" in the skills XML, `load_skill`, and the enabled-skill
+	 * count. A skill that survives here but whose body calls a tool that was never bound
+	 * teaches the model a capability it does not have.
+	 *
+	 * Two independent gates can strand a skill:
+	 *
+	 *  - **Per-tool overrides.** A skill declaring `allowed-tools` needs at least one of its
+	 *    declared built-in tools to survive the `toolsConfig` veto (e.g. the manage-skills
+	 *    core skill while the `manage_skills` tool is disabled — the out-of-the-box default).
+	 *    Unknown (non-built-in) ids don't count as declared tools, matching `attachedToolIds`.
+	 *  - **Plugin exec approval.** A skill linked to a plugin that exposes an `api` is backed
+	 *    by that plugin's `exec_<plugin>` tool, which is gated *separately* by the per-agent
+	 *    `pluginExecTools` approval — and the two can diverge: declining the privacy
+	 *    confirmation in the editor leaves the skill enabled with exec approval off (see
+	 *    `toggleSkill`). Such a skill is stranded whether or not it declares `allowed-tools`:
+	 *    the curated integration skills (dataview, tasknotes) declare none at all, and their
+	 *    bodies are entirely about calling `exec_<plugin>`.
 	 */
 	private skillHasUsableTools(agentCfg: AgentConfig, meta: SkillMetadata): boolean {
+		// A plugin-linked skill whose exec tool exists but isn't approved has nothing to run.
+		// Only applies when the plugin actually offers an exec tool — a linked plugin with no
+		// public `api` backs a guidance-only skill, which stays useful on its own.
+		if (meta.linkedPluginId && this.pluginOffersExecTool(meta.linkedPluginId)) {
+			if (!(agentCfg.pluginExecTools?.[toExecToolId(meta.linkedPluginId)] ?? false)) return false;
+		}
+
 		const spec = meta.frontmatter.allowedTools;
 		if (!spec) return true;
 		const builtIn = new Set<string>(BUILT_IN_TOOL_IDS);
@@ -814,6 +833,11 @@ export class AgentManager {
 			if (agentCfg.toolsConfig[id as BuiltInToolId]?.enabled ?? true) return true;
 		}
 		return !declaresBuiltInTool;
+	}
+
+	/** Whether an enabled plugin exposes a public `api`, i.e. gets an `exec_<plugin>` tool. */
+	private pluginOffersExecTool(pluginId: string): boolean {
+		return this.resolvePluginIntegrations().some((integ) => integ.pluginId === pluginId);
 	}
 
 	/**
@@ -947,11 +971,27 @@ export class AgentManager {
 				for (const id of attached) {
 					if (agentCfg.toolsConfig[id]?.enabled ?? true) boundBuiltInTools.add(id);
 				}
+				// The exec tools bound above, so a body naming an unapproved `exec_<plugin>`
+				// is flagged rather than read as callable.
+				const boundExecTools = new Set<string>();
+				for (const integ of this.resolvePluginIntegrations()) {
+					if (!this.isPluginEnabled(integ.pluginId)) continue;
+					if (agentCfg.pluginExecTools?.[toExecToolId(integ.pluginId)] ?? false) {
+						boundExecTools.add(toRuntimeToolName(integ.pluginId));
+					}
+				}
 				tools.push(
 					createLoadSkillTool(this.plugin.skillsService, {
 						skillNames: loadableSkills,
-						isToolAvailable: (toolId) =>
-							!BUILT_IN_TOOL_IDS.includes(toolId as BuiltInToolId) || boundBuiltInTools.has(toolId),
+						isToolAvailable: (toolId) => {
+							if (BUILT_IN_TOOL_IDS.includes(toolId as BuiltInToolId)) {
+								return boundBuiltInTools.has(toolId);
+							}
+							// Only judge ids we actually govern; anything else (MCP tools,
+							// unknown names) is reported available rather than wrongly flagged.
+							if (toolId.startsWith("exec_")) return boundExecTools.has(toolId);
+							return true;
+						},
 					}),
 				);
 			}
