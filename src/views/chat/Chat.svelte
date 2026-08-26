@@ -99,17 +99,25 @@ function portalComposer(node: HTMLElement) {
 	// goes stale with the keyboard exactly like `.view-content`, but that no
 	// longer matters because the composer is positioned off `100vh`.
 	//
-	// Exception: with "Open new chat in" set to a sidebar, the phone chat leaf
-	// lives in a `.workspace-drawer` — a SIBLING of mod-root, painted over it.
-	// A composer portaled to mod-root then sits behind the open drawer (only its
-	// overflowing buttons peek out). Host it in the drawer instead: the drawer is
-	// `position: fixed` at the full viewport height, so the same 100vh-anchored
-	// positioning holds, and being a descendant inherits the drawer's own slide
-	// transform exactly like mod-root's.
-	const host =
+	// Exception: with "Open new chat in" set to a sidebar, the chat leaf lives in
+	// a `.workspace-drawer` — a SIBLING of mod-root, painted over it. (Both phones
+	// and tablets use drawers; `.mod-left-split`/`.mod-right-split` are the
+	// desktop-only shape.) A composer portaled to mod-root then sits behind the
+	// open drawer, or lands off-viewport entirely at the drawer's x-offset. Host
+	// it in the drawer instead: the drawer is `position: fixed` at the full
+	// viewport height, so the same 100vh-anchored positioning holds, and being a
+	// descendant inherits the drawer's own slide transform exactly like mod-root's.
+	//
+	// Resolved lazily, not once at mount: this action runs as soon as `.chat-root`
+	// exists, which can be BEFORE Obsidian has moved the leaf into the drawer (the
+	// composer itself is awaited via MutationObserver below, so `portal()` often
+	// runs a good deal later). Capturing the host up front therefore pinned
+	// drawer-docked chats to mod-root — the tablet symptom was a composer sitting
+	// at x=1366 on a 1366px-wide viewport, i.e. just off-screen.
+	const resolveHost = () =>
 		node.closest<HTMLElement>(".workspace-drawer") ??
 		document.querySelector<HTMLElement>(".workspace-split.mod-root");
-	if (!host) return {};
+	if (!resolveHost()) return {};
 
 	let composer: HTMLElement | null = null;
 	let home: HTMLElement | null = null;
@@ -117,6 +125,7 @@ function portalComposer(node: HTMLElement) {
 	let ro: ResizeObserver | null = null;
 	let leafObserver: MutationObserver | null = null;
 	let classObserver: MutationObserver | null = null;
+	let treeObserver: MutationObserver | null = null;
 
 	// Horizontal placement and height come from wherever the leaf actually is
 	// (main view, sidebar split, …), so measure rather than assume full width.
@@ -136,7 +145,10 @@ function portalComposer(node: HTMLElement) {
 	const publishGeometry = () => {
 		if (!composer) return;
 		const leaf = node.getBoundingClientRect();
-		const hostRect = host.getBoundingClientRect();
+		// The composer's ACTUAL parent, not a freshly resolved host: these two can
+		// disagree while a re-host is pending, and `left` is only transform-neutral
+		// when measured against the element the composer actually inherits from.
+		const hostRect = (composer.parentElement ?? node).getBoundingClientRect();
 		const height = composer.getBoundingClientRect().height;
 		composer.style.setProperty("--s2b-composer-left", `${Math.round(leaf.left - hostRect.left)}px`);
 		composer.style.setProperty("--s2b-composer-width", `${Math.round(leaf.width)}px`);
@@ -198,12 +210,26 @@ function portalComposer(node: HTMLElement) {
 		}
 	};
 
+	// Move the composer under whichever host currently owns the leaf. Called on
+	// first portal and again whenever the leaf is relocated (docking a chat into
+	// a drawer, or dragging it back out) — otherwise a chat that moves after mount
+	// keeps a host it no longer belongs to and the composer strands off-screen.
+	const rehost = () => {
+		if (!composer) return;
+		const currentHost = resolveHost();
+		if (!currentHost || composer.parentElement === currentHost) return;
+		currentHost.appendChild(composer);
+		publishGeometry();
+	};
+
 	const portal = (found: HTMLElement) => {
 		composer = found;
 		home = found.parentElement;
 		nextSibling = found.nextSibling;
+		(resolveHost() ?? node).appendChild(found);
+		// After the append, so the host-relative `left` is measured against the
+		// element the composer now actually inherits its transform from.
 		publishGeometry();
-		host.appendChild(found);
 		found.classList.add("s2b-composer-portaled");
 		// The composer grows and shrinks with its content (attachments,
 		// multi-line drafts), and the leaf moves when splits resize — both
@@ -213,10 +239,24 @@ function portalComposer(node: HTMLElement) {
 		ro.observe(node);
 		if (leafEl) {
 			syncActiveState();
-			leafObserver = new MutationObserver(syncActiveState);
+			leafObserver = new MutationObserver(() => {
+				syncActiveState();
+				// The leaf may have been moved into (or out of) a drawer, which
+				// changes which element should host the composer.
+				rehost();
+			});
 			// `style` as well as `class`: `syncActiveState` reads the leaf's
 			// computed `display`, which Obsidian can change either way.
 			leafObserver.observe(leafEl, { attributes: true, attributeFilter: ["class", "style"] });
+		}
+
+		// Relocating a leaf is a DOM move, not an attribute change, so the observer
+		// above never sees it. Watch the workspace subtree for structural changes
+		// and re-evaluate the host; `rehost` is a no-op when nothing moved.
+		const workspaceEl = document.querySelector<HTMLElement>(".workspace");
+		if (workspaceEl) {
+			treeObserver = new MutationObserver(rehost);
+			treeObserver.observe(workspaceEl, { childList: true, subtree: true });
 		}
 		classObserver = new MutationObserver(ensurePortaledClass);
 		classObserver.observe(found, { attributes: true, attributeFilter: ["class"] });
@@ -245,6 +285,7 @@ function portalComposer(node: HTMLElement) {
 			ro?.disconnect();
 			leafObserver?.disconnect();
 			classObserver?.disconnect();
+			treeObserver?.disconnect();
 			if (!composer) return;
 			composer.style.display = "";
 			composer.classList.remove("s2b-composer-portaled");
