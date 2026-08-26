@@ -98,7 +98,17 @@ function portalComposer(node: HTMLElement) {
 	// `overflow: visible`, so it is a usable containing block; its own height
 	// goes stale with the keyboard exactly like `.view-content`, but that no
 	// longer matters because the composer is positioned off `100vh`.
-	const host = document.querySelector<HTMLElement>(".workspace-split.mod-root");
+	//
+	// Exception: with "Open new chat in" set to a sidebar, the phone chat leaf
+	// lives in a `.workspace-drawer` — a SIBLING of mod-root, painted over it.
+	// A composer portaled to mod-root then sits behind the open drawer (only its
+	// overflowing buttons peek out). Host it in the drawer instead: the drawer is
+	// `position: fixed` at the full viewport height, so the same 100vh-anchored
+	// positioning holds, and being a descendant inherits the drawer's own slide
+	// transform exactly like mod-root's.
+	const host =
+		node.closest<HTMLElement>(".workspace-drawer") ??
+		document.querySelector<HTMLElement>(".workspace-split.mod-root");
 	if (!host) return {};
 
 	let composer: HTMLElement | null = null;
