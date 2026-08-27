@@ -159,11 +159,20 @@ function toMergedCalls(group: ToolCallGroup): MergedCall[] {
 }
 
 /**
- * A merged group's overall status: running if any call is still running, failed
+ * Whether a call is still in flight — either waiting on the model to finish
+ * streaming its arguments (`pending`) or actually executing (`running`). Both
+ * read as "in progress" everywhere in this view: same shimmer, same live dot.
+ */
+function isInFlight(status: UnifiedToolCall["status"]): boolean {
+	return status === "running" || status === "pending";
+}
+
+/**
+ * A merged group's overall status: running if any call is still in flight, failed
  * if any failed (and none running), else completed — mirroring the step-dot rule.
  */
 function mergedGroupStatus(group: ToolCallGroup): "running" | "completed" | "failed" {
-	if (group.calls.some((c) => c.status === "running")) return "running";
+	if (group.calls.some((c) => isInFlight(c.status))) return "running";
 	if (group.calls.some((c) => c.status === "failed")) return "failed";
 	return "completed";
 }
@@ -285,7 +294,7 @@ function buildDirectoryTreeView(
 /* ── Step helpers ── */
 
 function isStepRunning(step: TimelineStep): boolean {
-	return step.tools.some((t) => t.status === "running");
+	return step.tools.some((t) => isInFlight(t.status));
 }
 
 function hasStepFailure(step: TimelineStep): boolean {
@@ -360,10 +369,11 @@ $effect(() => {
 	return () => clearInterval(timer);
 });
 
-// The one tool actually executing right now, if any. Parallel calls in the same
-// step are common, so a single running tool names itself and several report a
-// count — never a name that happens to be first in the array.
-const runningTools = $derived(lastStep?.tools.filter((t) => t.status === "running") ?? []);
+// The tools executing right now. Only the COUNT is used: the tool row rendered
+// directly below the header already states what each call is doing, in the same
+// present-continuous wording, so repeating one call's label up here just said the
+// same thing twice ("Editing notes…" over "Editing notes").
+const runningTools = $derived(lastStep?.tools.filter((t) => isInFlight(t.status)) ?? []);
 
 /**
  * What the run is doing at this instant, in the model's own terms. Ordered most
@@ -372,9 +382,9 @@ const runningTools = $derived(lastStep?.tools.filter((t) => t.status === "runnin
  * - `summarizingHistory` — the store's own flag for the pre-flight context
  *   summarization pass, surfaced here so the header agrees with the separate
  *   status row rather than saying "Thinking…" through a step the user can see.
- * - a running tool — `buildToolSummary` already renders present-continuous
- *   labels ("Reading main.md", "Searching notes for X"), so the header can state
- *   the actual action instead of a synonym for "busy".
+ * - in-flight tools — reported as a bare count. The per-call detail belongs to
+ *   the tool rows below, which are always visible while the run is current; the
+ *   header only says that tool work (not thinking, not writing) is the phase.
  * - no steps and no text yet — nothing has come back from the provider at all.
  *   On a local provider this window is the model being pulled into memory (a
  *   cold Ollama/oMLX load is tens of seconds of apparent hang), so name it that
@@ -385,11 +395,9 @@ const runningTools = $derived(lastStep?.tools.filter((t) => t.status === "runnin
  */
 const runningPhase = $derived.by((): string => {
 	if (summarizingHistory) return "Summarizing earlier messages";
-	if (runningTools.length === 1) {
-		const tool = runningTools[0];
-		return buildToolSummary(tool.name, tool.input, toOutputModel(tool), tool.status).label;
+	if (runningTools.length > 0) {
+		return runningTools.length === 1 ? "Running 1 tool" : `Running ${runningTools.length} tools`;
 	}
-	if (runningTools.length > 1) return `Running ${runningTools.length} tools`;
 	if (steps.length === 0 && !answerContent) return isLocalModel ? "Loading model" : "Waiting for the model";
 	if (answerContent) return "Writing";
 	return "Thinking";
@@ -493,7 +501,7 @@ const showThinkingHeader = $derived(steps.length > 0 || !!isStreaming);
   <span
     class="tool-card-name"
     class:tool-card-name-failed={status === "failed"}
-    class:is-running={status === "running"}>{label}</span>
+    class:is-running={isInFlight(status)}>{label}</span>
   <!-- Orphan-child attribution: a subagent tool call whose parent `task` row isn't
        shown (folding couldn't find it) still notes which subagent it ran in. The
        `task` row itself needs no chip — its sentence already names the subagent. -->
@@ -526,7 +534,7 @@ const showThinkingHeader = $derived(steps.length > 0 || !!isStreaming);
         {@render outputBody(outputModel!, tool.id)}
       </div>
     </div>
-  {:else if showRawIO && tool.status !== "running"}
+  {:else if showRawIO && !isInFlight(tool.status)}
     <div class="tool-io-section">
       <div class="tool-io-label">Output</div>
       <span class="tool-io-empty">(no output)</span>
@@ -555,7 +563,7 @@ const showThinkingHeader = $derived(steps.length > 0 || !!isStreaming);
         <span
           class="tool-card-name"
           class:tool-card-name-failed={tool.status === "failed"}
-          class:is-running={tool.status === "running"}>{headerLabel}</span>
+          class:is-running={isInFlight(tool.status)}>{headerLabel}</span>
       </summary>
 
       <!-- Child steps render inline as normal tool rows, indented under the task
@@ -597,7 +605,7 @@ const showThinkingHeader = $derived(steps.length > 0 || !!isStreaming);
       <span
         class="tool-card-name"
         class:tool-card-name-failed={status === "failed"}
-        class:is-running={status === "running"}>{foldOutcome(summary)}</span>
+        class:is-running={isInFlight(status)}>{foldOutcome(summary)}</span>
     </summary>
 
     <!-- Each merged call keeps its own friendly result (and raw I/O in dev mode). -->
@@ -1136,10 +1144,9 @@ const showThinkingHeader = $derived(steps.length > 0 || !!isStreaming);
     line-height: 20px;
     color: var(--text-faint);
     transition: color 0.15s;
-    /* The running label now carries real status — including tool labels that embed
-       user content ("Searching notes for <query>") — so it has no bounded length.
-       Clamp it to one line: a wrapping header would grow the row mid-stream and
-       shove the answer down on every phase change. */
+    /* Clamp to one line. Every phase string is short by construction, but the label
+       changes mid-stream, and a wrapping header would grow the row and shove the
+       answer down on a phase change — cheap insurance against that. */
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;

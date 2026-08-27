@@ -248,3 +248,71 @@ describe("groupStepTools — merging consecutive same-tool calls", () => {
 		expect(groups[0].calls).toHaveLength(1);
 	});
 });
+
+describe("toolTimelineModel — pending tool calls", () => {
+	it("renders a tool call whose arguments are still streaming", () => {
+		// The whole point of `tool_pending`: a manage_notes edit streams its note
+		// body as the argument, so without this the card is invisible for seconds.
+		const steps = buildStepsFromEvents(
+			events({ type: "tool_pending", toolCallId: "t1", toolName: "manage_notes" }),
+		);
+		expect(steps).toHaveLength(1);
+		expect(steps[0].tools).toHaveLength(1);
+		expect(steps[0].tools[0].status).toBe("pending");
+		expect(steps[0].tools[0].input).toBeUndefined();
+	});
+
+	it("does not duplicate a call that was announced then started", () => {
+		// The store upgrades the pending event in place, so a settled stream never
+		// carries both events for one id. Guard the model against it regardless.
+		const steps = buildStepsFromEvents(
+			events(
+				{ type: "tool_start", toolCallId: "t1", toolName: "manage_notes", input: { operations: [] } },
+				{ type: "tool_end", toolCallId: "t1", toolName: "manage_notes", output: "ok", status: "completed" },
+			),
+		);
+		expect(steps[0].tools).toHaveLength(1);
+		expect(steps[0].tools[0].status).toBe("completed");
+	});
+
+	it("resolves a pending call to completed when its end event arrives", () => {
+		const steps = buildStepsFromEvents(
+			events(
+				{ type: "tool_pending", toolCallId: "t1", toolName: "read_content" },
+				{ type: "tool_end", toolCallId: "t1", toolName: "read_content", output: "ok", status: "completed" },
+			),
+		);
+		expect(steps[0].tools).toHaveLength(1);
+		expect(steps[0].tools[0].status).toBe("completed");
+		expect(steps[0].tools[0].output).toBe("ok");
+	});
+
+	it("attaches a preamble inserted before the announced call", () => {
+		// tool_start splices the preamble in AHEAD of the already-positioned pending
+		// event, so the reasoning text still reads above the card it belongs to.
+		const steps = buildStepsFromEvents(
+			events(
+				{ type: "preamble", toolCallId: "t1", toolName: "manage_notes", content: "Let me fix that typo." },
+				{ type: "tool_pending", toolCallId: "t1", toolName: "manage_notes" },
+			),
+		);
+		expect(steps[0].tools[0].preamble).toBe("Let me fix that typo.");
+	});
+
+	it("nests a pending subagent child under its parent task", () => {
+		const steps = buildStepsFromEvents(
+			events(
+				{ type: "tool_start", toolCallId: "task-1", toolName: "task", subAgentName: "Writer" },
+				{
+					type: "tool_pending",
+					toolCallId: "child-a",
+					toolName: "manage_notes",
+					subAgentName: "Writer",
+					parentToolCallId: "task-1",
+				},
+			),
+		);
+		expect(steps[0].tools).toHaveLength(1);
+		expect(steps[0].tools[0].children?.[0].status).toBe("pending");
+	});
+});

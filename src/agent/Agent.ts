@@ -1,6 +1,6 @@
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { type BaseMessage, HumanMessage, isAIMessage } from "@langchain/core/messages";
-import type { MessageContentComplex } from "@langchain/core/messages";
+import type { MessageContentComplex, ToolCallChunk } from "@langchain/core/messages";
 import type { RunnableConfig } from "@langchain/core/runnables";
 import { AsyncLocalStorageProviderSingleton } from "@langchain/core/singletons";
 import type { BaseCheckpointSaver, CheckpointTuple } from "@langchain/langgraph";
@@ -200,6 +200,30 @@ export type AgentStreamChunk =
 			token: string;
 			/** The id of the AI message producing this token (step boundary discriminator). */
 			aiMessageId?: string;
+			runId: string;
+			threadId: string;
+	  }
+	| {
+			/**
+			 * The model has begun emitting a tool call, but its arguments are still
+			 * streaming so the tool has NOT started executing yet. Emitted from the
+			 * `messages` stream's `tool_call_chunks` as soon as a call's name is known.
+			 *
+			 * `on_tool_start` (→ `tool_start`) cannot fire until the arguments JSON is
+			 * complete and schema-validated, because LangChain parses the args before
+			 * invoking the callback. For a tool whose argument IS the payload — a
+			 * `manage_notes` edit carries whole note bodies — that window is seconds
+			 * long, during which the UI had nothing to show. This chunk fills it.
+			 */
+			type: "tool_pending";
+			toolCallId: string;
+			toolName: string;
+			/** The id of the AI message that produced this tool call. */
+			aiMessageId?: string;
+			/** Name of the subagent this tool is running inside (via `task`), if any. */
+			subAgentName?: string;
+			/** The id of the parent `task` tool call this is nested under, if any. */
+			parentToolCallId?: string;
 			runId: string;
 			threadId: string;
 	  }
@@ -926,6 +950,10 @@ export class Agent {
 		const toolCallPreambles = new Map<string, string>();
 		// Running text accumulator for the current AI message (reset on new aiMessageId).
 		let preambleAccumulator = "";
+		// Tool call ids already announced via `tool_pending`, so a call whose args
+		// stream across many deltas announces exactly once. Never cleared on a step
+		// boundary: ids are globally unique per run, and `tool_start` reconciles by id.
+		const announcedPendingToolCalls = new Set<string>();
 		try {
 			for await (const chunk of stream) {
 				// Check if aborted before processing
@@ -1047,6 +1075,44 @@ export class Agent {
 								if (tc.id && !toolCallPreambles.has(tc.id)) {
 									toolCallPreambles.set(tc.id, preambleAccumulator);
 								}
+							}
+						}
+
+						// Announce each tool call as soon as its NAME is known, long before
+						// its arguments finish streaming. `on_tool_start` cannot fire until
+						// the args JSON is complete and schema-validated (LangChain parses
+						// before invoking the callback), so a tool whose argument is itself
+						// the payload — a `manage_notes` edit carrying whole note bodies —
+						// left the UI blank for seconds. Streaming deltas carry partial calls
+						// in `tool_call_chunks`; `name` and `id` land in the FIRST delta while
+						// `args` accrues across later ones, which is exactly the early signal
+						// we need. Announce once per id and let `tool_start` fill in the input.
+						const chunkCalls = (message as { tool_call_chunks?: ToolCallChunk[] }).tool_call_chunks;
+						if (Array.isArray(chunkCalls)) {
+							for (const tc of chunkCalls) {
+								if (!tc.id || !tc.name || announcedPendingToolCalls.has(tc.id)) continue;
+								announcedPendingToolCalls.add(tc.id);
+								// Attribution here is deliberately NOT resolved via
+								// resolveToolAttribution: that call mutates the `task` bookkeeping
+								// (pushes the call stack, bumps child counts) and must run exactly
+								// once per call, at on_tool_start. Reading the open-task state
+								// read-only keeps nesting correct without double-counting.
+								const parentToolCallId = taskCallStack.at(-1);
+								Logger.debug(`${label}.tool_pending`, { runId, toolCallId: tc.id, toolName: tc.name });
+								yield {
+									type: "tool_pending",
+									toolCallId: tc.id,
+									toolName: tc.name,
+									aiMessageId: parentToolCallId
+										? (taskAiMessageIds.get(parentToolCallId) ?? lastAiMessageId)
+										: lastAiMessageId,
+									subAgentName: parentToolCallId
+										? taskSubAgentNames.get(parentToolCallId)
+										: undefined,
+									parentToolCallId,
+									runId,
+									threadId,
+								};
 							}
 						}
 					}

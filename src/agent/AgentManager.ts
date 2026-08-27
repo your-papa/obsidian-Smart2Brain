@@ -126,6 +126,10 @@ export type AuthValidationResult = { success: true } | { success: false; message
 export type AgentManagerStreamChunk =
 	| { type: "token"; token: string; aiMessageId?: string }
 	| Pick<
+			Extract<AgentStreamChunk, { type: "tool_pending" }>,
+			"type" | "toolCallId" | "toolName" | "aiMessageId" | "subAgentName" | "parentToolCallId"
+	  >
+	| Pick<
 			Extract<AgentStreamChunk, { type: "tool_start" }>,
 			| "type"
 			| "toolCallId"
@@ -1424,6 +1428,15 @@ export class AgentManager {
 		switch (chunk.type) {
 			case "token":
 				return { type: "token", token: chunk.token, aiMessageId: chunk.aiMessageId };
+			case "tool_pending":
+				return {
+					type: "tool_pending",
+					toolCallId: chunk.toolCallId,
+					toolName: chunk.toolName,
+					aiMessageId: chunk.aiMessageId,
+					subAgentName: chunk.subAgentName,
+					parentToolCallId: chunk.parentToolCallId,
+				};
 			case "tool_start":
 				return {
 					type: "tool_start",

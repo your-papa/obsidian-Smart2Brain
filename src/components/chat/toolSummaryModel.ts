@@ -43,9 +43,15 @@ function verb(running: string, done: string): Verb {
 	return { running, done };
 }
 
-/** Resolves a {@link Label} to a display string, choosing the verb tense by status. */
+/**
+ * Resolves a {@link Label} to a display string, choosing the verb tense by status.
+ * `pending` (arguments still streaming) is in-flight just like `running`, so it
+ * takes the present-continuous form — a call that hasn't started must never read
+ * as though it already finished.
+ */
 function renderLabel(label: Label, status: ToolCallStatus): string {
-	const v = status === "running" ? label.verb.running : label.verb.done;
+	const inFlight = status === "running" || status === "pending";
+	const v = inFlight ? label.verb.running : label.verb.done;
 	return label.rest ? `${v} ${label.rest}` : v;
 }
 
@@ -583,7 +589,7 @@ export function buildMergedToolSummary(toolName: string, calls: MergedCall[], st
 	// A failed group must not display a positive aggregate ("found 3 notes") in red —
 	// mirror the single-call failed guard. Aggregates are also empty while running.
 	if (status === "failed") return { label, summary: "failed" };
-	const summary = status === "running" ? "" : (spec.aggregate?.(calls) ?? "");
+	const summary = status === "running" || status === "pending" ? "" : (spec.aggregate?.(calls) ?? "");
 	return { label, summary };
 }
 

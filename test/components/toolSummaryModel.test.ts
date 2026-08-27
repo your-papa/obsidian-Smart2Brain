@@ -319,3 +319,19 @@ describe("buildMergedToolSummary", () => {
 		expect(s.label).toContain("×2");
 	});
 });
+
+describe("buildToolSummary — pending calls", () => {
+	it("uses the present-continuous verb for a call whose args are still streaming", () => {
+		// A pending call has not started; labelling it "Edited notes" would claim
+		// work that hasn't happened. `pending` must read like `running`.
+		const summary = buildToolSummary("manage_notes", undefined, undefined, "pending");
+		expect(summary.label).toBe("Editing notes");
+		expect(summary.summary).toBe("");
+	});
+
+	it("matches the running label for the same tool", () => {
+		const pending = buildToolSummary("read_content", undefined, undefined, "pending");
+		const running = buildToolSummary("read_content", undefined, undefined, "running");
+		expect(pending.label).toBe(running.label);
+	});
+});

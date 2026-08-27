@@ -60,12 +60,18 @@ function isHiddenHumanSource(source: unknown): source is HiddenHumanSource {
 	return typeof source === "string" && HIDDEN_HUMAN_MESSAGE_SOURCES.has(source);
 }
 
-export type ToolCallStatus = "running" | "completed" | "failed";
+/**
+ * `pending` means the model is still streaming the call's arguments — the tool
+ * has not started executing and its `input` is not yet known. Only reachable
+ * live: a settled/checkpoint-replayed call is never pending.
+ */
+export type ToolCallStatus = "pending" | "running" | "completed" | "failed";
 
 export interface ToolCallState {
 	id: string;
 	name: string;
-	input: Record<string, unknown>;
+	/** Absent while `status` is `pending` — the arguments are still streaming. */
+	input?: Record<string, unknown>;
 	status: ToolCallStatus;
 	output?: unknown;
 	preamble?: string;
@@ -75,7 +81,7 @@ export interface ToolCallState {
 	parentToolCallId?: string;
 }
 
-export type AssistantTimelineEventType = "preamble" | "tool_start" | "tool_end";
+export type AssistantTimelineEventType = "preamble" | "tool_pending" | "tool_start" | "tool_end";
 
 export interface AssistantTimelineEvent {
 	id: string;
@@ -910,6 +916,41 @@ function deriveGenerationFromAssistantMessages(messages: BaseMessage[]): Message
 		generation = mergeGeneration(generation, extractGenerationFromAssistantMessage(msg));
 	}
 	return generation;
+}
+
+/**
+ * Ids of tool calls that were announced but never started, and so must be removed
+ * from the timeline.
+ *
+ * A `pending` entry comes from `tool_call_chunks` (the model naming a call before
+ * its arguments finish streaming) and is resolved by `on_tool_start`. LangChain
+ * validates arguments against the tool schema BEFORE firing that callback, so a
+ * call whose arguments don't match throws `ToolInputParsingException` and fires
+ * NEITHER tool callback — leaving the announcement with nothing to resolve it,
+ * shimmering as "running" indefinitely.
+ *
+ * Such calls are dropped rather than marked failed: the rejected call produces no
+ * ToolMessage and never reaches the checkpoint, the error is fed back to the model,
+ * and the model normally retries successfully within the same turn (appearing as
+ * its own card). A phantom "failed" row would report a failure the turn didn't
+ * actually suffer.
+ *
+ * `beforeToolCallId` scopes the sweep to calls announced before that call, which is
+ * what makes mid-stream cleanup sound: tool execution is ordered, so a call that has
+ * just ended proves every earlier announcement without a `tool_start` is dead. Omit
+ * it to sweep everything once the stream is over.
+ */
+export function selectUnresolvedPendingIds(calls: ToolCallState[], beforeToolCallId?: string): Set<string> {
+	const cutoff = beforeToolCallId ? calls.findIndex((t) => t.id === beforeToolCallId) : calls.length;
+	// findIndex returning -1 (unknown id) must not sweep the whole list, and a cutoff
+	// of 0 means the ending call is first, so there is nothing earlier to sweep.
+	if (cutoff <= 0) return new Set();
+	return new Set(
+		calls
+			.slice(0, cutoff)
+			.filter((t) => t.status === "pending")
+			.map((t) => t.id),
+	);
 }
 
 function buildTimelineFromToolCalls(
@@ -2237,6 +2278,22 @@ export class ChatSession {
 
 		if (!assistantMsg.assistantTimeline) assistantMsg.assistantTimeline = [];
 
+		const dropUnresolvedPending = (beforeToolCallId?: string) => {
+			const calls = assistantMsg.toolCalls;
+			if (!calls?.length) return;
+			const orphaned = selectUnresolvedPendingIds(calls, beforeToolCallId);
+			if (orphaned.size === 0) return;
+			Logger.debug("chatStore.consumeStream.dropped_unresolved_pending", {
+				toolCallIds: [...orphaned],
+			});
+			assistantMsg.toolCalls = calls.filter((t) => !orphaned.has(t.id));
+			if (assistantMsg.assistantTimeline) {
+				assistantMsg.assistantTimeline = assistantMsg.assistantTimeline.filter(
+					(e) => !(e.toolCallId && orphaned.has(e.toolCallId) && e.type !== "preamble"),
+				);
+			}
+		};
+
 		for await (const chunk of stream) {
 			if (chunk.type === "token") {
 				this.summarizingHistory = false;
@@ -2264,6 +2321,48 @@ export class ChatSession {
 				continue;
 			}
 
+			// The model has begun a tool call but is still streaming its arguments, so
+			// the tool hasn't started and we have no input yet. Show the call now rather
+			// than leaving the turn blank for however long the arguments take — for a
+			// `manage_notes` edit the arguments ARE the note body, so that wait is
+			// seconds. The matching `tool_start` upgrades this entry in place below.
+			if (chunk.type === "tool_pending") {
+				this.summarizingHistory = false;
+				hasSeenToolCall = true;
+				pendingStepReset = false;
+				// Clear the live answer spot exactly as tool_start does: the text emitted
+				// before this call is the call's preamble and is committed to the step by
+				// tool_start, so leaving it in `content` would render it twice.
+				tokenBuffer = "";
+				assistantMsg.content = "";
+				assistantMsg.contentAiMessageId = undefined;
+
+				if (!assistantMsg.toolCalls) assistantMsg.toolCalls = [];
+				if (!assistantMsg.toolCalls.some((t) => t.id === chunk.toolCallId)) {
+					assistantMsg.toolCalls.push({
+						id: chunk.toolCallId,
+						name: chunk.toolName,
+						status: "pending",
+						subAgentName: chunk.subAgentName,
+						parentToolCallId: chunk.parentToolCallId,
+					});
+				}
+
+				if (!assistantMsg.assistantTimeline.some((e) => e.toolCallId === chunk.toolCallId)) {
+					assistantMsg.assistantTimeline.push({
+						id: `pending-${chunk.toolCallId}-${assistantMsg.assistantTimeline.length}`,
+						type: "tool_pending",
+						toolCallId: chunk.toolCallId,
+						toolName: chunk.toolName,
+						status: "pending",
+						aiMessageId: chunk.aiMessageId,
+						subAgentName: chunk.subAgentName,
+						parentToolCallId: chunk.parentToolCallId,
+					});
+				}
+				continue;
+			}
+
 			if (chunk.type === "tool_start") {
 				this.summarizingHistory = false;
 				hasSeenToolCall = true;
@@ -2281,43 +2380,89 @@ export class ChatSession {
 				assistantMsg.contentAiMessageId = undefined;
 
 				if (!assistantMsg.toolCalls) assistantMsg.toolCalls = [];
-				assistantMsg.toolCalls.push({
-					id: chunk.toolCallId,
-					name: chunk.toolName,
-					input: this.normalizeToolInput(chunk.input),
-					status: "running",
-					preamble: isFirstWithPreamble ? preambleTrimmed : undefined,
-					subAgentName: chunk.subAgentName,
-					parentToolCallId: chunk.parentToolCallId,
-				});
+				// A `tool_pending` for this id already created the entry; upgrade it in
+				// place so the card doesn't duplicate or jump position when execution
+				// actually begins. Attribution stays as announced (tool_start's is
+				// authoritative, but identical here); only input/status/preamble fill in.
+				const announced = assistantMsg.toolCalls.find((t) => t.id === chunk.toolCallId);
+				if (announced) {
+					announced.name = chunk.toolName;
+					announced.input = this.normalizeToolInput(chunk.input);
+					announced.status = "running";
+					if (isFirstWithPreamble) announced.preamble = preambleTrimmed;
+					if (chunk.subAgentName) announced.subAgentName = chunk.subAgentName;
+					if (chunk.parentToolCallId) announced.parentToolCallId = chunk.parentToolCallId;
+				} else {
+					assistantMsg.toolCalls.push({
+						id: chunk.toolCallId,
+						name: chunk.toolName,
+						input: this.normalizeToolInput(chunk.input),
+						status: "running",
+						preamble: isFirstWithPreamble ? preambleTrimmed : undefined,
+						subAgentName: chunk.subAgentName,
+						parentToolCallId: chunk.parentToolCallId,
+					});
+				}
+
+				// The announced `tool_pending` event is already positioned in the timeline,
+				// so upgrade it in place. Pushing a second event would render the tool
+				// twice; and the preamble must be INSERTED BEFORE it (not appended) so the
+				// reasoning text still reads above the card it belongs to.
+				const announcedEventIdx = assistantMsg.assistantTimeline.findIndex(
+					(e) => e.type === "tool_pending" && e.toolCallId === chunk.toolCallId,
+				);
 
 				if (isFirstWithPreamble) {
-					assistantMsg.assistantTimeline.push({
+					const preambleEvent: AssistantTimelineEvent = {
 						id: `preamble-${chunk.toolCallId}-${assistantMsg.assistantTimeline.length}`,
 						type: "preamble",
 						toolCallId: chunk.toolCallId,
 						toolName: chunk.toolName,
 						content: preambleTrimmed,
 						aiMessageId: chunk.aiMessageId,
-					});
+					};
+					if (announcedEventIdx >= 0) {
+						assistantMsg.assistantTimeline.splice(announcedEventIdx, 0, preambleEvent);
+					} else {
+						assistantMsg.assistantTimeline.push(preambleEvent);
+					}
 				}
 
-				assistantMsg.assistantTimeline.push({
-					id: `start-${chunk.toolCallId}-${assistantMsg.assistantTimeline.length}`,
-					type: "tool_start",
-					toolCallId: chunk.toolCallId,
-					toolName: chunk.toolName,
-					input: this.normalizeToolInput(chunk.input),
-					status: "running",
-					aiMessageId: chunk.aiMessageId,
-					subAgentName: chunk.subAgentName,
-					parentToolCallId: chunk.parentToolCallId,
-				});
+				const startedEvent = assistantMsg.assistantTimeline.find(
+					(e) => e.type === "tool_pending" && e.toolCallId === chunk.toolCallId,
+				);
+				if (startedEvent) {
+					startedEvent.type = "tool_start";
+					startedEvent.toolName = chunk.toolName;
+					startedEvent.input = this.normalizeToolInput(chunk.input);
+					startedEvent.status = "running";
+					if (chunk.aiMessageId) startedEvent.aiMessageId = chunk.aiMessageId;
+					if (chunk.subAgentName) startedEvent.subAgentName = chunk.subAgentName;
+					if (chunk.parentToolCallId) startedEvent.parentToolCallId = chunk.parentToolCallId;
+				} else {
+					assistantMsg.assistantTimeline.push({
+						id: `start-${chunk.toolCallId}-${assistantMsg.assistantTimeline.length}`,
+						type: "tool_start",
+						toolCallId: chunk.toolCallId,
+						toolName: chunk.toolName,
+						input: this.normalizeToolInput(chunk.input),
+						status: "running",
+						aiMessageId: chunk.aiMessageId,
+						subAgentName: chunk.subAgentName,
+						parentToolCallId: chunk.parentToolCallId,
+					});
+				}
 				continue;
 			}
 
 			if (chunk.type === "tool_end") {
 				this.summarizingHistory = false;
+				// A call that finished proves any call announced BEFORE it never started:
+				// tool execution is ordered, so an earlier announcement that still has no
+				// tool_start was rejected at schema validation. Clearing it here rather
+				// than only at stream end matters — the turn can run for tens of seconds
+				// afterwards, and the dead card would shimmer for all of it.
+				dropUnresolvedPending(chunk.toolCallId);
 				// Determine tool completion status up-front so both ToolCallState
 				// and the timeline event use the same value.  During streaming the
 				// on_tool_end event does not carry a status flag, so we default to
@@ -2426,6 +2571,10 @@ export class ChatSession {
 				break;
 			}
 		}
+
+		// Sweep any call still pending once the stream is over — the run may have ended
+		// (or been aborted) before a superseding tool_end could clear it.
+		dropUnresolvedPending();
 
 		if (!assistantMsg.content) {
 			assistantMsg.content = hasSeenToolCall ? tokenBuffer.trim() : tokenBuffer;

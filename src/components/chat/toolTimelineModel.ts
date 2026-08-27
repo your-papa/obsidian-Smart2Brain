@@ -39,7 +39,9 @@ function toUnifiedFromEvent(event: AssistantTimelineEvent): UnifiedToolCall {
 		id: event.toolCallId ?? "",
 		name: event.toolName ?? "Unknown",
 		input: event.input,
-		status: "running",
+		// A `tool_pending` event is a call whose arguments are still streaming, so it
+		// carries no input and must not claim to be running yet.
+		status: event.type === "tool_pending" ? "pending" : "running",
 		subAgentName: event.subAgentName,
 		parentToolCallId: event.parentToolCallId,
 	};
@@ -94,7 +96,7 @@ export function buildStepsFromEvents(rawEvents: AssistantTimelineEvent[]): Timel
 
 			if (event.type === "preamble" && event.content?.trim() && event.toolCallId) {
 				pendingPreambles.set(event.toolCallId, event.content.trim());
-			} else if (event.type === "tool_start") {
+			} else if (event.type === "tool_start" || event.type === "tool_pending") {
 				const tc = toUnifiedFromEvent(event);
 				const p = pendingPreambles.get(tc.id);
 				if (p) {
@@ -110,7 +112,7 @@ export function buildStepsFromEvents(rawEvents: AssistantTimelineEvent[]): Timel
 		for (const event of rawEvents) {
 			if (event.type === "preamble" && event.content?.trim() && event.toolCallId) {
 				pendingPreambles.set(event.toolCallId, event.content.trim());
-			} else if (event.type === "tool_start") {
+			} else if (event.type === "tool_start" || event.type === "tool_pending") {
 				const tc = toUnifiedFromEvent(event);
 				const p = pendingPreambles.get(tc.id);
 				if (p) {
