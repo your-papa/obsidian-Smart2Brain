@@ -114,6 +114,17 @@ export interface PendingChangeEntry {
 	 * (in a later user turn's context block). Resolved-but-unreported entries are
 	 * reported exactly once; pending ones are re-reported until resolved. */
 	reportedToModel?: boolean;
+	/** Paths this entry previously lived at, oldest first, recorded whenever a
+	 * vault rename re-keys `change.path`.
+	 *
+	 * The rename handler overwrites `change.path` in place, so without this the
+	 * entry keeps no trace of where it was staged — and the model only ever knows
+	 * the original path. That makes an agent-side `discard` of a since-renamed
+	 * note unresolvable: neither the path nor (after a rename that also changes
+	 * the basename) the basename can reach it. Kept as history rather than a
+	 * single previous path so a note renamed twice is still reachable by the name
+	 * the model actually saw. */
+	formerPaths?: string[];
 }
 
 /**

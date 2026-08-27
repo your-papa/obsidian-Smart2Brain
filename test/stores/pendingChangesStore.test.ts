@@ -1147,6 +1147,77 @@ describe("PendingChangesStore", () => {
 	 * Pinned from the `replace_pending` side too, since that flag exists to
 	 * supersede and is the likeliest route back to clearing this by mistake.
 	 */
+	/**
+	 * Regression (PR #429 review, second pass): the rename handler overwrote
+	 * `change.path` in place, leaving the entry with no trace of where it was
+	 * staged — while the model knows it only by that original path. An
+	 * agent-side `discard` was then unresolvable whenever a rename also changed
+	 * the basename.
+	 */
+	describe("rename records the path it leaves", () => {
+		async function renameTo(newPath: string, oldPath: string) {
+			const renameCb = (plugin.app.vault.on as ReturnType<typeof vi.fn>).mock.calls.find(
+				(c) => c[0] === "rename",
+			)?.[1];
+			renameCb({ path: newPath }, oldPath);
+		}
+
+		beforeEach(async () => {
+			await store.load();
+		});
+
+		it("records the former path on the entry", async () => {
+			const [id] = store.addChanges(
+				[{ type: "update", path: "Notes/doc.md", originalContent: "a", newContent: "b" }],
+				"tc-1",
+				"thread-1",
+			);
+
+			await renameTo("Notes/renamed.md", "Notes/doc.md");
+
+			expect(store.getEntry(id)?.change.path).toBe("Notes/renamed.md");
+			expect(store.getEntry(id)?.formerPaths).toEqual(["Notes/doc.md"]);
+		});
+
+		it("accumulates across repeated renames, oldest first", async () => {
+			const [id] = store.addChanges(
+				[{ type: "update", path: "Notes/doc.md", originalContent: "a", newContent: "b" }],
+				"tc-1",
+				"thread-1",
+			);
+
+			await renameTo("Notes/interim.md", "Notes/doc.md");
+			await renameTo("Notes/final.md", "Notes/interim.md");
+
+			// The staged name must remain reachable however many renames follow.
+			expect(store.getEntry(id)?.formerPaths).toEqual(["Notes/doc.md", "Notes/interim.md"]);
+		});
+
+		it("survives a save/load round-trip", async () => {
+			store.addChanges(
+				[{ type: "update", path: "Notes/doc.md", originalContent: "a", newContent: "b" }],
+				"tc-1",
+				"thread-1",
+			);
+			await renameTo("Notes/renamed.md", "Notes/doc.md");
+
+			// Round-trip through the store's OWN save path and the persistence
+			// schema, which would silently strip an unknown key and make the discard
+			// unresolvable again after a reload.
+			store.cleanup(); // flushes the debounced save
+			await vi.waitFor(() => expect(plugin.app.vault.adapter.write).toHaveBeenCalled());
+			const written = vi.mocked(plugin.app.vault.adapter.write).mock.calls.at(-1)?.[1] as string;
+			expect(written).toContain("formerPaths");
+
+			const fresh = new PendingChangesStore(plugin);
+			vi.mocked(plugin.app.vault.adapter.exists).mockResolvedValue(true);
+			vi.mocked(plugin.app.vault.adapter.read).mockResolvedValue(written);
+			await fresh.load();
+
+			expect(fresh.getPendingForThread("thread-1")[0]?.formerPaths).toEqual(["Notes/doc.md"]);
+		});
+	});
+
 	describe("replace_pending-style supersede keeps the undo reachable", () => {
 		it("keeps the superseded entry's applied content resolvable", async () => {
 			const original = "a\nkeep\nb\n";

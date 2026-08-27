@@ -1193,7 +1193,7 @@ describe("manageNotes tool", () => {
 			expect(result).toContain("Withdrew 1 pending proposal(s)");
 		});
 
-		it("withdraws a renamed note's proposal via its current entry path", async () => {
+		it("withdraws a moved note's proposal via its current entry path", async () => {
 			// #handleFileRename re-keys the entry, so the path the model remembers
 			// no longer resolves — but the basename still identifies the proposal.
 			mockResolveVaultFileDetailed.mockReturnValue({ status: "not_found" });
@@ -1203,6 +1203,55 @@ describe("manageNotes tool", () => {
 			await tool.invoke({ operations: [{ type: "discard", path: "Notes/doc.md" }] }, THREAD_CONFIG);
 
 			expect(mockDiscardPendingForPath).toHaveBeenCalledWith("Archive/doc.md", "test-thread-id");
+		});
+
+		/**
+		 * Regression (PR #429 review, second pass): a rename that also changes the
+		 * BASENAME leaves nothing for the name-based tiers to match — the model
+		 * knows only the staged path, and the entry was re-keyed in place. The
+		 * store now records the path it leaves in `formerPaths`.
+		 */
+		it("withdraws a renamed note's proposal via the path it was staged under", async () => {
+			mockResolveVaultFileDetailed.mockReturnValue({ status: "not_found" });
+			mockGetPendingForThread.mockReturnValue([
+				{ change: { path: "Notes/renamed.md" }, formerPaths: ["Notes/doc.md"] },
+			]);
+			mockDiscardPendingForPath.mockReturnValue({ discarded: 1, skippedApplied: 0 });
+
+			const result = await tool.invoke(
+				{ operations: [{ type: "discard", path: "Notes/doc.md" }] },
+				THREAD_CONFIG,
+			);
+
+			expect(mockDiscardPendingForPath).toHaveBeenCalledWith("Notes/renamed.md", "test-thread-id");
+			expect(result).toContain("Withdrew 1 pending proposal(s)");
+		});
+
+		it("follows a note renamed more than once back to the staged name", async () => {
+			mockResolveVaultFileDetailed.mockReturnValue({ status: "not_found" });
+			mockGetPendingForThread.mockReturnValue([
+				{ change: { path: "Notes/final.md" }, formerPaths: ["Notes/doc.md", "Notes/interim.md"] },
+			]);
+			mockDiscardPendingForPath.mockReturnValue({ discarded: 1, skippedApplied: 0 });
+
+			await tool.invoke({ operations: [{ type: "discard", path: "Notes/doc.md" }] }, THREAD_CONFIG);
+
+			expect(mockDiscardPendingForPath).toHaveBeenCalledWith("Notes/final.md", "test-thread-id");
+		});
+
+		it("prefers a former-path match over a looser basename match", async () => {
+			mockResolveVaultFileDetailed.mockReturnValue({ status: "not_found" });
+			mockGetPendingForThread.mockReturnValue([
+				{ change: { path: "Notes/renamed.md" }, formerPaths: ["Notes/doc.md"] },
+				// Same basename as the reference, but never staged under that path.
+				{ change: { path: "Archive/doc.md" } },
+			]);
+			mockDiscardPendingForPath.mockReturnValue({ discarded: 1, skippedApplied: 0 });
+
+			await tool.invoke({ operations: [{ type: "discard", path: "Notes/doc.md" }] }, THREAD_CONFIG);
+
+			expect(mockDiscardPendingForPath).toHaveBeenCalledWith("Notes/renamed.md", "test-thread-id");
+			expect(mockDiscardPendingForPath).not.toHaveBeenCalledWith("Archive/doc.md", "test-thread-id");
 		});
 
 		it("prefers the vault-resolved path over a looser basename match", async () => {
