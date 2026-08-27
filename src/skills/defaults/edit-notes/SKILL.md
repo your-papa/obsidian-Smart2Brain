@@ -23,11 +23,16 @@ replacing it. The user then sees both edits. When the user is correcting you
 - **Replacing your own pending edit** — re-stage the update with
   `"replace_pending": true`. Your earlier proposal is dropped and only the new
   edit is reviewed.
-- **Withdrawing an edit entirely** — use a `discard` operation for that path. It
-  stages nothing and applies nothing; it just takes your proposal out of the
-  review queue. Safe to use when you are unsure whether anything is pending. If
-  it reports that the name matches more than one pending proposal, re-run it with
-  the full path of the one you meant — do not guess.
+- **Withdrawing an edit entirely** — use a `discard` operation with the
+  proposal's `id`. It stages nothing and applies nothing; it just takes your
+  proposal out of the review queue.
+
+Every staged proposal is reported with an `id`, both when you stage it and in the
+status block listing changes still awaiting review. `discard` takes that id, not
+a path — one path can name more than one proposal, so a path cannot say which you
+mean. Use an id you were actually given; never invent or guess one. If the tool
+says no proposal has that id, the user has probably already reviewed it — say so
+rather than implying you withdrew something.
 - **Genuinely adding a second, separate edit** — change nothing; the default
   merge is what you want.
 

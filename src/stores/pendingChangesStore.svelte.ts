@@ -32,7 +32,7 @@ const pendingChangeEntrySchema = z.object({
 	threadId: z.string(),
 	createdAt: z.number(),
 	reportedToModel: z.boolean().optional(),
-	formerPaths: z.array(z.string()).optional(),
+	shortId: z.string().optional(),
 });
 
 const pendingChangesArraySchema = z.array(pendingChangeEntrySchema);
@@ -91,6 +91,28 @@ function buildPartialContent(changes: Change[], groupIndex: number, targetUsesNe
 
 	return result;
 }
+/** Characters in a freshly minted short id, before collision lengthening. */
+const SHORT_ID_LENGTH = 6;
+
+/**
+ * A short handle for an entry, unique among `taken`.
+ *
+ * Derived from the END of the UUID, never the start: UUIDv7's leading bits are
+ * a millisecond timestamp, so entries staged in one batch share a long prefix —
+ * a leading 8-char slice collided on every member of a 12-entry burst in
+ * testing. The trailing bits are random, but not collision-proof at scale
+ * (~1 per 500 ids at 6 chars), so this lengthens on collision rather than
+ * truncating blindly. Falls back to the full id if even that collides.
+ */
+function mintShortId(fullId: string, taken: ReadonlySet<string>): string {
+	const compact = fullId.replace(/-/g, "");
+	for (let length = SHORT_ID_LENGTH; length <= compact.length; length++) {
+		const candidate = compact.slice(-length);
+		if (!taken.has(candidate)) return candidate;
+	}
+	return fullId;
+}
+
 export function getPendingChangesStore(): PendingChangesStore {
 	if (!_store) throw new Error("PendingChangesStore not initialized");
 	return _store;
@@ -142,6 +164,7 @@ export class PendingChangesStore {
 				this.#entries = [];
 			}
 		}
+		this.#backfillShortIds();
 		await this.#pruneOrphanedThreads();
 		this.#renameHandler = this.#plugin.app.vault.on("rename", (file, oldPath) => {
 			this.#handleFileRename(oldPath, file.path);
@@ -152,6 +175,25 @@ export class PendingChangesStore {
 		if (this.#entries.length > 0) {
 			this.notifyChange();
 		}
+	}
+
+	/**
+	 * Give every loaded entry a short id. Entries persisted before short ids
+	 * existed have none, and without one the model has no way to name them — they
+	 * would be permanently undiscardable while still sitting in the review queue.
+	 * Minted against the ids already present so a backfilled entry cannot collide
+	 * with one that was persisted.
+	 */
+	#backfillShortIds(): void {
+		const taken = new Set(this.#entries.map((entry) => entry.shortId).filter((id): id is string => !!id));
+		let changed = false;
+		for (const entry of this.#entries) {
+			if (entry.shortId) continue;
+			entry.shortId = mintShortId(entry.id, taken);
+			taken.add(entry.shortId);
+			changed = true;
+		}
+		if (changed) this.scheduleSave();
 	}
 
 	private get storagePath(): string {
@@ -299,14 +341,23 @@ export class PendingChangesStore {
 		}
 
 		const createdAt = Date.now();
-		const entries: PendingChangeEntry[] = changes.map((change) => ({
-			id: genUUIDv7(),
-			change,
-			status: "pending",
-			toolCallId,
-			threadId,
-			createdAt,
-		}));
+		// Seeded with every live short id and grown as we go, so a batch cannot
+		// collide with existing entries OR within itself.
+		const takenShortIds = new Set(this.#entries.map((entry) => entry.shortId).filter((id): id is string => !!id));
+		const entries: PendingChangeEntry[] = changes.map((change) => {
+			const id = genUUIDv7();
+			const shortId = mintShortId(id, takenShortIds);
+			takenShortIds.add(shortId);
+			return {
+				id,
+				shortId,
+				change,
+				status: "pending",
+				toolCallId,
+				threadId,
+				createdAt,
+			};
+		});
 
 		this.#entries.push(...entries);
 		this.scheduleSave();
@@ -732,14 +783,19 @@ export class PendingChangesStore {
 	 * Only consults entries the model itself staged in this thread — outcomes for
 	 * other chats' proposals would be noise it has no proposal to correlate with.
 	 */
-	takeReviewOutcomesForThread(threadId: string): { outcomes: ReviewOutcomeRef[]; pendingPaths: string[] } {
+	takeReviewOutcomesForThread(threadId: string): {
+		outcomes: ReviewOutcomeRef[];
+		pendingProposals: { path: string; shortId: string }[];
+	} {
 		const outcomes: ReviewOutcomeRef[] = [];
-		const pendingPaths: string[] = [];
+		const pendingProposals: { path: string; shortId: string }[] = [];
 		let changed = false;
 		for (const entry of this.#entries) {
 			if (entry.threadId !== threadId) continue;
 			if (entry.status === "pending") {
-				pendingPaths.push(entry.change.path);
+				// `shortId` is backfilled on load, so a pending entry without one
+				// cannot normally exist; skip rather than emit an unusable id.
+				if (entry.shortId) pendingProposals.push({ path: entry.change.path, shortId: entry.shortId });
 				continue;
 			}
 			if (entry.reportedToModel) continue;
@@ -758,7 +814,7 @@ export class PendingChangesStore {
 			changed = true;
 		}
 		if (changed) this.scheduleSave();
-		return { outcomes, pendingPaths };
+		return { outcomes, pendingProposals };
 	}
 
 	/** Mark entries as already surfaced to the model, so the next turn's outcome
@@ -800,41 +856,41 @@ export class PendingChangesStore {
 	}
 
 	/**
-	 * Reject this thread's pending entries for `filePath` — the agent's own
-	 * retraction path (`manage_notes` `discard`), so it can withdraw a proposal
-	 * it no longer stands behind instead of only ever stacking new ones on top.
+	 * Withdraw one pending proposal by its short id — the agent's own retraction
+	 * path (`manage_notes` `discard`), so it can take back a proposal it no
+	 * longer stands behind instead of only ever stacking new ones on top.
+	 *
+	 * Keyed by id rather than path because a path is not identity: it can move
+	 * with a rename, be reused by a different note, or name two proposals at once
+	 * (a since-renamed one and whatever took its place). Every attempt to rank
+	 * those cases picked wrong in some scenario; an id has none of that ambiguity.
 	 *
 	 * Scoped to `threadId` deliberately: another chat's proposal is not this
-	 * agent's to drop, matching how `resolveUpdateBases` and the update-dedup
-	 * both refuse to reach across threads.
+	 * agent's to drop, matching how the update-dedup refuses to reach across
+	 * threads.
 	 *
-	 * Entries holding unreverted partially-applied content are SKIPPED, not
+	 * An entry holding unreverted partially-applied content is REFUSED, not
 	 * rejected. That content is on disk because the user accepted a diff group;
-	 * silently reverting it (or marking it resolved while it sits there) would
-	 * undo their own decision. They are returned separately so the caller can
-	 * tell the model, which must then leave them to the user.
-	 *
-	 * @returns the number discarded, plus the paths' entry count that was skipped.
+	 * silently resolving the entry while it sits there would discard their only
+	 * undo record. The caller reports that so the model leaves it to the user.
 	 */
-	discardPendingForPath(filePath: string, threadId: string): { discarded: number; skippedApplied: number } {
-		let discarded = 0;
-		let skippedApplied = 0;
-		for (const entry of this.#entries) {
-			if (entry.threadId !== threadId) continue;
-			if (entry.status !== "pending") continue;
-			if (entry.change.path !== filePath) continue;
-			if (this.hasUnrevertedApplication(entry)) {
-				skippedApplied++;
-				continue;
-			}
-			entry.status = "rejected";
-			discarded++;
-		}
-		if (discarded > 0) {
-			this.scheduleSave();
-			this.notifyChange();
-		}
-		return { discarded, skippedApplied };
+	discardPendingById(shortId: string, threadId: string): "discarded" | "not_found" | "partially_applied" {
+		const entry = this.#entries.find(
+			(e) => e.shortId === shortId && e.threadId === threadId && e.status === "pending",
+		);
+		if (!entry) return "not_found";
+		if (this.hasUnrevertedApplication(entry)) return "partially_applied";
+
+		entry.status = "rejected";
+		this.scheduleSave();
+		this.notifyChange();
+		return "discarded";
+	}
+
+	/** Look up a pending entry by the short id the model was given. Thread-scoped
+	 * for the same reason as `discardPendingById`. */
+	getPendingByShortId(shortId: string, threadId: string): PendingChangeEntry | undefined {
+		return this.#entries.find((e) => e.shortId === shortId && e.threadId === threadId && e.status === "pending");
 	}
 
 	/** Count distinct OTHER threads that also have a pending update to `filePath`.
@@ -917,14 +973,6 @@ export class PendingChangesStore {
 			// reported success while the applied content sat at the new path.
 			if (entry.status !== "pending" && !this.hasUnrevertedApplication(entry)) continue;
 			if (entry.change.path === oldPath) {
-				// Keep the path we are leaving. `change.path` is overwritten in place,
-				// so otherwise the entry retains no trace of where it was staged —
-				// while the model still knows it only by that original path. An
-				// agent-side `discard` of a since-renamed note would then be
-				// unresolvable whenever the rename also changed the basename.
-				// Appended (not replaced) so a twice-renamed note stays reachable by
-				// the name the model actually saw.
-				entry.formerPaths = [...(entry.formerPaths ?? []), oldPath];
 				entry.change.path = newPath;
 				changed = true;
 			}

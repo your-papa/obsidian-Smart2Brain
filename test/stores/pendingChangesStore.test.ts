@@ -880,7 +880,7 @@ describe("PendingChangesStore", () => {
 	 * ------------------------------------------------------------------------*/
 
 	describe("takeReviewOutcomesForThread", () => {
-		it("reports resolved entries once and pending paths every time", async () => {
+		it("reports resolved entries once and pending proposals every time", async () => {
 			const file = makeTFile("a.md");
 			(plugin.app.vault.getAbstractFileByPath as ReturnType<typeof vi.fn>).mockReturnValue(file);
 			(plugin.app.vault.read as ReturnType<typeof vi.fn>).mockResolvedValue("x");
@@ -903,12 +903,15 @@ describe("PendingChangesStore", () => {
 				{ path: "a.md", outcome: "accepted" },
 				{ path: "b.md", outcome: "rejected" },
 			]);
-			expect(first.pendingPaths).toEqual(["c.md"]);
+			// Pending proposals carry the id the model discards by — this repeating
+			// every turn is what keeps an id reachable once the staging tool result
+			// has fallen out of context.
+			expect(first.pendingProposals).toEqual([{ path: "c.md", shortId: expect.any(String) }]);
 
 			// Resolved outcomes are delivered exactly once; pending repeats.
 			const second = store.takeReviewOutcomesForThread("thread-1");
 			expect(second.outcomes).toEqual([]);
-			expect(second.pendingPaths).toEqual(["c.md"]);
+			expect(second.pendingProposals).toEqual(first.pendingProposals);
 		});
 
 		it("reports a group-resolved entry with applied text as partially applied", async () => {
@@ -1061,160 +1064,149 @@ describe("PendingChangesStore", () => {
 	});
 
 	/* ----------------------------------------------------------------------
-	 * discardPendingForPath — the agent's retraction path (manage_notes discard)
+	 * discardPendingById — the agent's retraction path (manage_notes discard)
 	 * --------------------------------------------------------------------*/
 
-	describe("discardPendingForPath", () => {
-		it("rejects this thread's pending entries for the path", () => {
-			const [id] = store.addChanges(
-				[{ type: "update", path: "note.md", originalContent: "old", newContent: "new" }],
-				"tc-1",
-				"thread-1",
-			);
+	describe("discardPendingById", () => {
+		function stage(path: string, threadId = "thread-1") {
+			const [id] = store.addChanges([{ type: "create", path, content: "x" }], "tc-1", threadId);
+			return store.getEntry(id)!;
+		}
 
-			expect(store.discardPendingForPath("note.md", "thread-1")).toEqual({ discarded: 1, skippedApplied: 0 });
-			expect(store.getEntry(id)?.status).toBe("rejected");
+		it("withdraws the entry with that short id", () => {
+			const entry = stage("note.md");
+
+			expect(store.discardPendingById(entry.shortId!, "thread-1")).toBe("discarded");
+			expect(store.getEntry(entry.id)?.status).toBe("rejected");
 			expect(store.getPendingCount("thread-1")).toBe(0);
 		});
 
-		it("leaves other threads' proposals alone", () => {
-			const [mine] = store.addChanges(
-				[{ type: "update", path: "note.md", originalContent: "old", newContent: "a" }],
-				"tc-1",
-				"thread-1",
-			);
-			const [theirs] = store.addChanges(
-				[{ type: "update", path: "note.md", originalContent: "old", newContent: "b" }],
-				"tc-2",
-				"thread-2",
-			);
+		it("withdraws only that entry, not others in the thread", () => {
+			const target = stage("a.md");
+			const other = stage("b.md");
 
-			expect(store.discardPendingForPath("note.md", "thread-1").discarded).toBe(1);
-			expect(store.getEntry(mine)?.status).toBe("rejected");
-			// Another chat's proposal is never this agent's to withdraw.
-			expect(store.getEntry(theirs)?.status).toBe("pending");
+			store.discardPendingById(target.shortId!, "thread-1");
+
+			expect(store.getEntry(other.id)?.status).toBe("pending");
 		});
 
-		it("leaves other paths in the same thread alone", () => {
-			store.addChanges([{ type: "create", path: "a.md", content: "A" }], "tc-1", "thread-1");
-			const [b] = store.addChanges([{ type: "create", path: "b.md", content: "B" }], "tc-2", "thread-1");
+		it("will not reach another thread's proposal", () => {
+			const theirs = stage("note.md", "thread-2");
 
-			expect(store.discardPendingForPath("a.md", "thread-1").discarded).toBe(1);
-			expect(store.getEntry(b)?.status).toBe("pending");
+			// Correct id, wrong thread — another chat's proposal is not ours to drop.
+			expect(store.discardPendingById(theirs.shortId!, "thread-1")).toBe("not_found");
+			expect(store.getEntry(theirs.id)?.status).toBe("pending");
 		});
 
-		it("reports zero rather than throwing when nothing is pending", () => {
-			expect(store.discardPendingForPath("absent.md", "thread-1")).toEqual({
-				discarded: 0,
-				skippedApplied: 0,
-			});
+		it("reports not_found for an unknown id rather than throwing", () => {
+			expect(store.discardPendingById("nosuch", "thread-1")).toBe("not_found");
 		});
 
-		it("skips entries whose groups the user already partly applied", async () => {
+		it("refuses an entry whose groups the user already partly applied", async () => {
 			// Two separated change groups, so accepting one leaves the entry pending
-			// with applied content on disk (a single group would accept the whole
-			// entry and clear the snapshot).
+			// with applied content on disk (a single group would accept it outright).
 			const original = "a\nkeep\nb\n";
 			const [id] = store.addChanges(
 				[{ type: "update", path: "note.md", originalContent: original, newContent: "A\nkeep\nB\n" }],
 				"tc-1",
 				"thread-1",
 			);
-
-			// Accept one group so real content lands in the note — the user's own
-			// decision, which a later agent-side discard must not quietly undo.
-			const file = makeTFile("note.md");
-			vi.mocked(plugin.app.vault.getAbstractFileByPath).mockReturnValue(file);
+			vi.mocked(plugin.app.vault.getAbstractFileByPath).mockReturnValue(makeTFile("note.md"));
 			vi.mocked(plugin.app.vault.read).mockResolvedValue(original);
 			await store.acceptChangeGroup(id, 0);
-			expect(store.hasUnrevertedApplication(store.getEntry(id)!)).toBe(true);
 
-			expect(store.discardPendingForPath("note.md", "thread-1")).toEqual({
-				discarded: 0,
-				skippedApplied: 1,
-			});
+			const entry = store.getEntry(id)!;
+			expect(store.hasUnrevertedApplication(entry)).toBe(true);
+			// That text is on disk because the USER accepted it; resolving the entry
+			// would discard their only undo record.
+			expect(store.discardPendingById(entry.shortId!, "thread-1")).toBe("partially_applied");
 			expect(store.getEntry(id)?.status).toBe("pending");
+		});
+
+		it("getPendingByShortId is scoped the same way", () => {
+			const entry = stage("note.md");
+
+			expect(store.getPendingByShortId(entry.shortId!, "thread-1")?.id).toBe(entry.id);
+			expect(store.getPendingByShortId(entry.shortId!, "other-thread")).toBeUndefined();
+
+			store.discardPendingById(entry.shortId!, "thread-1");
+			// Resolved entries are not pending, so they are no longer addressable.
+			expect(store.getPendingByShortId(entry.shortId!, "thread-1")).toBeUndefined();
 		});
 	});
 
 	/**
-	 * Raised in the PR #429 review as "replacement leaves a stuck entry". It is
-	 * not a defect: the applied text is still in the note, so the superseded entry
-	 * must stay actionable to keep the undo reachable — see "keeps an entry
-	 * actionable when superseded by a newer proposal" above, and the
-	 * `initialOriginalContent` audit block it belongs to.
-	 *
-	 * Pinned from the `replace_pending` side too, since that flag exists to
-	 * supersede and is the likeliest route back to clearing this by mistake.
+	 * Short ids ARE the retraction mechanism — `discard` takes one and the model
+	 * has no other handle on a proposal. A collision would aim a discard at the
+	 * wrong note; a missing id would make one unreachable.
 	 */
-	/**
-	 * Regression (PR #429 review, second pass): the rename handler overwrote
-	 * `change.path` in place, leaving the entry with no trace of where it was
-	 * staged — while the model knows it only by that original path. An
-	 * agent-side `discard` was then unresolvable whenever a rename also changed
-	 * the basename.
-	 */
-	describe("rename records the path it leaves", () => {
-		async function renameTo(newPath: string, oldPath: string) {
-			const renameCb = (plugin.app.vault.on as ReturnType<typeof vi.fn>).mock.calls.find(
-				(c) => c[0] === "rename",
-			)?.[1];
-			renameCb({ path: newPath }, oldPath);
-		}
+	describe("short ids", () => {
+		it("are unique across a same-millisecond batch", () => {
+			// UUIDv7's leading bits are a timestamp, so entries staged together share
+			// a long prefix — a leading-slice id would collide on every one of these.
+			const ids = store.addChanges(
+				Array.from({ length: 25 }, (_, i) => ({
+					type: "create" as const,
+					path: `note-${i}.md`,
+					content: "x",
+				})),
+				"tc-1",
+				"thread-1",
+			);
 
-		beforeEach(async () => {
+			const shortIds = ids.map((id) => store.getEntry(id)?.shortId);
+			expect(shortIds.every(Boolean)).toBe(true);
+			expect(new Set(shortIds).size).toBe(ids.length);
+		});
+
+		it("do not collide with ids staged in an earlier batch", () => {
+			const first = store.addChanges([{ type: "create", path: "a.md", content: "x" }], "tc-1", "thread-1");
+			const second = store.addChanges([{ type: "create", path: "b.md", content: "x" }], "tc-2", "thread-1");
+
+			expect(store.getEntry(first[0])?.shortId).not.toBe(store.getEntry(second[0])?.shortId);
+		});
+
+		it("survive a save/load round-trip", async () => {
 			await store.load();
-		});
+			const [id] = store.addChanges([{ type: "create", path: "a.md", content: "x" }], "tc-1", "thread-1");
+			const shortId = store.getEntry(id)?.shortId;
 
-		it("records the former path on the entry", async () => {
-			const [id] = store.addChanges(
-				[{ type: "update", path: "Notes/doc.md", originalContent: "a", newContent: "b" }],
-				"tc-1",
-				"thread-1",
-			);
-
-			await renameTo("Notes/renamed.md", "Notes/doc.md");
-
-			expect(store.getEntry(id)?.change.path).toBe("Notes/renamed.md");
-			expect(store.getEntry(id)?.formerPaths).toEqual(["Notes/doc.md"]);
-		});
-
-		it("accumulates across repeated renames, oldest first", async () => {
-			const [id] = store.addChanges(
-				[{ type: "update", path: "Notes/doc.md", originalContent: "a", newContent: "b" }],
-				"tc-1",
-				"thread-1",
-			);
-
-			await renameTo("Notes/interim.md", "Notes/doc.md");
-			await renameTo("Notes/final.md", "Notes/interim.md");
-
-			// The staged name must remain reachable however many renames follow.
-			expect(store.getEntry(id)?.formerPaths).toEqual(["Notes/doc.md", "Notes/interim.md"]);
-		});
-
-		it("survives a save/load round-trip", async () => {
-			store.addChanges(
-				[{ type: "update", path: "Notes/doc.md", originalContent: "a", newContent: "b" }],
-				"tc-1",
-				"thread-1",
-			);
-			await renameTo("Notes/renamed.md", "Notes/doc.md");
-
-			// Round-trip through the store's OWN save path and the persistence
-			// schema, which would silently strip an unknown key and make the discard
-			// unresolvable again after a reload.
-			store.cleanup(); // flushes the debounced save
+			// Through the store's OWN save path and the persistence schema, which
+			// would silently strip an unknown key and make the entry undiscardable.
+			store.cleanup();
 			await vi.waitFor(() => expect(plugin.app.vault.adapter.write).toHaveBeenCalled());
 			const written = vi.mocked(plugin.app.vault.adapter.write).mock.calls.at(-1)?.[1] as string;
-			expect(written).toContain("formerPaths");
+			expect(written).toContain("shortId");
 
 			const fresh = new PendingChangesStore(plugin);
 			vi.mocked(plugin.app.vault.adapter.exists).mockResolvedValue(true);
 			vi.mocked(plugin.app.vault.adapter.read).mockResolvedValue(written);
 			await fresh.load();
 
-			expect(fresh.getPendingForThread("thread-1")[0]?.formerPaths).toEqual(["Notes/doc.md"]);
+			expect(fresh.getPendingByShortId(shortId!, "thread-1")).toBeDefined();
+		});
+
+		it("are backfilled for entries persisted before short ids existed", async () => {
+			// Without this such an entry could never be named, so it would sit in the
+			// review queue permanently undiscardable.
+			const legacy = JSON.stringify([
+				{
+					id: "01a0430a-d52a-702a-8711-8436ab485534",
+					change: { type: "create", path: "old.md", content: "x" },
+					status: "pending",
+					toolCallId: "tc-old",
+					threadId: "thread-1",
+					createdAt: 1,
+				},
+			]);
+			vi.mocked(plugin.app.vault.adapter.exists).mockResolvedValue(true);
+			vi.mocked(plugin.app.vault.adapter.read).mockResolvedValue(legacy);
+
+			await store.load();
+
+			const entry = store.getPendingForThread("thread-1")[0];
+			expect(entry?.shortId).toBeTruthy();
+			expect(store.discardPendingById(entry.shortId!, "thread-1")).toBe("discarded");
 		});
 	});
 

@@ -114,17 +114,19 @@ export interface PendingChangeEntry {
 	 * (in a later user turn's context block). Resolved-but-unreported entries are
 	 * reported exactly once; pending ones are re-reported until resolved. */
 	reportedToModel?: boolean;
-	/** Paths this entry previously lived at, oldest first, recorded whenever a
-	 * vault rename re-keys `change.path`.
+	/** Short, stable handle the model names this proposal by (`manage_notes`
+	 * `discard`).
 	 *
-	 * The rename handler overwrites `change.path` in place, so without this the
-	 * entry keeps no trace of where it was staged — and the model only ever knows
-	 * the original path. That makes an agent-side `discard` of a since-renamed
-	 * note unresolvable: neither the path nor (after a rename that also changes
-	 * the basename) the basename can reach it. Kept as history rather than a
-	 * single previous path so a note renamed twice is still reachable by the name
-	 * the model actually saw. */
-	formerPaths?: string[];
+	 * A proposal is an object with its own lifetime; its path is a mutable label
+	 * that can move, be reused, or name two proposals at once — so paths cannot
+	 * identify one. `id` already provides identity but is a 36-char UUID whose
+	 * members differ only in their last characters within a batch, which is
+	 * error-prone for a model to reproduce. This is the same identity in a form
+	 * that survives being copied by hand.
+	 *
+	 * Optional only for entries persisted before this existed; one is minted on
+	 * load so every entry has one in memory. */
+	shortId?: string;
 }
 
 /**
@@ -147,5 +149,15 @@ export interface ReviewOutcomeRef {
  * appended context block can be exactly reconstructed and stripped for display. */
 export interface ReviewStatusRef {
 	outcomes: ReviewOutcomeRef[];
-	pendingPaths: string[];
+	/** Proposals still awaiting review, with the short id the model discards by.
+	 *
+	 * Re-listed on every turn, which is what makes an id durable: the tool result
+	 * that first reported it eventually falls out of context, and without an id
+	 * the model cannot name the proposal to withdraw it. */
+	pendingProposals: { path: string; shortId: string }[];
+	/** Pre-`pendingProposals` shape, still read when reconstructing the context
+	 * block of a message persisted before ids existed. The block is stripped from
+	 * the displayed message by exact string match, so an old message must still
+	 * render byte-identically or its suffix leaks into the UI. Never written. */
+	pendingPaths?: string[];
 }

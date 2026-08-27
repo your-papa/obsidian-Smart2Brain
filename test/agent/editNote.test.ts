@@ -3,7 +3,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 vi.mock("obsidian", () => import("../__mocks__/obsidian"));
 
 // Mock pendingChangesStore
-const mockAddChanges = vi.fn();
+// Returns entry ids like the real store, which the summary reads back to report
+// each staged proposal's discard id.
+const mockAddChanges = vi.fn().mockReturnValue([]);
 const mockIsPathAllowed = vi.fn().mockReturnValue(true);
 const mockShouldBlockFile = vi.fn().mockReturnValue(false);
 const mockCountOtherThreads = vi.fn().mockReturnValue(0);
@@ -15,6 +17,7 @@ vi.mock("../../src/stores/pendingChangesStore.svelte", () => ({
 		shouldBlockFile: mockShouldBlockFile,
 		countOtherThreadsPendingUpdate: mockCountOtherThreads,
 		getPendingUpdatesForPath: (...args: unknown[]) => mockGetPendingUpdatesForPath(...args),
+		getEntry: () => undefined,
 	}),
 }));
 
@@ -87,6 +90,7 @@ describe("manageNotes tool (update operations)", () => {
 		mockShouldBlockFile.mockReturnValue(false);
 		mockGetPendingUpdatesForPath.mockReturnValue([]);
 		mockCountOtherThreads.mockReturnValue(0);
+		mockAddChanges.mockReturnValue([]);
 		app = createMockApp();
 		tool = createManageNotesTool(app);
 	});

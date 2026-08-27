@@ -49,10 +49,10 @@ const updateOperationSchema = z.object({
 
 const discardOperationSchema = z.object({
 	type: z.literal("discard"),
-	path: z
+	id: z
 		.string()
 		.describe(
-			"File path or wiki link reference whose pending (not yet reviewed) proposals from this chat should be withdrawn, e.g. 'Notes/todo.md' or '[[todo]]'",
+			"The id of the pending proposal to withdraw, exactly as given when it was staged (or in the status block listing changes awaiting review). Not a file path — one path can name more than one proposal. Never guess an id.",
 		),
 });
 
@@ -391,136 +391,49 @@ function summarizeOperations(changes: PendingChange[]): string {
 		.join(", ");
 }
 
-/**
- * The entry paths a `discard` should target, given the reference the model wrote.
- *
- * A discard names a PROPOSAL, not a file, so it must resolve against the entries
- * rather than the vault. Three cases the vault alone cannot serve:
- *
- *   - the note was renamed after staging (`#handleFileRename` re-keys the entry
- *     to the new path, so the old path the model remembers no longer resolves —
- *     which is why that handler records the path it leaves in `formerPaths`);
- *   - the proposal is a delete for a note that is already gone; and
- *   - the model used a wiki-link, which normalizes to a bare basename that never
- *     equals the canonical `Notes/todo.md` an entry is keyed by.
- *
- * Resolution is strict-to-loose, stopping at the first tier that hits so a loose
- * match can never override an exact one:
- *
- *   1. proposals living AT the name — an entry whose path equals the reference,
- *      or equals what the vault resolves the reference to. Both answer "which
- *      proposal is at this name now" and are merged;
- *   2. a proposal one of whose `formerPaths` equals it — the note was renamed
- *      after staging and the model still knows it by the name it was staged
- *      under. An exact match on a path the entry genuinely had, so it beats the
- *      basename tier: a rename that also changes the basename
- *      (`Notes/doc.md` -> `Notes/renamed.md`) is unreachable by name alone;
- *   3. proposals whose basename matches, with or without the `.md` the model may
- *      have omitted — the wiki-link case, and renames that kept the basename but
- *      predate `formerPaths` being recorded.
- *
- * A tier may legitimately return several paths (two pending proposals for
- * same-named notes in different folders). All are this thread's own proposals and
- * the model asked to withdraw that name, so all are withdrawn and each is
- * reported by full path — silently picking one would leave the others stuck.
- *
- * But when tiers 1 and 2 hit DIFFERENT proposals the name is genuinely ambiguous:
- * it belongs to one note now and belonged to another when that one was staged,
- * and both have live proposals. Nothing in the reference resolves that, and any
- * ranking silently withdraws a proposal the model did not ask about while leaving
- * the one it did. That case returns `ambiguous` so the caller can ask the model
- * to name a path, mirroring `validateExistingMarkdownFile`'s ambiguous branch.
- *
- * Returns the reference itself when nothing matches, so the caller still reports
- * an honest "nothing to withdraw" against the name the model used.
- */
-function resolveDiscardTargets(
-	pending: { change: { path: string }; formerPaths?: string[] }[],
-	cleanPath: string,
-	vaultResolvedPath: string | undefined,
-): { paths: string[] } | { ambiguous: string[] } {
-	const normalized = normalizePath(cleanPath);
-	const dedupePaths = (entries: typeof pending) => [...new Set(entries.map((entry) => entry.change.path))];
-
-	// Tier 1 and tier 2 both name a path a proposal LIVES at. Tier 1 is the
-	// vault's answer to "what file is at this name now"; tier 2 is an entry
-	// sitting at the reference as written. They can only disagree when the
-	// reference is a basename or wiki-link, and either way the union is what the
-	// model named.
-	const atPath = pending.filter(
-		(entry) => entry.change.path === normalized || (!!vaultResolvedPath && entry.change.path === vaultResolvedPath),
-	);
-
-	// A proposal staged under this name before its note was renamed away.
-	const byFormerPath = pending.filter((entry) => entry.formerPaths?.includes(normalized));
-
-	// Both tiers hit on DIFFERENT proposals: the name now belongs to one note and
-	// used to belong to another, and both have live proposals. Nothing in the
-	// reference says which the model meant, and picking either silently withdraws
-	// a proposal it did not ask about while leaving the one it did. Ask instead —
-	// same resolution as `validateExistingMarkdownFile`'s ambiguous branch.
-	if (atPath.length > 0 && byFormerPath.length > 0) {
-		const candidates = [...new Set([...dedupePaths(atPath), ...dedupePaths(byFormerPath)])];
-		if (candidates.length > 1) return { ambiguous: candidates };
-	}
-
-	if (atPath.length > 0) return { paths: dedupePaths(atPath) };
-	if (byFormerPath.length > 0) return { paths: dedupePaths(byFormerPath) };
-
-	// Basename comparison, tolerating a missing `.md` on the model's reference.
-	// Reached only when nothing matched by path, so there is no live proposal at
-	// this name to confuse it with — the wiki-link case, and renames that kept
-	// the basename but predate `formerPaths` being recorded.
-	const wanted = normalized.split("/").pop() ?? normalized;
-	const wantedWithExt = wanted.endsWith(".md") ? wanted : `${wanted}.md`;
-	const byBasename = pending.filter((entry) => {
-		const path = entry.change.path;
-		return (path.split("/").pop() ?? path) === wantedWithExt;
-	});
-
-	if (byBasename.length > 0) return { paths: dedupePaths(byBasename) };
-
-	// Nothing matched. Report against the canonical path when the vault knows
-	// one, so the "nothing to withdraw" names the real file rather than a bare
-	// wiki-link basename; otherwise echo the model's own reference.
-	return { paths: [vaultResolvedPath ?? normalized] };
+/** One `discard` operation's outcome, for `summarizeDiscards`. */
+interface DiscardResult {
+	id: string;
+	/** The proposal's path, when the id matched one. */
+	path?: string;
+	outcome: "discarded" | "not_found" | "partially_applied";
 }
 
 /**
  * Phrase the outcome of this batch's `discard` operations for the model.
  *
- * A discard that matched nothing is reported plainly rather than as an error:
- * the proposal may already have been reviewed, and treating "nothing to withdraw"
- * as a failure would punish the safe habit of discarding before re-staging. But
- * it must not read as a success either, or the model will tell the user it took
- * back something that is still pending — or already applied.
+ * An id that matched nothing is reported plainly rather than as an error: the
+ * proposal may already have been reviewed, and treating that as a failure would
+ * punish the safe habit of discarding before re-staging. But it must not read as
+ * a success either, or the model will tell the user it took back something that
+ * is still pending — or already applied.
  */
-function summarizeDiscards(results: { path: string; discarded: number; skippedApplied: number }[]): string {
+function summarizeDiscards(results: DiscardResult[]): string {
 	if (results.length === 0) return "";
 
 	const parts: string[] = [];
-	const withdrawn = results.filter((r) => r.discarded > 0);
+
+	const withdrawn = results.filter((r) => r.outcome === "discarded");
 	if (withdrawn.length > 0) {
-		const total = withdrawn.reduce((sum, r) => sum + r.discarded, 0);
 		const paths = withdrawn.map((r) => `"${r.path}"`).join(", ");
 		parts.push(
-			`Withdrew ${total} pending proposal(s) for ${paths} — they are no longer awaiting review and will not be applied.`,
+			`Withdrew ${withdrawn.length} pending proposal(s) — ${paths} are no longer awaiting review and will not be applied.`,
 		);
 	}
 
-	const empty = results.filter((r) => r.discarded === 0 && r.skippedApplied === 0);
-	if (empty.length > 0) {
-		const paths = empty.map((r) => `"${r.path}"`).join(", ");
+	const missing = results.filter((r) => r.outcome === "not_found");
+	if (missing.length > 0) {
+		const ids = missing.map((r) => `"${r.id}"`).join(", ");
 		parts.push(
-			`Nothing to withdraw for ${paths} — this chat had no pending proposals there (they may already have been accepted or rejected). Do not tell the user you took anything back.`,
+			`No pending proposal in this chat with id ${ids} — it may already have been accepted or rejected, or the id may be wrong. Nothing was withdrawn; do not tell the user you took anything back.`,
 		);
 	}
 
-	const skipped = results.filter((r) => r.skippedApplied > 0);
-	if (skipped.length > 0) {
-		const paths = skipped.map((r) => `"${r.path}"`).join(", ");
+	const applied = results.filter((r) => r.outcome === "partially_applied");
+	if (applied.length > 0) {
+		const paths = applied.map((r) => `"${r.path}"`).join(", ");
 		parts.push(
-			`Could not withdraw ${skipped.reduce((sum, r) => sum + r.skippedApplied, 0)} proposal(s) for ${paths}: the user already accepted part of those changes, so that content is in the note. Leave it to them to undo.`,
+			`Could not withdraw ${applied.length} proposal(s) for ${paths}: the user already accepted part of those changes, so that content is in the note. Leave it to them to undo.`,
 		);
 	}
 
@@ -607,7 +520,7 @@ export async function stageNoteOperations(
 	// Outcome of each `discard` operation. Tracked separately from `stagedChanges`
 	// because a discard stages nothing — it withdraws — so it must not be counted
 	// in the "Proposed N operation(s)" tally the user's review surfaces reflect.
-	const discardResults: { path: string; discarded: number; skippedApplied: number }[] = [];
+	const discardResults: DiscardResult[] = [];
 
 	for (let i = 0; i < operations.length; i++) {
 		const operation = operations[i];
@@ -698,36 +611,20 @@ export async function stageNoteOperations(
 			// one. Gating it on `allowUpdate` would let a permission change
 			// strand proposals the agent is otherwise able to clean up.
 			//
-			// Also exempt from `ensureUniqueTarget`: `discard` + `update` on one
-			// path in a single batch is the natural correction idiom, and the
-			// update branch still guards against a *second* update to that path.
+			// Also exempt from `ensureUniqueTarget`, which keys on paths: a discard
+			// names an id, and `discard` + `update` touching one note in a single
+			// batch is the natural correction idiom. The update branch still guards
+			// against a *second* update to that path.
 			//
-			// Resolved against the THREAD'S OWN PENDING ENTRIES, not just the vault.
-			// Unlike update/delete/move this never touches the file, so the note may
-			// legitimately be gone: renamed after staging, or a proposal to delete a
-			// note that has since been removed. Vault resolution alone fails there,
-			// and falling back to the literal input is worse than useless — a
-			// wiki-link (`[[todo]]`) normalizes to a bare basename that can never
-			// equal the canonical `Notes/todo.md` an entry is keyed by, so the
-			// discard would silently match nothing and wrongly report that there was
-			// nothing to withdraw. Matching entry paths by basename closes both gaps.
-			const cleanPath = normalizeReferencePath(operation.path);
-			const resolved = resolveVaultFileDetailed(app, cleanPath);
-			const discardTargets = resolveDiscardTargets(
-				store.getPendingForThread(threadId),
-				cleanPath,
-				resolved.status === "found" ? resolved.file.path : undefined,
-			);
-
-			if ("ambiguous" in discardTargets) {
-				const candidatesList = discardTargets.ambiguous.map((candidate) => `- ${candidate}`).join("\n");
-				return `Error in operation ${operationNumber}: "${operation.path}" matches more than one pending proposal — it names one note now and named another when that one was staged. Re-run the discard with the full path of the one you mean. Candidates:\n${candidatesList}`;
-			}
-
-			for (const targetPath of discardTargets.paths) {
-				const { discarded, skippedApplied } = store.discardPendingForPath(targetPath, threadId);
-				discardResults.push({ path: targetPath, discarded, skippedApplied });
-			}
+			// Identified by id, never by path. A path is a mutable label — it moves
+			// with a rename, can be reused by a different note, and can name two
+			// proposals at once (one staged before a rename, one after). Resolving
+			// a proposal from a name went through four rounds of tie-breaking rules
+			// and still had a case where any choice was wrong. An id has no such
+			// case, so the lookup is exact and there is nothing left to rank.
+			const path = store.getPendingByShortId(operation.id, threadId)?.change.path;
+			const outcome = store.discardPendingById(operation.id, threadId);
+			discardResults.push({ id: operation.id, path, outcome });
 			continue;
 		}
 
@@ -963,6 +860,17 @@ export async function stageNoteOperations(
 		}
 		if (stagedCount > 0) {
 			summary += ` ${stagedCount} will be reviewed by the user, who will approve or reject them.`;
+			// The ids are what makes a proposal retractable later: `discard` takes
+			// one, and the model cannot name a proposal any other way. Listed here
+			// and re-listed in every turn's review-status block, so an id stays
+			// recoverable even once this tool result falls out of context.
+			const staged = (entryIds ?? [])
+				.map((entryId) => store.getEntry(entryId))
+				.filter((entry) => entry?.status === "pending" && entry.shortId)
+				.map((entry) => `- "${entry?.change.path}" (id: ${entry?.shortId})`);
+			if (staged.length > 0) {
+				summary += ` Awaiting review — use these ids with a \`discard\` operation to withdraw one:\n${staged.join("\n")}`;
+			}
 		}
 		if (discardSummary) summary += ` ${discardSummary}`;
 	}

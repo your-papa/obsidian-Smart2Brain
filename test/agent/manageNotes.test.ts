@@ -7,8 +7,9 @@ const mockIsPathAllowed = vi.fn().mockReturnValue(true);
 const mockCountOtherThreads = vi.fn().mockReturnValue(0);
 const mockShouldBlockFile = vi.fn().mockReturnValue(false);
 const mockGetPendingUpdatesForPath = vi.fn().mockReturnValue([]);
-const mockDiscardPendingForPath = vi.fn().mockReturnValue({ discarded: 0, skippedApplied: 0 });
-const mockGetPendingForThread = vi.fn().mockReturnValue([]);
+const mockDiscardPendingById = vi.fn().mockReturnValue("not_found");
+const mockGetPendingByShortId = vi.fn().mockReturnValue(undefined);
+const mockGetEntry = vi.fn().mockReturnValue(undefined);
 
 vi.mock("../../src/stores/pendingChangesStore.svelte", () => ({
 	getPendingChangesStore: () => ({
@@ -17,8 +18,9 @@ vi.mock("../../src/stores/pendingChangesStore.svelte", () => ({
 		countOtherThreadsPendingUpdate: mockCountOtherThreads,
 		shouldBlockFile: (...args: unknown[]) => mockShouldBlockFile(...args),
 		getPendingUpdatesForPath: (...args: unknown[]) => mockGetPendingUpdatesForPath(...args),
-		discardPendingForPath: (...args: unknown[]) => mockDiscardPendingForPath(...args),
-		getPendingForThread: (...args: unknown[]) => mockGetPendingForThread(...args),
+		discardPendingById: (...args: unknown[]) => mockDiscardPendingById(...args),
+		getPendingByShortId: (...args: unknown[]) => mockGetPendingByShortId(...args),
+		getEntry: (...args: unknown[]) => mockGetEntry(...args),
 	}),
 }));
 
@@ -104,8 +106,9 @@ describe("manageNotes tool", () => {
 		mockCountOtherThreads.mockReturnValue(0);
 		mockShouldBlockFile.mockReturnValue(false);
 		mockGetPendingUpdatesForPath.mockReturnValue([]);
-		mockDiscardPendingForPath.mockReturnValue({ discarded: 0, skippedApplied: 0 });
-		mockGetPendingForThread.mockReturnValue([]);
+		mockDiscardPendingById.mockReturnValue("not_found");
+		mockGetPendingByShortId.mockReturnValue(undefined);
+		mockGetEntry.mockReturnValue(undefined);
 		mockAddChanges.mockReturnValue(["mock-id"]);
 		mockGetIndexableVaultFiles.mockReturnValue([]);
 		setManageNotesPermissions();
@@ -1086,62 +1089,62 @@ describe("manageNotes tool", () => {
 	 * stage a second proposal — which the rebase then merged with the first,
 	 * leaving BOTH edits in the review queue while the agent told the user the
 	 * earlier one had been superseded.
+	 *
+	 * Keyed by id, not path. Resolving a proposal from a path went through four
+	 * rounds of tie-breaking and still had a case where every choice was wrong: a
+	 * path moves with a rename, can be reused by another note, and can name two
+	 * live proposals at once. An id has none of that.
 	 */
-	describe("discard withdraws this thread's pending proposals", () => {
-		beforeEach(() => {
-			mockResolveVaultFileDetailed.mockReturnValue({ status: "found", file: makeFile("Notes/doc.md") });
-		});
+	describe("discard withdraws a pending proposal by id", () => {
+		it("withdraws the proposal with that id and stages nothing", async () => {
+			mockGetPendingByShortId.mockReturnValue({ change: { path: "Notes/doc.md" } });
+			mockDiscardPendingById.mockReturnValue("discarded");
 
-		it("withdraws pending proposals for the path and stages nothing", async () => {
-			mockDiscardPendingForPath.mockReturnValue({ discarded: 2, skippedApplied: 0 });
+			const result = await tool.invoke({ operations: [{ type: "discard", id: "4f2a9c" }] }, THREAD_CONFIG);
 
-			const result = await tool.invoke(
-				{ operations: [{ type: "discard", path: "Notes/doc.md" }] },
-				THREAD_CONFIG,
-			);
-
-			expect(mockDiscardPendingForPath).toHaveBeenCalledWith("Notes/doc.md", "test-thread-id");
-			expect(result).toContain("Withdrew 2 pending proposal(s)");
+			expect(mockDiscardPendingById).toHaveBeenCalledWith("4f2a9c", "test-thread-id");
+			expect(result).toContain("Withdrew 1 pending proposal(s)");
+			// Reported by path — that is what the user sees in the review bar.
 			expect(result).toContain("Notes/doc.md");
-			// A discard proposes nothing — it must not inflate the operation tally.
+			// A discard proposes nothing, so it must not inflate the operation tally.
 			expect(result).not.toContain("Proposed");
 			expect(mockAddChanges).toHaveBeenCalledWith([], expect.anything(), "test-thread-id");
 		});
 
-		it("is a neutral no-op rather than an error when nothing is pending", async () => {
-			mockDiscardPendingForPath.mockReturnValue({ discarded: 0, skippedApplied: 0 });
+		it("is a neutral report rather than an error for an unknown id", async () => {
+			mockDiscardPendingById.mockReturnValue("not_found");
 
-			const result = await tool.invoke(
-				{ operations: [{ type: "discard", path: "Notes/doc.md" }] },
-				THREAD_CONFIG,
-			);
+			const result = await tool.invoke({ operations: [{ type: "discard", id: "nosuch" }] }, THREAD_CONFIG);
 
 			expect(result).not.toContain("Error");
-			expect(result).toContain("Nothing to withdraw");
+			expect(result).toContain("No pending proposal in this chat with id");
+			expect(result).toContain("nosuch");
 			// The model must not claim a retraction that never happened.
-			expect(result).toContain("Do not tell the user you took anything back");
+			expect(result).toContain("do not tell the user you took anything back");
 		});
 
-		it("reports proposals it could not withdraw because the user already applied part", async () => {
-			mockDiscardPendingForPath.mockReturnValue({ discarded: 0, skippedApplied: 1 });
+		it("refuses a proposal the user has already partly applied", async () => {
+			mockGetPendingByShortId.mockReturnValue({ change: { path: "Notes/doc.md" } });
+			mockDiscardPendingById.mockReturnValue("partially_applied");
 
-			const result = await tool.invoke(
-				{ operations: [{ type: "discard", path: "Notes/doc.md" }] },
-				THREAD_CONFIG,
-			);
+			const result = await tool.invoke({ operations: [{ type: "discard", id: "4f2a9c" }] }, THREAD_CONFIG);
 
 			expect(result).toContain("Could not withdraw 1 proposal(s)");
 			expect(result).toContain("Leave it to them to undo");
 		});
 
-		it("allows discard and update for the same path in one batch", async () => {
-			mockDiscardPendingForPath.mockReturnValue({ discarded: 1, skippedApplied: 0 });
+		it("allows discard and update for the same note in one batch", async () => {
+			// The batch's one-target-per-path guard keys on paths; a discard names
+			// an id, so this correction idiom must not trip it.
+			mockGetPendingByShortId.mockReturnValue({ change: { path: "Notes/doc.md" } });
+			mockDiscardPendingById.mockReturnValue("discarded");
+			mockResolveVaultFileDetailed.mockReturnValue({ status: "found", file: makeFile("Notes/doc.md") });
 			vi.mocked(app.vault.read).mockResolvedValue("line one\nline two\n");
 
 			const result = await tool.invoke(
 				{
 					operations: [
-						{ type: "discard", path: "Notes/doc.md" },
+						{ type: "discard", id: "4f2a9c" },
 						{
 							type: "update",
 							path: "Notes/doc.md",
@@ -1152,247 +1155,20 @@ describe("manageNotes tool", () => {
 				THREAD_CONFIG,
 			);
 
-			// The one-target-per-path guard must not fire — this pair is the
-			// correction idiom the discard operation exists to enable.
 			expect(result).not.toContain("targeted more than once");
 			expect(result).toContain("Withdrew 1 pending proposal(s)");
 			const staged = mockAddChanges.mock.calls[0][0][0];
 			expect(staged.newContent).toBe("line one\nline two edited\n");
 		});
 
-		it("still discards when the note no longer resolves in the vault", async () => {
-			// Entries are keyed by path, so a proposal for a note that has since been
-			// renamed or deleted must remain withdrawable.
-			mockResolveVaultFileDetailed.mockReturnValue({ status: "not_found" });
-			mockGetPendingForThread.mockReturnValue([{ change: { path: "Notes/gone.md" } }]);
-			mockDiscardPendingForPath.mockReturnValue({ discarded: 1, skippedApplied: 0 });
+		it("is scoped to this thread", async () => {
+			// The store does the scoping; assert the tool passes the thread through
+			// rather than letting one chat withdraw another's proposal.
+			mockDiscardPendingById.mockReturnValue("not_found");
 
-			const result = await tool.invoke(
-				{ operations: [{ type: "discard", path: "Notes/gone.md" }] },
-				THREAD_CONFIG,
-			);
+			await tool.invoke({ operations: [{ type: "discard", id: "4f2a9c" }] }, THREAD_CONFIG);
 
-			expect(mockDiscardPendingForPath).toHaveBeenCalledWith("Notes/gone.md", "test-thread-id");
-			expect(result).toContain("Withdrew 1 pending proposal(s)");
-		});
-
-		/**
-		 * Regression (PR #429 review): a wiki-link normalizes to a bare basename
-		 * that can never equal the canonical path an entry is keyed by, so the
-		 * discard matched nothing and wrongly reported "nothing to withdraw".
-		 */
-		it("resolves an unresolvable wiki-link against the thread's own entries", async () => {
-			mockResolveVaultFileDetailed.mockReturnValue({ status: "not_found" });
-			mockGetPendingForThread.mockReturnValue([{ change: { path: "Notes/todo.md" } }]);
-			mockDiscardPendingForPath.mockReturnValue({ discarded: 1, skippedApplied: 0 });
-
-			const result = await tool.invoke({ operations: [{ type: "discard", path: "[[todo]]" }] }, THREAD_CONFIG);
-
-			// Not the bare "todo" the reference normalizes to.
-			expect(mockDiscardPendingForPath).toHaveBeenCalledWith("Notes/todo.md", "test-thread-id");
-			expect(result).toContain("Withdrew 1 pending proposal(s)");
-		});
-
-		it("withdraws a moved note's proposal via its current entry path", async () => {
-			// #handleFileRename re-keys the entry, so the path the model remembers
-			// no longer resolves — but the basename still identifies the proposal.
-			mockResolveVaultFileDetailed.mockReturnValue({ status: "not_found" });
-			mockGetPendingForThread.mockReturnValue([{ change: { path: "Archive/doc.md" } }]);
-			mockDiscardPendingForPath.mockReturnValue({ discarded: 1, skippedApplied: 0 });
-
-			await tool.invoke({ operations: [{ type: "discard", path: "Notes/doc.md" }] }, THREAD_CONFIG);
-
-			expect(mockDiscardPendingForPath).toHaveBeenCalledWith("Archive/doc.md", "test-thread-id");
-		});
-
-		/**
-		 * Regression (PR #429 review, second pass): a rename that also changes the
-		 * BASENAME leaves nothing for the name-based tiers to match — the model
-		 * knows only the staged path, and the entry was re-keyed in place. The
-		 * store now records the path it leaves in `formerPaths`.
-		 */
-		it("withdraws a renamed note's proposal via the path it was staged under", async () => {
-			mockResolveVaultFileDetailed.mockReturnValue({ status: "not_found" });
-			mockGetPendingForThread.mockReturnValue([
-				{ change: { path: "Notes/renamed.md" }, formerPaths: ["Notes/doc.md"] },
-			]);
-			mockDiscardPendingForPath.mockReturnValue({ discarded: 1, skippedApplied: 0 });
-
-			const result = await tool.invoke(
-				{ operations: [{ type: "discard", path: "Notes/doc.md" }] },
-				THREAD_CONFIG,
-			);
-
-			expect(mockDiscardPendingForPath).toHaveBeenCalledWith("Notes/renamed.md", "test-thread-id");
-			expect(result).toContain("Withdrew 1 pending proposal(s)");
-		});
-
-		it("follows a note renamed more than once back to the staged name", async () => {
-			mockResolveVaultFileDetailed.mockReturnValue({ status: "not_found" });
-			mockGetPendingForThread.mockReturnValue([
-				{ change: { path: "Notes/final.md" }, formerPaths: ["Notes/doc.md", "Notes/interim.md"] },
-			]);
-			mockDiscardPendingForPath.mockReturnValue({ discarded: 1, skippedApplied: 0 });
-
-			await tool.invoke({ operations: [{ type: "discard", path: "Notes/doc.md" }] }, THREAD_CONFIG);
-
-			expect(mockDiscardPendingForPath).toHaveBeenCalledWith("Notes/final.md", "test-thread-id");
-		});
-
-		/**
-		 * Regression (PR #429 review, third pass): vault resolution short-circuited
-		 * ahead of `formerPaths`. Once a proposal's note is renamed away, a NEW file
-		 * can occupy the path it was staged under — the vault resolves that file,
-		 * which has no pending entry, so the discard missed the re-keyed proposal.
-		 */
-		it("ignores a vault match that is not one of this thread's proposals", async () => {
-			// A different note now sits at the path the proposal was staged under.
-			mockResolveVaultFileDetailed.mockReturnValue({ status: "found", file: makeFile("Notes/doc.md") });
-			mockGetPendingForThread.mockReturnValue([
-				{ change: { path: "Notes/renamed.md" }, formerPaths: ["Notes/doc.md"] },
-			]);
-			mockDiscardPendingForPath.mockReturnValue({ discarded: 1, skippedApplied: 0 });
-
-			const result = await tool.invoke(
-				{ operations: [{ type: "discard", path: "Notes/doc.md" }] },
-				THREAD_CONFIG,
-			);
-
-			expect(mockDiscardPendingForPath).toHaveBeenCalledWith("Notes/renamed.md", "test-thread-id");
-			expect(mockDiscardPendingForPath).not.toHaveBeenCalledWith("Notes/doc.md", "test-thread-id");
-			expect(result).toContain("Withdrew 1 pending proposal(s)");
-		});
-
-		it("names the canonical path when the vault resolves but nothing is pending", async () => {
-			mockResolveVaultFileDetailed.mockReturnValue({ status: "found", file: makeFile("Notes/doc.md") });
-			mockGetPendingForThread.mockReturnValue([]);
-
-			const result = await tool.invoke({ operations: [{ type: "discard", path: "[[doc]]" }] }, THREAD_CONFIG);
-
-			// Reported by real path, not the bare "doc" the wiki-link normalizes to.
-			expect(mockDiscardPendingForPath).toHaveBeenCalledWith("Notes/doc.md", "test-thread-id");
-			expect(result).toContain("Nothing to withdraw");
-			expect(result).toContain("Notes/doc.md");
-		});
-
-		/**
-		 * Regression (PR #429 review, fourth pass): when a renamed proposal's former
-		 * path is reused by a NEW note that also has a live proposal, the name
-		 * truthfully identifies both. Every ranking tried here silently withdrew one
-		 * proposal while leaving the other, so the tool now asks instead.
-		 */
-		it("refuses to guess when the name identifies two live proposals", async () => {
-			mockResolveVaultFileDetailed.mockReturnValue({ status: "found", file: makeFile("Notes/doc.md") });
-			mockGetPendingForThread.mockReturnValue([
-				// Staged as Notes/doc.md, since renamed away.
-				{ change: { path: "Notes/renamed.md" }, formerPaths: ["Notes/doc.md"] },
-				// A different note now at Notes/doc.md, with its own proposal.
-				{ change: { path: "Notes/doc.md" } },
-			]);
-
-			const result = await tool.invoke(
-				{ operations: [{ type: "discard", path: "Notes/doc.md" }] },
-				THREAD_CONFIG,
-			);
-
-			expect(result).toContain("matches more than one pending proposal");
-			expect(result).toContain("Notes/doc.md");
-			expect(result).toContain("Notes/renamed.md");
-			// Nothing withdrawn — guessing either way loses a proposal.
-			expect(mockDiscardPendingForPath).not.toHaveBeenCalled();
-		});
-
-		it("withdraws normally once the ambiguity is gone", async () => {
-			// Same shape, but the new note has no proposal of its own.
-			mockResolveVaultFileDetailed.mockReturnValue({ status: "found", file: makeFile("Notes/doc.md") });
-			mockGetPendingForThread.mockReturnValue([
-				{ change: { path: "Notes/renamed.md" }, formerPaths: ["Notes/doc.md"] },
-			]);
-			mockDiscardPendingForPath.mockReturnValue({ discarded: 1, skippedApplied: 0 });
-
-			const result = await tool.invoke(
-				{ operations: [{ type: "discard", path: "Notes/doc.md" }] },
-				THREAD_CONFIG,
-			);
-
-			expect(result).not.toContain("matches more than one");
-			expect(mockDiscardPendingForPath).toHaveBeenCalledWith("Notes/renamed.md", "test-thread-id");
-		});
-
-		it("is not ambiguous when both tiers name the same proposal", async () => {
-			// A note renamed away and back: `formerPaths` and the current path agree.
-			mockResolveVaultFileDetailed.mockReturnValue({ status: "found", file: makeFile("Notes/doc.md") });
-			mockGetPendingForThread.mockReturnValue([
-				{ change: { path: "Notes/doc.md" }, formerPaths: ["Notes/doc.md"] },
-			]);
-			mockDiscardPendingForPath.mockReturnValue({ discarded: 1, skippedApplied: 0 });
-
-			const result = await tool.invoke(
-				{ operations: [{ type: "discard", path: "Notes/doc.md" }] },
-				THREAD_CONFIG,
-			);
-
-			expect(result).not.toContain("matches more than one");
-			expect(mockDiscardPendingForPath).toHaveBeenCalledWith("Notes/doc.md", "test-thread-id");
-			expect(mockDiscardPendingForPath).toHaveBeenCalledTimes(1);
-		});
-
-		it("prefers a former-path match over a looser basename match", async () => {
-			mockResolveVaultFileDetailed.mockReturnValue({ status: "not_found" });
-			mockGetPendingForThread.mockReturnValue([
-				{ change: { path: "Notes/renamed.md" }, formerPaths: ["Notes/doc.md"] },
-				// Same basename as the reference, but never staged under that path.
-				{ change: { path: "Archive/doc.md" } },
-			]);
-			mockDiscardPendingForPath.mockReturnValue({ discarded: 1, skippedApplied: 0 });
-
-			await tool.invoke({ operations: [{ type: "discard", path: "Notes/doc.md" }] }, THREAD_CONFIG);
-
-			expect(mockDiscardPendingForPath).toHaveBeenCalledWith("Notes/renamed.md", "test-thread-id");
-			expect(mockDiscardPendingForPath).not.toHaveBeenCalledWith("Archive/doc.md", "test-thread-id");
-		});
-
-		it("prefers the vault-resolved path over a looser basename match", async () => {
-			mockResolveVaultFileDetailed.mockReturnValue({ status: "found", file: makeFile("Notes/doc.md") });
-			// Both are this thread's proposals; the vault-resolved one must win.
-			mockGetPendingForThread.mockReturnValue([
-				{ change: { path: "Notes/doc.md" } },
-				{ change: { path: "Archive/doc.md" } },
-			]);
-			mockDiscardPendingForPath.mockReturnValue({ discarded: 1, skippedApplied: 0 });
-
-			await tool.invoke({ operations: [{ type: "discard", path: "Notes/doc.md" }] }, THREAD_CONFIG);
-
-			expect(mockDiscardPendingForPath).toHaveBeenCalledWith("Notes/doc.md", "test-thread-id");
-			expect(mockDiscardPendingForPath).not.toHaveBeenCalledWith("Archive/doc.md", "test-thread-id");
-		});
-
-		it("withdraws every same-named proposal and names each in full", async () => {
-			// Two pending proposals share a basename; withdrawing only one would
-			// leave the other stuck with no way for the model to name it.
-			mockResolveVaultFileDetailed.mockReturnValue({ status: "not_found" });
-			mockGetPendingForThread.mockReturnValue([
-				{ change: { path: "Notes/doc.md" } },
-				{ change: { path: "Archive/doc.md" } },
-			]);
-			mockDiscardPendingForPath.mockReturnValue({ discarded: 1, skippedApplied: 0 });
-
-			const result = await tool.invoke({ operations: [{ type: "discard", path: "[[doc]]" }] }, THREAD_CONFIG);
-
-			expect(mockDiscardPendingForPath).toHaveBeenCalledWith("Notes/doc.md", "test-thread-id");
-			expect(mockDiscardPendingForPath).toHaveBeenCalledWith("Archive/doc.md", "test-thread-id");
-			expect(result).toContain("Notes/doc.md");
-			expect(result).toContain("Archive/doc.md");
-		});
-
-		it("reports honestly against the model's own reference when nothing matches", async () => {
-			mockResolveVaultFileDetailed.mockReturnValue({ status: "not_found" });
-			mockGetPendingForThread.mockReturnValue([{ change: { path: "Notes/unrelated.md" } }]);
-
-			const result = await tool.invoke({ operations: [{ type: "discard", path: "[[absent]]" }] }, THREAD_CONFIG);
-
-			expect(mockDiscardPendingForPath).toHaveBeenCalledWith("absent", "test-thread-id");
-			expect(result).toContain("Nothing to withdraw");
+			expect(mockDiscardPendingById).toHaveBeenCalledWith("4f2a9c", "test-thread-id");
 		});
 
 		it("does not require update permission", async () => {
@@ -1400,15 +1176,75 @@ describe("manageNotes tool", () => {
 			// must not strand proposals the agent could otherwise clean up.
 			setManageNotesPermissions({ allowCreate: false, allowUpdate: false, allowDelete: false, allowMove: false });
 			tool = createManageNotesTool(app);
-			mockDiscardPendingForPath.mockReturnValue({ discarded: 1, skippedApplied: 0 });
+			mockGetPendingByShortId.mockReturnValue({ change: { path: "Notes/doc.md" } });
+			mockDiscardPendingById.mockReturnValue("discarded");
 
-			const result = await tool.invoke(
-				{ operations: [{ type: "discard", path: "Notes/doc.md" }] },
-				THREAD_CONFIG,
-			);
+			const result = await tool.invoke({ operations: [{ type: "discard", id: "4f2a9c" }] }, THREAD_CONFIG);
 
 			expect(result).not.toContain("disabled for this agent");
 			expect(result).toContain("Withdrew 1 pending proposal(s)");
+		});
+	});
+
+	/**
+	 * The ids are the whole retraction mechanism: `discard` takes one, and the
+	 * model has no other way to name a proposal. If staging stops reporting them
+	 * the feature is unreachable, so this is pinned separately.
+	 */
+	describe("staged proposals are reported with their ids", () => {
+		it("lists each pending proposal's path and id", async () => {
+			mockResolveVaultFileDetailed.mockReturnValue({ status: "found", file: makeFile("Notes/doc.md") });
+			vi.mocked(app.vault.read).mockResolvedValue("line one\n");
+			mockAddChanges.mockReturnValue(["uuid-1"]);
+			mockGetEntry.mockReturnValue({
+				status: "pending",
+				shortId: "4f2a9c",
+				change: { path: "Notes/doc.md" },
+			});
+
+			const result = await tool.invoke(
+				{
+					operations: [
+						{
+							type: "update",
+							path: "Notes/doc.md",
+							edits: [{ oldText: "line one", newText: "line one edited" }],
+						},
+					],
+				},
+				THREAD_CONFIG,
+			);
+
+			expect(result).toContain('"Notes/doc.md" (id: 4f2a9c)');
+			expect(result).toContain("discard");
+		});
+
+		it("omits ids for changes that were auto-applied rather than staged", async () => {
+			// A memory write applies immediately, so it is never awaiting review and
+			// has no id to withdraw — listing one would invite a discard that fails.
+			mockResolveVaultFileDetailed.mockReturnValue({ status: "found", file: makeFile("Notes/doc.md") });
+			vi.mocked(app.vault.read).mockResolvedValue("line one\n");
+			mockAddChanges.mockReturnValue(["uuid-1"]);
+			mockGetEntry.mockReturnValue({
+				status: "accepted",
+				shortId: "4f2a9c",
+				change: { path: "Notes/doc.md" },
+			});
+
+			const result = await tool.invoke(
+				{
+					operations: [
+						{
+							type: "update",
+							path: "Notes/doc.md",
+							edits: [{ oldText: "line one", newText: "line one edited" }],
+						},
+					],
+				},
+				THREAD_CONFIG,
+			);
+
+			expect(result).not.toContain("(id: 4f2a9c)");
 		});
 	});
 
