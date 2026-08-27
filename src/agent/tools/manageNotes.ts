@@ -404,27 +404,33 @@ function summarizeOperations(changes: PendingChange[]): string {
  *   - the model used a wiki-link, which normalizes to a bare basename that never
  *     equals the canonical `Notes/todo.md` an entry is keyed by.
  *
- * Resolution order is strict-to-loose, and stops at the first tier that hits so
- * a loose match can never override an exact one:
+ * Resolution is strict-to-loose, stopping at the first tier that hits so a loose
+ * match can never override an exact one:
  *
- *   1. the vault-resolved canonical path — but ONLY when a pending entry sits at
- *      it. The vault answers "what file is at this name now", which diverges
- *      from "which proposal did the model mean" as soon as a note is renamed
- *      away and something else takes its old path;
- *   2. an entry whose path equals the normalized reference exactly;
- *   3. an entry one of whose `formerPaths` equals it — the note was renamed
- *      after staging, and the model still knows it by the name it was staged
- *      under. This is an EXACT match on a path the entry genuinely had, so it
- *      precedes the basename tier: a rename that also changes the basename
+ *   1. proposals living AT the name — an entry whose path equals the reference,
+ *      or equals what the vault resolves the reference to. Both answer "which
+ *      proposal is at this name now" and are merged;
+ *   2. a proposal one of whose `formerPaths` equals it — the note was renamed
+ *      after staging and the model still knows it by the name it was staged
+ *      under. An exact match on a path the entry genuinely had, so it beats the
+ *      basename tier: a rename that also changes the basename
  *      (`Notes/doc.md` -> `Notes/renamed.md`) is unreachable by name alone;
- *   4. entries whose basename matches, with or without the `.md` the model may
- *      have omitted — the wiki-link case, and renames that kept the basename
- *      but predate `formerPaths` being recorded.
+ *   3. proposals whose basename matches, with or without the `.md` the model may
+ *      have omitted — the wiki-link case, and renames that kept the basename but
+ *      predate `formerPaths` being recorded.
  *
- * Tiers 3 and 4 can legitimately return several paths (two pending proposals for
- * same-named notes in different folders). All are this thread's own proposals
- * and the model asked to withdraw that name, so all are withdrawn and each is
+ * A tier may legitimately return several paths (two pending proposals for
+ * same-named notes in different folders). All are this thread's own proposals and
+ * the model asked to withdraw that name, so all are withdrawn and each is
  * reported by full path — silently picking one would leave the others stuck.
+ *
+ * But when tiers 1 and 2 hit DIFFERENT proposals the name is genuinely ambiguous:
+ * it belongs to one note now and belonged to another when that one was staged,
+ * and both have live proposals. Nothing in the reference resolves that, and any
+ * ranking silently withdraws a proposal the model did not ask about while leaving
+ * the one it did. That case returns `ambiguous` so the caller can ask the model
+ * to name a path, mirroring `validateExistingMarkdownFile`'s ambiguous branch.
+ *
  * Returns the reference itself when nothing matches, so the caller still reports
  * an honest "nothing to withdraw" against the name the model used.
  */
@@ -432,28 +438,39 @@ function resolveDiscardTargets(
 	pending: { change: { path: string }; formerPaths?: string[] }[],
 	cleanPath: string,
 	vaultResolvedPath: string | undefined,
-): string[] {
+): { paths: string[] } | { ambiguous: string[] } {
 	const normalized = normalizePath(cleanPath);
 	const dedupePaths = (entries: typeof pending) => [...new Set(entries.map((entry) => entry.change.path))];
 
-	// Tier 1 only wins when it names a proposal this thread actually has.
-	// Resolving through the vault answers "what file is at this name NOW", which
-	// is not the same question: once a proposal's note is renamed away, a NEW
-	// file can occupy the path it was staged under. Returning that path
-	// unconditionally aimed the discard at a note with no pending entry and
-	// reported nothing to withdraw, while the re-keyed proposal stayed queued.
-	// Falling through instead lets the `formerPaths` tier below find it.
-	if (vaultResolvedPath && pending.some((entry) => entry.change.path === vaultResolvedPath)) {
-		return [vaultResolvedPath];
+	// Tier 1 and tier 2 both name a path a proposal LIVES at. Tier 1 is the
+	// vault's answer to "what file is at this name now"; tier 2 is an entry
+	// sitting at the reference as written. They can only disagree when the
+	// reference is a basename or wiki-link, and either way the union is what the
+	// model named.
+	const atPath = pending.filter(
+		(entry) => entry.change.path === normalized || (!!vaultResolvedPath && entry.change.path === vaultResolvedPath),
+	);
+
+	// A proposal staged under this name before its note was renamed away.
+	const byFormerPath = pending.filter((entry) => entry.formerPaths?.includes(normalized));
+
+	// Both tiers hit on DIFFERENT proposals: the name now belongs to one note and
+	// used to belong to another, and both have live proposals. Nothing in the
+	// reference says which the model meant, and picking either silently withdraws
+	// a proposal it did not ask about while leaving the one it did. Ask instead —
+	// same resolution as `validateExistingMarkdownFile`'s ambiguous branch.
+	if (atPath.length > 0 && byFormerPath.length > 0) {
+		const candidates = [...new Set([...dedupePaths(atPath), ...dedupePaths(byFormerPath)])];
+		if (candidates.length > 1) return { ambiguous: candidates };
 	}
 
-	if (pending.some((entry) => entry.change.path === normalized)) return [normalized];
-
-	// The note was renamed after staging; match the name it was staged under.
-	const byFormerPath = pending.filter((entry) => entry.formerPaths?.includes(normalized));
-	if (byFormerPath.length > 0) return dedupePaths(byFormerPath);
+	if (atPath.length > 0) return { paths: dedupePaths(atPath) };
+	if (byFormerPath.length > 0) return { paths: dedupePaths(byFormerPath) };
 
 	// Basename comparison, tolerating a missing `.md` on the model's reference.
+	// Reached only when nothing matched by path, so there is no live proposal at
+	// this name to confuse it with — the wiki-link case, and renames that kept
+	// the basename but predate `formerPaths` being recorded.
 	const wanted = normalized.split("/").pop() ?? normalized;
 	const wantedWithExt = wanted.endsWith(".md") ? wanted : `${wanted}.md`;
 	const byBasename = pending.filter((entry) => {
@@ -461,12 +478,12 @@ function resolveDiscardTargets(
 		return (path.split("/").pop() ?? path) === wantedWithExt;
 	});
 
-	if (byBasename.length > 0) return dedupePaths(byBasename);
+	if (byBasename.length > 0) return { paths: dedupePaths(byBasename) };
 
 	// Nothing matched. Report against the canonical path when the vault knows
 	// one, so the "nothing to withdraw" names the real file rather than a bare
 	// wiki-link basename; otherwise echo the model's own reference.
-	return [vaultResolvedPath ?? normalized];
+	return { paths: [vaultResolvedPath ?? normalized] };
 }
 
 /**
@@ -696,13 +713,18 @@ export async function stageNoteOperations(
 			// nothing to withdraw. Matching entry paths by basename closes both gaps.
 			const cleanPath = normalizeReferencePath(operation.path);
 			const resolved = resolveVaultFileDetailed(app, cleanPath);
-			const targetPaths = resolveDiscardTargets(
+			const discardTargets = resolveDiscardTargets(
 				store.getPendingForThread(threadId),
 				cleanPath,
 				resolved.status === "found" ? resolved.file.path : undefined,
 			);
 
-			for (const targetPath of targetPaths) {
+			if ("ambiguous" in discardTargets) {
+				const candidatesList = discardTargets.ambiguous.map((candidate) => `- ${candidate}`).join("\n");
+				return `Error in operation ${operationNumber}: "${operation.path}" matches more than one pending proposal — it names one note now and named another when that one was staged. Re-run the discard with the full path of the one you mean. Candidates:\n${candidatesList}`;
+			}
+
+			for (const targetPath of discardTargets.paths) {
 				const { discarded, skippedApplied } = store.discardPendingForPath(targetPath, threadId);
 				discardResults.push({ path: targetPath, discarded, skippedApplied });
 			}

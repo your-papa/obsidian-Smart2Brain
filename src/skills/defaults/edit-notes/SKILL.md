@@ -25,7 +25,9 @@ replacing it. The user then sees both edits. When the user is correcting you
   edit is reviewed.
 - **Withdrawing an edit entirely** — use a `discard` operation for that path. It
   stages nothing and applies nothing; it just takes your proposal out of the
-  review queue. Safe to use when you are unsure whether anything is pending.
+  review queue. Safe to use when you are unsure whether anything is pending. If
+  it reports that the name matches more than one pending proposal, re-run it with
+  the full path of the one you meant — do not guess.
 - **Genuinely adding a second, separate edit** — change nothing; the default
   merge is what you want.
 
