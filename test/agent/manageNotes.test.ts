@@ -8,6 +8,7 @@ const mockCountOtherThreads = vi.fn().mockReturnValue(0);
 const mockShouldBlockFile = vi.fn().mockReturnValue(false);
 const mockGetPendingUpdatesForPath = vi.fn().mockReturnValue([]);
 const mockDiscardPendingForPath = vi.fn().mockReturnValue({ discarded: 0, skippedApplied: 0 });
+const mockGetPendingForThread = vi.fn().mockReturnValue([]);
 
 vi.mock("../../src/stores/pendingChangesStore.svelte", () => ({
 	getPendingChangesStore: () => ({
@@ -17,6 +18,7 @@ vi.mock("../../src/stores/pendingChangesStore.svelte", () => ({
 		shouldBlockFile: (...args: unknown[]) => mockShouldBlockFile(...args),
 		getPendingUpdatesForPath: (...args: unknown[]) => mockGetPendingUpdatesForPath(...args),
 		discardPendingForPath: (...args: unknown[]) => mockDiscardPendingForPath(...args),
+		getPendingForThread: (...args: unknown[]) => mockGetPendingForThread(...args),
 	}),
 }));
 
@@ -103,6 +105,7 @@ describe("manageNotes tool", () => {
 		mockShouldBlockFile.mockReturnValue(false);
 		mockGetPendingUpdatesForPath.mockReturnValue([]);
 		mockDiscardPendingForPath.mockReturnValue({ discarded: 0, skippedApplied: 0 });
+		mockGetPendingForThread.mockReturnValue([]);
 		mockAddChanges.mockReturnValue(["mock-id"]);
 		mockGetIndexableVaultFiles.mockReturnValue([]);
 		setManageNotesPermissions();
@@ -1161,6 +1164,7 @@ describe("manageNotes tool", () => {
 			// Entries are keyed by path, so a proposal for a note that has since been
 			// renamed or deleted must remain withdrawable.
 			mockResolveVaultFileDetailed.mockReturnValue({ status: "not_found" });
+			mockGetPendingForThread.mockReturnValue([{ change: { path: "Notes/gone.md" } }]);
 			mockDiscardPendingForPath.mockReturnValue({ discarded: 1, skippedApplied: 0 });
 
 			const result = await tool.invoke(
@@ -1170,6 +1174,74 @@ describe("manageNotes tool", () => {
 
 			expect(mockDiscardPendingForPath).toHaveBeenCalledWith("Notes/gone.md", "test-thread-id");
 			expect(result).toContain("Withdrew 1 pending proposal(s)");
+		});
+
+		/**
+		 * Regression (PR #429 review): a wiki-link normalizes to a bare basename
+		 * that can never equal the canonical path an entry is keyed by, so the
+		 * discard matched nothing and wrongly reported "nothing to withdraw".
+		 */
+		it("resolves an unresolvable wiki-link against the thread's own entries", async () => {
+			mockResolveVaultFileDetailed.mockReturnValue({ status: "not_found" });
+			mockGetPendingForThread.mockReturnValue([{ change: { path: "Notes/todo.md" } }]);
+			mockDiscardPendingForPath.mockReturnValue({ discarded: 1, skippedApplied: 0 });
+
+			const result = await tool.invoke({ operations: [{ type: "discard", path: "[[todo]]" }] }, THREAD_CONFIG);
+
+			// Not the bare "todo" the reference normalizes to.
+			expect(mockDiscardPendingForPath).toHaveBeenCalledWith("Notes/todo.md", "test-thread-id");
+			expect(result).toContain("Withdrew 1 pending proposal(s)");
+		});
+
+		it("withdraws a renamed note's proposal via its current entry path", async () => {
+			// #handleFileRename re-keys the entry, so the path the model remembers
+			// no longer resolves — but the basename still identifies the proposal.
+			mockResolveVaultFileDetailed.mockReturnValue({ status: "not_found" });
+			mockGetPendingForThread.mockReturnValue([{ change: { path: "Archive/doc.md" } }]);
+			mockDiscardPendingForPath.mockReturnValue({ discarded: 1, skippedApplied: 0 });
+
+			await tool.invoke({ operations: [{ type: "discard", path: "Notes/doc.md" }] }, THREAD_CONFIG);
+
+			expect(mockDiscardPendingForPath).toHaveBeenCalledWith("Archive/doc.md", "test-thread-id");
+		});
+
+		it("prefers the vault-resolved path over a looser basename match", async () => {
+			mockResolveVaultFileDetailed.mockReturnValue({ status: "found", file: makeFile("Notes/doc.md") });
+			mockGetPendingForThread.mockReturnValue([{ change: { path: "Archive/doc.md" } }]);
+			mockDiscardPendingForPath.mockReturnValue({ discarded: 1, skippedApplied: 0 });
+
+			await tool.invoke({ operations: [{ type: "discard", path: "Notes/doc.md" }] }, THREAD_CONFIG);
+
+			expect(mockDiscardPendingForPath).toHaveBeenCalledWith("Notes/doc.md", "test-thread-id");
+			expect(mockDiscardPendingForPath).not.toHaveBeenCalledWith("Archive/doc.md", "test-thread-id");
+		});
+
+		it("withdraws every same-named proposal and names each in full", async () => {
+			// Two pending proposals share a basename; withdrawing only one would
+			// leave the other stuck with no way for the model to name it.
+			mockResolveVaultFileDetailed.mockReturnValue({ status: "not_found" });
+			mockGetPendingForThread.mockReturnValue([
+				{ change: { path: "Notes/doc.md" } },
+				{ change: { path: "Archive/doc.md" } },
+			]);
+			mockDiscardPendingForPath.mockReturnValue({ discarded: 1, skippedApplied: 0 });
+
+			const result = await tool.invoke({ operations: [{ type: "discard", path: "[[doc]]" }] }, THREAD_CONFIG);
+
+			expect(mockDiscardPendingForPath).toHaveBeenCalledWith("Notes/doc.md", "test-thread-id");
+			expect(mockDiscardPendingForPath).toHaveBeenCalledWith("Archive/doc.md", "test-thread-id");
+			expect(result).toContain("Notes/doc.md");
+			expect(result).toContain("Archive/doc.md");
+		});
+
+		it("reports honestly against the model's own reference when nothing matches", async () => {
+			mockResolveVaultFileDetailed.mockReturnValue({ status: "not_found" });
+			mockGetPendingForThread.mockReturnValue([{ change: { path: "Notes/unrelated.md" } }]);
+
+			const result = await tool.invoke({ operations: [{ type: "discard", path: "[[absent]]" }] }, THREAD_CONFIG);
+
+			expect(mockDiscardPendingForPath).toHaveBeenCalledWith("absent", "test-thread-id");
+			expect(result).toContain("Nothing to withdraw");
 		});
 
 		it("does not require update permission", async () => {

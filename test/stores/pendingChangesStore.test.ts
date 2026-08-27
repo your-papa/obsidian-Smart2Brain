@@ -1136,4 +1136,42 @@ describe("PendingChangesStore", () => {
 			expect(store.getEntry(id)?.status).toBe("pending");
 		});
 	});
+
+	/**
+	 * Raised in the PR #429 review as "replacement leaves a stuck entry". It is
+	 * not a defect: the applied text is still in the note, so the superseded entry
+	 * must stay actionable to keep the undo reachable — see "keeps an entry
+	 * actionable when superseded by a newer proposal" above, and the
+	 * `initialOriginalContent` audit block it belongs to.
+	 *
+	 * Pinned from the `replace_pending` side too, since that flag exists to
+	 * supersede and is the likeliest route back to clearing this by mistake.
+	 */
+	describe("replace_pending-style supersede keeps the undo reachable", () => {
+		it("keeps the superseded entry's applied content resolvable", async () => {
+			const original = "a\nkeep\nb\n";
+			const [id] = store.addChanges(
+				[{ type: "update", path: "note.md", originalContent: original, newContent: "A\nkeep\nB\n" }],
+				"tc-1",
+				"thread-1",
+			);
+			vi.mocked(plugin.app.vault.getAbstractFileByPath).mockReturnValue(makeTFile("note.md"));
+			vi.mocked(plugin.app.vault.read).mockResolvedValue(original);
+			await store.acceptChangeGroup(id, 0);
+
+			// What `replace_pending` produces: a proposal staged against DISK, which
+			// already contains the accepted group.
+			store.addChanges(
+				[{ type: "update", path: "note.md", originalContent: "A\nkeep\nb\n", newContent: "A\nkeep\nZ\n" }],
+				"tc-2",
+				"thread-1",
+			);
+
+			const superseded = store.getEntry(id)!;
+			expect(superseded.status).toBe("rejected");
+			// Both invariants: the text is on disk, so the undo record must survive.
+			expect(store.hasUnrevertedApplication(superseded)).toBe(true);
+			expect(store.getActionableForThread("thread-1").map((e) => e.id)).toContain(id);
+		});
+	});
 });
