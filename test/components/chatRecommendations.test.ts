@@ -1,9 +1,14 @@
 import { describe, expect, it } from "vitest";
+import { CURATED_PLUGIN_INTEGRATIONS } from "../../src/agent/integrations/pluginIntegrations";
 import {
 	DISMISS_ALL_ID,
+	filterIntegrationSuggestions,
 	filterPluginNudges,
 	filterSuggestions,
 	filterUpdateNotices,
+	INTEGRATION_SUGGESTIONS,
+	MAX_TOTAL_SUGGESTIONS,
+	mergeSuggestions,
 	PLUGIN_NUDGE_COLLAPSE_THRESHOLD_DESKTOP,
 	PLUGIN_NUDGE_COLLAPSE_THRESHOLD_MOBILE,
 	type PluginNudge,
@@ -94,6 +99,123 @@ describe("SUGGESTED_QUERIES catalog", () => {
 			(s) => s.requires !== "search" && READS_THE_VAULT.test(s.query ?? s.label),
 		);
 		expect(ungatedVaultQueries.map((s) => s.id)).toEqual([]);
+	});
+});
+
+describe("integration suggestions", () => {
+	const all = () => true;
+	const none = () => false;
+	const only =
+		(...ids: string[]) =>
+		(pluginId: string) =>
+			ids.includes(pluginId);
+
+	it("shows nothing when no integration is usable", () => {
+		expect(filterIntegrationSuggestions(INTEGRATION_SUGGESTIONS, [], none)).toEqual([]);
+	});
+
+	it("shows only the suggestions whose integration is usable", () => {
+		const visible = filterIntegrationSuggestions(INTEGRATION_SUGGESTIONS, [], only("tasknotes"));
+		expect(visible.map((s) => s.pluginId)).toEqual(["tasknotes"]);
+	});
+
+	it("drops a dismissed integration suggestion", () => {
+		const visible = filterIntegrationSuggestions(INTEGRATION_SUGGESTIONS, ["int-tasknotes"], all);
+		expect(visible.map((s) => s.id)).not.toContain("int-tasknotes");
+	});
+
+	/*
+	 * These bypass filterSuggestions (which owns DISMISS_ALL_ID for the generic catalog),
+	 * so they must honour it themselves or "Dismiss all" would leave them behind.
+	 */
+	it("returns nothing when the whole block is dismissed", () => {
+		expect(filterIntegrationSuggestions(INTEGRATION_SUGGESTIONS, [DISMISS_ALL_ID], all)).toEqual([]);
+	});
+
+	describe("catalog", () => {
+		it("has ids distinct from the generic catalog", () => {
+			const generic = new Set(SUGGESTED_QUERIES.map((s) => s.id));
+			const collisions = INTEGRATION_SUGGESTIONS.filter((s) => generic.has(s.id));
+			expect(collisions.map((s) => s.id)).toEqual([]);
+		});
+
+		it("has unique ids", () => {
+			const seen = new Set(INTEGRATION_SUGGESTIONS.map((s) => s.id));
+			expect(seen.size).toBe(INTEGRATION_SUGGESTIONS.length);
+		});
+
+		it("does not reuse the whole-block dismissal id", () => {
+			expect(INTEGRATION_SUGGESTIONS.some((s) => s.id === DISMISS_ALL_ID)).toBe(false);
+		});
+
+		/*
+		 * Dismissal keys all share one persisted string array, so an integration id that
+		 * happened to equal a nudge key would make dismissing one silently dismiss the other.
+		 */
+		it("cannot collide with a plugin-nudge dismissal key", () => {
+			const collisions = INTEGRATION_SUGGESTIONS.filter((s) => s.id === pluginNudgeId(s.pluginId));
+			expect(collisions.map((s) => s.id)).toEqual([]);
+		});
+
+		/* A suggestion for a plugin with no curated integration could never become usable:
+		   there would be no exec tool and no bundled skill behind it. */
+		it("only targets curated integrations", () => {
+			const curated = new Set(CURATED_PLUGIN_INTEGRATIONS.map((i) => i.pluginId));
+			const orphans = INTEGRATION_SUGGESTIONS.filter((s) => !curated.has(s.pluginId));
+			expect(orphans.map((s) => s.pluginId)).toEqual([]);
+		});
+
+		it("targets each plugin at most once", () => {
+			const seen = new Set(INTEGRATION_SUGGESTIONS.map((s) => s.pluginId));
+			expect(seen.size).toBe(INTEGRATION_SUGGESTIONS.length);
+		});
+	});
+});
+
+describe("mergeSuggestions", () => {
+	const q = (id: string): SuggestedQuery => ({ id, icon: "sparkles", label: id });
+
+	it("puts generic suggestions first", () => {
+		const merged = mergeSuggestions([q("g1"), q("g2")], [q("i1")]);
+		expect(merged.map((s) => s.id)).toEqual(["g1", "g2", "i1"]);
+	});
+
+	it("returns everything when under the cap", () => {
+		expect(mergeSuggestions([q("g1")], [q("i1")])).toHaveLength(2);
+	});
+
+	it("caps the combined list", () => {
+		const generic = [q("g1"), q("g2"), q("g3")];
+		const integration = [q("i1"), q("i2"), q("i3"), q("i4")];
+		expect(mergeSuggestions(generic, integration).map((s) => s.id)).toEqual([
+			"g1",
+			"g2",
+			"g3",
+			"i1",
+			"i2",
+		]);
+	});
+
+	/* The generic catalog was deliberately trimmed to three; the cap is what stops a
+	   plugin-rich vault from quietly undoing that. */
+	it("never exceeds MAX_TOTAL_SUGGESTIONS", () => {
+		const many = Array.from({ length: 12 }, (_, i) => q(`i${i}`));
+		expect(mergeSuggestions(SUGGESTED_QUERIES, many).length).toBeLessThanOrEqual(MAX_TOTAL_SUGGESTIONS);
+	});
+
+	it("honours an explicit limit", () => {
+		expect(mergeSuggestions([q("g1"), q("g2")], [q("i1")], 2).map((s) => s.id)).toEqual(["g1", "g2"]);
+	});
+
+	it("treats a zero or negative limit as showing nothing", () => {
+		expect(mergeSuggestions([q("g1")], [q("i1")], 0)).toEqual([]);
+		expect(mergeSuggestions([q("g1")], [q("i1")], -1)).toEqual([]);
+	});
+
+	it("handles either side being empty", () => {
+		expect(mergeSuggestions([], [q("i1")]).map((s) => s.id)).toEqual(["i1"]);
+		expect(mergeSuggestions([q("g1")], []).map((s) => s.id)).toEqual(["g1"]);
+		expect(mergeSuggestions([], [])).toEqual([]);
 	});
 });
 

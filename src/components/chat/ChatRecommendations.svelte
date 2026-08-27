@@ -20,9 +20,12 @@ import { ProviderSetupModal } from "../../views/provider-setup/ProviderSetup";
 import { isMobileUI } from "../../utils/platform";
 import {
 	DISMISS_ALL_ID,
+	filterIntegrationSuggestions,
 	filterPluginNudges,
 	filterSuggestions,
 	filterUpdateNotices,
+	INTEGRATION_SUGGESTIONS,
+	mergeSuggestions,
 	type PluginNudge,
 	pluginNudgeId,
 	shouldCollapsePluginNudges,
@@ -108,10 +111,58 @@ const ctx = $derived({
 	hasSearch: indexPopulated(data.searchEmbedIndex),
 });
 
+/**
+ * Whether a plugin integration is actually usable by this agent right now — the exact
+ * inverse of the nudge condition below. All three must hold:
+ *
+ *  1. the plugin is installed and enabled in Obsidian;
+ *  2. its skill is enabled for this agent (absent = off, matching the runtime
+ *     `AgentManager.getEnabledPluginIds()` semantics rather than the editor's display
+ *     default);
+ *  3. the `exec_<plugin>` tool is approved.
+ *
+ * (3) is the easy one to forget and the reason this isn't just "is the skill on".
+ * `AgentManager.skillHasUsableTools` documents the divergence: declining the privacy
+ * confirmation leaves the skill enabled with exec approval OFF, and the curated
+ * integration skills declare no `allowed-tools` at all — their bodies are entirely about
+ * calling `exec_<plugin>`. Suggesting a query in that state would be a dead end.
+ */
+function integrationUsable(pluginId: string): boolean {
+	const mgr = plugin.agentManager;
+	if (!mgr?.isPluginEnabled(pluginId)) return false;
+
+	const agent = data.getSelectedAgent();
+	if (!(agent.pluginExecTools?.[toExecToolId(pluginId)] ?? false)) return false;
+
+	// Resolve the skill from what is actually discovered on disk rather than trusting a
+	// hardcoded id: curated integration skills seed on demand, so the file may not exist
+	// yet even though CURATED_PLUGIN_INTEGRATIONS names one (same reasoning as
+	// `enablePlugin` below, issue #382).
+	const skills = plugin.skillsService?.isDiscovered() ? plugin.skillsService.getCachedSkills() : undefined;
+	if (!skills) return false;
+	const skillId = [...skills].find(([, metadata]) => metadata.linkedPluginId === pluginId)?.[0];
+	if (!skillId) return false;
+	return agent.skills[skillId]?.enabled ?? false;
+}
+
+// Starter queries for integrations that are switched on and usable. Reads live
+// `app.plugins` state, so it depends on the same refresh signal the nudges use.
+const integrationSuggestions = $derived.by<SuggestedQuery[]>(() => {
+	const _refresh = pluginRefresh;
+	return filterIntegrationSuggestions(INTEGRATION_SUGGESTIONS, data.dismissedRecommendations, integrationUsable);
+});
+
 // Suggestions are hidden (not just the `chat`-gated one) when no model is
 // selected — the model-select CTA takes their place, since none of them can
 // actually be sent yet.
-const suggestions = $derived(!noModelSelected ? filterSuggestions(ctx, data.dismissedRecommendations) : []);
+//
+// Generic starters lead and integration ones fill the remaining room, capped so a vault
+// with several integrations can't undo the deliberate trim of the generic catalog.
+const suggestions = $derived(
+	!noModelSelected
+		? mergeSuggestions(filterSuggestions(ctx, data.dismissedRecommendations), integrationSuggestions)
+		: [],
+);
 
 // Installed+enabled plugins whose S2B integration isn't switched on for the
 // selected agent yet. Not dismissed = eligible to nudge.

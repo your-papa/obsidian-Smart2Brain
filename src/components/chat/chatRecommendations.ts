@@ -74,6 +74,101 @@ export const SUGGESTED_QUERIES: SuggestedQuery[] = [
 	},
 ];
 
+/**
+ * A starter query demonstrating what an *enabled* plugin integration can do.
+ *
+ * The exact counterpart of a {@link PluginNudge}: a nudge asks the user to switch an
+ * integration on and vanishes once they do, at which point the agent is more capable but
+ * the empty state says nothing about it. These fill that gap — they appear only once the
+ * integration is usable, and they persist.
+ */
+export interface IntegrationSuggestion extends SuggestedQuery {
+	/** Obsidian plugin id whose integration must be usable for this to show. */
+	pluginId: string;
+}
+
+/**
+ * Starter queries for the community integrations S2B ships a `SKILL.md` for.
+ *
+ * Hardcoded rather than read from skill frontmatter, deliberately. The frontmatter
+ * `description` is model-facing prose ("…Use when the user asks about their tasks, todos,
+ * due dates…") and would read wrong on a chip; and neither frontmatter parser
+ * (`src/skills/defaults/index.ts`, `src/skills/SkillsService.ts`) can express a list —
+ * both are line-based `key: value` scanners over a `Record<string, string>` metadata type.
+ * Hand-written copy is also simply better copy, which is the whole point of this surface.
+ *
+ * Core-plugin skills (canvas, bases) are deliberately absent: they are enabled by default
+ * whenever their core plugin is on, so they would claim slots the user never opted into.
+ *
+ * `obsidian-charts` is absent too despite shipping a SKILL.md — it has no entry in
+ * `CURATED_PLUGIN_INTEGRATIONS` and renders through dataviewjs codeblocks rather than a
+ * public scripting `api`, so it never gains an `exec_` tool and a suggestion for it could
+ * never satisfy the usability gate. The catalog test enforces this.
+ *
+ * Icons reuse the ids in `PLUGIN_ICON_BY_ID` so a suggestion wears the same glyph as the
+ * nudge it replaces.
+ */
+export const INTEGRATION_SUGGESTIONS: IntegrationSuggestion[] = [
+	{
+		id: "int-tasknotes",
+		pluginId: "tasknotes",
+		icon: "check-square",
+		label: "What tasks are due this week?",
+	},
+	{
+		id: "int-tasks",
+		pluginId: "obsidian-tasks-plugin",
+		icon: "check-square",
+		label: "What tasks are overdue?",
+	},
+	{
+		id: "int-dataview",
+		pluginId: "dataview",
+		icon: "code",
+		label: "Show a table of my notes by tag",
+	},
+];
+
+/**
+ * Ceiling on the combined suggestion list. The generic catalog was deliberately trimmed to
+ * three; without a ceiling a vault with four integrations enabled would push the list back
+ * to seven and undo that.
+ */
+export const MAX_TOTAL_SUGGESTIONS = 5;
+
+/**
+ * Filters integration suggestions to those whose integration is usable and that the user
+ * hasn't dismissed. `isUsable` is supplied by the caller (it reads live `app.plugins` and
+ * agent state), keeping this module free of Svelte/Obsidian imports.
+ *
+ * Respects {@link DISMISS_ALL_ID} so "Dismiss all" hides these too — the generic catalog
+ * gets that from {@link filterSuggestions}, and these would otherwise survive it.
+ */
+export function filterIntegrationSuggestions(
+	catalog: readonly IntegrationSuggestion[],
+	dismissed: readonly string[],
+	isUsable: (pluginId: string) => boolean,
+): IntegrationSuggestion[] {
+	if (dismissed.includes(DISMISS_ALL_ID)) return [];
+	return catalog.filter((s) => isUsable(s.pluginId) && !dismissed.includes(s.id));
+}
+
+/**
+ * Combines the generic starters with the integration ones, generic first, capped.
+ *
+ * Generic lead so the top of the list is stable and familiar regardless of which plugins
+ * happen to be installed; integration suggestions fill whatever room is left. With the
+ * default cap that means a user running several integrations sees the three generic
+ * starters plus two integration ones.
+ */
+export function mergeSuggestions(
+	generic: readonly SuggestedQuery[],
+	integration: readonly SuggestedQuery[],
+	limit: number = MAX_TOTAL_SUGGESTIONS,
+): SuggestedQuery[] {
+	return [...generic, ...integration].slice(0, Math.max(0, limit));
+}
+
 function requirementMet(requires: SuggestionRequirement | undefined, ctx: RecommendationContext): boolean {
 	switch (requires) {
 		case "chat":
