@@ -17,7 +17,6 @@
       "Bash(bunx biome check *)",
       "Bash(bunx biome format *)",
       "Bash(bunx tsc --noEmit *)",
-      "Bash(bunx btca ask *)",
       "Bash(obsidian vault=\"S2B Test Vault\" command *)",
       "Bash(obsidian vault=\"S2B Test Vault\" dev:dom *)",
       "Bash(obsidian vault=\"S2B Test Vault\" dev:screenshot *)",

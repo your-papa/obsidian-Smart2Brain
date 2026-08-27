@@ -37,16 +37,6 @@ release" and covers the provider list, bundled skills, built-in tools,
 `BUILT_IN_TOOL_IDS`, `src/skills/defaults/`, or `manifest.json` means the site
 needs updating too.
 
-## btca — querying upstream docs
-
-When working with the libraries in this project, use `btca` to pull real docs from source repos rather than relying on memory:
-
-```bash
-bunx btca ask -r <resource> -q "<question>"
-```
-
-Resources defined in `btca.config.jsonc`: `svelte`, `tailwindcss`, `langchainjs`, `bitsui`, `runed`, `zod`, `tanstackQuery`, `obsidian`, `btca`, `biome`. Pass multiple `-r` flags to query several at once.
-
 ## Architecture
 
 This section is the canonical description of the architecture. (A longer
