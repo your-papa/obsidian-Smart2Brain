@@ -286,6 +286,13 @@ export class PendingChangesStore {
 					existing.change.type === "update"
 				) {
 					existing.status = "rejected";
+					// Any `initialOriginalContent` snapshot is deliberately LEFT SET here.
+					// It means "applied content the user has not signed off on", and
+					// superseding the proposal does not make that content reviewed — the
+					// text is still in the note, so the undo path must stay reachable via
+					// `getActionableForThread`. Clearing it strands the applied text with
+					// its only undo record discarded. Pinned by "keeps an entry actionable
+					// when superseded by a newer proposal" in the store's tests.
 				}
 			}
 		}

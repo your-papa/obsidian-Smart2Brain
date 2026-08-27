@@ -392,6 +392,57 @@ function summarizeOperations(changes: PendingChange[]): string {
 }
 
 /**
+ * The entry paths a `discard` should target, given the reference the model wrote.
+ *
+ * A discard names a PROPOSAL, not a file, so it must resolve against the entries
+ * rather than the vault. Three cases the vault alone cannot serve:
+ *
+ *   - the note was renamed after staging (`#handleFileRename` re-keys the entry
+ *     to the new path, so the old path the model remembers no longer resolves);
+ *   - the proposal is a delete for a note that is already gone; and
+ *   - the model used a wiki-link, which normalizes to a bare basename that never
+ *     equals the canonical `Notes/todo.md` an entry is keyed by.
+ *
+ * Resolution order is strict-to-loose, and stops at the first tier that hits so
+ * a loose match can never override an exact one:
+ *
+ *   1. the vault-resolved canonical path, when the file still exists;
+ *   2. an entry whose path equals the normalized reference exactly;
+ *   3. entries whose basename matches, with or without the `.md` the model may
+ *      have omitted — the wiki-link and renamed-note cases.
+ *
+ * Tier 3 can legitimately return several paths (two pending proposals for
+ * same-named notes in different folders). Both are this thread's own proposals
+ * and the model asked to withdraw that name, so both are withdrawn and each is
+ * reported by full path — silently picking one would leave the other stuck.
+ * Returns the reference itself when nothing matches, so the caller still reports
+ * an honest "nothing to withdraw" against the name the model used.
+ */
+function resolveDiscardTargets(
+	pending: { change: { path: string } }[],
+	cleanPath: string,
+	vaultResolvedPath: string | undefined,
+): string[] {
+	if (vaultResolvedPath) return [vaultResolvedPath];
+
+	const normalized = normalizePath(cleanPath);
+	if (pending.some((entry) => entry.change.path === normalized)) return [normalized];
+
+	// Basename comparison, tolerating a missing `.md` on the model's reference.
+	const wanted = normalized.split("/").pop() ?? normalized;
+	const wantedWithExt = wanted.endsWith(".md") ? wanted : `${wanted}.md`;
+	const byBasename = [
+		...new Set(
+			pending
+				.map((entry) => entry.change.path)
+				.filter((path) => (path.split("/").pop() ?? path) === wantedWithExt),
+		),
+	];
+
+	return byBasename.length > 0 ? byBasename : [normalized];
+}
+
+/**
  * Phrase the outcome of this batch's `discard` operations for the model.
  *
  * A discard that matched nothing is reported plainly rather than as an error:
@@ -607,16 +658,27 @@ export async function stageNoteOperations(
 			// path in a single batch is the natural correction idiom, and the
 			// update branch still guards against a *second* update to that path.
 			//
-			// Resolved leniently: unlike update/delete/move this never touches the
-			// file, so a note that has since been renamed or deleted must still be
-			// discardable. Fall back to the literal normalized path when the
-			// vault can't resolve it, since that is what the entry is keyed by.
+			// Resolved against the THREAD'S OWN PENDING ENTRIES, not just the vault.
+			// Unlike update/delete/move this never touches the file, so the note may
+			// legitimately be gone: renamed after staging, or a proposal to delete a
+			// note that has since been removed. Vault resolution alone fails there,
+			// and falling back to the literal input is worse than useless — a
+			// wiki-link (`[[todo]]`) normalizes to a bare basename that can never
+			// equal the canonical `Notes/todo.md` an entry is keyed by, so the
+			// discard would silently match nothing and wrongly report that there was
+			// nothing to withdraw. Matching entry paths by basename closes both gaps.
 			const cleanPath = normalizeReferencePath(operation.path);
 			const resolved = resolveVaultFileDetailed(app, cleanPath);
-			const targetPath = resolved.status === "found" ? resolved.file.path : normalizePath(cleanPath);
+			const targetPaths = resolveDiscardTargets(
+				store.getPendingForThread(threadId),
+				cleanPath,
+				resolved.status === "found" ? resolved.file.path : undefined,
+			);
 
-			const { discarded, skippedApplied } = store.discardPendingForPath(targetPath, threadId);
-			discardResults.push({ path: targetPath, discarded, skippedApplied });
+			for (const targetPath of targetPaths) {
+				const { discarded, skippedApplied } = store.discardPendingForPath(targetPath, threadId);
+				discardResults.push({ path: targetPath, discarded, skippedApplied });
+			}
 			continue;
 		}
 
