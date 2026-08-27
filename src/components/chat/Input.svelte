@@ -198,7 +198,12 @@ const contextUsage = $derived.by(() => {
 	return buildUsageEstimate(contextBreakdown.totalTokens, selectedChatModel?.modelConfig?.contextWindow);
 });
 
-const canSendMessage = $derived(inputValue.trim().length > 0 || attachments.length > 0);
+// No model on the agent means no provider either — `chatModel` carries both, and
+// it's the same value ModelSelectButton renders as "Select model". Sending in that
+// state fails inside the agent with a generic error, so gate the composer instead.
+const hasChatModel = $derived(Boolean(selectedChatModel));
+const hasContentToSend = $derived(inputValue.trim().length > 0 || attachments.length > 0);
+const canSendMessage = $derived(hasContentToSend && hasChatModel);
 const canSummarizeNow = $derived.by(() => {
 	return Boolean(session && session.messageState === MessageState.idle && session.messages.length > 0);
 });
@@ -316,10 +321,21 @@ $effect(() => {
 	if (registry.pendingSubmitThreadPath && registry.pendingSubmitThreadPath !== threadPath) return;
 	if (!session) return;
 	if (savingFiles) return;
-	if (!canSendMessage) return;
+	if (!hasContentToSend) return;
 
 	registry.pendingAutoSubmit = false;
 	registry.pendingSubmitThreadPath = null;
+	// Consume the queued submit either way. Waiting for `hasChatModel` instead
+	// would leave the request armed indefinitely and fire it much later, once the
+	// user eventually picks a model — long after they've forgotten they asked.
+	// The text stays in the composer, so nothing is lost by explaining and stopping.
+	if (!hasChatModel) {
+		showActionNotice(
+			"Select a chat model to send this.",
+			selectChatModelAction("Select model", selectedAgentWriteTarget),
+		);
+		return;
+	}
 	sendMessage();
 });
 
@@ -516,6 +532,13 @@ function toggleFullscreen() {
 function attemptSend() {
 	if (savingFiles) {
 		new Notice("Please wait for attachments to finish saving");
+	} else if (!hasChatModel) {
+		// Reachable from the keyboard even though the button is disabled.
+		// The picker is the only way forward, so offer it rather than just saying no.
+		showActionNotice(
+			"Select a chat model before sending.",
+			selectChatModelAction("Select model", selectedAgentWriteTarget),
+		);
 	} else if (canSendMessage) {
 		if (isEditing) {
 			saveEdit();
@@ -540,8 +563,12 @@ function cancelActiveEdit() {
 
 function saveEdit() {
 	if (!session || editingPairId === null) return;
-	if (!canSendMessage) {
+	if (!hasContentToSend) {
 		new Notice("Add text before saving");
+		return;
+	}
+	if (!hasChatModel) {
+		new Notice("Select a chat model before saving.");
 		return;
 	}
 
@@ -565,8 +592,12 @@ function sendMessage() {
 		new Notice("Please wait for attachments to finish saving");
 		return;
 	}
-	if (!canSendMessage) {
+	if (!hasContentToSend) {
 		new Notice("Add text or attach a file before sending");
+		return;
+	}
+	if (!hasChatModel) {
+		new Notice("Select a chat model before sending.");
 		return;
 	}
 	if (!session) {
@@ -1237,13 +1268,15 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
           <Button
             disabled={!canSendMessage || savingFiles}
             ariaLabel={isEditing ? "save edit" : "send message"}
-            tooltip={isEditing
-              ? sendShortcutHint
-                ? `Save edit (${sendShortcutHint})`
-                : "Save edit"
-              : sendShortcutHint
-                ? `Send message (${sendShortcutHint})`
-                : "Send message"}
+            tooltip={!hasChatModel
+              ? "Select a chat model first"
+              : isEditing
+                ? sendShortcutHint
+                  ? `Save edit (${sendShortcutHint})`
+                  : "Save edit"
+                : sendShortcutHint
+                  ? `Send message (${sendShortcutHint})`
+                  : "Send message"}
             onClick={attemptSend}
             dataTestId="send-message-button"
             styles="send-message-button p-0 border-none cursor-pointer flex items-center justify-center shrink-0 transition-all duration-200 disabled:cursor-not-allowed"

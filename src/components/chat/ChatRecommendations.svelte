@@ -487,9 +487,16 @@ function reviewNotice(notice: UpdateNotice): void {
     display: flex;
     align-items: center;
     gap: 0.75rem;
-    padding: 0.6rem 0.9rem;
+    /* Obsidian's app.css gives `button` a fixed `height` (~30px). With
+       `box-sizing: border-box` that height SUBSUMES the padding below rather
+       than adding to it, so the two text lines were pinned flush against the
+       top and bottom borders and any padding increase did nothing at all.
+       `height: auto` hands sizing back to the content, which is what makes the
+       vertical padding take effect. */
+    height: auto;
+    padding: 0.55rem 0.9rem;
     border: 1px solid var(--interactive-accent);
-    border-radius: var(--radius-m);
+    border-radius: var(--radius-l);
     background: color-mix(in srgb, var(--interactive-accent) 8%, transparent);
     box-shadow: none;
     text-align: left;
