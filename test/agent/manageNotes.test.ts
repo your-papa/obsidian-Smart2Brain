@@ -7,6 +7,7 @@ const mockIsPathAllowed = vi.fn().mockReturnValue(true);
 const mockCountOtherThreads = vi.fn().mockReturnValue(0);
 const mockShouldBlockFile = vi.fn().mockReturnValue(false);
 const mockGetPendingUpdatesForPath = vi.fn().mockReturnValue([]);
+const mockDiscardPendingForPath = vi.fn().mockReturnValue({ discarded: 0, skippedApplied: 0 });
 
 vi.mock("../../src/stores/pendingChangesStore.svelte", () => ({
 	getPendingChangesStore: () => ({
@@ -15,6 +16,7 @@ vi.mock("../../src/stores/pendingChangesStore.svelte", () => ({
 		countOtherThreadsPendingUpdate: mockCountOtherThreads,
 		shouldBlockFile: (...args: unknown[]) => mockShouldBlockFile(...args),
 		getPendingUpdatesForPath: (...args: unknown[]) => mockGetPendingUpdatesForPath(...args),
+		discardPendingForPath: (...args: unknown[]) => mockDiscardPendingForPath(...args),
 	}),
 }));
 
@@ -100,6 +102,8 @@ describe("manageNotes tool", () => {
 		mockCountOtherThreads.mockReturnValue(0);
 		mockShouldBlockFile.mockReturnValue(false);
 		mockGetPendingUpdatesForPath.mockReturnValue([]);
+		mockDiscardPendingForPath.mockReturnValue({ discarded: 0, skippedApplied: 0 });
+		mockAddChanges.mockReturnValue(["mock-id"]);
 		mockGetIndexableVaultFiles.mockReturnValue([]);
 		setManageNotesPermissions();
 		app = createMockApp();
@@ -673,7 +677,7 @@ describe("manageNotes tool", () => {
 				THREAD_CONFIG,
 			);
 
-			expect(result).toContain("superseded");
+			expect(result).toContain("contains BOTH");
 			const staged = mockAddChanges.mock.calls[0][0][0];
 			// Conflict baseline stays disk; the proposal carries both rounds of edits.
 			expect(staged.originalContent).toBe(DISK);
@@ -716,7 +720,7 @@ describe("manageNotes tool", () => {
 			);
 
 			expect(result).toContain("Proposed");
-			expect(result).not.toContain("superseded");
+			expect(result).not.toContain("contains BOTH");
 			const staged = mockAddChanges.mock.calls[0][0][0];
 			expect(staged.originalContent).toBe(DISK);
 			expect(staged.newContent).toBe("line one\nline two rewritten\nline three\n");
@@ -761,7 +765,7 @@ describe("manageNotes tool", () => {
 				THREAD_CONFIG,
 			);
 
-			expect(result).toContain("superseded");
+			expect(result).toContain("contains BOTH");
 			const staged = mockAddChanges.mock.calls[0][0][0];
 			// Both edits present — disk-first would have lost "line one edited".
 			expect(staged.newContent).toBe("line one edited\nline two\nline three edited\n");
@@ -796,7 +800,7 @@ describe("manageNotes tool", () => {
 			);
 
 			// Pending base can't match, so disk wins and the model's intent stands.
-			expect(result).not.toContain("superseded");
+			expect(result).not.toContain("contains BOTH");
 			const staged = mockAddChanges.mock.calls[0][0][0];
 			expect(staged.newContent).toBe("line one\nMODEL VERSION\nline three\n");
 		});
@@ -822,9 +826,7 @@ describe("manageNotes tool", () => {
 		});
 
 		it("falls back to disk when the pending proposal is stale against disk", async () => {
-			mockGetPendingUpdatesForPath.mockReturnValue([
-				pendingEntry("test-thread-id", "some older disk content\n"),
-			]);
+			mockGetPendingUpdatesForPath.mockReturnValue([pendingEntry("test-thread-id", "some older disk content\n")]);
 
 			const result = await tool.invoke(
 				{
@@ -860,7 +862,7 @@ describe("manageNotes tool", () => {
 				THREAD_CONFIG,
 			);
 
-			expect(result).not.toContain("superseded");
+			expect(result).not.toContain("contains BOTH");
 			const staged = mockAddChanges.mock.calls[0][0][0];
 			expect(staged.newContent).toBe("line one\nline 2\nline three\n");
 		});
@@ -877,7 +879,7 @@ describe("manageNotes tool", () => {
 				THREAD_CONFIG,
 			);
 
-			expect(result).toContain("superseded");
+			expect(result).toContain("contains BOTH");
 			const staged = mockAddChanges.mock.calls[0][0][0];
 			expect(staged.originalContent).toBe(DISK);
 			expect(staged.newContent).toBe("line one\nline two changed\nline three\n");
@@ -1072,6 +1074,200 @@ describe("manageNotes tool", () => {
 
 			expect(result).toContain("update permission");
 			expect(mockAddChanges).not.toHaveBeenCalled();
+		});
+	});
+
+	/**
+	 * The agent's retraction path. Before this, `manage_notes` could only stage,
+	 * so an agent correcting itself ("i meant at the bottom") could do nothing but
+	 * stage a second proposal — which the rebase then merged with the first,
+	 * leaving BOTH edits in the review queue while the agent told the user the
+	 * earlier one had been superseded.
+	 */
+	describe("discard withdraws this thread's pending proposals", () => {
+		beforeEach(() => {
+			mockResolveVaultFileDetailed.mockReturnValue({ status: "found", file: makeFile("Notes/doc.md") });
+		});
+
+		it("withdraws pending proposals for the path and stages nothing", async () => {
+			mockDiscardPendingForPath.mockReturnValue({ discarded: 2, skippedApplied: 0 });
+
+			const result = await tool.invoke(
+				{ operations: [{ type: "discard", path: "Notes/doc.md" }] },
+				THREAD_CONFIG,
+			);
+
+			expect(mockDiscardPendingForPath).toHaveBeenCalledWith("Notes/doc.md", "test-thread-id");
+			expect(result).toContain("Withdrew 2 pending proposal(s)");
+			expect(result).toContain("Notes/doc.md");
+			// A discard proposes nothing — it must not inflate the operation tally.
+			expect(result).not.toContain("Proposed");
+			expect(mockAddChanges).toHaveBeenCalledWith([], expect.anything(), "test-thread-id");
+		});
+
+		it("is a neutral no-op rather than an error when nothing is pending", async () => {
+			mockDiscardPendingForPath.mockReturnValue({ discarded: 0, skippedApplied: 0 });
+
+			const result = await tool.invoke(
+				{ operations: [{ type: "discard", path: "Notes/doc.md" }] },
+				THREAD_CONFIG,
+			);
+
+			expect(result).not.toContain("Error");
+			expect(result).toContain("Nothing to withdraw");
+			// The model must not claim a retraction that never happened.
+			expect(result).toContain("Do not tell the user you took anything back");
+		});
+
+		it("reports proposals it could not withdraw because the user already applied part", async () => {
+			mockDiscardPendingForPath.mockReturnValue({ discarded: 0, skippedApplied: 1 });
+
+			const result = await tool.invoke(
+				{ operations: [{ type: "discard", path: "Notes/doc.md" }] },
+				THREAD_CONFIG,
+			);
+
+			expect(result).toContain("Could not withdraw 1 proposal(s)");
+			expect(result).toContain("Leave it to them to undo");
+		});
+
+		it("allows discard and update for the same path in one batch", async () => {
+			mockDiscardPendingForPath.mockReturnValue({ discarded: 1, skippedApplied: 0 });
+			vi.mocked(app.vault.read).mockResolvedValue("line one\nline two\n");
+
+			const result = await tool.invoke(
+				{
+					operations: [
+						{ type: "discard", path: "Notes/doc.md" },
+						{
+							type: "update",
+							path: "Notes/doc.md",
+							edits: [{ oldText: "line two", newText: "line two edited" }],
+						},
+					],
+				},
+				THREAD_CONFIG,
+			);
+
+			// The one-target-per-path guard must not fire — this pair is the
+			// correction idiom the discard operation exists to enable.
+			expect(result).not.toContain("targeted more than once");
+			expect(result).toContain("Withdrew 1 pending proposal(s)");
+			const staged = mockAddChanges.mock.calls[0][0][0];
+			expect(staged.newContent).toBe("line one\nline two edited\n");
+		});
+
+		it("still discards when the note no longer resolves in the vault", async () => {
+			// Entries are keyed by path, so a proposal for a note that has since been
+			// renamed or deleted must remain withdrawable.
+			mockResolveVaultFileDetailed.mockReturnValue({ status: "not_found" });
+			mockDiscardPendingForPath.mockReturnValue({ discarded: 1, skippedApplied: 0 });
+
+			const result = await tool.invoke(
+				{ operations: [{ type: "discard", path: "Notes/gone.md" }] },
+				THREAD_CONFIG,
+			);
+
+			expect(mockDiscardPendingForPath).toHaveBeenCalledWith("Notes/gone.md", "test-thread-id");
+			expect(result).toContain("Withdrew 1 pending proposal(s)");
+		});
+
+		it("does not require update permission", async () => {
+			// Discarding only ever REMOVES a proposed write, so a permission change
+			// must not strand proposals the agent could otherwise clean up.
+			setManageNotesPermissions({ allowCreate: false, allowUpdate: false, allowDelete: false, allowMove: false });
+			tool = createManageNotesTool(app);
+			mockDiscardPendingForPath.mockReturnValue({ discarded: 1, skippedApplied: 0 });
+
+			const result = await tool.invoke(
+				{ operations: [{ type: "discard", path: "Notes/doc.md" }] },
+				THREAD_CONFIG,
+			);
+
+			expect(result).not.toContain("disabled for this agent");
+			expect(result).toContain("Withdrew 1 pending proposal(s)");
+		});
+	});
+
+	describe("replace_pending opts out of the rebase", () => {
+		const DISK = "line one\nline two\nline three\n";
+
+		beforeEach(() => {
+			mockResolveVaultFileDetailed.mockReturnValue({ status: "found", file: makeFile("Notes/doc.md") });
+			vi.mocked(app.vault.read).mockResolvedValue(DISK);
+			// A pending proposal that the default rebase WOULD have merged with:
+			// its edit is orthogonal, so both bases match.
+			mockGetPendingUpdatesForPath.mockReturnValue([
+				{
+					id: "prior-id",
+					status: "pending",
+					toolCallId: "tc-prior",
+					threadId: "test-thread-id",
+					createdAt: 1,
+					change: {
+						type: "update",
+						path: "Notes/doc.md",
+						originalContent: DISK,
+						newContent: "line one edited\nline two\nline three\n",
+					},
+				},
+			]);
+		});
+
+		it("stages an update against disk and drops the earlier proposal", async () => {
+			const result = await tool.invoke(
+				{
+					operations: [
+						{
+							type: "update",
+							path: "Notes/doc.md",
+							replace_pending: true,
+							edits: [{ oldText: "line three", newText: "line three edited" }],
+						},
+					],
+				},
+				THREAD_CONFIG,
+			);
+
+			// No merge note: this REPLACES the earlier proposal rather than adding to it.
+			expect(result).not.toContain("contains BOTH");
+			const staged = mockAddChanges.mock.calls[0][0][0];
+			// "line one edited" is absent — the earlier round was deliberately dropped.
+			expect(staged.newContent).toBe("line one\nline two\nline three edited\n");
+		});
+
+		it("merges instead when the flag is omitted", async () => {
+			const result = await tool.invoke(
+				{
+					operations: [
+						{
+							type: "update",
+							path: "Notes/doc.md",
+							edits: [{ oldText: "line three", newText: "line three edited" }],
+						},
+					],
+				},
+				THREAD_CONFIG,
+			);
+
+			expect(result).toContain("contains BOTH");
+			const staged = mockAddChanges.mock.calls[0][0][0];
+			expect(staged.newContent).toBe("line one edited\nline two\nline three edited\n");
+		});
+
+		it("applies to a vault-wide replace too", async () => {
+			mockGetIndexableVaultFiles.mockReturnValue([makeFile("Notes/doc.md")]);
+
+			const result = await tool.invoke(
+				{
+					operations: [{ type: "replace", find: "line two", replace: "LINE 2", replace_pending: true }],
+				},
+				THREAD_CONFIG,
+			);
+
+			expect(result).not.toContain("contains BOTH");
+			const staged = mockAddChanges.mock.calls[0][0][0];
+			expect(staged.newContent).toBe("line one\nLINE 2\nline three\n");
 		});
 	});
 });

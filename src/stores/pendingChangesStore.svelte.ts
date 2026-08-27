@@ -791,6 +791,44 @@ export class PendingChangesStore {
 		);
 	}
 
+	/**
+	 * Reject this thread's pending entries for `filePath` — the agent's own
+	 * retraction path (`manage_notes` `discard`), so it can withdraw a proposal
+	 * it no longer stands behind instead of only ever stacking new ones on top.
+	 *
+	 * Scoped to `threadId` deliberately: another chat's proposal is not this
+	 * agent's to drop, matching how `resolveUpdateBases` and the update-dedup
+	 * both refuse to reach across threads.
+	 *
+	 * Entries holding unreverted partially-applied content are SKIPPED, not
+	 * rejected. That content is on disk because the user accepted a diff group;
+	 * silently reverting it (or marking it resolved while it sits there) would
+	 * undo their own decision. They are returned separately so the caller can
+	 * tell the model, which must then leave them to the user.
+	 *
+	 * @returns the number discarded, plus the paths' entry count that was skipped.
+	 */
+	discardPendingForPath(filePath: string, threadId: string): { discarded: number; skippedApplied: number } {
+		let discarded = 0;
+		let skippedApplied = 0;
+		for (const entry of this.#entries) {
+			if (entry.threadId !== threadId) continue;
+			if (entry.status !== "pending") continue;
+			if (entry.change.path !== filePath) continue;
+			if (this.hasUnrevertedApplication(entry)) {
+				skippedApplied++;
+				continue;
+			}
+			entry.status = "rejected";
+			discarded++;
+		}
+		if (discarded > 0) {
+			this.scheduleSave();
+			this.notifyChange();
+		}
+		return { discarded, skippedApplied };
+	}
+
 	/** Count distinct OTHER threads that also have a pending update to `filePath`.
 	 * `exceptThreadId` is the thread being viewed/staged; it's excluded so the
 	 * result is "how many *other* chats are editing this same file". Used by the

@@ -336,7 +336,7 @@ export const DEFAULT_TOOLS_CONFIG: ToolsConfig = {
 		enabled: true,
 		name: "manage_notes",
 		description:
-			"Create, update, delete, move, or find-and-replace across markdown notes in one staged batch. For a single note, use 'update' with targeted search-and-replace edits (add is_regex/replace_all to match by regex or replace every occurrence). For vault-wide or folder-scoped find-and-replace, use the 'replace' operation (find/replace, optional is_regex/case_sensitive/path_prefix) — preview its blast radius first with grep_notes. Batch related note operations together.",
+			"Create, update, delete, move, or find-and-replace across markdown notes in one staged batch. For a single note, use 'update' with targeted search-and-replace edits (add is_regex/replace_all to match by regex or replace every occurrence). For vault-wide or folder-scoped find-and-replace, use the 'replace' operation (find/replace, optional is_regex/case_sensitive/path_prefix) — preview its blast radius first with grep_notes. Batch related note operations together. Staged changes can still be revised: editing a note you already have a pending proposal for ADDS to that proposal, so set replace_pending on the update to replace it instead, or use the 'discard' operation to withdraw it entirely.",
 		settings: {
 			allowCreate: true,
 			allowUpdate: true,
