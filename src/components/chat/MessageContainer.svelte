@@ -918,7 +918,7 @@ $effect(() => {
                 {@const genLabel = shouldShowGenerationLabel(index) ? getGenerationLabel(messagePair) : null}
                 {@const timestamp = onMobile ? null : formatMessageTimestamp(messagePair)}
                 <div
-                  class="message-footer flex flex-row items-center gap-3 flex-wrap opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 pointer-events-none group-hover:pointer-events-auto transition-all duration-200 ease-out"
+                  class="message-footer message-footer-assistant flex flex-row items-center gap-3 flex-nowrap opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 pointer-events-none group-hover:pointer-events-auto transition-all duration-200 ease-out"
                 >
                   <div class="footer-actions flex flex-row items-center gap-1.5">
                     {#if messagePair.assistantBranchInfo}
@@ -1112,9 +1112,74 @@ $effect(() => {
     color: var(--text-faint);
   }
 
+  /* Everything below is scoped to `.message-footer-assistant`. The user
+     message reuses `.message-footer` but lays out in the OPPOSITE order
+     (timestamp then actions, right-aligned) and carries no metadata group,
+     so the sizing rules here actively break it: pinning its actions with
+     nothing else able to yield pushes the buttons off the right edge. */
+  .message-footer-assistant {
+    /* Query container for the metadata's progressive collapse (see the
+       `@container` rules below). As in the composer, the constraint is the
+       width of the CHAT PANE, not the viewport: a sidebar can be dragged
+       wide and a narrow window's main view is just as cramped as a sidebar,
+       so only querying an element in the actual column tracks it. */
+    container-type: inline-size;
+    container-name: chat-message-footer;
+  }
+
+  /* The assistant footer is `nowrap`: it must stay a single line at every
+     width. It previously wrapped, which dropped the agent/model group onto
+     its own row and made the footer grow taller than the message it
+     annotates. With nowrap the overflow has to go somewhere, so pin the
+     controls and let ONLY the metadata shrink — otherwise the browser is
+     free to squeeze the icon buttons and deform the touch targets. */
+  .message-footer-assistant .footer-actions {
+    flex-shrink: 0;
+  }
+
   .footer-meta {
     color: var(--text-faint);
     overflow: hidden;
+    flex-shrink: 1;
+    min-width: 0;
+  }
+
+  /* Progressive collapse of the footer metadata as the chat pane narrows.
+     Without this, everything stays on one line and merely truncates, which
+     produced unreadable stubs ("S2B Ag…", "openai/gemma-4-26b-a4b-i…") that
+     identify neither the agent nor the model. Shed whole items instead, in
+     priority order (least identifying first):
+
+       1. <400px — drop the timestamp. It's the only item that says nothing
+          about WHO answered, and it's already hidden on mobile for this
+          reason. Dropping it hands its width to the labels.
+       2. <300px — drop the model. The agent name + its user-chosen icon
+          still identify the responder; a truncated provider/model string
+          does not.
+       3. <220px — drop the metadata entirely, leaving the action buttons.
+          Below this the labels can't survive at any useful length, and the
+          controls are the part you actually click.
+
+     Every shed item remains in the group's `title` tooltip, so the full
+     agent · model text stays reachable on hover at any width. */
+  @container chat-message-footer (max-width: 400px) {
+    .message-footer-assistant .message-timestamp,
+    .message-footer-assistant .footer-dot {
+      display: none;
+    }
+  }
+
+  @container chat-message-footer (max-width: 300px) {
+    .message-footer-assistant .generation-model,
+    .message-footer-assistant .generation-sep {
+      display: none;
+    }
+  }
+
+  @container chat-message-footer (max-width: 220px) {
+    .message-footer-assistant .footer-meta {
+      display: none;
+    }
   }
 
   .generation-label {
@@ -1122,8 +1187,15 @@ $effect(() => {
     line-height: 1.15;
   }
 
+  /* The agent is the more identifying of the two labels and is far shorter,
+     so let the model absorb the truncation first: the agent only shrinks
+     once the model has already collapsed to nothing. Otherwise flexbox
+     splits the deficit between them and clips BOTH into stubs, which is
+     exactly the "S2B Ag… · openai/gemma-4-26b-a4b-i…" case. */
   .generation-agent {
     font-weight: 500;
+    flex-shrink: 0;
+    max-width: 100%;
   }
 
   .generation-agent-icon {
@@ -1141,6 +1213,8 @@ $effect(() => {
   .generation-model {
     color: var(--text-faint);
     font-variant-numeric: tabular-nums;
+    flex-shrink: 1;
+    min-width: 0;
   }
 
   /* Small dot separating the model label from the timestamp. */
