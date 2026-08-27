@@ -776,7 +776,12 @@ export function formatGraphNotesContext(notes: GraphNoteRef[]): string {
  * edits were (or will be) applied — including ones the user rejected.
  */
 export function formatReviewOutcomesContext(status: ReviewStatusRef): string {
-	if (status.outcomes.length === 0 && status.pendingPaths.length === 0) return "";
+	const pendingProposals = status.pendingProposals ?? [];
+	// Messages persisted before proposals carried ids kept only paths. Their block
+	// is reconstructed here to be stripped by exact match, so it has to render the
+	// way it originally did — hence reading the legacy field rather than migrating.
+	const legacyPendingPaths = pendingProposals.length === 0 ? (status.pendingPaths ?? []) : [];
+	if (status.outcomes.length === 0 && pendingProposals.length === 0 && legacyPendingPaths.length === 0) return "";
 	const lines = ["[Status of your proposed note changes]"];
 	for (const o of status.outcomes) {
 		if (o.outcome === "accepted") {
@@ -789,9 +794,16 @@ export function formatReviewOutcomesContext(status: ReviewStatusRef): string {
 			);
 		}
 	}
-	if (status.pendingPaths.length > 0) {
+	if (pendingProposals.length > 0) {
 		lines.push(
-			`- Still awaiting the user's review (NOT applied yet): ${status.pendingPaths.map((p) => `"${p}"`).join(", ")}`,
+			"- Still awaiting the user's review (NOT applied yet). Use the id with a `discard` operation to withdraw one:",
+		);
+		for (const proposal of pendingProposals) {
+			lines.push(`  - "${proposal.path}" (id: ${proposal.shortId})`);
+		}
+	} else if (legacyPendingPaths.length > 0) {
+		lines.push(
+			`- Still awaiting the user's review (NOT applied yet): ${legacyPendingPaths.map((p) => `"${p}"`).join(", ")}`,
 		);
 	}
 	return lines.join("\n");
@@ -2149,8 +2161,10 @@ export class ChatSession {
 		// still read the notes) — accepted over re-reporting them forever.
 		let reviewStatus: ReviewStatusRef | undefined;
 		try {
-			const { outcomes, pendingPaths } = getPendingChangesStore().takeReviewOutcomesForThread(String(this.id));
-			if (outcomes.length > 0 || pendingPaths.length > 0) reviewStatus = { outcomes, pendingPaths };
+			const { outcomes, pendingProposals } = getPendingChangesStore().takeReviewOutcomesForThread(
+				String(this.id),
+			);
+			if (outcomes.length > 0 || pendingProposals.length > 0) reviewStatus = { outcomes, pendingProposals };
 		} catch {
 			// store not initialized — send without the block
 		}
