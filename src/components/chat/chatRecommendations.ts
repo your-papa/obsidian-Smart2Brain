@@ -34,6 +34,24 @@ export interface RecommendationContext {
  * Curated first-query suggestions. `requires` gates each on a feature so we
  * never suggest something the user can't run (e.g. a vault-search prompt with
  * no populated index).
+ *
+ * Deliberately short. An earlier catalog carried six entries, three of which
+ * ("Summarize my recent notes", "What are the main themes in my vault?",
+ * "Connect ideas across my notes") were the same broad-retrieval-and-synthesize
+ * request in different words, so the list read as padding rather than a menu.
+ * Each survivor earns its slot by being structurally distinct:
+ *   - `help-overview` is the only one whose answer depends on how THIS install
+ *     is configured (which skills and tools the agent actually has), so it
+ *     teaches the surface rather than demonstrating the model.
+ *   - `find-notes` is the only one prefilling a PARTIAL query — a template the
+ *     user completes, not a canned question.
+ *   - `summarize-recent` is the only synthesis prompt with a concrete,
+ *     verifiable scope ("recent") instead of a vague whole-vault sweep.
+ *
+ * Anything retrieval-backed MUST declare `requires: "search"`. The two removed
+ * synthesis entries were ungated, so they rendered on an empty vault with no
+ * populated index and could only disappoint — see the catalog test that guards
+ * this.
  */
 export const SUGGESTED_QUERIES: SuggestedQuery[] = [
 	{
@@ -53,22 +71,6 @@ export const SUGGESTED_QUERIES: SuggestedQuery[] = [
 		label: "Find notes about a topic",
 		query: "Find my notes about ",
 		requires: "search",
-	},
-	{
-		id: "vault-themes",
-		icon: "git-fork",
-		label: "What are the main themes in my vault?",
-	},
-	{
-		id: "connect-ideas",
-		icon: "network",
-		label: "Connect ideas across my notes",
-	},
-	{
-		id: "brainstorm",
-		icon: "lightbulb",
-		label: "Help me brainstorm ideas",
-		requires: "chat",
 	},
 ];
 
@@ -116,14 +118,49 @@ export interface PluginNudge {
 export const pluginNudgeId = (pluginId: string): string => `plugin:${pluginId}`;
 
 /**
- * Filters plugin nudges down to those the user hasn't dismissed. The candidate
- * list is expected to already be narrowed to installed-but-not-enabled
+ * How many plugin nudges may render at once, by available vertical space.
+ *
+ * The candidate list is unbounded in principle: `AgentManager.resolvePluginIntegrations`
+ * returns the curated integrations PLUS every enabled plugin exposing an object `api`,
+ * so a plugin-heavy vault could otherwise stack more "Enable …" rows than the whole
+ * suggestion list above it — making the empty state taller, which is the opposite of
+ * what this surface is for.
+ *
+ * Mobile gets one row because the composer and keyboard already claim most of the
+ * viewport there. These are display caps only: nothing is dropped from the candidate
+ * set, so dismissing or enabling a visible nudge promotes the next one into view.
+ */
+export const MAX_PLUGIN_NUDGES_DESKTOP = 3;
+export const MAX_PLUGIN_NUDGES_MOBILE = 1;
+
+/**
+ * Filters plugin nudges down to those the user hasn't dismissed, ranks the ones
+ * backed by a preshipped S2B skill first, and (optionally) caps how many render.
+ *
+ * The candidate list is expected to already be narrowed to installed-but-not-enabled
  * integrations by the caller (which reads live `app.plugins` / agent state).
  * Respects {@link DISMISS_ALL_ID} so "Dismiss all" hides plugin nudges too.
+ *
+ * Ranking matters because the slots are scarce: a `skillId` means we ship a SKILL.md
+ * documenting that plugin's api, so enabling it yields a genuinely more capable agent.
+ * An auto-discovered plugin with no bundled skill is the weakest thing on this surface
+ * and should never displace a curated one.
+ *
+ * The sort is stable within each group (`Array.prototype.sort` is stable per spec), so
+ * the visible rows don't shuffle between renders as unrelated candidates come and go.
+ *
+ * @param limit Max nudges to return. Omit for no cap — see {@link MAX_PLUGIN_NUDGES_DESKTOP}.
  */
-export function filterPluginNudges(candidates: readonly PluginNudge[], dismissed: readonly string[]): PluginNudge[] {
+export function filterPluginNudges(
+	candidates: readonly PluginNudge[],
+	dismissed: readonly string[],
+	limit?: number,
+): PluginNudge[] {
 	if (dismissed.includes(DISMISS_ALL_ID)) return [];
-	return candidates.filter((n) => !dismissed.includes(n.id));
+	const visible = candidates
+		.filter((n) => !dismissed.includes(n.id))
+		.sort((a, b) => Number(Boolean(b.skillId)) - Number(Boolean(a.skillId)));
+	return limit === undefined ? visible : visible.slice(0, Math.max(0, limit));
 }
 
 /**

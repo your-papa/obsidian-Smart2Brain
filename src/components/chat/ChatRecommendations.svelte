@@ -17,11 +17,14 @@ import { Logger } from "../../utils/logging";
 import { extractErrorMessage } from "../../utils/errorMessage";
 import { ModelSelectionModal } from "../modal/ModelSelectionModal";
 import { ProviderSetupModal } from "../../views/provider-setup/ProviderSetup";
+import { isMobileUI } from "../../utils/platform";
 import {
 	DISMISS_ALL_ID,
 	filterPluginNudges,
 	filterSuggestions,
 	filterUpdateNotices,
+	MAX_PLUGIN_NUDGES_DESKTOP,
+	MAX_PLUGIN_NUDGES_MOBILE,
 	type PluginNudge,
 	pluginNudgeId,
 	type SuggestedQuery,
@@ -136,7 +139,14 @@ const pluginNudges = $derived.by<PluginNudge[]>(() => {
 			skillId: integ.skillId,
 		});
 	}
-	return filterPluginNudges(candidates, data.dismissedRecommendations);
+	// Capped by available vertical space, skill-backed integrations first. isMobileUI() is
+	// a plain call, not a signal — it belongs inside this $derived.by (which already re-runs
+	// on pluginRefresh) rather than in an $effect syncing a separate state variable.
+	return filterPluginNudges(
+		candidates,
+		data.dismissedRecommendations,
+		isMobileUI() ? MAX_PLUGIN_NUDGES_MOBILE : MAX_PLUGIN_NUDGES_DESKTOP,
+	);
 });
 
 // "Updated default" notices: agents whose customized prompt/guidance couldn't be
@@ -371,12 +381,20 @@ function reviewNotice(notice: UpdateNotice): void {
 <style>
   /* One shared column so the greeting, suggestions and notices all align on the
      same left edge. Width is capped for readability but the box itself is fluid,
-     so a narrow mobile pane just shrinks it instead of overflowing. */
+     so a narrow mobile pane just shrinks it instead of overflowing.
+
+     `box-sizing: border-box` is load-bearing, not boilerplate: there is NO global
+     preflight border-box in this plugin's bundle (Obsidian's app.css does not set
+     one either), so the default `content-box` made `padding-inline` add 1rem ON TOP
+     of `width: 100%`. The column was therefore always 1rem wider than its parent,
+     which showed up as a horizontal scrollbar once labels wrapped on a narrow pane.
+     The same reason `.dismiss-chip` sets it explicitly in the mobile block below. */
   .recommendation-stack {
     width: 100%;
     max-width: 30rem;
     margin-inline: auto;
     padding-inline: 0.5rem;
+    box-sizing: border-box;
     gap: 1.25rem;
   }
 
@@ -430,6 +448,10 @@ function reviewNotice(notice: UpdateNotice): void {
        the space before the dismiss chip, so both rows' chips land on the same
        right edge. */
     padding: 0.5rem 0 0.5rem 0.6rem;
+    /* Same content-box trap as `.recommendation-stack` — this is a `flex: 1` item
+       with horizontal padding, so without this the padding is added outside the
+       flex-resolved width and the row overhangs its container. */
+    box-sizing: border-box;
     border: none;
     border-radius: var(--radius-m);
     background: transparent;
@@ -437,6 +459,9 @@ function reviewNotice(notice: UpdateNotice): void {
     color: var(--text-normal);
     font-size: var(--font-ui-small);
     text-align: left;
+    /* Obsidian's `button` rule pins a fixed height (~30px), which crops the second
+       line once a long label wraps on a narrow pane. Content decides the height. */
+    height: auto;
     cursor: pointer;
     transition: background 120ms ease;
   }

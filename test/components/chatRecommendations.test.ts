@@ -4,6 +4,8 @@ import {
 	filterPluginNudges,
 	filterSuggestions,
 	filterUpdateNotices,
+	MAX_PLUGIN_NUDGES_DESKTOP,
+	MAX_PLUGIN_NUDGES_MOBILE,
 	type PluginNudge,
 	pluginNudgeId,
 	type RecommendationContext,
@@ -68,6 +70,30 @@ describe("SUGGESTED_QUERIES catalog", () => {
 	it("does not reuse the whole-block dismissal id for any suggestion", () => {
 		expect(SUGGESTED_QUERIES.some((s) => s.id === DISMISS_ALL_ID)).toBe(false);
 	});
+
+	/*
+	 * The catalog is deliberately short — an earlier version shipped six entries, three of
+	 * which were the same broad-retrieval-and-synthesize request in different words. This
+	 * is a soft ceiling, not a magic number: adding a genuinely distinct suggestion is fine,
+	 * but crossing it should be a conscious decision rather than incremental drift.
+	 */
+	it("stays small enough to read as a menu rather than padding", () => {
+		expect(SUGGESTED_QUERIES.length).toBeLessThanOrEqual(4);
+	});
+
+	/*
+	 * Regression guard for the real bug behind the trim: "What are the main themes in my
+	 * vault?" and "Connect ideas across my notes" carried NO `requires` gate, so they
+	 * rendered on an empty vault with no populated index and could only disappoint.
+	 * Anything that reads the vault must declare `requires: "search"`.
+	 */
+	it("gates every retrieval-backed suggestion on search", () => {
+		const READS_THE_VAULT = /\b(notes?|vault|themes?|ideas)\b/i;
+		const ungatedVaultQueries = SUGGESTED_QUERIES.filter(
+			(s) => s.requires !== "search" && READS_THE_VAULT.test(s.query ?? s.label),
+		);
+		expect(ungatedVaultQueries.map((s) => s.id)).toEqual([]);
+	});
 });
 
 describe("plugin nudges", () => {
@@ -95,6 +121,85 @@ describe("plugin nudges", () => {
 
 	it("returns nothing when the whole block is dismissed", () => {
 		expect(filterPluginNudges([nudge("dataview")], [DISMISS_ALL_ID])).toEqual([]);
+	});
+
+	/*
+	 * The candidate list is unbounded in principle — resolvePluginIntegrations() returns the
+	 * curated integrations PLUS every enabled plugin exposing an object `api` — so without a
+	 * cap a plugin-heavy vault stacks more "Enable …" rows than the whole suggestion list
+	 * above them, making the empty state taller rather than shorter.
+	 */
+	describe("display cap", () => {
+		const skillBacked = (pluginId: string): PluginNudge => ({ ...nudge(pluginId), skillId: pluginId });
+
+		it("returns every candidate when no limit is given", () => {
+			const nudges = [nudge("a"), nudge("b"), nudge("c"), nudge("d")];
+			expect(filterPluginNudges(nudges, [])).toHaveLength(4);
+		});
+
+		it("caps the result at the given limit", () => {
+			const nudges = [nudge("a"), nudge("b"), nudge("c"), nudge("d")];
+			expect(filterPluginNudges(nudges, [], 2)).toHaveLength(2);
+			expect(filterPluginNudges(nudges, [], MAX_PLUGIN_NUDGES_MOBILE)).toHaveLength(1);
+		});
+
+		it("returns fewer than the limit when there are fewer candidates", () => {
+			expect(filterPluginNudges([nudge("a")], [], MAX_PLUGIN_NUDGES_DESKTOP)).toHaveLength(1);
+		});
+
+		it("treats a zero or negative limit as showing nothing", () => {
+			expect(filterPluginNudges([nudge("a")], [], 0)).toEqual([]);
+			expect(filterPluginNudges([nudge("a")], [], -1)).toEqual([]);
+		});
+
+		/*
+		 * A skillId means we ship a SKILL.md documenting that plugin's api, so enabling it
+		 * yields a genuinely more capable agent. An auto-discovered plugin with no bundled
+		 * skill is the weakest thing on this surface and must never take a scarce slot from
+		 * a curated one.
+		 */
+		it("ranks skill-backed candidates ahead of auto-discovered ones", () => {
+			const nudges = [nudge("auto-1"), skillBacked("dataview"), nudge("auto-2"), skillBacked("tasks")];
+			expect(filterPluginNudges(nudges, [], 2).map((n) => n.pluginId)).toEqual(["dataview", "tasks"]);
+		});
+
+		it("falls back to auto-discovered candidates when no skill-backed ones remain", () => {
+			const nudges = [nudge("auto-1"), nudge("auto-2")];
+			expect(filterPluginNudges(nudges, [], 2).map((n) => n.pluginId)).toEqual(["auto-1", "auto-2"]);
+		});
+
+		it("preserves relative order within a group so visible rows do not shuffle", () => {
+			const nudges = [skillBacked("dataview"), skillBacked("tasks"), skillBacked("tasknotes")];
+			expect(filterPluginNudges(nudges, [], 3).map((n) => n.pluginId)).toEqual([
+				"dataview",
+				"tasks",
+				"tasknotes",
+			]);
+		});
+
+		it("applies dismissal before the cap, promoting a hidden candidate into view", () => {
+			const nudges = [skillBacked("dataview"), skillBacked("tasks")];
+			// Only one slot: dataview wins it, then is dismissed and tasks takes its place.
+			expect(filterPluginNudges(nudges, [], 1).map((n) => n.pluginId)).toEqual(["dataview"]);
+			expect(filterPluginNudges(nudges, [pluginNudgeId("dataview")], 1).map((n) => n.pluginId)).toEqual([
+				"tasks",
+			]);
+		});
+
+		it("still honours the whole-block dismissal when a limit is given", () => {
+			expect(filterPluginNudges([skillBacked("dataview")], [DISMISS_ALL_ID], 3)).toEqual([]);
+		});
+
+		it("does not mutate the caller's candidate array while sorting", () => {
+			const nudges = [nudge("auto"), skillBacked("dataview")];
+			const order = nudges.map((n) => n.pluginId);
+			filterPluginNudges(nudges, [], 2);
+			expect(nudges.map((n) => n.pluginId)).toEqual(order);
+		});
+
+		it("gives mobile less room than desktop", () => {
+			expect(MAX_PLUGIN_NUDGES_MOBILE).toBeLessThan(MAX_PLUGIN_NUDGES_DESKTOP);
+		});
 	});
 });
 
