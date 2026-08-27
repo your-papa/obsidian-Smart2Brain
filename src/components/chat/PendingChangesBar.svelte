@@ -726,12 +726,17 @@ function previewChange(evt: Event, entry: PendingChangeEntry) {
     pointer-events: none;
   }
 
+  /* Tints derive from the HEX colour vars via `color-mix`, not
+     `hsla(var(--color-green-hsl), …)`: the -hsl forms are theme-dependent and
+     are absent entirely in some themes (Cupertino), where the hsla() collapses
+     to transparent and the hover state silently disappears. Same treatment as
+     the in-note diff bar in styles.css, so both review surfaces match. */
   .pcb-action-accept {
     color: var(--color-green);
   }
 
   .pcb-action-accept:hover {
-    background: hsla(var(--color-green-hsl), 0.15);
+    background: color-mix(in srgb, var(--color-green) 15%, transparent);
   }
 
   .pcb-action-reject {
@@ -739,7 +744,7 @@ function previewChange(evt: Event, entry: PendingChangeEntry) {
   }
 
   .pcb-action-reject:hover {
-    background: hsla(var(--color-red-hsl), 0.15);
+    background: color-mix(in srgb, var(--color-red) 15%, transparent);
   }
 
   .pcb-action-icon {
@@ -849,7 +854,7 @@ function previewChange(evt: Event, entry: PendingChangeEntry) {
     border-radius: var(--radius-s);
     font-size: 10px;
     font-weight: var(--font-semibold);
-    background: hsla(var(--color-orange-hsl), 0.2);
+    background: color-mix(in srgb, var(--color-orange) 20%, transparent);
     color: var(--color-orange);
     cursor: help;
   }
@@ -974,18 +979,20 @@ function previewChange(evt: Event, entry: PendingChangeEntry) {
     flex-shrink: 0;
   }
 
+  /* color-mix on the hex vars rather than the theme-dependent -hsl forms — see
+     the note on .pcb-action-accept above. */
   .badge-create {
-    background: hsla(var(--color-green-hsl), 0.2);
+    background: color-mix(in srgb, var(--color-green) 20%, transparent);
     color: var(--color-green);
   }
 
   .badge-update {
-    background: hsla(var(--color-yellow-hsl), 0.2);
+    background: color-mix(in srgb, var(--color-yellow) 20%, transparent);
     color: var(--color-yellow);
   }
 
   .badge-delete {
-    background: hsla(var(--color-red-hsl), 0.2);
+    background: color-mix(in srgb, var(--color-red) 20%, transparent);
     color: var(--color-red);
   }
 </style>

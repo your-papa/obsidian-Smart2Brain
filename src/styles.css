@@ -746,39 +746,84 @@ button.s2b-pill--interactive:hover {
 	word-break: break-word;
 }
 
-/* Action bar for pending change accept/reject buttons */
+/* Action bar for pending change accept/reject buttons.
+   Visual language is shared with the chat-side `PendingChangesBar.svelte`:
+   colour tokens over hardcoded rgba, and transparent buttons that tint on
+   hover rather than filled boxes. It keeps its own --background-secondary
+   fill (unlike the chat bar's page-coloured one) because this bar sits on
+   note background and has to read as plugin chrome, not as note content. */
 .s2b-diff-action-bar-widget,
 .s2b-diff-actions-bar {
 	display: flex;
 	align-items: center;
+	/* Nowrap + a container query (below) instead of wrapping: a wrapped bar
+	   doubles in height and shoves the diff down the note, which is worse
+	   than dropping two button labels. */
+	flex-wrap: nowrap;
 	gap: 8px;
 	padding: 4px 8px;
 	background-color: var(--background-secondary);
 	border: 1px solid var(--background-modifier-border);
-	border-radius: 4px;
+	border-radius: var(--radius-m);
 	margin: 4px 0;
+	/* Query container for the label collapse below. The real constraint is how
+	   wide THIS BAR is — not the viewport: a note can be in a narrow sidebar
+	   leaf, a split, or a narrow window, and only the bar's own width tracks
+	   all three. Same reasoning as `.chat-input-wrapper` in Input.svelte. */
+	container-type: inline-size;
+	container-name: s2b-diff-bar;
+}
+
+/* Every control is fixed-size; only the label may shrink (see below), so the
+   browser can't squeeze the buttons and deform their touch targets. */
+.s2b-diff-action-bar-widget > *,
+.s2b-diff-actions-bar > * {
+	flex-shrink: 0;
+}
+
+/* Below this width the two words don't fit beside the label, counter and three
+   icon buttons. Shed them and let the check/x glyphs carry the meaning — the
+   same icon-only treatment the chat bar's entry rows already use. The buttons
+   keep their aria-labels, so this is purely visual. */
+@container s2b-diff-bar (max-width: 320px) {
+	.s2b-diff-btn-label {
+		display: none;
+	}
 }
 
 /* Banner shown at the top of a note's inline diff when other chats also have a
    pending update to the same file (only the latest is rendered inline). */
 .s2b-diff-cross-thread-banner {
-	font-size: var(--font-smaller);
+	font-size: var(--font-ui-smaller);
 	line-height: 1.4;
 	padding: 6px 10px;
 	margin: 4px 0;
-	border-radius: 4px;
-	background-color: hsla(var(--color-orange-hsl), 0.15);
-	border: 1px solid hsla(var(--color-orange-hsl), 0.35);
+	/* Matches the action bar it sits above. */
+	border-radius: var(--radius-m);
+	/* color-mix on the hex var rather than the theme-dependent -hsl form, which
+	   some themes leave undefined — see the note on .s2b-diff-accept-btn. */
+	background-color: color-mix(in srgb, var(--color-orange) 15%, transparent);
+	border: 1px solid color-mix(in srgb, var(--color-orange) 35%, transparent);
 	color: var(--text-normal);
 }
 
 .s2b-diff-actions-label {
-	font-size: var(--font-smaller);
+	/* Matches `.pcb-entry-header` in PendingChangesBar.svelte so the two review
+	   surfaces share one type scale. */
+	font-size: var(--font-ui-smaller);
 	color: var(--text-muted);
 	/* Absorb free space so the buttons sit at the right — unless a position
 	   indicator follows the label, in which case the indicator carries the
 	   auto-margin instead (see below) and the two sit together on the left. */
 	margin-right: auto;
+	/* The bar is nowrap, so overflow has to go somewhere: this label is the only
+	   thing allowed to give. It ellipsizes down toward "Pending c…" in the last
+	   sliver of width before the container query drops the button labels. */
+	flex-shrink: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 /* Position of this change group among the note's pending changes (e.g. "2/3"),
@@ -788,7 +833,7 @@ button.s2b-pill--interactive:hover {
    Matches the label's font-size + line-height so the two text baselines line up
    in the center-aligned bar (a smaller font floats visibly higher). */
 .s2b-diff-position-indicator {
-	font-size: var(--font-smaller);
+	font-size: var(--font-ui-smaller);
 	line-height: 1;
 	color: var(--text-muted);
 	opacity: 0.8;
@@ -802,13 +847,40 @@ button.s2b-pill--interactive:hover {
 	margin-right: 0;
 }
 
-.s2b-diff-accept-btn,
-.s2b-diff-reject-btn {
-	font-size: var(--font-smallest);
-	padding: 2px 12px;
-	border-radius: 4px;
+/* Accept / Reject. Mirrors `.pcb-action` in PendingChangesBar.svelte: no fill
+   at rest, colour carried by the text + glyph, and a translucent tint of that
+   same colour on hover. Scoped under the bar containers (0,2,0) for the same
+   reason as the icon buttons below — `background: transparent` has to beat
+   Obsidian's default `button:not(.clickable-icon)` fill (0,1,1). */
+.s2b-diff-actions-bar .s2b-diff-accept-btn,
+.s2b-diff-actions-bar .s2b-diff-reject-btn,
+.s2b-diff-action-bar-widget .s2b-diff-accept-btn,
+.s2b-diff-action-bar-widget .s2b-diff-reject-btn {
+	display: flex;
+	align-items: center;
+	gap: 3px;
+	font-size: var(--font-ui-smaller);
+	font-weight: var(--font-medium);
+	padding: 2px 8px;
+	border-radius: var(--radius-s);
 	cursor: pointer;
-	border: 1px solid var(--background-modifier-border);
+	border: none;
+	box-shadow: none;
+	background: transparent;
+	transition: background 100ms ease;
+}
+
+/* The glyph sits beside the word at rest and carries the button alone once the
+   container query drops the label. 12px matches the chat bar's icon buttons. */
+.s2b-diff-btn-icon {
+	display: flex;
+	align-items: center;
+	--icon-size: 12px;
+}
+
+.s2b-diff-btn-icon svg {
+	width: 12px;
+	height: 12px;
 }
 
 /* Scoped under the bar containers (0,2,0) so `background: none` beats
@@ -831,7 +903,7 @@ button.s2b-pill--interactive:hover {
 .s2b-diff-actions-bar .s2b-diff-toggle-btn:hover,
 .s2b-diff-action-bar-widget .s2b-diff-toggle-btn:hover {
 	color: var(--text-normal);
-	background: none;
+	background: var(--background-modifier-hover);
 }
 
 /* Prev/next pending-change chevrons in the note's diff action bar. Hidden at
@@ -855,7 +927,7 @@ button.s2b-pill--interactive:hover {
 .s2b-diff-actions-bar .s2b-diff-nav-btn:hover,
 .s2b-diff-action-bar-widget .s2b-diff-nav-btn:hover {
 	color: var(--text-normal);
-	background: none;
+	background: var(--background-modifier-hover);
 }
 
 .s2b-diff-actions-bar:hover .s2b-diff-toggle-btn,
@@ -865,33 +937,46 @@ button.s2b-pill--interactive:hover {
 	opacity: 1;
 }
 
-.s2b-diff-accept-btn {
-	background-color: rgba(0, 180, 0, 0.2);
-	color: var(--text-normal);
+/* Theme tokens, not hardcoded rgba: these buttons are chrome, so unlike the
+   diff body tints they should track the user's theme like the rest of the UI.
+   Tints go through `color-mix` on the HEX var rather than
+   `hsla(var(--color-green-hsl), …)`: the -hsl forms are theme-dependent and are
+   simply absent in some themes (Cupertino), where the hsla() collapses to
+   transparent and the hover state silently disappears. The hex vars are
+   always defined. */
+.s2b-diff-actions-bar .s2b-diff-accept-btn,
+.s2b-diff-action-bar-widget .s2b-diff-accept-btn {
+	color: var(--color-green);
 }
 
-.s2b-diff-accept-btn:hover {
-	background-color: rgba(0, 180, 0, 0.35);
+.s2b-diff-actions-bar .s2b-diff-accept-btn:hover,
+.s2b-diff-action-bar-widget .s2b-diff-accept-btn:hover {
+	background: color-mix(in srgb, var(--color-green) 15%, transparent);
 }
 
 /* Stale entry: the accept is guaranteed to fail its conflict check, so the
-   in-note bars disable it with an explanatory title (parity with the chat bar). */
-.s2b-diff-accept-btn[disabled] {
-	opacity: 0.45;
+   in-note bars disable it with an explanatory title (parity with the chat bar).
+   Kept visible but clearly inert, and pointer-events stay on so the title
+   tooltip still explains why — matching `.pcb-action-icon[disabled]`. */
+.s2b-diff-actions-bar .s2b-diff-accept-btn[disabled],
+.s2b-diff-action-bar-widget .s2b-diff-accept-btn[disabled] {
+	opacity: 0.35;
 	cursor: not-allowed;
 }
 
-.s2b-diff-accept-btn[disabled]:hover {
-	background-color: rgba(0, 180, 0, 0.2);
+.s2b-diff-actions-bar .s2b-diff-accept-btn[disabled]:hover,
+.s2b-diff-action-bar-widget .s2b-diff-accept-btn[disabled]:hover {
+	background: transparent;
 }
 
-.s2b-diff-reject-btn {
-	background-color: rgba(220, 50, 47, 0.2);
-	color: var(--text-normal);
+.s2b-diff-actions-bar .s2b-diff-reject-btn,
+.s2b-diff-action-bar-widget .s2b-diff-reject-btn {
+	color: var(--color-red);
 }
 
-.s2b-diff-reject-btn:hover {
-	background-color: rgba(220, 50, 47, 0.35);
+.s2b-diff-actions-bar .s2b-diff-reject-btn:hover,
+.s2b-diff-action-bar-widget .s2b-diff-reject-btn:hover {
+	background: color-mix(in srgb, var(--color-red) 15%, transparent);
 }
 
 .s2b-reading-diff-word-removed {
@@ -983,6 +1068,17 @@ button.s2b-pill--interactive:hover {
 		opacity: 1 !important;
 		transform: none !important;
 		pointer-events: auto !important;
+	}
+
+	/* Pending-change bar chevrons and diff-mode toggle. Both sit at `opacity: 0`
+	   until the bar is hovered, which on touch means permanently invisible —
+	   taking cross-file navigation and the word-diff/two-pane switch with them.
+	   Show them at rest here; desktop keeps its cleaner hover-reveal. */
+	.s2b-diff-actions-bar .s2b-diff-nav-btn,
+	.s2b-diff-actions-bar .s2b-diff-toggle-btn,
+	.s2b-diff-action-bar-widget .s2b-diff-nav-btn,
+	.s2b-diff-action-bar-widget .s2b-diff-toggle-btn {
+		opacity: 1;
 	}
 
 	/* Code-block copy button lives in `<pre>` and is revealed on `pre:hover`.
@@ -1312,10 +1408,24 @@ button.s2b-pill--interactive:hover {
 .is-mobile .graph-controls .clickable-icon,
 .is-mobile .s2b-bottom-sheet .clickable-icon,
 .is-mobile .provider-icon-button.clickable-icon,
-.is-mobile .pcb-action-icon {
+.is-mobile .pcb-action-icon,
+.is-mobile .s2b-diff-nav-btn,
+.is-mobile .s2b-diff-toggle-btn {
 	min-width: 44px !important;
 	min-height: 44px !important;
 	padding: 10px !important;
+	box-sizing: border-box !important;
+}
+
+/* The in-note bar's Accept/Reject are the same 2px-padded controls, but they
+   may still carry a text label (the container query only drops it below 320px),
+   so square 44px padding would balloon them. Raise the tappable height and let
+   the inline padding stay proportional to the content. */
+.is-mobile .s2b-diff-accept-btn,
+.is-mobile .s2b-diff-reject-btn {
+	min-height: 44px !important;
+	padding-block: 10px !important;
+	padding-inline: 12px !important;
 	box-sizing: border-box !important;
 }
 

@@ -1,6 +1,7 @@
 import type { Change } from "diff";
 import { MarkdownRenderer, setIcon, type MarkdownPostProcessorContext, type Plugin } from "obsidian";
 import { diffLines, diffWords } from "diff";
+import { canNavigate, createResolveButton } from "../lib/diffActionButton";
 import { navigateToPendingChange } from "../lib/pendingChangeNavigation";
 import { getPendingChangesStore } from "../stores/pendingChangesStore.svelte";
 import { getData } from "../stores/dataStore.svelte";
@@ -434,8 +435,12 @@ function createReadingDiffActionBar(
 		});
 		return btn;
 	};
-	bar.appendChild(makeNavBtn("chevron-up", "Previous pending change", "prev"));
-	bar.appendChild(makeNavBtn("chevron-down", "Next pending change", "next"));
+	// Only when the thread has another stop to reach — navigation wraps, so a
+	// lone pending change would give two chevrons that lead back here.
+	if (canNavigate(entryId)) {
+		bar.appendChild(makeNavBtn("chevron-up", "Previous pending change", "prev"));
+		bar.appendChild(makeNavBtn("chevron-down", "Next pending change", "next"));
+	}
 
 	// Toggle view mode icon (visible on hover via CSS)
 	const toggleBtn = document.createElement("button");
@@ -466,9 +471,7 @@ function createReadingDiffActionBar(
 	});
 	bar.appendChild(toggleBtn);
 
-	const acceptBtn = document.createElement("button");
-	acceptBtn.className = "s2b-diff-accept-btn";
-	acceptBtn.textContent = "Accept";
+	const acceptBtn = createResolveButton("s2b-diff-accept-btn", "check", "Accept", "Accept change");
 	acceptBtn.addEventListener("click", (e) => {
 		e.preventDefault();
 		e.stopPropagation();
@@ -504,9 +507,7 @@ function createReadingDiffActionBar(
 		/* store not initialized */
 	}
 
-	const rejectBtn = document.createElement("button");
-	rejectBtn.className = "s2b-diff-reject-btn";
-	rejectBtn.textContent = "Reject";
+	const rejectBtn = createResolveButton("s2b-diff-reject-btn", "x", "Reject", "Reject change");
 	rejectBtn.addEventListener("click", (e) => {
 		e.preventDefault();
 		e.stopPropagation();

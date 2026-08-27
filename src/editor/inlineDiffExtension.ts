@@ -2,6 +2,7 @@ import { type DecorationSet, Decoration, EditorView, ViewPlugin, type ViewUpdate
 import { type EditorState, type Extension, StateEffect, StateField } from "@codemirror/state";
 import { diffLines, diffWords } from "diff";
 import { type App, Component, MarkdownRenderer, editorInfoField, setIcon } from "obsidian";
+import { canNavigate, createResolveButton } from "../lib/diffActionButton";
 import { type ChangeGroup, identifyGroups } from "../lib/diffGroups";
 import { navigateToPendingChange } from "../lib/pendingChangeNavigation";
 import { getData } from "../stores/dataStore.svelte";
@@ -42,6 +43,10 @@ function createEditActionBar(entryId: string, groupIndex: number, groupTotal: nu
 	// files, reusing the SAME shared cursor as the palette commands and the
 	// reading-view bars so all entry points stay in sync. The entry's threadId
 	// is resolved lazily on click (the bar only knows the entryId).
+	//
+	// Only rendered when the thread has somewhere to go. Navigation wraps, so a
+	// lone pending change makes both chevrons no-ops that land right back on
+	// this bar — omit them rather than show two dead controls.
 	const makeNavBtn = (iconName: string, ariaLabel: string, direction: "next" | "prev"): HTMLButtonElement => {
 		const btn = document.createElement("button");
 		btn.className = "s2b-diff-nav-btn";
@@ -64,8 +69,10 @@ function createEditActionBar(entryId: string, groupIndex: number, groupTotal: nu
 		});
 		return btn;
 	};
-	bar.appendChild(makeNavBtn("chevron-up", "Previous pending change", "prev"));
-	bar.appendChild(makeNavBtn("chevron-down", "Next pending change", "next"));
+	if (canNavigate(entryId)) {
+		bar.appendChild(makeNavBtn("chevron-up", "Previous pending change", "prev"));
+		bar.appendChild(makeNavBtn("chevron-down", "Next pending change", "next"));
+	}
 
 	// Toggle view mode icon (visible on hover via CSS)
 	const toggleBtn = document.createElement("button");
@@ -95,9 +102,7 @@ function createEditActionBar(entryId: string, groupIndex: number, groupTotal: nu
 	});
 	bar.appendChild(toggleBtn);
 
-	const acceptBtn = document.createElement("button");
-	acceptBtn.className = "s2b-diff-accept-btn";
-	acceptBtn.textContent = "Accept";
+	const acceptBtn = createResolveButton("s2b-diff-accept-btn", "check", "Accept", "Accept change");
 	// Stale parity with the chat bar: once the document no longer matches the
 	// staged original, the store's conflict check makes every group accept fail
 	// unconditionally, so offer the explanation instead of the error.
@@ -120,9 +125,7 @@ function createEditActionBar(entryId: string, groupIndex: number, groupTotal: nu
 	});
 	bar.appendChild(acceptBtn);
 
-	const rejectBtn = document.createElement("button");
-	rejectBtn.className = "s2b-diff-reject-btn";
-	rejectBtn.textContent = "Reject";
+	const rejectBtn = createResolveButton("s2b-diff-reject-btn", "x", "Reject", "Reject change");
 	rejectBtn.addEventListener("click", (e) => {
 		e.preventDefault();
 		e.stopPropagation();

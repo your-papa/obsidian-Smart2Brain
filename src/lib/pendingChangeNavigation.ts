@@ -143,6 +143,25 @@ export function orderedStopsForThread(threadId: string): NavStop[] {
 	);
 }
 
+/**
+ * Whether stepping through the thread's pending changes would actually go
+ * anywhere — i.e. there is more than one stop.
+ *
+ * Navigation WRAPS (see `navigateToPendingChange`), so with two or more stops
+ * both directions always have a target and both chevrons are useful. With
+ * exactly one, next and prev both land back on the change you're already
+ * looking at, so the in-note bars hide their chevrons entirely rather than
+ * offering two controls that visibly do nothing.
+ */
+export function threadHasMultipleStops(threadId: string): boolean {
+	try {
+		return orderedStopsForThread(threadId).length > 1;
+	} catch {
+		// Store not initialized — err toward the quieter bar.
+		return false;
+	}
+}
+
 /** 0-based line to scroll to: the first changed line of an update, else the top of the file. */
 export function firstChangedLine(change: PendingChange): number {
 	if (change.type === "update") {
