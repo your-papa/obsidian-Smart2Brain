@@ -1275,6 +1275,68 @@ describe("manageNotes tool", () => {
 			expect(result).toContain("Notes/doc.md");
 		});
 
+		/**
+		 * Regression (PR #429 review, fourth pass): when a renamed proposal's former
+		 * path is reused by a NEW note that also has a live proposal, the name
+		 * truthfully identifies both. Every ranking tried here silently withdrew one
+		 * proposal while leaving the other, so the tool now asks instead.
+		 */
+		it("refuses to guess when the name identifies two live proposals", async () => {
+			mockResolveVaultFileDetailed.mockReturnValue({ status: "found", file: makeFile("Notes/doc.md") });
+			mockGetPendingForThread.mockReturnValue([
+				// Staged as Notes/doc.md, since renamed away.
+				{ change: { path: "Notes/renamed.md" }, formerPaths: ["Notes/doc.md"] },
+				// A different note now at Notes/doc.md, with its own proposal.
+				{ change: { path: "Notes/doc.md" } },
+			]);
+
+			const result = await tool.invoke(
+				{ operations: [{ type: "discard", path: "Notes/doc.md" }] },
+				THREAD_CONFIG,
+			);
+
+			expect(result).toContain("matches more than one pending proposal");
+			expect(result).toContain("Notes/doc.md");
+			expect(result).toContain("Notes/renamed.md");
+			// Nothing withdrawn — guessing either way loses a proposal.
+			expect(mockDiscardPendingForPath).not.toHaveBeenCalled();
+		});
+
+		it("withdraws normally once the ambiguity is gone", async () => {
+			// Same shape, but the new note has no proposal of its own.
+			mockResolveVaultFileDetailed.mockReturnValue({ status: "found", file: makeFile("Notes/doc.md") });
+			mockGetPendingForThread.mockReturnValue([
+				{ change: { path: "Notes/renamed.md" }, formerPaths: ["Notes/doc.md"] },
+			]);
+			mockDiscardPendingForPath.mockReturnValue({ discarded: 1, skippedApplied: 0 });
+
+			const result = await tool.invoke(
+				{ operations: [{ type: "discard", path: "Notes/doc.md" }] },
+				THREAD_CONFIG,
+			);
+
+			expect(result).not.toContain("matches more than one");
+			expect(mockDiscardPendingForPath).toHaveBeenCalledWith("Notes/renamed.md", "test-thread-id");
+		});
+
+		it("is not ambiguous when both tiers name the same proposal", async () => {
+			// A note renamed away and back: `formerPaths` and the current path agree.
+			mockResolveVaultFileDetailed.mockReturnValue({ status: "found", file: makeFile("Notes/doc.md") });
+			mockGetPendingForThread.mockReturnValue([
+				{ change: { path: "Notes/doc.md" }, formerPaths: ["Notes/doc.md"] },
+			]);
+			mockDiscardPendingForPath.mockReturnValue({ discarded: 1, skippedApplied: 0 });
+
+			const result = await tool.invoke(
+				{ operations: [{ type: "discard", path: "Notes/doc.md" }] },
+				THREAD_CONFIG,
+			);
+
+			expect(result).not.toContain("matches more than one");
+			expect(mockDiscardPendingForPath).toHaveBeenCalledWith("Notes/doc.md", "test-thread-id");
+			expect(mockDiscardPendingForPath).toHaveBeenCalledTimes(1);
+		});
+
 		it("prefers a former-path match over a looser basename match", async () => {
 			mockResolveVaultFileDetailed.mockReturnValue({ status: "not_found" });
 			mockGetPendingForThread.mockReturnValue([
