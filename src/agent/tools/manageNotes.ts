@@ -37,10 +37,23 @@ const createOperationSchema = z.object({
 	content: z.string().describe("Full markdown content for the new note"),
 });
 
+const REPLACE_PENDING_DESCRIPTION =
+	"Set true when this edit REPLACES an earlier, still-unreviewed proposal of yours for the same file rather than adding to it. By default a re-edit is applied on top of your pending proposal so both rounds survive; with this flag the edit is applied to the note as it is on disk and the earlier proposal is dropped. Use it whenever the user is correcting you.";
+
 const updateOperationSchema = z.object({
 	type: z.literal("update"),
 	path: z.string().describe("File path or wiki link reference, e.g. 'Notes/todo.md' or '[[todo]]'"),
 	edits: z.array(editSchema).min(1).describe("Sequential search-and-replace edits to apply"),
+	replace_pending: z.boolean().optional().describe(REPLACE_PENDING_DESCRIPTION),
+});
+
+const discardOperationSchema = z.object({
+	type: z.literal("discard"),
+	path: z
+		.string()
+		.describe(
+			"File path or wiki link reference whose pending (not yet reviewed) proposals from this chat should be withdrawn, e.g. 'Notes/todo.md' or '[[todo]]'",
+		),
 });
 
 const deleteOperationSchema = z.object({
@@ -64,6 +77,7 @@ const replaceOperationSchema = z.object({
 		.string()
 		.optional()
 		.describe("Optional folder to scope the replace (e.g. 'Projects'). Omit to replace across the whole vault."),
+	replace_pending: z.boolean().optional().describe(REPLACE_PENDING_DESCRIPTION),
 });
 
 const manageNotesSchema = z.object({
@@ -75,6 +89,7 @@ const manageNotesSchema = z.object({
 				deleteOperationSchema,
 				moveOperationSchema,
 				replaceOperationSchema,
+				discardOperationSchema,
 			]),
 		)
 		.min(1)
@@ -289,8 +304,16 @@ function applySequentialEdits(
  * longer accounts for those edits, and rebasing onto it would stage a proposal
  * that silently reverts the user's own work on accept. (Such a proposal is
  * un-appliable anyway — accept would fail its conflict check.)
+ *
+ * `replacePending` opts out of the rebase entirely. The heuristic above cannot
+ * distinguish "another edit" from "a correction of my last edit" — it only asks
+ * whether the anchor text still matches, so a correction whose anchor happens to
+ * survive gets merged with the very edit it was meant to replace. The model knows
+ * which it meant; this flag is how it says so, and the store's update-dedup then
+ * supersedes the earlier proposal as usual.
  */
-function resolveUpdateBases(threadId: string, filePath: string, diskContent: string): string[] {
+function resolveUpdateBases(threadId: string, filePath: string, diskContent: string, replacePending = false): string[] {
+	if (replacePending) return [diskContent];
 	const store = getPendingChangesStore();
 	const prior = store
 		.getPendingUpdatesForPath(filePath)
@@ -369,6 +392,47 @@ function summarizeOperations(changes: PendingChange[]): string {
 }
 
 /**
+ * Phrase the outcome of this batch's `discard` operations for the model.
+ *
+ * A discard that matched nothing is reported plainly rather than as an error:
+ * the proposal may already have been reviewed, and treating "nothing to withdraw"
+ * as a failure would punish the safe habit of discarding before re-staging. But
+ * it must not read as a success either, or the model will tell the user it took
+ * back something that is still pending — or already applied.
+ */
+function summarizeDiscards(results: { path: string; discarded: number; skippedApplied: number }[]): string {
+	if (results.length === 0) return "";
+
+	const parts: string[] = [];
+	const withdrawn = results.filter((r) => r.discarded > 0);
+	if (withdrawn.length > 0) {
+		const total = withdrawn.reduce((sum, r) => sum + r.discarded, 0);
+		const paths = withdrawn.map((r) => `"${r.path}"`).join(", ");
+		parts.push(
+			`Withdrew ${total} pending proposal(s) for ${paths} — they are no longer awaiting review and will not be applied.`,
+		);
+	}
+
+	const empty = results.filter((r) => r.discarded === 0 && r.skippedApplied === 0);
+	if (empty.length > 0) {
+		const paths = empty.map((r) => `"${r.path}"`).join(", ");
+		parts.push(
+			`Nothing to withdraw for ${paths} — this chat had no pending proposals there (they may already have been accepted or rejected). Do not tell the user you took anything back.`,
+		);
+	}
+
+	const skipped = results.filter((r) => r.skippedApplied > 0);
+	if (skipped.length > 0) {
+		const paths = skipped.map((r) => `"${r.path}"`).join(", ");
+		parts.push(
+			`Could not withdraw ${skipped.reduce((sum, r) => sum + r.skippedApplied, 0)} proposal(s) for ${paths}: the user already accepted part of those changes, so that content is in the note. Leave it to them to undo.`,
+		);
+	}
+
+	return parts.join(" ");
+}
+
+/**
  * True when `path` is the folder itself or nested inside it. Both are normalized
  * first so a trailing slash or `.`-segment doesn't cause a false negative. Used to
  * scope memory auto-approval strictly to the agent's memory folder — mirrors the
@@ -442,9 +506,13 @@ export async function stageNoteOperations(
 	// skip must be surfaced — otherwise a multi-op batch silently under-applies.
 	const conflictSkippedPaths = new Set<string>();
 	// Files whose new proposal was based on this thread's earlier pending update
-	// (see resolveUpdateBase) — surfaced so the model knows the superseding
-	// proposal carries both rounds of edits.
+	// (see resolveUpdateBases) — surfaced so the model knows the new proposal
+	// carries BOTH rounds of edits rather than replacing the earlier one.
 	const rebasedPaths = new Set<string>();
+	// Outcome of each `discard` operation. Tracked separately from `stagedChanges`
+	// because a discard stages nothing — it withdraws — so it must not be counted
+	// in the "Proposed N operation(s)" tally the user's review surfaces reflect.
+	const discardResults: { path: string; discarded: number; skippedApplied: number }[] = [];
 
 	for (let i = 0; i < operations.length; i++) {
 		const operation = operations[i];
@@ -510,7 +578,7 @@ export async function stageNoteOperations(
 
 			const originalContent = await app.vault.read(result.file);
 			const editResult = applyEditsToFirstMatchingBase(
-				resolveUpdateBases(threadId, result.file.path, originalContent),
+				resolveUpdateBases(threadId, result.file.path, originalContent, operation.replace_pending),
 				operation.edits,
 				result.file.path,
 				operationNumber,
@@ -526,6 +594,29 @@ export async function stageNoteOperations(
 				originalContent,
 				newContent: editResult.content,
 			});
+			continue;
+		}
+
+		if (operation.type === "discard") {
+			// No permission gate, deliberately. Discarding is strictly
+			// de-escalatory — it can only REMOVE a proposed write, never cause
+			// one. Gating it on `allowUpdate` would let a permission change
+			// strand proposals the agent is otherwise able to clean up.
+			//
+			// Also exempt from `ensureUniqueTarget`: `discard` + `update` on one
+			// path in a single batch is the natural correction idiom, and the
+			// update branch still guards against a *second* update to that path.
+			//
+			// Resolved leniently: unlike update/delete/move this never touches the
+			// file, so a note that has since been renamed or deleted must still be
+			// discardable. Fall back to the literal normalized path when the
+			// vault can't resolve it, since that is what the entry is keyed by.
+			const cleanPath = normalizeReferencePath(operation.path);
+			const resolved = resolveVaultFileDetailed(app, cleanPath);
+			const targetPath = resolved.status === "found" ? resolved.file.path : normalizePath(cleanPath);
+
+			const { discarded, skippedApplied } = store.discardPendingForPath(targetPath, threadId);
+			discardResults.push({ path: targetPath, discarded, skippedApplied });
 			continue;
 		}
 
@@ -656,7 +747,7 @@ export async function stageNoteOperations(
 			// the pattern is present there (so the replace doesn't silently drop a
 			// pending edit the store's dedup then supersedes); otherwise fall back to
 			// disk, which is what a replace targeting text the model just read means.
-			const bases = resolveUpdateBases(threadId, file.path, originalContent);
+			const bases = resolveUpdateBases(threadId, file.path, originalContent, operation.replace_pending);
 			const base = bases.find((candidate) => matcher.test(candidate)) ?? bases[bases.length - 1];
 			const rebasedOnPending = base !== originalContent;
 			// Skip notes too large to regex safely (unbounded backtracking would
@@ -743,10 +834,17 @@ export async function stageNoteOperations(
 		}
 	}
 
+	// Built first so a discard-only batch (which stages nothing) can stand on it
+	// as the whole summary rather than reporting "Proposed 0 note operation(s)".
+	const discardSummary = summarizeDiscards(discardResults);
+
 	const stagedCount = stagedChanges.length - autoAppliedCount - autoApplyFailures.length;
 	let summary: string;
-	if (autoAppliedCount > 0 && stagedCount === 0 && autoApplyFailures.length === 0) {
+	if (stagedChanges.length === 0 && discardResults.length > 0) {
+		summary = discardSummary;
+	} else if (autoAppliedCount > 0 && stagedCount === 0 && autoApplyFailures.length === 0) {
 		summary = `Saved ${autoAppliedCount} memory note operation(s) (${summarizeOperations(stagedChanges)}) to \`${memory.folder}/\` — applied automatically, no user review needed.`;
+		if (discardSummary) summary += ` ${discardSummary}`;
 	} else {
 		summary = `Proposed ${stagedChanges.length} note operation(s) across ${seenPaths.size} path(s) (${summarizeOperations(stagedChanges)}).`;
 		if (autoAppliedCount > 0) {
@@ -755,13 +853,19 @@ export async function stageNoteOperations(
 		if (stagedCount > 0) {
 			summary += ` ${stagedCount} will be reviewed by the user, who will approve or reject them.`;
 		}
+		if (discardSummary) summary += ` ${discardSummary}`;
+	}
+	// Deliberately FIRST among the trailing notes. This one changes what the model
+	// should say to the user, so it must not be buried behind up to four other
+	// clauses — and it avoids the word "superseded", which was read as "only my
+	// new edit remains" and led to the model telling the user the earlier edit was
+	// gone while BOTH sat in the review queue.
+	if (rebasedPaths.size > 0) {
+		const paths = [...rebasedPaths].map((p) => `"${p}"`).join(", ");
+		summary += ` IMPORTANT: ${paths} now contains BOTH your earlier pending edit AND this one — this proposal ADDS to the earlier one, it does not replace it. The user will see every edit together. If you meant to REPLACE your earlier edit (e.g. the user is correcting you), re-stage it with "replace_pending": true, or "discard" the file first. Do not tell the user this supersedes the earlier edit unless you did one of those.`;
 	}
 	if (autoApplyFailures.length > 0) {
 		summary += ` ${autoApplyFailures.length} memory write(s) could not be applied: ${autoApplyFailures.join("; ")}.`;
-	}
-	if (rebasedPaths.size > 0) {
-		const paths = [...rebasedPaths].map((p) => `"${p}"`).join(", ");
-		summary += ` Note: this thread already had a pending (not yet reviewed) update to ${paths}; the new proposal was built on top of it and contains both rounds of edits — the older proposal was superseded.`;
 	}
 	if (crossThreadPaths.size > 0) {
 		const paths = [...crossThreadPaths].map((p) => `"${p}"`).join(", ");

@@ -1059,4 +1059,81 @@ describe("PendingChangesStore", () => {
 			expect(store.isFilePrivate("Docs/spec.md")).toBe(false);
 		});
 	});
+
+	/* ----------------------------------------------------------------------
+	 * discardPendingForPath — the agent's retraction path (manage_notes discard)
+	 * --------------------------------------------------------------------*/
+
+	describe("discardPendingForPath", () => {
+		it("rejects this thread's pending entries for the path", () => {
+			const [id] = store.addChanges(
+				[{ type: "update", path: "note.md", originalContent: "old", newContent: "new" }],
+				"tc-1",
+				"thread-1",
+			);
+
+			expect(store.discardPendingForPath("note.md", "thread-1")).toEqual({ discarded: 1, skippedApplied: 0 });
+			expect(store.getEntry(id)?.status).toBe("rejected");
+			expect(store.getPendingCount("thread-1")).toBe(0);
+		});
+
+		it("leaves other threads' proposals alone", () => {
+			const [mine] = store.addChanges(
+				[{ type: "update", path: "note.md", originalContent: "old", newContent: "a" }],
+				"tc-1",
+				"thread-1",
+			);
+			const [theirs] = store.addChanges(
+				[{ type: "update", path: "note.md", originalContent: "old", newContent: "b" }],
+				"tc-2",
+				"thread-2",
+			);
+
+			expect(store.discardPendingForPath("note.md", "thread-1").discarded).toBe(1);
+			expect(store.getEntry(mine)?.status).toBe("rejected");
+			// Another chat's proposal is never this agent's to withdraw.
+			expect(store.getEntry(theirs)?.status).toBe("pending");
+		});
+
+		it("leaves other paths in the same thread alone", () => {
+			store.addChanges([{ type: "create", path: "a.md", content: "A" }], "tc-1", "thread-1");
+			const [b] = store.addChanges([{ type: "create", path: "b.md", content: "B" }], "tc-2", "thread-1");
+
+			expect(store.discardPendingForPath("a.md", "thread-1").discarded).toBe(1);
+			expect(store.getEntry(b)?.status).toBe("pending");
+		});
+
+		it("reports zero rather than throwing when nothing is pending", () => {
+			expect(store.discardPendingForPath("absent.md", "thread-1")).toEqual({
+				discarded: 0,
+				skippedApplied: 0,
+			});
+		});
+
+		it("skips entries whose groups the user already partly applied", async () => {
+			// Two separated change groups, so accepting one leaves the entry pending
+			// with applied content on disk (a single group would accept the whole
+			// entry and clear the snapshot).
+			const original = "a\nkeep\nb\n";
+			const [id] = store.addChanges(
+				[{ type: "update", path: "note.md", originalContent: original, newContent: "A\nkeep\nB\n" }],
+				"tc-1",
+				"thread-1",
+			);
+
+			// Accept one group so real content lands in the note — the user's own
+			// decision, which a later agent-side discard must not quietly undo.
+			const file = makeTFile("note.md");
+			vi.mocked(plugin.app.vault.getAbstractFileByPath).mockReturnValue(file);
+			vi.mocked(plugin.app.vault.read).mockResolvedValue(original);
+			await store.acceptChangeGroup(id, 0);
+			expect(store.hasUnrevertedApplication(store.getEntry(id)!)).toBe(true);
+
+			expect(store.discardPendingForPath("note.md", "thread-1")).toEqual({
+				discarded: 0,
+				skippedApplied: 1,
+			});
+			expect(store.getEntry(id)?.status).toBe("pending");
+		});
+	});
 });
