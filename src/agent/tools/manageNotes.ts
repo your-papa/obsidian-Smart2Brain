@@ -398,7 +398,8 @@ function summarizeOperations(changes: PendingChange[]): string {
  * rather than the vault. Three cases the vault alone cannot serve:
  *
  *   - the note was renamed after staging (`#handleFileRename` re-keys the entry
- *     to the new path, so the old path the model remembers no longer resolves);
+ *     to the new path, so the old path the model remembers no longer resolves —
+ *     which is why that handler records the path it leaves in `formerPaths`);
  *   - the proposal is a delete for a note that is already gone; and
  *   - the model used a wiki-link, which normalizes to a bare basename that never
  *     equals the canonical `Notes/todo.md` an entry is keyed by.
@@ -408,18 +409,24 @@ function summarizeOperations(changes: PendingChange[]): string {
  *
  *   1. the vault-resolved canonical path, when the file still exists;
  *   2. an entry whose path equals the normalized reference exactly;
- *   3. entries whose basename matches, with or without the `.md` the model may
- *      have omitted — the wiki-link and renamed-note cases.
+ *   3. an entry one of whose `formerPaths` equals it — the note was renamed
+ *      after staging, and the model still knows it by the name it was staged
+ *      under. This is an EXACT match on a path the entry genuinely had, so it
+ *      precedes the basename tier: a rename that also changes the basename
+ *      (`Notes/doc.md` -> `Notes/renamed.md`) is unreachable by name alone;
+ *   4. entries whose basename matches, with or without the `.md` the model may
+ *      have omitted — the wiki-link case, and renames that kept the basename
+ *      but predate `formerPaths` being recorded.
  *
- * Tier 3 can legitimately return several paths (two pending proposals for
- * same-named notes in different folders). Both are this thread's own proposals
- * and the model asked to withdraw that name, so both are withdrawn and each is
- * reported by full path — silently picking one would leave the other stuck.
+ * Tiers 3 and 4 can legitimately return several paths (two pending proposals for
+ * same-named notes in different folders). All are this thread's own proposals
+ * and the model asked to withdraw that name, so all are withdrawn and each is
+ * reported by full path — silently picking one would leave the others stuck.
  * Returns the reference itself when nothing matches, so the caller still reports
  * an honest "nothing to withdraw" against the name the model used.
  */
 function resolveDiscardTargets(
-	pending: { change: { path: string } }[],
+	pending: { change: { path: string }; formerPaths?: string[] }[],
 	cleanPath: string,
 	vaultResolvedPath: string | undefined,
 ): string[] {
@@ -428,18 +435,21 @@ function resolveDiscardTargets(
 	const normalized = normalizePath(cleanPath);
 	if (pending.some((entry) => entry.change.path === normalized)) return [normalized];
 
+	const dedupePaths = (entries: typeof pending) => [...new Set(entries.map((entry) => entry.change.path))];
+
+	// The note was renamed after staging; match the name it was staged under.
+	const byFormerPath = pending.filter((entry) => entry.formerPaths?.includes(normalized));
+	if (byFormerPath.length > 0) return dedupePaths(byFormerPath);
+
 	// Basename comparison, tolerating a missing `.md` on the model's reference.
 	const wanted = normalized.split("/").pop() ?? normalized;
 	const wantedWithExt = wanted.endsWith(".md") ? wanted : `${wanted}.md`;
-	const byBasename = [
-		...new Set(
-			pending
-				.map((entry) => entry.change.path)
-				.filter((path) => (path.split("/").pop() ?? path) === wantedWithExt),
-		),
-	];
+	const byBasename = pending.filter((entry) => {
+		const path = entry.change.path;
+		return (path.split("/").pop() ?? path) === wantedWithExt;
+	});
 
-	return byBasename.length > 0 ? byBasename : [normalized];
+	return byBasename.length > 0 ? dedupePaths(byBasename) : [normalized];
 }
 
 /**

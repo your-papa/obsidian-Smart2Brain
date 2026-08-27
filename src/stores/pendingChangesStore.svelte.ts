@@ -32,6 +32,7 @@ const pendingChangeEntrySchema = z.object({
 	threadId: z.string(),
 	createdAt: z.number(),
 	reportedToModel: z.boolean().optional(),
+	formerPaths: z.array(z.string()).optional(),
 });
 
 const pendingChangesArraySchema = z.array(pendingChangeEntrySchema);
@@ -916,6 +917,14 @@ export class PendingChangesStore {
 			// reported success while the applied content sat at the new path.
 			if (entry.status !== "pending" && !this.hasUnrevertedApplication(entry)) continue;
 			if (entry.change.path === oldPath) {
+				// Keep the path we are leaving. `change.path` is overwritten in place,
+				// so otherwise the entry retains no trace of where it was staged —
+				// while the model still knows it only by that original path. An
+				// agent-side `discard` of a since-renamed note would then be
+				// unresolvable whenever the rename also changed the basename.
+				// Appended (not replaced) so a twice-renamed note stays reachable by
+				// the name the model actually saw.
+				entry.formerPaths = [...(entry.formerPaths ?? []), oldPath];
 				entry.change.path = newPath;
 				changed = true;
 			}
