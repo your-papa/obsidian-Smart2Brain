@@ -25,6 +25,12 @@ interface Props {
 	isStreaming?: boolean;
 	/** Persisted wall-clock duration of the turn (ms), for the "Thought for Ns" label. */
 	thinkingDurationMs?: number;
+	/** The session is running its pre-flight context summarization pass. */
+	summarizingHistory?: boolean;
+	/** The chat model runs on this machine (Ollama/oMLX), so a slow first token is a
+	 *  model load rather than network latency. Changes only the wording of the
+	 *  pre-first-token status. */
+	isLocalModel?: boolean;
 	ontoggle?: () => void;
 }
 
@@ -35,6 +41,8 @@ const {
 	contentAiMessageId,
 	isStreaming,
 	thinkingDurationMs,
+	summarizingHistory,
+	isLocalModel,
 	ontoggle,
 }: Props = $props();
 
@@ -317,14 +325,15 @@ const priorSteps = $derived(currentStep ? steps.slice(0, -1) : steps);
 // stops. No latch, no mid-stream freeze — the "thinking process" spans the whole turn.
 const summaryRunning = $derived(!!isStreaming);
 
-// While streaming, the header shows an animated live status instead of the static
-// settled label: a word that rotates through the set below (the agent is thinking
-// AND taking actions, so a single word undersells it) plus a live elapsed-seconds
-// timer, à la Claude Code. Not clickable while running.
-const RUNNING_WORDS = ["Working", "Thinking", "Exploring", "Investigating", "Reasoning", "Digging in"];
-const WORD_ROTATE_SECONDS = 10;
+// While streaming, the header shows a live status instead of the static settled
+// label, plus a live elapsed-seconds timer, à la Claude Code. The status text is
+// DERIVED FROM WHAT IS ACTUALLY HAPPENING (see `runningPhase` below) rather than
+// rotating through a set of interchangeable synonyms — a rotation of
+// "Exploring/Investigating/Reasoning/Digging in" told the user nothing the timer
+// didn't already, and actively misled when the run was in fact waiting on a cold
+// model or running a named tool. Only two generic words remain, for the two
+// phases that genuinely have nothing more specific to report.
 let runningSeconds = $state(0);
-let runningWordIndex = $state(0);
 
 // Drive the timer from a wall-clock anchor captured once on the rising edge of the
 // stream, so elapsed is monotonic and can't drift or reset on mid-stream state
@@ -338,23 +347,55 @@ $effect(() => {
 	if (isStreaming && !wasStreaming) {
 		runStartMs = Date.now();
 		runningSeconds = 0;
-		runningWordIndex = 0;
 	}
 	wasStreaming = !!isStreaming;
 
 	if (!summaryRunning) return;
 
 	const tick = () => {
-		const elapsed = Math.floor((Date.now() - runStartMs) / 1000);
-		runningSeconds = elapsed;
-		runningWordIndex = Math.floor(elapsed / WORD_ROTATE_SECONDS) % RUNNING_WORDS.length;
+		runningSeconds = Math.floor((Date.now() - runStartMs) / 1000);
 	};
 	tick();
 	const timer = setInterval(tick, 1000);
 	return () => clearInterval(timer);
 });
 
-const runningLabel = $derived(`${RUNNING_WORDS[runningWordIndex]}… ${runningSeconds}s`);
+// The one tool actually executing right now, if any. Parallel calls in the same
+// step are common, so a single running tool names itself and several report a
+// count — never a name that happens to be first in the array.
+const runningTools = $derived(lastStep?.tools.filter((t) => t.status === "running") ?? []);
+
+/**
+ * What the run is doing at this instant, in the model's own terms. Ordered most
+ * specific first; each branch is keyed on a signal the stream really produces:
+ *
+ * - `summarizingHistory` — the store's own flag for the pre-flight context
+ *   summarization pass, surfaced here so the header agrees with the separate
+ *   status row rather than saying "Thinking…" through a step the user can see.
+ * - a running tool — `buildToolSummary` already renders present-continuous
+ *   labels ("Reading main.md", "Searching notes for X"), so the header can state
+ *   the actual action instead of a synonym for "busy".
+ * - no steps and no text yet — nothing has come back from the provider at all.
+ *   On a local provider this window is the model being pulled into memory (a
+ *   cold Ollama/oMLX load is tens of seconds of apparent hang), so name it that
+ *   way; on a remote provider the same window is just the request in flight.
+ * - text arriving — tokens are landing, so the model is writing.
+ * - anything else (between steps, tool results being folded back in) — the one
+ *   genuinely opaque phase, which keeps the generic "Thinking…".
+ */
+const runningPhase = $derived.by((): string => {
+	if (summarizingHistory) return "Summarizing earlier messages";
+	if (runningTools.length === 1) {
+		const tool = runningTools[0];
+		return buildToolSummary(tool.name, tool.input, toOutputModel(tool), tool.status).label;
+	}
+	if (runningTools.length > 1) return `Running ${runningTools.length} tools`;
+	if (steps.length === 0 && !answerContent) return isLocalModel ? "Loading model" : "Waiting for the model";
+	if (answerContent) return "Writing";
+	return "Thinking";
+});
+
+const runningLabel = $derived(`${runningPhase}… ${runningSeconds}s`);
 // Settled label after the run finishes: the total time it took. Prefers the
 // PERSISTED duration (survives reload) → the live timer (this session). A settled
 // turn always took SOME time, so floor at 1s — we never fall back to a step-count
@@ -1095,6 +1136,14 @@ const showThinkingHeader = $derived(steps.length > 0 || !!isStreaming);
     line-height: 20px;
     color: var(--text-faint);
     transition: color 0.15s;
+    /* The running label now carries real status — including tool labels that embed
+       user content ("Searching notes for <query>") — so it has no bounded length.
+       Clamp it to one line: a wrapping header would grow the row mid-stream and
+       shove the answer down on every phase change. */
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .thinking-summary-status.is-running,
   .tool-card-name.is-running {

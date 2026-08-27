@@ -18,7 +18,6 @@ import { DEFAULT_AGENT_ICON } from "../../types/plugin";
 import { VIEW_TYPE_CHAT } from "../../views/chat/Chat";
 import Button from "../ui/Button.svelte";
 import Icon from "../ui/Icon.svelte";
-import DotAnimation from "../ui/DotAnimation.svelte";
 import MarkdownRenderer from "../ui/MarkdownRenderer.svelte";
 import BranchNavigator from "./BranchNavigator.svelte";
 import CollapsibleUserBubble from "./CollapsibleUserBubble.svelte";
@@ -51,6 +50,19 @@ const session = $derived(registry.sessionFor(threadPath));
 
 const messages = $derived.by(() => {
 	return session?.messages;
+});
+
+// Whether this session's chat model runs on this machine. Ollama and oMLX are the
+// local templates (the same pair dataStore trusts with private data by default),
+// and only they can spend the pre-first-token window loading weights into memory —
+// which is what the streaming status says during it. Remote providers get the
+// network wording instead.
+const isLocalModel = $derived.by(() => {
+	const data = getData();
+	const providerId = data.getAgent(session?.selectedAgentId ?? "")?.chatModel?.provider;
+	if (!providerId) return false;
+	const templateId = data.getProviderTemplateId(providerId);
+	return templateId === "ollama" || templateId === "omlx";
 });
 
 const onMobile = isMobileUI();
@@ -866,6 +878,9 @@ $effect(() => {
                     contentAiMessageId={messagePair.assistantMessage.contentAiMessageId}
                     isStreaming={messagePair.assistantMessage.state === AssistantState.streaming}
                     thinkingDurationMs={messagePair.assistantMessage.thinkingDurationMs}
+                    summarizingHistory={index === messages.length - 1 &&
+                      !!session?.summarizingHistory}
+                    {isLocalModel}
                     ontoggle={() => toggleCollapsed(messagePair)}
                   />
                 {:else}
@@ -961,14 +976,6 @@ $effect(() => {
               {/if}
               </div>
 
-              {#if index === messages.length - 1 && session?.summarizingHistory}
-                <div
-                  class="summarizing-status flex items-center gap-2 text-sm text-text-muted pl-1"
-                >
-                  <span>Summarizing earlier messages to make room for this reply</span>
-                  <span aria-hidden="true"><DotAnimation /></span>
-                </div>
-              {/if}
             </div>
           {/if}
         {/each}
@@ -1150,10 +1157,6 @@ $effect(() => {
     color: var(--text-faint);
     white-space: nowrap;
     font-variant-numeric: tabular-nums;
-  }
-
-  .summarizing-status {
-    min-height: 20px;
   }
 
   .message-nav-overlay {
