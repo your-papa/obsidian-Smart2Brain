@@ -407,7 +407,10 @@ function summarizeOperations(changes: PendingChange[]): string {
  * Resolution order is strict-to-loose, and stops at the first tier that hits so
  * a loose match can never override an exact one:
  *
- *   1. the vault-resolved canonical path, when the file still exists;
+ *   1. the vault-resolved canonical path — but ONLY when a pending entry sits at
+ *      it. The vault answers "what file is at this name now", which diverges
+ *      from "which proposal did the model mean" as soon as a note is renamed
+ *      away and something else takes its old path;
  *   2. an entry whose path equals the normalized reference exactly;
  *   3. an entry one of whose `formerPaths` equals it — the note was renamed
  *      after staging, and the model still knows it by the name it was staged
@@ -430,12 +433,21 @@ function resolveDiscardTargets(
 	cleanPath: string,
 	vaultResolvedPath: string | undefined,
 ): string[] {
-	if (vaultResolvedPath) return [vaultResolvedPath];
-
 	const normalized = normalizePath(cleanPath);
-	if (pending.some((entry) => entry.change.path === normalized)) return [normalized];
-
 	const dedupePaths = (entries: typeof pending) => [...new Set(entries.map((entry) => entry.change.path))];
+
+	// Tier 1 only wins when it names a proposal this thread actually has.
+	// Resolving through the vault answers "what file is at this name NOW", which
+	// is not the same question: once a proposal's note is renamed away, a NEW
+	// file can occupy the path it was staged under. Returning that path
+	// unconditionally aimed the discard at a note with no pending entry and
+	// reported nothing to withdraw, while the re-keyed proposal stayed queued.
+	// Falling through instead lets the `formerPaths` tier below find it.
+	if (vaultResolvedPath && pending.some((entry) => entry.change.path === vaultResolvedPath)) {
+		return [vaultResolvedPath];
+	}
+
+	if (pending.some((entry) => entry.change.path === normalized)) return [normalized];
 
 	// The note was renamed after staging; match the name it was staged under.
 	const byFormerPath = pending.filter((entry) => entry.formerPaths?.includes(normalized));
@@ -449,7 +461,12 @@ function resolveDiscardTargets(
 		return (path.split("/").pop() ?? path) === wantedWithExt;
 	});
 
-	return byBasename.length > 0 ? dedupePaths(byBasename) : [normalized];
+	if (byBasename.length > 0) return dedupePaths(byBasename);
+
+	// Nothing matched. Report against the canonical path when the vault knows
+	// one, so the "nothing to withdraw" names the real file rather than a bare
+	// wiki-link basename; otherwise echo the model's own reference.
+	return [vaultResolvedPath ?? normalized];
 }
 
 /**

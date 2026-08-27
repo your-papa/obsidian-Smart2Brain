@@ -1239,6 +1239,42 @@ describe("manageNotes tool", () => {
 			expect(mockDiscardPendingForPath).toHaveBeenCalledWith("Notes/final.md", "test-thread-id");
 		});
 
+		/**
+		 * Regression (PR #429 review, third pass): vault resolution short-circuited
+		 * ahead of `formerPaths`. Once a proposal's note is renamed away, a NEW file
+		 * can occupy the path it was staged under — the vault resolves that file,
+		 * which has no pending entry, so the discard missed the re-keyed proposal.
+		 */
+		it("ignores a vault match that is not one of this thread's proposals", async () => {
+			// A different note now sits at the path the proposal was staged under.
+			mockResolveVaultFileDetailed.mockReturnValue({ status: "found", file: makeFile("Notes/doc.md") });
+			mockGetPendingForThread.mockReturnValue([
+				{ change: { path: "Notes/renamed.md" }, formerPaths: ["Notes/doc.md"] },
+			]);
+			mockDiscardPendingForPath.mockReturnValue({ discarded: 1, skippedApplied: 0 });
+
+			const result = await tool.invoke(
+				{ operations: [{ type: "discard", path: "Notes/doc.md" }] },
+				THREAD_CONFIG,
+			);
+
+			expect(mockDiscardPendingForPath).toHaveBeenCalledWith("Notes/renamed.md", "test-thread-id");
+			expect(mockDiscardPendingForPath).not.toHaveBeenCalledWith("Notes/doc.md", "test-thread-id");
+			expect(result).toContain("Withdrew 1 pending proposal(s)");
+		});
+
+		it("names the canonical path when the vault resolves but nothing is pending", async () => {
+			mockResolveVaultFileDetailed.mockReturnValue({ status: "found", file: makeFile("Notes/doc.md") });
+			mockGetPendingForThread.mockReturnValue([]);
+
+			const result = await tool.invoke({ operations: [{ type: "discard", path: "[[doc]]" }] }, THREAD_CONFIG);
+
+			// Reported by real path, not the bare "doc" the wiki-link normalizes to.
+			expect(mockDiscardPendingForPath).toHaveBeenCalledWith("Notes/doc.md", "test-thread-id");
+			expect(result).toContain("Nothing to withdraw");
+			expect(result).toContain("Notes/doc.md");
+		});
+
 		it("prefers a former-path match over a looser basename match", async () => {
 			mockResolveVaultFileDetailed.mockReturnValue({ status: "not_found" });
 			mockGetPendingForThread.mockReturnValue([
@@ -1256,7 +1292,11 @@ describe("manageNotes tool", () => {
 
 		it("prefers the vault-resolved path over a looser basename match", async () => {
 			mockResolveVaultFileDetailed.mockReturnValue({ status: "found", file: makeFile("Notes/doc.md") });
-			mockGetPendingForThread.mockReturnValue([{ change: { path: "Archive/doc.md" } }]);
+			// Both are this thread's proposals; the vault-resolved one must win.
+			mockGetPendingForThread.mockReturnValue([
+				{ change: { path: "Notes/doc.md" } },
+				{ change: { path: "Archive/doc.md" } },
+			]);
 			mockDiscardPendingForPath.mockReturnValue({ discarded: 1, skippedApplied: 0 });
 
 			await tool.invoke({ operations: [{ type: "discard", path: "Notes/doc.md" }] }, THREAD_CONFIG);
