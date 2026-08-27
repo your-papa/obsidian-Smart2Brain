@@ -31,12 +31,12 @@ function handleSave() {
 	error = "";
 
 	if (!secretId.trim()) {
-		error = "Secret ID is required";
+		error = "Secret name is required";
 		return;
 	}
 
 	if (!isValidSecretId(secretId)) {
-		error = "Invalid ID. Use lowercase letters, numbers, and dashes only (max 64 chars)";
+		error = "Invalid name. Use lowercase letters, numbers, and dashes only (max 64 chars)";
 		return;
 	}
 
@@ -53,36 +53,22 @@ function handleSave() {
 		error = `Failed to save secret: ${e}`;
 	}
 }
-
-function openKeychainSettings() {
-	modal.close();
-	// @ts-ignore - Obsidian internal API
-	const setting = plugin.app.setting;
-	setting.open();
-	setting.openTabById("keychain");
-}
 </script>
 
 <div class="modal-content">
 	<!-- Description -->
 	<div class="setting-item-description mb-4">
-		<p class="mb-2">
+		<p>
 			Secrets are stored securely in Obsidian's Keychain, separate from plugin data. This allows you
 			to share API keys across multiple plugins without storing them in plaintext.
-		</p>
-		<p>
-			You can also manage your secrets in
-			<button class="text-[--text-accent] hover:underline" onclick={openKeychainSettings}>
-				Obsidian Settings &rarr; Keychain</button
-			>.
 		</p>
 	</div>
 
 	<SettingContainer
-		name="Secret ID"
+		name="Secret Name"
 		desc={suggestedId
-			? "Suggested from where you opened this. Edit it to reuse an ID across providers."
-			: "Unique identifier for this secret (lowercase letters, numbers, dashes)"}
+			? "Suggested from where you opened this. Edit it to reuse a name across providers."
+			: "Unique name for this secret (lowercase letters, numbers, dashes)"}
 	>
 		<Text
 			inputType="text"
