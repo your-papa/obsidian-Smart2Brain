@@ -127,7 +127,7 @@ export type AgentManagerStreamChunk =
 	| { type: "token"; token: string; aiMessageId?: string }
 	| Pick<
 			Extract<AgentStreamChunk, { type: "tool_pending" }>,
-			"type" | "toolCallId" | "toolName" | "aiMessageId" | "subAgentName" | "parentToolCallId"
+			"type" | "toolCallId" | "toolName" | "preamble" | "aiMessageId" | "subAgentName" | "parentToolCallId"
 	  >
 	| Pick<
 			Extract<AgentStreamChunk, { type: "tool_start" }>,
@@ -1433,6 +1433,7 @@ export class AgentManager {
 					type: "tool_pending",
 					toolCallId: chunk.toolCallId,
 					toolName: chunk.toolName,
+					preamble: chunk.preamble,
 					aiMessageId: chunk.aiMessageId,
 					subAgentName: chunk.subAgentName,
 					parentToolCallId: chunk.parentToolCallId,

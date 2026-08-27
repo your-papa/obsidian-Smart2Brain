@@ -2330,9 +2330,15 @@ export class ChatSession {
 				this.summarizingHistory = false;
 				hasSeenToolCall = true;
 				pendingStepReset = false;
-				// Clear the live answer spot exactly as tool_start does: the text emitted
-				// before this call is the call's preamble and is committed to the step by
-				// tool_start, so leaving it in `content` would render it twice.
+
+				// Commit the preamble AS WE CLEAR the live answer spot. Clearing without
+				// committing (leaving it for tool_start) blanked the text for the whole
+				// argument-streaming window — seconds for a `manage_notes` edit — so the
+				// user watched their preamble appear, vanish, then reappear. The two must
+				// happen in the same step: the text moves, it never disappears.
+				const pendingPreamble = (chunk.preamble ?? "").trim();
+				const pendingHasNewPreamble = !!pendingPreamble && !emittedStreamPreambles.has(pendingPreamble);
+				if (pendingHasNewPreamble) emittedStreamPreambles.add(pendingPreamble);
 				tokenBuffer = "";
 				assistantMsg.content = "";
 				assistantMsg.contentAiMessageId = undefined;
@@ -2343,12 +2349,28 @@ export class ChatSession {
 						id: chunk.toolCallId,
 						name: chunk.toolName,
 						status: "pending",
+						preamble: pendingHasNewPreamble ? pendingPreamble : undefined,
 						subAgentName: chunk.subAgentName,
 						parentToolCallId: chunk.parentToolCallId,
 					});
 				}
 
-				if (!assistantMsg.assistantTimeline.some((e) => e.toolCallId === chunk.toolCallId)) {
+				if (pendingHasNewPreamble) {
+					assistantMsg.assistantTimeline.push({
+						id: `preamble-${chunk.toolCallId}-${assistantMsg.assistantTimeline.length}`,
+						type: "preamble",
+						toolCallId: chunk.toolCallId,
+						toolName: chunk.toolName,
+						content: pendingPreamble,
+						aiMessageId: chunk.aiMessageId,
+					});
+				}
+
+				if (
+					!assistantMsg.assistantTimeline.some(
+						(e) => e.type !== "preamble" && e.toolCallId === chunk.toolCallId,
+					)
+				) {
 					assistantMsg.assistantTimeline.push({
 						id: `pending-${chunk.toolCallId}-${assistantMsg.assistantTimeline.length}`,
 						type: "tool_pending",

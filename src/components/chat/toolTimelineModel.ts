@@ -103,7 +103,21 @@ export function buildStepsFromEvents(rawEvents: AssistantTimelineEvent[]): Timel
 					tc.preamble = p;
 					pendingPreambles.delete(tc.id);
 				}
-				step.tools.push(tc);
+				// One card per tool call id. The store upgrades a `tool_pending` event
+				// into a `tool_start` in place, so a live stream sends only one event
+				// per id — but a replayed or reordered timeline can carry both, and
+				// pushing blindly would render the same call twice. A later event wins
+				// (pending → running), while the preamble, which arrives first, is kept.
+				const existing = step.tools.find((t) => t.id === tc.id);
+				if (existing) {
+					existing.status = tc.status;
+					if (tc.input !== undefined) existing.input = tc.input;
+					if (tc.preamble) existing.preamble = tc.preamble;
+					if (tc.subAgentName) existing.subAgentName = tc.subAgentName;
+					if (tc.parentToolCallId) existing.parentToolCallId = tc.parentToolCallId;
+				} else {
+					step.tools.push(tc);
+				}
 			}
 		}
 	} else {
@@ -119,7 +133,21 @@ export function buildStepsFromEvents(rawEvents: AssistantTimelineEvent[]): Timel
 					tc.preamble = p;
 					pendingPreambles.delete(tc.id);
 				}
-				step.tools.push(tc);
+				// One card per tool call id. The store upgrades a `tool_pending` event
+				// into a `tool_start` in place, so a live stream sends only one event
+				// per id — but a replayed or reordered timeline can carry both, and
+				// pushing blindly would render the same call twice. A later event wins
+				// (pending → running), while the preamble, which arrives first, is kept.
+				const existing = step.tools.find((t) => t.id === tc.id);
+				if (existing) {
+					existing.status = tc.status;
+					if (tc.input !== undefined) existing.input = tc.input;
+					if (tc.preamble) existing.preamble = tc.preamble;
+					if (tc.subAgentName) existing.subAgentName = tc.subAgentName;
+					if (tc.parentToolCallId) existing.parentToolCallId = tc.parentToolCallId;
+				} else {
+					step.tools.push(tc);
+				}
 			} else if (event.type === "tool_end") {
 				const tool = step.tools.find((t) => t.id === event.toolCallId);
 				if (tool) {

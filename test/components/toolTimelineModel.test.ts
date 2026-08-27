@@ -299,6 +299,29 @@ describe("toolTimelineModel — pending tool calls", () => {
 		expect(steps[0].tools[0].preamble).toBe("Let me fix that typo.");
 	});
 
+	it("keeps the preamble attached when the announced call later starts", () => {
+		// The regression this guards: the store cleared the live answer spot on
+		// tool_pending but only re-homed the text on tool_start, so the preamble
+		// blanked for the whole argument-streaming window. It now commits the
+		// preamble at announcement time — and must NOT re-emit it at tool_start,
+		// which would render the same paragraph twice.
+		const steps = buildStepsFromEvents(
+			events(
+				{ type: "preamble", toolCallId: "t1", toolName: "manage_notes", content: "Let me fix that typo." },
+				{ type: "tool_pending", toolCallId: "t1", toolName: "manage_notes" },
+				{
+					type: "tool_start",
+					toolCallId: "t1",
+					toolName: "manage_notes",
+					input: { operations: [] },
+				},
+			),
+		);
+		expect(steps[0].tools).toHaveLength(1);
+		expect(steps[0].tools[0].status).toBe("running");
+		expect(steps[0].tools[0].preamble).toBe("Let me fix that typo.");
+	});
+
 	it("nests a pending subagent child under its parent task", () => {
 		const steps = buildStepsFromEvents(
 			events(

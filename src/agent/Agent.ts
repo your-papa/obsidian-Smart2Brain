@@ -218,6 +218,13 @@ export type AgentStreamChunk =
 			type: "tool_pending";
 			toolCallId: string;
 			toolName: string;
+			/**
+			 * Text the model emitted before this call, as accumulated so far. Carried
+			 * here (not left for `tool_start`) because the announcement is what moves
+			 * the text out of the live answer spot: without it the preamble would
+			 * vanish for the seconds the arguments take to stream.
+			 */
+			preamble?: string;
 			/** The id of the AI message that produced this tool call. */
 			aiMessageId?: string;
 			/** Name of the subagent this tool is running inside (via `task`), if any. */
@@ -1103,6 +1110,11 @@ export class Agent {
 									type: "tool_pending",
 									toolCallId: tc.id,
 									toolName: tc.name,
+									// Whatever text preceded this call in the current AI message.
+									// `tool_start` re-sends the same text (from toolCallPreambles,
+									// stamped when tool_calls appeared) and the store dedupes, so
+									// sending it early only makes it visible sooner.
+									preamble: preambleAccumulator || undefined,
 									aiMessageId: parentToolCallId
 										? (taskAiMessageIds.get(parentToolCallId) ?? lastAiMessageId)
 										: lastAiMessageId,

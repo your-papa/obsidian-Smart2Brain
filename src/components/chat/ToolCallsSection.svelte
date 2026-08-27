@@ -53,7 +53,7 @@ const pluginData = getData();
 // Developer settings) to also see the exact I/O for debugging.
 const showRawIO = $derived(pluginData.showToolIODetails);
 
-let hoveringRail = $state(false);
+let hoveringHeader = $state(false);
 
 /* ── Formatters ── */
 
@@ -291,16 +291,6 @@ function buildDirectoryTreeView(
 	);
 }
 
-/* ── Step helpers ── */
-
-function isStepRunning(step: TimelineStep): boolean {
-	return step.tools.some((t) => isInFlight(t.status));
-}
-
-function hasStepFailure(step: TimelineStep): boolean {
-	return step.tools.some((t) => t.status === "failed");
-}
-
 /* ── Derived state ── */
 
 const steps = $derived(buildStepsFromEvents(assistantTimeline ?? []));
@@ -427,15 +417,6 @@ const settledLabel = $derived(`Thought for ${settledSeconds}s`);
 // only ever carries text not yet committed to a step.
 const liveContent = $derived(answerContent ?? "");
 
-// True in the narrow window where the model is streaming its opening text BEFORE the
-// first tool call (no steps yet). That text lives in the answer spot now, but the instant
-// the first tool_start arrives the reducer re-homes it as that step's preamble — which
-// sits inside the step with ~7px of top padding (.tool-step-content 4px + preamble 3px).
-// Without matching that offset here the text visibly drops when the tool call lands. So in
-// this window only, pad the answer spot to the same offset; the final answer (steps exist,
-// or not streaming) stays flush. Kept in a class rather than inline so it's easy to tune.
-const isPreFirstToolText = $derived(!!isStreaming && steps.length === 0 && !!liveContent);
-
 // The thinking-process header (chevron + shimmer/settled label) is shown whenever
 // there is a thinking process to represent: any built step, OR we're streaming.
 // Keying it on `isStreaming` (not on a per-content flag) keeps the header present for
@@ -443,14 +424,28 @@ const isPreFirstToolText = $derived(!!isStreaming && steps.length === 0 && !!liv
 // the first step lands. It stays hidden for a settled tool-free answer (no steps, not
 // streaming).
 const showThinkingHeader = $derived(steps.length > 0 || !!isStreaming);
+
+/**
+ * Markdown classes for ALL model prose — a tool call's preamble and the final
+ * answer alike.
+ *
+ * One class deliberately, not two. The same text is rendered by two different slots
+ * over its life: it streams into the live content spot, then re-homes into its step
+ * as a preamble the moment a tool call is announced. Nothing in the stream says
+ * which of the two it will end up being — the reducer writes both to `content`, and
+ * only the stream ENDING tells them apart — so any styling difference between the
+ * slots has to be guessed at mid-stream, and a wrong guess re-flows the text (a
+ * font-size change re-wraps every line). Styling both the same makes the handoff a
+ * pure re-parent and the guess unnecessary. Do not reintroduce a separate preamble
+ * style without a stream-level signal to key it on.
+ */
+const PROSE_MARKDOWN_CLASS =
+	"message-text markdown-preview-view leading-[1.5] !p-0 !w-full !max-w-full !m-0 [&_p]:my-2 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_strong]:font-semibold [&_code]:bg-code-background [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-[--font-monospace] [&_code]:text-[0.9em] [&_pre]:bg-code-background [&_pre]:p-3 [&_pre]:rounded [&_pre]:overflow-x-auto [&_pre]:my-2 [&_pre]:text-[0.85em] [&_pre]:relative [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-[1em] [&_pre_.clickable-icon]:absolute [&_pre_.clickable-icon]:top-1.5 [&_pre_.clickable-icon]:right-1.5 [&_pre_.clickable-icon]:opacity-0 [&_pre:hover_.clickable-icon]:opacity-100";
 </script>
 
 {#snippet preambleBlock(text: string)}
   <div class="tool-timeline-preamble">
-    <MarkdownRenderer
-      content={text}
-      class="message-text markdown-preview-view leading-[1.5] !p-0 !w-full !max-w-full !m-0 [&_p]:my-1 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0"
-    />
+    <MarkdownRenderer content={text} class={PROSE_MARKDOWN_CLASS} />
   </div>
 {/snippet}
 
@@ -567,7 +562,7 @@ const showThinkingHeader = $derived(steps.length > 0 || !!isStreaming);
       </summary>
 
       <!-- Child steps render inline as normal tool rows, indented under the task
-           sentence — no rail, no dots. -->
+           sentence. -->
       <div class="tool-subagent-branch">
         {#each children as child (child.id)}
           <div class="tool-subagent-branch-content">
@@ -626,26 +621,8 @@ const showThinkingHeader = $derived(steps.length > 0 || !!isStreaming);
   </details>
 {/snippet}
 
-{#snippet stepRow(
-  step: TimelineStep,
-  stepIdx: number,
-  totalSteps: number,
-)}
-  <div
-    class="tool-step"
-    class:step-first={stepIdx === 0}
-    class:step-last={stepIdx === totalSteps - 1}
-    class:step-only={totalSteps === 1}
-  >
-    <div class="tool-step-rail">
-      <div
-        class="tool-step-dot"
-        class:dot-running={isStepRunning(step)}
-        class:dot-failed={!isStepRunning(step) && hasStepFailure(step)}
-        class:dot-done={!isStepRunning(step) && !hasStepFailure(step)}
-      ></div>
-    </div>
-
+{#snippet stepRow(step: TimelineStep)}
+  <div class="tool-step">
     <div class="tool-step-content">
       <div class="tool-step-tools">
         {#each groupStepTools(step.tools) as group (group.id)}
@@ -969,12 +946,7 @@ const showThinkingHeader = $derived(steps.length > 0 || !!isStreaming);
 
 {#snippet answerContentBlock()}
   {#if liveContent}
-    <div class:answer-spot-pre-tool={isPreFirstToolText}>
-      <MarkdownRenderer
-        content={liveContent}
-        class="message-text markdown-preview-view leading-[1.5] !p-0 !w-full !max-w-full !m-0 [&_p]:my-2 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_strong]:font-semibold [&_code]:bg-code-background [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:font-[--font-monospace] [&_code]:text-[0.9em] [&_pre]:bg-code-background [&_pre]:p-3 [&_pre]:rounded [&_pre]:overflow-x-auto [&_pre]:my-2 [&_pre]:text-[0.85em] [&_pre]:relative [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre_code]:text-[1em] [&_pre_.clickable-icon]:absolute [&_pre_.clickable-icon]:top-1.5 [&_pre_.clickable-icon]:right-1.5 [&_pre_.clickable-icon]:opacity-0 [&_pre:hover_.clickable-icon]:opacity-100"
-      />
-    </div>
+    <MarkdownRenderer content={liveContent} class={PROSE_MARKDOWN_CLASS} />
   {/if}
 {/snippet}
 
@@ -986,7 +958,10 @@ const showThinkingHeader = $derived(steps.length > 0 || !!isStreaming);
      its INNER header/steps render when there's a thinking process. When there's no
      process (pure answer), the container is empty (zero-height) and just the answer
      shows below — same layout as before, but no subtree swap. -->
-<div class="tool-timeline no-rail" class:tool-timeline-highlight-all={hoveringRail}>
+<div
+  class="tool-timeline"
+  class:tool-timeline-header-hover={hoveringHeader}
+  class:tool-timeline-no-steps={priorSteps.length === 0}>
   {#if showThinkingHeader}
     <!-- The header is ALWAYS a clickable chevron toggle — in BOTH the running and
          settled states — so (a) the process can be collapsed mid-stream to just
@@ -1002,10 +977,10 @@ const showThinkingHeader = $derived(steps.length > 0 || !!isStreaming);
       class:is-collapsed={collapsed}
       onclick={ontoggle}
       onmouseenter={() => {
-        hoveringRail = true;
+        hoveringHeader = true;
       }}
       onmouseleave={() => {
-        hoveringRail = false;
+        hoveringHeader = false;
       }}
     >
       <span class="thinking-summary-chevron" class:is-open={!collapsed}>
@@ -1028,8 +1003,8 @@ const showThinkingHeader = $derived(steps.length > 0 || !!isStreaming);
          it doesn't hop up until the next AI message starts and folds it in. -->
     <div class="steps-expand-grid" class:steps-expanded={!collapsed}>
       <div class="steps-expand-inner">
-        {#each priorSteps as step, stepIdx (step.id)}
-          {@render stepRow(step, stepIdx, priorSteps.length)}
+        {#each priorSteps as step (step.id)}
+          {@render stepRow(step)}
         {/each}
       </div>
     </div>
@@ -1045,8 +1020,8 @@ const showThinkingHeader = $derived(steps.length > 0 || !!isStreaming);
      (rendered by stepRow); its live/uncommitted text streams in the single content spot
      below. -->
 {#if isStreaming && currentStep}
-  <div class="tool-timeline no-rail tool-timeline-current">
-    {@render stepRow(currentStep, 0, 1)}
+  <div class="tool-timeline tool-timeline-current">
+    {@render stepRow(currentStep)}
   </div>
 {/if}
 
@@ -1056,14 +1031,6 @@ const showThinkingHeader = $derived(steps.length > 0 || !!isStreaming);
 
 <style>
   /* ── Timeline container ── */
-  /* The rail bleeds left into the surrounding padding so the answer/preamble
-     text lines up flush with the rest of the chat content. The bleed is capped
-     at the padding that's ALWAYS present (scroll-container px-2 = 8px + message
-     px-2 = 8px → 16px), never the old -24px which overshot that on narrow panes
-     and pushed the dot past the scroll container's `overflow-x: hidden` edge,
-     clipping its left half + glow. A small left padding keeps the dot's glow
-     ring off the very edge even at the tightest width. Raising z-index cannot
-     fix this — the dot is clipped by an ancestor's overflow, not painted over. */
   .tool-timeline {
     position: relative;
     /* The container is full-width but its only interactive parts are the header button and
@@ -1100,34 +1067,27 @@ const showThinkingHeader = $derived(steps.length > 0 || !!isStreaming);
       margin-bottom 0.2s ease;
   }
 
-  /* The gap BELOW the header (before the answer) is collapsed-only: when collapsed the
-     header is a single quiet row and the parent `.group`'s 0.75rem flex gap then leaves an
-     outsized space below it, so pull whatever follows (the live current-run block while
-     streaming, or the answer once settled) up under the label. When EXPANDED the steps fill
-     that space, so there's nothing to close. Applied in BOTH streaming and settled phases
-     with the SAME value so nothing shifts at the streaming→settled boundary — an earlier
-     settled-only gate made the gap snap tighter the instant the run settled. */
-  .tool-timeline:has(.thinking-summary-header.is-collapsed) {
+  /* The gap BELOW the header (before the answer): when the header is a single quiet row
+     the parent `.group`'s 0.75rem flex gap leaves an outsized space below it, so pull
+     whatever follows (the live current-run block while streaming, or the answer once
+     settled) up under the label. Applied in BOTH streaming and settled phases with the
+     SAME value so nothing shifts at the streaming→settled boundary — an earlier
+     settled-only gate made the gap snap tighter the instant the run settled.
+
+     Two cases need it, not one. Collapsed is the obvious one. The other is EXPANDED BUT
+     EMPTY — the opening moments of a turn, before any step exists: the steps grid is
+     open but has nothing in it, so there is no content to fill the gap and the header
+     floated far above the streaming text. Keying only on `is-collapsed` (on the
+     reasoning that "expanded means steps fill the space") missed it. */
+  .tool-timeline:has(.thinking-summary-header.is-collapsed),
+  .tool-timeline.tool-timeline-no-steps {
     /* -0.95rem pulled the answer flush enough that the label read as part of it.
        Giving back ~4px separates the two without reopening the original gap. */
     margin-bottom: -0.7rem;
   }
 
-  /* Rail-less mode: the vertical timeline rail (dots + connecting line) is hidden
-     and its 24px column collapses to zero, so the "Thinking process" header and
-     the expanded step content sit flush with the answer below — no indent, no
-     negative-margin bleed into the chat history, nothing to clip on narrow panes. */
-  .tool-timeline.no-rail .tool-step-rail {
-    display: none;
-  }
-  .tool-timeline.no-rail .tool-step {
-    /* Was flex [rail | content]; with the rail gone the content is the only child
-       and should fill the row flush-left. */
-    gap: 0;
-  }
-
   /* The current-run block (streaming) sits directly below the process, holding the
-     run in flight. It reuses the same rail-less step layout as the process so a run
+     run in flight. It reuses the same step layout as the process so a run
      looks identical whether it's live here or folded into the process above — no
      shift when it folds. No extra chrome; the step's own padding provides spacing. */
   .tool-timeline-current {
@@ -1193,8 +1153,8 @@ const showThinkingHeader = $derived(steps.length > 0 || !!isStreaming);
   }
 
   /* ── Thinking-process summary header (collapsed toggle) ── */
-  /* A plain, rail-less toggle: chevron + label, flush with the answer. Clicking
-     (or the whole row hover, via .tool-timeline-highlight-all) toggles the steps. */
+  /* A plain toggle: chevron + label, flush with the answer. Clicking
+     (or the whole row hover, via .tool-timeline-header-hover) toggles the steps. */
   .thinking-summary-header {
     display: flex;
     align-items: center;
@@ -1225,10 +1185,10 @@ const showThinkingHeader = $derived(steps.length > 0 || !!isStreaming);
   .thinking-summary-chevron.is-open {
     transform: rotate(90deg);
   }
-  /* Whole-header hover feedback, driven off the shared hoveringRail state so the
-     header and (former) rail highlight as one unit with no competing mechanism. */
-  .tool-timeline-highlight-all .thinking-summary-status,
-  .tool-timeline-highlight-all .thinking-summary-chevron {
+  /* Whole-header hover feedback, driven off the shared hoveringHeader state so the
+     header highlights as one unit with no competing mechanism. */
+  .tool-timeline-header-hover .thinking-summary-status,
+  .tool-timeline-header-hover .thinking-summary-chevron {
     color: var(--text-normal);
   }
 
@@ -1273,125 +1233,23 @@ const showThinkingHeader = $derived(steps.length > 0 || !!isStreaming);
     overflow: hidden;
   }
 
-  /* ── Answer spot ── */
-  /* The single live-content spot below the header. Before the first tool call the model's
-     opening text streams here; the instant that first tool call lands, the reducer re-homes
-     the text as the step's preamble, which sits with ~7px of top padding inside the step
-     (.tool-step-content 4px + .tool-timeline-preamble 3px). Match that offset ONLY in the
-     pre-first-tool window so the text doesn't jump down when it becomes a preamble. The
-     final answer (steps present, or settled) keeps this at 0 for a tight header→answer gap. */
-  .answer-spot-pre-tool {
-    padding-top: 7px;
-  }
-
   /* ── Preamble ── */
   .tool-timeline-preamble {
-    /* Match the tool-card-header's 3px top padding so the first text line starts
-       at the same offset whether a step opens with a preamble or a tool row —
-       keeps the step dot aligned to the first line in both cases. */
-    padding: 3px 0;
-    font-size: 0.82rem;
-    color: var(--text-muted);
+    /* No padding, no font-size, no colour: a preamble IS the model's prose, identical
+       to the final answer (see PROSE_MARKDOWN_CLASS), and it streams in the live
+       content spot before landing here. Any box offset on this side is a vertical jump
+       at that handoff, because the live spot has none. What distinguishes a preamble is
+       only what sits BELOW it — the tool rows — not how its own text is drawn.
+
+       The old `padding: 3px 0` existed to align a step dot to the first text line;
+       that rail was removed, so it aligned nothing and only pushed the text down. */
     flex: 1;
     min-width: 0;
   }
 
   /* ── Step row ── */
   .tool-step {
-    display: flex;
-    gap: 0;
     position: relative;
-  }
-  .tool-step + .tool-step {
-    margin-top: 0;
-  }
-
-  /* ── Rail (continuous line via ::before) ── */
-  .tool-step-rail {
-    position: relative;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    align-self: stretch;
-    width: 24px;
-    flex-shrink: 0;
-    /* Push the dot down so its center (padding-top + 5px dot radius) lands on the
-       first content line's optical center. Content adds 4px top padding and the
-       preamble/header add 3px, and the first line is ~19px tall — its center sits
-       ~16px below the step top, so 12px + 5px ≈ 17px keeps the dot on that line. */
-    padding-top: 12px;
-  }
-
-  .tool-step-rail::before {
-    content: "";
-    position: absolute;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 2px;
-    background: var(--background-modifier-border);
-    border-radius: 1px;
-    top: 0;
-    bottom: 0;
-    transition:
-      background 0.15s,
-      opacity 0.15s;
-  }
-
-  /* First step: line starts at dot center */
-  .step-first .tool-step-rail::before {
-    top: 17px;
-  }
-
-  /* Last step: line ends at dot center */
-  .step-last .tool-step-rail::before {
-    bottom: auto;
-    height: 17px;
-  }
-
-  /* Single step: no connecting line needed */
-  .step-only .tool-step-rail::before {
-    display: none;
-  }
-
-  .tool-step-dot {
-    position: relative;
-    z-index: 1;
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    flex-shrink: 0;
-    border: 2px solid var(--background-modifier-border);
-    background: var(--background-primary);
-    transition:
-      border-color 0.2s,
-      background 0.2s,
-      box-shadow 0.2s,
-      transform 0.15s;
-  }
-  .dot-done {
-    border-color: var(--interactive-accent);
-    background: var(--interactive-accent);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--interactive-accent) 15%, transparent);
-  }
-  .dot-running {
-    border-color: var(--text-accent);
-    background: var(--background-primary);
-    animation: pulse-dot 1.25s ease-in-out infinite;
-  }
-  .dot-failed {
-    border-color: var(--color-red);
-    background: var(--color-red);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-red) 15%, transparent);
-  }
-
-  @keyframes pulse-dot {
-    0%,
-    100% {
-      box-shadow: 0 0 0 0 color-mix(in srgb, var(--text-accent) 52%, transparent);
-    }
-    50% {
-      box-shadow: 0 0 0 8px color-mix(in srgb, var(--text-accent) 0%, transparent);
-    }
   }
 
   /* ── Step content ── */
@@ -1402,6 +1260,14 @@ const showThinkingHeader = $derived(steps.length > 0 || !!isStreaming);
     flex-direction: column;
     gap: 0;
     padding: 4px 0 8px;
+  }
+  /* A step that OPENS with a preamble starts with text that was, a frame earlier,
+     streaming in the live content spot with no top padding. Keeping the 4px here would
+     drop that text by 4px the instant its tool call lands — the last of the handoff
+     shift. Steps that open with a tool row keep the padding: nothing re-parents into
+     them, so there is no offset to match. */
+  .tool-step-content:has(.tool-step-tools > :first-child .tool-timeline-preamble:first-child) {
+    padding-top: 0;
   }
 
   .tool-step-tools {
@@ -1529,7 +1395,7 @@ const showThinkingHeader = $derived(steps.length > 0 || !!isStreaming);
   }
 
   /* The subagent's tool calls render as a plain indented list under the parent
-     `task` sentence — no rail or dots, always visible. A subtle left rule
+     `task` sentence — always visible. A subtle left rule
      (matching the expanded tool-body indent) marks them as subordinate without a
      second timeline. */
   .tool-subagent-branch {
