@@ -23,10 +23,9 @@ import {
 	filterPluginNudges,
 	filterSuggestions,
 	filterUpdateNotices,
-	MAX_PLUGIN_NUDGES_DESKTOP,
-	MAX_PLUGIN_NUDGES_MOBILE,
 	type PluginNudge,
 	pluginNudgeId,
+	shouldCollapsePluginNudges,
 	type SuggestedQuery,
 	type UpdateNotice,
 } from "./chatRecommendations";
@@ -139,15 +138,32 @@ const pluginNudges = $derived.by<PluginNudge[]>(() => {
 			skillId: integ.skillId,
 		});
 	}
-	// Capped by available vertical space, skill-backed integrations first. isMobileUI() is
-	// a plain call, not a signal — it belongs inside this $derived.by (which already re-runs
-	// on pluginRefresh) rather than in an $effect syncing a separate state variable.
-	return filterPluginNudges(
-		candidates,
-		data.dismissedRecommendations,
-		isMobileUI() ? MAX_PLUGIN_NUDGES_MOBILE : MAX_PLUGIN_NUDGES_DESKTOP,
-	);
+	// Every eligible nudge, skill-backed first. Nothing is capped: the footer collapses
+	// into one summary row when there are several (see `nudgesCollapsed`), which bounds
+	// its height without withholding integrations from the user.
+	return filterPluginNudges(candidates, data.dismissedRecommendations);
 });
+
+// Whether the nudge footer renders as a summary row rather than one row per plugin.
+// Expansion is deliberately ephemeral component state, not persisted: it's a transient
+// disclosure for the current empty state, not a user preference worth remembering.
+let nudgesExpanded = $state(false);
+// Desktop tolerates a longer run of rows than mobile, so the threshold differs. Read once
+// here rather than at each call site so the summary row and the "Show less" control can
+// never disagree about whether this list is collapsible.
+const collapsible = $derived(shouldCollapsePluginNudges(pluginNudges.length, isMobileUI()));
+const nudgesCollapsed = $derived(collapsible && !nudgesExpanded);
+// Leading glyphs for the summary row. Capped purely so the cluster can't grow unbounded
+// and push the label out of a narrow pane — the COUNT beside it is always exact, so this
+// truncation never hides the real total from the user.
+const MAX_SUMMARY_ICONS = 4;
+const nudgeSummaryIcons = $derived(pluginNudges.slice(0, MAX_SUMMARY_ICONS));
+
+function dismissAllPluginNudges(): void {
+	// The summary row stands for the whole pending set, so its dismiss applies to all of
+	// them — dismissing them one-by-one behind a collapsed row would be invisible work.
+	for (const nudge of pluginNudges) data.dismissRecommendation(nudge.id);
+}
 
 // "Updated default" notices: agents whose customized prompt/guidance couldn't be
 // auto-migrated after a default changed upstream (issue #356). staleGuidance is
@@ -291,11 +307,14 @@ function reviewNotice(notice: UpdateNotice): void {
             <span class="suggestion-icon" use:icon={s.icon} style="--icon-size: 15px"></span>
             <span class="suggestion-label">{s.label}</span>
           </button>
+          <!-- No `clickable-icon`: that class carries its own hover background, which
+               would paint a second, differently-rounded box on top of the row's tint.
+               The row is the hover surface here. No `title` either — it duplicated the
+               aria-label, so the native tooltip repeated the label back verbatim. -->
           <button
             type="button"
-            class="dismiss-chip clickable-icon"
+            class="dismiss-chip"
             aria-label={`Dismiss "${s.label}"`}
-            title="Dismiss this suggestion"
             onclick={() => dismiss(s.id)}
           >
             <span use:icon={"x"} style="--icon-size: 13px"></span>
@@ -343,26 +362,93 @@ function reviewNotice(notice: UpdateNotice): void {
         </div>
       {/each}
 
-      {#each pluginNudges as nudge (nudge.id)}
-        <div class="s2b-notice">
-          <span class="s2b-notice-icon" use:icon={nudge.icon} style="--icon-size: 14px"></span>
-          <span class="s2b-notice-text">
-            Enable the <strong>{nudge.displayName}</strong> skill for this agent.
-          </span>
-          <button type="button" class="s2b-notice-action" onclick={() => void enablePlugin(nudge)}>
-            Enable
-          </button>
-          <button
-            type="button"
-            class="dismiss-chip clickable-icon"
-            aria-label={`Dismiss ${nudge.displayName} suggestion`}
-            title="Dismiss this suggestion"
-            onclick={() => dismiss(nudge.id)}
-          >
-            <span use:icon={"x"} style="--icon-size: 13px"></span>
-          </button>
-        </div>
-      {/each}
+      <!--
+        Several pending integrations collapse into one summary row so the footer stays a
+        constant height instead of out-growing the suggestions above it. The count is
+        always exact and one click reveals the full list, so nothing is hidden from the
+        user — unlike the hard cap this replaced. Below the threshold every nudge renders
+        directly; in particular a lone nudge is never summarised. See
+        PLUGIN_NUDGE_COLLAPSE_THRESHOLD_DESKTOP / _MOBILE.
+
+        Accessibility: `aria-expanded` belongs to ONE disclosure control, not to whichever
+        button happens to be on screen. Both states therefore render the same toggle
+        (`.nudge-disclosure`) pointing at the same `aria-controls` target, so a screen
+        reader follows a single control flipping state rather than two rival ones.
+      -->
+      <div class="nudge-group" id="s2b-plugin-nudges">
+        {#if nudgesCollapsed}
+          <div class="s2b-notice">
+            <span class="nudge-summary-icons" aria-hidden="true">
+              {#each nudgeSummaryIcons as nudge (nudge.id)}
+                <span class="nudge-summary-icon" use:icon={nudge.icon} style="--icon-size: 14px"></span>
+              {/each}
+            </span>
+            <span class="s2b-notice-text">
+              <strong>{pluginNudges.length}</strong> plugin integrations available for this agent.
+            </span>
+            <button
+              type="button"
+              class="s2b-notice-action nudge-disclosure"
+              aria-expanded="false"
+              aria-controls="s2b-plugin-nudges"
+              onclick={() => {
+                nudgesExpanded = true;
+              }}
+            >
+              Review
+            </button>
+            <!-- Bulk action, so it is NOT the bare `×` every other row uses: a chip
+                 identical to the per-row dismiss would give no hint that it clears the
+                 whole set at once. Labelled with the count and set apart visually. -->
+            <button
+              type="button"
+              class="nudge-dismiss-all"
+              aria-label={`Dismiss all ${pluginNudges.length} plugin integration suggestions`}
+              title={`Dismiss all ${pluginNudges.length} suggestions`}
+              onclick={dismissAllPluginNudges}
+            >
+              Dismiss all
+            </button>
+          </div>
+        {:else}
+          {#each pluginNudges as nudge (nudge.id)}
+            <div class="s2b-notice">
+              <span class="s2b-notice-icon" use:icon={nudge.icon} style="--icon-size: 14px"></span>
+              <span class="s2b-notice-text">
+                Enable the <strong>{nudge.displayName}</strong> skill for this agent.
+              </span>
+              <button type="button" class="s2b-notice-action" onclick={() => void enablePlugin(nudge)}>
+                Enable
+              </button>
+              <button
+                type="button"
+                class="dismiss-chip clickable-icon"
+                aria-label={`Dismiss ${nudge.displayName} suggestion`}
+                title="Dismiss this suggestion"
+                onclick={() => dismiss(nudge.id)}
+              >
+                <span use:icon={"x"} style="--icon-size: 13px"></span>
+              </button>
+            </div>
+          {/each}
+
+          <!-- Only offered once the user expanded a collapsed group: with a naturally short
+               list there is nothing to collapse back to. -->
+          {#if nudgesExpanded && collapsible}
+            <button
+              type="button"
+              class="nudge-collapse nudge-disclosure"
+              aria-expanded="true"
+              aria-controls="s2b-plugin-nudges"
+              onclick={() => {
+                nudgesExpanded = false;
+              }}
+            >
+              Show less
+            </button>
+          {/if}
+        {/if}
+      </div>
     </div>
   {/if}
 
@@ -423,10 +509,30 @@ function reviewNotice(notice: UpdateNotice): void {
     gap: 0.25rem;
   }
 
+  /* `flex-start`, not `stretch`: the suggestion pill sizes to its own text (see
+     `.suggestion`), so the row must not stretch it back to full width. The trailing
+     dismiss chip then sits directly beside the pill rather than at the far right of
+     the column — a short label with a distant `×` reads as two unrelated controls.
+
+     The row (not the pill) carries the hover tint, and it is `width: fit-content` so the
+     tint wraps label + chip exactly. The `×` cannot live INSIDE the pill — the pill is
+     itself a <button>, and nesting a button in a button is invalid HTML that breaks
+     keyboard navigation — so the shared background is what makes the pair read as one
+     object instead of a pill with something floating beside it. */
   .suggestion-row {
     display: flex;
     align-items: center;
-    gap: 0.6rem;
+    justify-content: flex-start;
+    width: fit-content;
+    max-width: 100%;
+    gap: 0.15rem;
+    padding-right: 0.25rem;
+    border-radius: var(--radius-m);
+    transition: background 120ms ease;
+  }
+
+  .suggestion-row:hover {
+    background: var(--background-modifier-hover);
   }
 
   /* Full-width rows rather than centered pills: one straight left edge for the
@@ -434,23 +540,32 @@ function reviewNotice(notice: UpdateNotice): void {
      a fixed-width column (see its own rule) shared with `.s2b-notice`'s row, so
      both dismiss buttons land on the same right edge regardless of how long the
      suggestion label or the sibling "Enable"/"Review" action is. */
+  /* Shrink-to-fit, NOT `flex: 1`. A full-width pill stretched a three-word label across
+     the whole column, which read as an oversized input rather than a suggestion, and it
+     pushed the dismiss `×` far away from the text it belongs to. `min-width: 0` still
+     allows shrinking below the intrinsic width so a long label wraps instead of
+     overflowing on a narrow pane; `max-width: 100%` keeps it inside the column once the
+     sibling chip is accounted for. */
   .suggestion {
-    flex: 1;
+    /* Shrink-to-fit but shrinkable: `min-width: 0` lets a long label wrap instead of
+       forcing the row wider than the column. The column bound lives on the row
+       (`.suggestion-row`'s `max-width`), so it is not repeated here. */
+    flex: 0 1 auto;
     min-width: 0;
     display: flex;
     align-items: center;
     /* Obsidian's base `button` rule centres flex content. Without this the icon +
-       label pair is centred inside each full-width row, so every suggestion starts
-       at a different x and the left edge goes ragged. */
+       label pair is centred inside the pill, so a wrapped label's second line no
+       longer lines up under the first. */
     justify-content: flex-start;
     gap: 0.6rem;
-    /* No right padding: the row's own `gap` (matching `.s2b-notice`'s) provides
-       the space before the dismiss chip, so both rows' chips land on the same
-       right edge. */
-    padding: 0.5rem 0 0.5rem 0.6rem;
-    /* Same content-box trap as `.recommendation-stack` — this is a `flex: 1` item
+    /* Symmetric padding now that the pill ends where its text does — the old
+       right-padding-free rule existed to let the row's gap stand in for it while the
+       pill spanned the full column. */
+    padding: 0.5rem 0.75rem;
+    /* Same content-box trap as `.recommendation-stack` — this is a shrinkable flex item
        with horizontal padding, so without this the padding is added outside the
-       flex-resolved width and the row overhangs its container. */
+       flex-resolved width and the pill overhangs its container. */
     box-sizing: border-box;
     border: none;
     border-radius: var(--radius-m);
@@ -466,9 +581,19 @@ function reviewNotice(notice: UpdateNotice): void {
     transition: background 120ms ease;
   }
 
+  /* The row owns the hover tint (see `.suggestion-row:hover`) so it spans the label and
+     the dismiss chip as one surface. The pill itself must stay transparent on hover or
+     the two tints would stack into a darker patch behind the text only.
+
+     Keyboard parity: hovering is not the only way to reach this. `:focus-visible` paints
+     the same surface so a tab-through user sees the row highlight too. */
   .suggestion:hover {
-    background: var(--background-modifier-hover);
+    background: transparent;
     box-shadow: none;
+  }
+
+  .suggestion-row:has(.suggestion:focus-visible) {
+    background: var(--background-modifier-hover);
   }
 
   .suggestion-icon {
@@ -565,27 +690,105 @@ function reviewNotice(notice: UpdateNotice): void {
      in app.css (dark pill, near-white text). Svelte's scoping hash does not raise
      specificity, so a bare `.notice` here loses to it and the rows render as dark
      toast blocks. Don't drop the prefix. */
+  /* No gap: `.s2b-notice`'s own block padding already separates the rows, and stacking a
+     gap on top of it spread the nudges far apart (they are a compact list of related
+     chores, not independent cards). Suggestions keep a small gap because their hover
+     pills would otherwise touch. */
   .s2b-notices {
     display: flex;
     flex-direction: column;
-    gap: 0.35rem;
+    gap: 0;
     padding-top: 1rem;
     border-top: 1px solid var(--background-modifier-border);
   }
 
+  /* Wrapper so the disclosure toggle has a stable `aria-controls` target across both
+     the collapsed and expanded states. Purely structural — it must not introduce its
+     own spacing, or the footer's gap would double up between nudge rows. */
+  .nudge-group {
+    display: contents;
+  }
+
   /* No right padding: like `.suggestion-row`, the trailing dismiss chip's own
-     width is the right-edge reserve, so both rows' chips land on the same edge. */
+     width is the right-edge reserve, so both rows' chips land on the same edge.
+
+     Lighter vertical padding than `.suggestion`'s 0.5rem. A suggestion needs that room
+     because its padding is inside a visible hover pill; a notice row is bare text, so the
+     same value just pushes the rows apart and the footer sprawls. The earlier 0.1rem was
+     too tight and 0.5rem too airy — this sits between, close enough to the suggestions'
+     rhythm to look intentional while keeping the footer compact. */
   .s2b-notice {
     display: flex;
     align-items: center;
     gap: 0.6rem;
-    padding: 0.1rem 0 0.1rem 0.6rem;
+    padding: 0.2rem 0 0.2rem 0.6rem;
   }
 
   .s2b-notice-icon {
     display: flex;
     align-items: center;
     flex-shrink: 0;
+    color: var(--text-muted);
+  }
+
+  /* Icon cluster standing in for the individual rows' single glyph, so the collapsed
+     summary still previews WHICH integrations are waiting rather than just how many.
+     Sits in the same leading slot as `.s2b-notice-icon`, so the text still starts on
+     the shared left edge when only one plugin is pending and the row renders expanded. */
+  .nudge-summary-icons {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    /* Slight overlap reads as a stack rather than a row of unrelated glyphs, and keeps
+       four icons roughly within the width of two. */
+    gap: 0.15rem;
+  }
+
+  .nudge-summary-icon {
+    display: flex;
+    align-items: center;
+    color: var(--text-muted);
+  }
+
+  /* The collapsed row's dismiss clears EVERY pending nudge, so it must not wear the
+     same bare `×` chip as the per-row dismisses — an identical glyph would give no
+     hint that its scope is the whole set. A worded control makes the bulk action
+     legible, and it sits in the same trailing slot so the row still lines up. */
+  .nudge-dismiss-all {
+    flex-shrink: 0;
+    padding: 0.25rem 0.4rem;
+    border: none;
+    background: transparent;
+    box-shadow: none;
+    color: var(--text-faint);
+    font-size: var(--font-ui-smaller);
+    white-space: nowrap;
+    cursor: pointer;
+  }
+
+  .nudge-dismiss-all:hover {
+    background: transparent;
+    box-shadow: none;
+    color: var(--text-muted);
+  }
+
+  /* Mirrors `.dismiss-all` — a quiet tertiary control, deliberately weaker than the
+     accent-coloured `.s2b-notice-action` so collapsing never competes with Enable. */
+  .nudge-collapse {
+    align-self: flex-start;
+    margin-left: 0.6rem;
+    padding: 0.25rem 0.4rem;
+    border: none;
+    background: transparent;
+    box-shadow: none;
+    color: var(--text-faint);
+    font-size: var(--font-ui-smaller);
+    cursor: pointer;
+  }
+
+  .nudge-collapse:hover {
+    background: transparent;
+    box-shadow: none;
     color: var(--text-muted);
   }
 
@@ -621,22 +824,47 @@ function reviewNotice(notice: UpdateNotice): void {
     color: var(--text-accent-hover);
   }
 
-  /* Fixed-width column, identical in the suggestion row and the notice row, so
-     both dismiss buttons land on the same right edge. `margin-left: auto` (not
-     the row's `gap`) pins it there — the two rows have a different number of flex
-     items ahead of the chip (suggestion: 1, notice: icon+text+action = 3), so
-     matching gaps only coincidentally lines up the edge; auto-margin doesn't
-     depend on that count. */
+  /* Fixed-width so the glyph has a stable hit box.
+
+     No `margin-left: auto` in either row. A notice row does not need it — its
+     `.s2b-notice-text` is `flex: 1` and already absorbs the slack, pushing the action
+     and this chip to the right edge as a pair. A suggestion row must not have it: the
+     pill is shrink-to-fit, so an auto margin would strand the `×` across an expanse of
+     empty space, detached from the label it dismisses. Both rows therefore keep the
+     chip adjacent to the control it belongs to. */
   .dismiss-chip {
     flex-shrink: 0;
-    margin-left: auto;
     width: 1.75rem;
+    height: 1.75rem;
     display: flex;
     align-items: center;
     justify-content: center;
+    /* Self-sufficient reset: the suggestion row's chip drops `.clickable-icon` (it would
+       double-paint a hover box over the row tint), so the neutral appearance can't be
+       inherited from it and is declared here instead. */
+    padding: 0;
+    border: none;
+    background: transparent;
+    box-shadow: none;
+    border-radius: var(--radius-s);
     opacity: 0;
     color: var(--text-muted);
-    transition: opacity 120ms ease;
+    cursor: pointer;
+    transition:
+      opacity 120ms ease,
+      color 120ms ease;
+  }
+
+  /* Suggestion rows only: the glyph brightens but paints no background, because the row
+     already supplies the tinted surface. This is what distinguishes "about to dismiss"
+     from "about to run the suggestion" when both share one surface.
+
+     Scoped to `.suggestion-row` deliberately — notice rows have NO row-level tint, so
+     their chips keep `.clickable-icon`'s own hover box as their only hover feedback. */
+  .suggestion-row .dismiss-chip:hover {
+    background: transparent;
+    box-shadow: none;
+    color: var(--text-normal);
   }
 
   .suggestion-row:hover .dismiss-chip,
@@ -685,7 +913,9 @@ function reviewNotice(notice: UpdateNotice): void {
   }
 
   :global(.is-mobile) .s2b-notice-action,
-  :global(.is-mobile) .dismiss-all {
+  :global(.is-mobile) .dismiss-all,
+  :global(.is-mobile) .nudge-collapse,
+  :global(.is-mobile) .nudge-dismiss-all {
     min-height: 44px;
     padding-inline: 0.6rem;
   }

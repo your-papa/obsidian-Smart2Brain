@@ -4,10 +4,11 @@ import {
 	filterPluginNudges,
 	filterSuggestions,
 	filterUpdateNotices,
-	MAX_PLUGIN_NUDGES_DESKTOP,
-	MAX_PLUGIN_NUDGES_MOBILE,
+	PLUGIN_NUDGE_COLLAPSE_THRESHOLD_DESKTOP,
+	PLUGIN_NUDGE_COLLAPSE_THRESHOLD_MOBILE,
 	type PluginNudge,
 	pluginNudgeId,
+	shouldCollapsePluginNudges,
 	type RecommendationContext,
 	type StaleGuidanceLike,
 	type SuggestedQuery,
@@ -124,81 +125,106 @@ describe("plugin nudges", () => {
 	});
 
 	/*
-	 * The candidate list is unbounded in principle — resolvePluginIntegrations() returns the
-	 * curated integrations PLUS every enabled plugin exposing an object `api` — so without a
-	 * cap a plugin-heavy vault stacks more "Enable …" rows than the whole suggestion list
-	 * above them, making the empty state taller rather than shorter.
+	 * Ranking survives the removal of the display cap: curated integrations lead the list
+	 * and therefore supply the collapsed summary row's leading icons.
 	 */
-	describe("display cap", () => {
+	describe("ranking", () => {
 		const skillBacked = (pluginId: string): PluginNudge => ({ ...nudge(pluginId), skillId: pluginId });
 
-		it("returns every candidate when no limit is given", () => {
-			const nudges = [nudge("a"), nudge("b"), nudge("c"), nudge("d")];
-			expect(filterPluginNudges(nudges, [])).toHaveLength(4);
-		});
-
-		it("caps the result at the given limit", () => {
-			const nudges = [nudge("a"), nudge("b"), nudge("c"), nudge("d")];
-			expect(filterPluginNudges(nudges, [], 2)).toHaveLength(2);
-			expect(filterPluginNudges(nudges, [], MAX_PLUGIN_NUDGES_MOBILE)).toHaveLength(1);
-		});
-
-		it("returns fewer than the limit when there are fewer candidates", () => {
-			expect(filterPluginNudges([nudge("a")], [], MAX_PLUGIN_NUDGES_DESKTOP)).toHaveLength(1);
-		});
-
-		it("treats a zero or negative limit as showing nothing", () => {
-			expect(filterPluginNudges([nudge("a")], [], 0)).toEqual([]);
-			expect(filterPluginNudges([nudge("a")], [], -1)).toEqual([]);
+		it("returns every eligible candidate — nothing is capped", () => {
+			const nudges = [nudge("a"), nudge("b"), nudge("c"), nudge("d"), nudge("e")];
+			expect(filterPluginNudges(nudges, [])).toHaveLength(5);
 		});
 
 		/*
 		 * A skillId means we ship a SKILL.md documenting that plugin's api, so enabling it
 		 * yields a genuinely more capable agent. An auto-discovered plugin with no bundled
-		 * skill is the weakest thing on this surface and must never take a scarce slot from
-		 * a curated one.
+		 * skill is the weakest thing on this surface and sorts last.
 		 */
 		it("ranks skill-backed candidates ahead of auto-discovered ones", () => {
 			const nudges = [nudge("auto-1"), skillBacked("dataview"), nudge("auto-2"), skillBacked("tasks")];
-			expect(filterPluginNudges(nudges, [], 2).map((n) => n.pluginId)).toEqual(["dataview", "tasks"]);
+			expect(filterPluginNudges(nudges, []).map((n) => n.pluginId)).toEqual([
+				"dataview",
+				"tasks",
+				"auto-1",
+				"auto-2",
+			]);
 		});
 
-		it("falls back to auto-discovered candidates when no skill-backed ones remain", () => {
+		it("keeps auto-discovered candidates in order when there are no skill-backed ones", () => {
 			const nudges = [nudge("auto-1"), nudge("auto-2")];
-			expect(filterPluginNudges(nudges, [], 2).map((n) => n.pluginId)).toEqual(["auto-1", "auto-2"]);
+			expect(filterPluginNudges(nudges, []).map((n) => n.pluginId)).toEqual(["auto-1", "auto-2"]);
 		});
 
-		it("preserves relative order within a group so visible rows do not shuffle", () => {
+		it("preserves relative order within a group so rows do not shuffle", () => {
 			const nudges = [skillBacked("dataview"), skillBacked("tasks"), skillBacked("tasknotes")];
-			expect(filterPluginNudges(nudges, [], 3).map((n) => n.pluginId)).toEqual([
+			expect(filterPluginNudges(nudges, []).map((n) => n.pluginId)).toEqual([
 				"dataview",
 				"tasks",
 				"tasknotes",
 			]);
 		});
 
-		it("applies dismissal before the cap, promoting a hidden candidate into view", () => {
-			const nudges = [skillBacked("dataview"), skillBacked("tasks")];
-			// Only one slot: dataview wins it, then is dismissed and tasks takes its place.
-			expect(filterPluginNudges(nudges, [], 1).map((n) => n.pluginId)).toEqual(["dataview"]);
-			expect(filterPluginNudges(nudges, [pluginNudgeId("dataview")], 1).map((n) => n.pluginId)).toEqual([
-				"tasks",
-			]);
-		});
-
-		it("still honours the whole-block dismissal when a limit is given", () => {
-			expect(filterPluginNudges([skillBacked("dataview")], [DISMISS_ALL_ID], 3)).toEqual([]);
-		});
-
 		it("does not mutate the caller's candidate array while sorting", () => {
 			const nudges = [nudge("auto"), skillBacked("dataview")];
 			const order = nudges.map((n) => n.pluginId);
-			filterPluginNudges(nudges, [], 2);
+			filterPluginNudges(nudges, []);
 			expect(nudges.map((n) => n.pluginId)).toEqual(order);
 		});
+	});
 
-		it("gives mobile less room than desktop", () => {
-			expect(MAX_PLUGIN_NUDGES_MOBILE).toBeLessThan(MAX_PLUGIN_NUDGES_DESKTOP);
+	/*
+	 * The footer collapses instead of capping. An earlier version capped the list at 3
+	 * desktop / 1 mobile, which silently withheld integrations — a user with four eligible
+	 * plugins saw three and had no way to learn a fourth existed. Collapsing bounds the
+	 * height while keeping the full set one click away.
+	 */
+	describe("collapse threshold", () => {
+		const onDesktop = (count: number) => shouldCollapsePluginNudges(count, false);
+		const onMobile = (count: number) => shouldCollapsePluginNudges(count, true);
+
+		it("never summarises a lone nudge on either platform", () => {
+			expect(onDesktop(1)).toBe(false);
+			expect(onMobile(1)).toBe(false);
+		});
+
+		it("does not collapse an empty footer", () => {
+			expect(onDesktop(0)).toBe(false);
+			expect(onMobile(0)).toBe(false);
+		});
+
+		/* Desktop has room for a run of rows beneath the three suggestions, so collapsing
+		   earlier would add a click for no gain. Four stay expanded; five collapse. */
+		it("keeps up to four rows expanded on desktop", () => {
+			expect(onDesktop(2)).toBe(false);
+			expect(onDesktop(4)).toBe(false);
+			expect(onDesktop(5)).toBe(true);
+			expect(onDesktop(9)).toBe(true);
+		});
+
+		/* On mobile the composer and keyboard already claim most of the viewport, so a run
+		   of rows crowds out the suggestions above them. */
+		it("collapses from two rows on mobile", () => {
+			expect(onMobile(2)).toBe(true);
+			expect(onMobile(5)).toBe(true);
+		});
+
+		it("defaults to the desktop threshold when the platform is omitted", () => {
+			expect(shouldCollapsePluginNudges(4)).toBe(false);
+			expect(shouldCollapsePluginNudges(5)).toBe(true);
+		});
+
+		it("matches the exported thresholds", () => {
+			expect(onDesktop(PLUGIN_NUDGE_COLLAPSE_THRESHOLD_DESKTOP)).toBe(true);
+			expect(onDesktop(PLUGIN_NUDGE_COLLAPSE_THRESHOLD_DESKTOP - 1)).toBe(false);
+			expect(onMobile(PLUGIN_NUDGE_COLLAPSE_THRESHOLD_MOBILE)).toBe(true);
+			expect(onMobile(PLUGIN_NUDGE_COLLAPSE_THRESHOLD_MOBILE - 1)).toBe(false);
+		});
+
+		it("collapses no later on mobile than on desktop", () => {
+			expect(PLUGIN_NUDGE_COLLAPSE_THRESHOLD_MOBILE).toBeLessThanOrEqual(
+				PLUGIN_NUDGE_COLLAPSE_THRESHOLD_DESKTOP,
+			);
 		});
 	});
 });

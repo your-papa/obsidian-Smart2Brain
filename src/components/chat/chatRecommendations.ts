@@ -118,49 +118,59 @@ export interface PluginNudge {
 export const pluginNudgeId = (pluginId: string): string => `plugin:${pluginId}`;
 
 /**
- * How many plugin nudges may render at once, by available vertical space.
+ * At this many nudges or more, the footer collapses into a single summary row that
+ * expands on click instead of rendering one row per integration.
  *
- * The candidate list is unbounded in principle: `AgentManager.resolvePluginIntegrations`
- * returns the curated integrations PLUS every enabled plugin exposing an object `api`,
- * so a plugin-heavy vault could otherwise stack more "Enable …" rows than the whole
- * suggestion list above it — making the empty state taller, which is the opposite of
- * what this surface is for.
+ * Not a cap — nothing is hidden or dropped. An earlier version DID cap the list
+ * (3 desktop / 1 mobile), but that silently withheld integrations: a user with four
+ * eligible plugins saw three and had no way to know a fourth existed. Collapsing
+ * keeps the whole set reachable while bounding the footer's height, so it never
+ * out-grows the suggestion list it sits beneath.
  *
- * Mobile gets one row because the composer and keyboard already claim most of the
- * viewport there. These are display caps only: nothing is dropped from the candidate
- * set, so dismissing or enabling a visible nudge promotes the next one into view.
+ * The threshold is platform-dependent because the available vertical space is.
+ * Desktop comfortably shows four rows beneath three suggestions, so collapsing
+ * earlier would just add a click for no gain; on mobile the composer and keyboard
+ * already claim most of the viewport, so a run of rows crowds out the suggestions.
+ *
+ * Below the threshold every nudge renders directly — in particular a lone nudge is
+ * never summarised, since "1 plugin integration available" behind a click is
+ * strictly more work than simply showing the row.
  */
-export const MAX_PLUGIN_NUDGES_DESKTOP = 3;
-export const MAX_PLUGIN_NUDGES_MOBILE = 1;
+export const PLUGIN_NUDGE_COLLAPSE_THRESHOLD_DESKTOP = 5;
+export const PLUGIN_NUDGE_COLLAPSE_THRESHOLD_MOBILE = 2;
 
 /**
- * Filters plugin nudges down to those the user hasn't dismissed, ranks the ones
- * backed by a preshipped S2B skill first, and (optionally) caps how many render.
+ * Whether the nudge footer should render collapsed as a summary row.
+ *
+ * @param count How many nudges are pending.
+ * @param onMobile Selects the threshold — see the two threshold constants.
+ */
+export function shouldCollapsePluginNudges(count: number, onMobile = false): boolean {
+	return count >= (onMobile ? PLUGIN_NUDGE_COLLAPSE_THRESHOLD_MOBILE : PLUGIN_NUDGE_COLLAPSE_THRESHOLD_DESKTOP);
+}
+
+/**
+ * Filters plugin nudges down to those the user hasn't dismissed and ranks the ones
+ * backed by a preshipped S2B skill first.
  *
  * The candidate list is expected to already be narrowed to installed-but-not-enabled
  * integrations by the caller (which reads live `app.plugins` / agent state).
  * Respects {@link DISMISS_ALL_ID} so "Dismiss all" hides plugin nudges too.
  *
- * Ranking matters because the slots are scarce: a `skillId` means we ship a SKILL.md
- * documenting that plugin's api, so enabling it yields a genuinely more capable agent.
- * An auto-discovered plugin with no bundled skill is the weakest thing on this surface
- * and should never displace a curated one.
+ * Ranking matters even without a cap: a `skillId` means we ship a SKILL.md documenting
+ * that plugin's api, so enabling it yields a genuinely more capable agent. Curated
+ * integrations lead the list (and supply the summary row's leading icons); an
+ * auto-discovered plugin with no bundled skill is the weakest thing here and sorts last.
  *
  * The sort is stable within each group (`Array.prototype.sort` is stable per spec), so
- * the visible rows don't shuffle between renders as unrelated candidates come and go.
- *
- * @param limit Max nudges to return. Omit for no cap — see {@link MAX_PLUGIN_NUDGES_DESKTOP}.
+ * rows don't shuffle between renders as unrelated candidates come and go. It also does
+ * not mutate `candidates` — `filter` has already produced a fresh array by then.
  */
-export function filterPluginNudges(
-	candidates: readonly PluginNudge[],
-	dismissed: readonly string[],
-	limit?: number,
-): PluginNudge[] {
+export function filterPluginNudges(candidates: readonly PluginNudge[], dismissed: readonly string[]): PluginNudge[] {
 	if (dismissed.includes(DISMISS_ALL_ID)) return [];
-	const visible = candidates
+	return candidates
 		.filter((n) => !dismissed.includes(n.id))
 		.sort((a, b) => Number(Boolean(b.skillId)) - Number(Boolean(a.skillId)));
-	return limit === undefined ? visible : visible.slice(0, Math.max(0, limit));
 }
 
 /**
