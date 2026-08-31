@@ -789,6 +789,13 @@ const excludedTitle = $derived.by(() => (privacyMode === "private-by-default" ? 
        clipped text; multi-line is the whole point of the 50/50 split. */
     white-space: normal;
     height: auto;
+    /* Themes can inflate button padding well past core's (Cupertino uses 20px
+       inline), which on a half-width tab eats most of the room the label has to
+       wrap in and pushes it to three lines. Reclaim it: the tabs are a compact
+       strip, not standalone buttons. */
+    padding: 6px 8px;
+    font-size: var(--font-ui-smaller);
+    line-height: 1.25;
   }
 
   /* The mode pill overflows narrower phones at natural width; as a full-width

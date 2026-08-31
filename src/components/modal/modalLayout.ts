@@ -41,6 +41,10 @@ export function applyModalLayout(modal: Modal, options: ModalLayoutOptions): () 
 	// that core positions absolutely. It pads with Obsidian's safe-area variables
 	// because the modal element carries no padding of its own — without them the
 	// title sits under the notch and the footer under the home indicator.
+	//
+	// `left`/`right` are pinned because themes that inset the phone modal do it
+	// by offsetting those rather than by narrowing it, and a `width` alone would
+	// leave the sheet shifted off-centre.
 	const sizeOverrides = Platform.isPhone
 		? fullScreenOnPhone
 			? ([
@@ -50,6 +54,8 @@ export function applyModalLayout(modal: Modal, options: ModalLayoutOptions): () 
 					["max-height", "100dvh"],
 					["border-radius", "0"],
 					["margin", "0"],
+					["left", "0"],
+					["right", "0"],
 					["padding-top", "var(--safe-area-inset-top, 0px)"],
 					["padding-bottom", "var(--safe-area-inset-bottom, 0px)"],
 				] as const)
@@ -63,13 +69,24 @@ export function applyModalLayout(modal: Modal, options: ModalLayoutOptions): () 
 
 	const modalStyleMap = new Map<string, string | undefined>(sizeOverrides);
 
+	// The phone sheet's geometry is set at `important` priority. Themes restyle the
+	// mobile modal aggressively — Cupertino, for one, ships
+	// `width: calc(100vw - 16px) !important` plus a `top: 16px !important` on the
+	// close button, targeting `body.mod-macos.is-phone .modal`. An `!important`
+	// theme rule beats a plain inline style, so without this the sheet silently
+	// keeps the theme's inset card geometry and the close button lands back under
+	// the Dynamic Island. Desktop sizing stays normal priority: nothing fights it
+	// there, and overriding a user's theme is only justified where the layout
+	// would otherwise break.
+	const overridePriority = Platform.isPhone && fullScreenOnPhone ? "important" : "";
+
 	for (const [property, value] of modalStyleMap) {
 		if (value === undefined) {
 			modal.modalEl.style.removeProperty(property);
 			continue;
 		}
 
-		modal.modalEl.style.setProperty(property, value);
+		modal.modalEl.style.setProperty(property, value, overridePriority);
 	}
 
 	// Core's phone close/header buttons are absolutely positioned near the sheet's
@@ -82,7 +99,7 @@ export function applyModalLayout(modal: Modal, options: ModalLayoutOptions): () 
 			? [...modal.modalEl.querySelectorAll<HTMLElement>(".modal-header-button, .modal-close-button")]
 			: [];
 	for (const button of headerButtons) {
-		button.style.top = "calc(var(--safe-area-inset-top, 0px) + var(--size-4-3))";
+		button.style.setProperty("top", "calc(var(--safe-area-inset-top, 0px) + var(--size-4-3))", "important");
 	}
 
 	if (contentFill) {
