@@ -223,13 +223,23 @@ function registerTrigger(node: HTMLElement, id: T) {
 		gap: 0.45rem;
 	}
 
+	/* Setting --icon-size is what actually sizes the glyph: Obsidian's .svg-icon reads
+	   it for both width and height. Constraining only the span left the svg at the
+	   inherited 18px height inside a 14px box, so the icon was squashed horizontally
+	   and overflowed the span vertically, reading as sitting too low next to the label. */
 	.s2b-tab-icon {
+		--icon-size: 16px;
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
-		width: 14px;
-		height: 14px;
+		width: var(--icon-size);
+		height: var(--icon-size);
 		flex-shrink: 0;
+	}
+
+	.s2b-tab-icon :global(svg.svg-icon) {
+		width: var(--icon-size);
+		height: var(--icon-size);
 	}
 
 	/* The gliding pill. Sits behind the triggers (which are z-[1]). Position + size
