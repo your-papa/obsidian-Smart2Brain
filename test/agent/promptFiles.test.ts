@@ -32,71 +32,10 @@ import {
 const BASE_FILE = serializePromptFile(BASE_SYSTEM_PROMPT, BASE_SYSTEM_PROMPT_VERSION);
 const MEMORY_FILE = serializePromptFile(DEFAULT_MEMORY_PROMPT, DEFAULT_MEMORY_PROMPT_VERSION);
 
-/** In-memory DataAdapter covering the calls promptFiles makes. */
-function makeAdapter(initial: Record<string, string> = {}) {
-	const files = new Map(Object.entries(initial));
-	const dirs = new Set<string>();
-	for (const p of files.keys()) {
-		const parts = p.split("/");
-		for (let i = 1; i < parts.length; i++) dirs.add(parts.slice(0, i).join("/"));
-	}
-	return {
-		files,
-		dirs,
-		exists: vi.fn(async (p: string) => files.has(p) || dirs.has(p)),
-		read: vi.fn(async (p: string) => {
-			if (!files.has(p)) throw new Error(`ENOENT ${p}`);
-			return files.get(p)!;
-		}),
-		write: vi.fn(async (p: string, c: string) => {
-			files.set(p, c);
-		}),
-		mkdir: vi.fn(async (p: string) => {
-			dirs.add(p);
-		}),
-		remove: vi.fn(async (p: string) => {
-			files.delete(p);
-		}),
-		rename: vi.fn(async (from: string, to: string) => {
-			// Supports both file and directory renames: a directory rename moves every
-			// file/dir whose path starts with `${from}/`, mirroring DataAdapter semantics
-			// (verified live: Obsidian's adapter.rename moves a folder with contents intact).
-			if (files.has(from)) {
-				files.set(to, files.get(from)!);
-				files.delete(from);
-				return;
-			}
-			if (!dirs.has(from)) throw new Error(`ENOENT ${from}`);
-			const prefix = `${from}/`;
-			for (const [path, content] of Array.from(files.entries())) {
-				if (path.startsWith(prefix)) {
-					files.set(to + path.slice(from.length), content);
-					files.delete(path);
-				}
-			}
-			for (const path of Array.from(dirs)) {
-				if (path === from || path.startsWith(prefix)) {
-					dirs.add(to + path.slice(from.length));
-					dirs.delete(path);
-				}
-			}
-		}),
-		rmdir: vi.fn(async (p: string, recursive: boolean) => {
-			dirs.delete(p);
-			if (!recursive) return;
-			const prefix = `${p}/`;
-			for (const path of Array.from(files.keys())) {
-				if (path.startsWith(prefix)) files.delete(path);
-			}
-			for (const path of Array.from(dirs)) {
-				if (path.startsWith(prefix)) dirs.delete(path);
-			}
-		}),
-	};
-}
+import { makeVaultFake } from "./promptFilesVaultFake";
 
-function makeService(adapter: ReturnType<typeof makeAdapter>) {
-	const app = { vault: { adapter } } as never;
+function makeService(fake: ReturnType<typeof makeVaultFake>) {
+	const app = { vault: fake.vault, fileManager: fake.fileManager } as never;
 	return new PromptFilesService(app);
 }
 
@@ -114,50 +53,50 @@ describe("PromptFilesService", () => {
 	});
 
 	it("seeds the default base prompt file (in the agent's named subfolder) only when absent", async () => {
-		const adapter = makeAdapter();
-		const svc = makeService(adapter);
+		const fake = makeVaultFake();
+		const svc = makeService(fake);
 
 		await svc.seedDefaults(AGENTS);
 
-		expect(adapter.files.get(DEFAULT_PATH)).toBe(BASE_FILE);
+		expect(fake.files.get(DEFAULT_PATH)).toBe(BASE_FILE);
 	});
 
-	// The agentFolder setter's createFolder is fire-and-forget, and DataAdapter.mkdir does not create
-	// intermediate parents — so seedDefaults must create the agent-root folder before the nested
-	// `System Prompts/` dir, or a runtime folder change would seed into a missing parent and fail.
+	// The agentFolder setter's createFolder is fire-and-forget — so seedDefaults must ensure the
+	// agent-root folder itself, before the nested `System Prompts/` dir, or a runtime folder change
+	// could seed against a not-yet-created root.
 	it("creates the agent-root folder before the nested System Prompts dir", async () => {
 		state.agentFolder = "Meta/Agents";
-		const adapter = makeAdapter();
-		const svc = makeService(adapter);
+		const fake = makeVaultFake();
+		const svc = makeService(fake);
 
 		await svc.seedDefaults(AGENTS);
 
-		const rootIdx = adapter.mkdir.mock.calls.findIndex((c) => c[0] === "Meta/Agents");
-		const dirIdx = adapter.mkdir.mock.calls.findIndex((c) => c[0] === "Meta/Agents/System Prompts");
+		const rootIdx = fake.vault.createFolder.mock.calls.findIndex((c) => c[0] === "Meta/Agents");
+		const dirIdx = fake.vault.createFolder.mock.calls.findIndex((c) => c[0] === "Meta/Agents/System Prompts");
 		expect(rootIdx).toBeGreaterThanOrEqual(0);
 		expect(dirIdx).toBeGreaterThanOrEqual(0);
 		// Root must be created no later than the nested dir.
 		expect(rootIdx).toBeLessThan(dirIdx);
-		expect(adapter.files.get("Meta/Agents/System Prompts/S2B Agent/Base.md")).toBe(BASE_FILE);
+		expect(fake.files.get("Meta/Agents/System Prompts/S2B Agent/Base.md")).toBe(BASE_FILE);
 	});
 
 	it("preserves an edited base prompt's body on seed, back-filling only the baseline stamp", async () => {
-		const adapter = makeAdapter({ [DEFAULT_PATH]: "my edited prompt" });
-		const svc = makeService(adapter);
+		const fake = makeVaultFake({ [DEFAULT_PATH]: "my edited prompt" });
+		const svc = makeService(fake);
 
 		await svc.seedDefaults(AGENTS);
 
 		// The user's text is never clobbered; a stampless note gains the frontmatter baseline.
-		const parsed = parsePromptFile(adapter.files.get(DEFAULT_PATH) ?? "");
+		const parsed = parsePromptFile(fake.files.get(DEFAULT_PATH) ?? "");
 		expect(parsed.body).toBe("my edited prompt");
 		expect(parsed.version).toBe(BASE_SYSTEM_PROMPT_VERSION);
 	});
 
 	it("refresh loads parsed file content into the cache, falling back to the default when absent", async () => {
-		const adapter = makeAdapter({
+		const fake = makeVaultFake({
 			[DEFAULT_PATH]: serializePromptFile("custom base prompt", BASE_SYSTEM_PROMPT_VERSION),
 		});
-		const svc = makeService(adapter);
+		const svc = makeService(fake);
 
 		await svc.refresh(AGENTS);
 
@@ -173,8 +112,8 @@ describe("PromptFilesService", () => {
 	});
 
 	it("reads a note without frontmatter as an unknown baseline", async () => {
-		const adapter = makeAdapter({ [DEFAULT_PATH]: "customized, frontmatter removed" });
-		const svc = makeService(adapter);
+		const fake = makeVaultFake({ [DEFAULT_PATH]: "customized, frontmatter removed" });
+		const svc = makeService(fake);
 
 		await svc.refresh(AGENTS);
 
@@ -185,12 +124,12 @@ describe("PromptFilesService", () => {
 	});
 
 	it("writeBasePrompt writes the stamped note and caches the body", async () => {
-		const adapter = makeAdapter();
-		const svc = makeService(adapter);
+		const fake = makeVaultFake();
+		const svc = makeService(fake);
 
 		await svc.writeBasePrompt("default-agent", "new base prompt");
 
-		expect(adapter.files.get(DEFAULT_PATH)).toBe(serializePromptFile("new base prompt", BASE_SYSTEM_PROMPT_VERSION));
+		expect(fake.files.get(DEFAULT_PATH)).toBe(serializePromptFile("new base prompt", BASE_SYSTEM_PROMPT_VERSION));
 		expect(svc.getBasePrompt("default-agent")).toBe("new base prompt");
 	});
 
@@ -202,9 +141,9 @@ describe("PromptFilesService", () => {
 	 * editor.
 	 */
 	it("propagates a failed write instead of resolving quietly", async () => {
-		const adapter = makeAdapter();
-		const svc = makeService(adapter);
-		adapter.write.mockRejectedValueOnce(new Error("EACCES"));
+		const fake = makeVaultFake();
+		const svc = makeService(fake);
+		fake.vault.create.mockRejectedValueOnce(new Error("EACCES"));
 
 		await expect(svc.writeBasePrompt("default-agent", "new base prompt")).rejects.toThrow("EACCES");
 
@@ -213,66 +152,66 @@ describe("PromptFilesService", () => {
 	});
 
 	it("resetBasePrompt rewrites the file to the current default", async () => {
-		const adapter = makeAdapter({ [DEFAULT_PATH]: "drifted" });
-		const svc = makeService(adapter);
+		const fake = makeVaultFake({ [DEFAULT_PATH]: "drifted" });
+		const svc = makeService(fake);
 
 		await svc.resetBasePrompt("default-agent");
 
-		expect(adapter.files.get(DEFAULT_PATH)).toBe(BASE_FILE);
+		expect(fake.files.get(DEFAULT_PATH)).toBe(BASE_FILE);
 	});
 
 	it("respects a custom agent folder", async () => {
 		state.agentFolder = "Meta/Agents";
-		const adapter = makeAdapter();
-		const svc = makeService(adapter);
+		const fake = makeVaultFake();
+		const svc = makeService(fake);
 
 		await svc.writeBasePrompt("default-agent", "x");
 
-		expect(adapter.files.has("Meta/Agents/System Prompts/S2B Agent/Base.md")).toBe(true);
+		expect(fake.files.has("Meta/Agents/System Prompts/S2B Agent/Base.md")).toBe(true);
 	});
 
 	// v4→v5 migration stashes a customized prompt on `migratedBasePrompt`; seedDefaults must write
 	// it to the new file (not the factory default) and only consume the transient once it's durable.
 	it("seeds a migrated customized prompt to the new file and clears the transient", async () => {
-		const adapter = makeAdapter();
-		const svc = makeService(adapter);
+		const fake = makeVaultFake();
+		const svc = makeService(fake);
 		const agents = { "default-agent": { id: "default-agent", migratedBasePrompt: "MY CUSTOM" } } as never;
 
 		await svc.seedDefaults(agents);
 
 		// Written stamped at the current version — the migrated text was, by definition,
 		// customized against the defaults current at migration time.
-		expect(adapter.files.get(DEFAULT_PATH)).toBe(serializePromptFile("MY CUSTOM", BASE_SYSTEM_PROMPT_VERSION));
+		expect(fake.files.get(DEFAULT_PATH)).toBe(serializePromptFile("MY CUSTOM", BASE_SYSTEM_PROMPT_VERSION));
 		expect(
 			(agents as Record<string, { migratedBasePrompt?: string }>)["default-agent"].migratedBasePrompt,
 		).toBeUndefined();
 	});
 
 	it("keeps the migrated prompt transient when the write fails (so a later seed can retry)", async () => {
-		const adapter = makeAdapter();
-		adapter.write.mockRejectedValueOnce(new Error("EACCES"));
-		const svc = makeService(adapter);
+		const fake = makeVaultFake();
+		fake.vault.create.mockRejectedValueOnce(new Error("EACCES"));
+		const svc = makeService(fake);
 		const agents = { "default-agent": { id: "default-agent", migratedBasePrompt: "MY CUSTOM" } } as never;
 
 		await svc.seedDefaults(agents);
 
 		// Write failed → file absent AND the only retained copy is preserved for a retry.
-		expect(adapter.files.has(DEFAULT_PATH)).toBe(false);
+		expect(fake.files.has(DEFAULT_PATH)).toBe(false);
 		expect((agents as Record<string, { migratedBasePrompt?: string }>)["default-agent"].migratedBasePrompt).toBe(
 			"MY CUSTOM",
 		);
 	});
 
 	it("clears the migrated transient without clobbering an existing base-prompt file", async () => {
-		const adapter = makeAdapter({ [DEFAULT_PATH]: "already edited" });
-		const svc = makeService(adapter);
+		const fake = makeVaultFake({ [DEFAULT_PATH]: "already edited" });
+		const svc = makeService(fake);
 		const agents = { "default-agent": { id: "default-agent", migratedBasePrompt: "MY CUSTOM" } } as never;
 
 		await svc.seedDefaults(agents);
 
 		// Existing file wins (body never clobbered — only the baseline stamp is back-filled);
 		// the superseded transient is consumed.
-		expect(parsePromptFile(adapter.files.get(DEFAULT_PATH) ?? "").body).toBe("already edited");
+		expect(parsePromptFile(fake.files.get(DEFAULT_PATH) ?? "").body).toBe("already edited");
 		expect(
 			(agents as Record<string, { migratedBasePrompt?: string }>)["default-agent"].migratedBasePrompt,
 		).toBeUndefined();
@@ -282,12 +221,12 @@ describe("PromptFilesService", () => {
 
 	it("names the agent's subfolder after it, sanitizing illegal characters", async () => {
 		state.agents = { a1: { id: "a1", name: "Research/Assistant: v2" } };
-		const adapter = makeAdapter();
-		const svc = makeService(adapter);
+		const fake = makeVaultFake();
+		const svc = makeService(fake);
 
 		await svc.writeBasePrompt("a1", "x");
 
-		expect(adapter.files.has("Agents/System Prompts/Research Assistant v2/Base.md")).toBe(true);
+		expect(fake.files.has("Agents/System Prompts/Research Assistant v2/Base.md")).toBe(true);
 	});
 
 	it("copyAgentPrompts carries both the base and memory prompt to the duplicate", async () => {
@@ -295,71 +234,71 @@ describe("PromptFilesService", () => {
 			src: { id: "src", name: "Source" },
 			dup: { id: "dup", name: "Source (Copy)" },
 		};
-		const adapter = makeAdapter({
+		const fake = makeVaultFake({
 			"Agents/System Prompts/Source/Base.md": "edited base",
 			"Agents/System Prompts/Source/Memory.md": "edited memory",
 		});
-		const svc = makeService(adapter);
+		const svc = makeService(fake);
 		await svc.refresh({ src: { id: "src" }, dup: { id: "dup" } } as never);
 
 		await svc.copyAgentPrompts("src", "dup");
 
-		expect(adapter.files.get("Agents/System Prompts/Source (Copy)/Base.md")).toBe("edited base");
-		expect(adapter.files.get("Agents/System Prompts/Source (Copy)/Memory.md")).toBe("edited memory");
+		expect(fake.files.get("Agents/System Prompts/Source (Copy)/Base.md")).toBe("edited base");
+		expect(fake.files.get("Agents/System Prompts/Source (Copy)/Memory.md")).toBe("edited memory");
 		expect(svc.getBasePrompt("dup")).toBe("edited base");
 		expect(svc.getMemoryPrompt("dup")).toBe("edited memory");
 	});
 
 	it("renameAgentPromptDir moves the whole folder (both Base.md and Memory.md) to the new name-based path", async () => {
 		state.agents = { a1: { id: "a1", name: "Old Name" } };
-		const adapter = makeAdapter({
+		const fake = makeVaultFake({
 			"Agents/System Prompts/Old Name/Base.md": "keep base",
 			"Agents/System Prompts/Old Name/Memory.md": "keep memory",
 		});
-		const svc = makeService(adapter);
+		const svc = makeService(fake);
 		const oldDir = "Agents/System Prompts/Old Name";
 
 		// Simulate the rename: update the live name, then reconcile.
 		state.agents = { a1: { id: "a1", name: "New Name" } };
 		await svc.renameAgentPromptDir("a1", oldDir);
 
-		expect(adapter.files.has("Agents/System Prompts/Old Name/Base.md")).toBe(false);
-		expect(adapter.files.has("Agents/System Prompts/Old Name/Memory.md")).toBe(false);
-		expect(adapter.files.get("Agents/System Prompts/New Name/Base.md")).toBe("keep base");
-		expect(adapter.files.get("Agents/System Prompts/New Name/Memory.md")).toBe("keep memory");
+		expect(fake.files.has("Agents/System Prompts/Old Name/Base.md")).toBe(false);
+		expect(fake.files.has("Agents/System Prompts/Old Name/Memory.md")).toBe(false);
+		expect(fake.files.get("Agents/System Prompts/New Name/Base.md")).toBe("keep base");
+		expect(fake.files.get("Agents/System Prompts/New Name/Memory.md")).toBe("keep memory");
 	});
 
 	it("renameAgentPromptDir is a no-op when the target folder already exists", async () => {
 		state.agents = { a1: { id: "a1", name: "Old Name" } };
-		const adapter = makeAdapter({
+		const fake = makeVaultFake({
 			"Agents/System Prompts/Old Name/Base.md": "old content",
 			"Agents/System Prompts/New Name/Base.md": "existing content at target",
 		});
-		const svc = makeService(adapter);
+		const svc = makeService(fake);
 		const oldDir = "Agents/System Prompts/Old Name";
 
 		state.agents = { a1: { id: "a1", name: "New Name" } };
 		await svc.renameAgentPromptDir("a1", oldDir);
 
 		// Neither folder is touched — the collision is left for the caller to resolve.
-		expect(adapter.files.get("Agents/System Prompts/Old Name/Base.md")).toBe("old content");
-		expect(adapter.files.get("Agents/System Prompts/New Name/Base.md")).toBe("existing content at target");
+		expect(fake.files.get("Agents/System Prompts/Old Name/Base.md")).toBe("old content");
+		expect(fake.files.get("Agents/System Prompts/New Name/Base.md")).toBe("existing content at target");
 	});
 
 	it("deleteAgentPrompts removes the whole subfolder and drops both cache entries", async () => {
 		state.agents = { a1: { id: "a1", name: "Doomed" } };
-		const adapter = makeAdapter({
+		const fake = makeVaultFake({
 			"Agents/System Prompts/Doomed/Base.md": "bye",
 			"Agents/System Prompts/Doomed/Memory.md": "bye too",
 		});
-		const svc = makeService(adapter);
+		const svc = makeService(fake);
 		await svc.refresh({ a1: { id: "a1" } } as never);
 
 		await svc.deleteAgentPrompts("a1");
 
-		expect(adapter.files.has("Agents/System Prompts/Doomed/Base.md")).toBe(false);
-		expect(adapter.files.has("Agents/System Prompts/Doomed/Memory.md")).toBe(false);
-		expect(adapter.dirs.has("Agents/System Prompts/Doomed")).toBe(false);
+		expect(fake.files.has("Agents/System Prompts/Doomed/Base.md")).toBe(false);
+		expect(fake.files.has("Agents/System Prompts/Doomed/Memory.md")).toBe(false);
+		expect(fake.dirs.has("Agents/System Prompts/Doomed")).toBe(false);
 		expect(svc.reader.getBasePromptFile("a1")).toBeNull();
 		expect(svc.reader.getMemoryPromptFile("a1")).toBeNull();
 	});
@@ -367,31 +306,31 @@ describe("PromptFilesService", () => {
 	// --- Memory prompt: same lifecycle as the base prompt, same folder, different default -----
 
 	it("seeds the default memory prompt file (in the agent's named subfolder) only when absent", async () => {
-		const adapter = makeAdapter();
-		const svc = makeService(adapter);
+		const fake = makeVaultFake();
+		const svc = makeService(fake);
 
 		await svc.seedDefaults(AGENTS);
 
-		expect(adapter.files.get(MEMORY_DEFAULT_PATH)).toBe(MEMORY_FILE);
+		expect(fake.files.get(MEMORY_DEFAULT_PATH)).toBe(MEMORY_FILE);
 	});
 
 	it("preserves an edited memory prompt's body on seed", async () => {
-		const adapter = makeAdapter({ [MEMORY_DEFAULT_PATH]: "my edited memory instructions" });
-		const svc = makeService(adapter);
+		const fake = makeVaultFake({ [MEMORY_DEFAULT_PATH]: "my edited memory instructions" });
+		const svc = makeService(fake);
 
 		await svc.seedDefaults(AGENTS);
 
-		const parsed = parsePromptFile(adapter.files.get(MEMORY_DEFAULT_PATH) ?? "");
+		const parsed = parsePromptFile(fake.files.get(MEMORY_DEFAULT_PATH) ?? "");
 		expect(parsed.body).toBe("my edited memory instructions");
 		expect(parsed.version).toBe(DEFAULT_MEMORY_PROMPT_VERSION);
 	});
 
 	it("refresh loads memory-prompt content into the cache independently of the base prompt", async () => {
-		const adapter = makeAdapter({
+		const fake = makeVaultFake({
 			[DEFAULT_PATH]: "custom base prompt",
 			[MEMORY_DEFAULT_PATH]: "custom memory prompt",
 		});
-		const svc = makeService(adapter);
+		const svc = makeService(fake);
 
 		await svc.refresh(AGENTS);
 
@@ -403,13 +342,13 @@ describe("PromptFilesService", () => {
 	});
 
 	it("writeMemoryPrompt updates both the file and the cache, without touching the base prompt", async () => {
-		const adapter = makeAdapter({ [DEFAULT_PATH]: "base stays put" });
-		const svc = makeService(adapter);
+		const fake = makeVaultFake({ [DEFAULT_PATH]: "base stays put" });
+		const svc = makeService(fake);
 		await svc.refresh(AGENTS);
 
 		await svc.writeMemoryPrompt("default-agent", "new memory prompt");
 
-		expect(adapter.files.get(MEMORY_DEFAULT_PATH)).toBe(
+		expect(fake.files.get(MEMORY_DEFAULT_PATH)).toBe(
 			serializePromptFile("new memory prompt", DEFAULT_MEMORY_PROMPT_VERSION),
 		);
 		expect(svc.getMemoryPrompt("default-agent")).toBe("new memory prompt");
@@ -417,25 +356,25 @@ describe("PromptFilesService", () => {
 	});
 
 	it("resetMemoryPrompt rewrites the file to the current default", async () => {
-		const adapter = makeAdapter({ [MEMORY_DEFAULT_PATH]: "drifted" });
-		const svc = makeService(adapter);
+		const fake = makeVaultFake({ [MEMORY_DEFAULT_PATH]: "drifted" });
+		const svc = makeService(fake);
 
 		await svc.resetMemoryPrompt("default-agent");
 
-		expect(adapter.files.get(MEMORY_DEFAULT_PATH)).toBe(MEMORY_FILE);
+		expect(fake.files.get(MEMORY_DEFAULT_PATH)).toBe(MEMORY_FILE);
 	});
 
 	// v6→v7 migration stashes a customized prompt on `migratedMemoryPrompt`; seedDefaults must
 	// write it to the new file (not the factory default) and only consume the transient once
 	// it's durable — same contract as the v4→v5 base-prompt migration.
 	it("seeds a migrated customized memory prompt to the new file and clears the transient", async () => {
-		const adapter = makeAdapter();
-		const svc = makeService(adapter);
+		const fake = makeVaultFake();
+		const svc = makeService(fake);
 		const agents = { "default-agent": { id: "default-agent", migratedMemoryPrompt: "MY MEMORY" } } as never;
 
 		await svc.seedDefaults(agents);
 
-		expect(adapter.files.get(MEMORY_DEFAULT_PATH)).toBe(
+		expect(fake.files.get(MEMORY_DEFAULT_PATH)).toBe(
 			serializePromptFile("MY MEMORY", DEFAULT_MEMORY_PROMPT_VERSION),
 		);
 		expect(
@@ -444,15 +383,15 @@ describe("PromptFilesService", () => {
 	});
 
 	it("ensureMemoryPrompt seeds from the default only when the file is absent", async () => {
-		const adapter = makeAdapter();
-		const svc = makeService(adapter);
+		const fake = makeVaultFake();
+		const svc = makeService(fake);
 
 		await svc.ensureMemoryPrompt("default-agent");
-		expect(adapter.files.get(MEMORY_DEFAULT_PATH)).toBe(MEMORY_FILE);
+		expect(fake.files.get(MEMORY_DEFAULT_PATH)).toBe(MEMORY_FILE);
 
 		await svc.writeMemoryPrompt("default-agent", "edited");
 		await svc.ensureMemoryPrompt("default-agent");
-		expect(adapter.files.get(MEMORY_DEFAULT_PATH)).toBe(
+		expect(fake.files.get(MEMORY_DEFAULT_PATH)).toBe(
 			serializePromptFile("edited", DEFAULT_MEMORY_PROMPT_VERSION),
 		);
 	});

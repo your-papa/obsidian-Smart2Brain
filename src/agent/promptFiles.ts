@@ -1,4 +1,4 @@
-import type { App, DataAdapter } from "obsidian";
+import type { App, FileManager, TFile, Vault } from "obsidian";
 import type { AgentsConfig, PromptFileReader, PromptFileSnapshot, PromptKindId } from "../types/plugin";
 import { agentPromptDir, agentRootDir, basePromptPath, memoryPromptPath, systemPromptsDir } from "../utils/agentPaths";
 import { Logger as Log } from "../utils/logging";
@@ -139,10 +139,12 @@ function currentVersionOf(kind: PromptKind): number | string | undefined {
  * The code constants `BASE_SYSTEM_PROMPT` / `DEFAULT_MEMORY_PROMPT` remain the factory defaults
  * the diff/reset UI compares against; the files are the editable copies, each carrying a small
  * plugin-managed frontmatter block recording its shipped baseline (see the frontmatter section
- * above). Content is read through the vault DataAdapter (works for in-vault paths) and cached
- * in memory — parsed, body + version — so the synchronous, reactive staleness getter and the
- * frequently-called system-prompt assembly don't hit disk on the hot path. Call {@link refresh}
- * after any write / vault change to the agent folder.
+ * above). Content is read through the Vault API — these are ordinary user-editable notes, so
+ * reads hit Obsidian's cache and the reconcile rewrites go through `Vault.process`, which is
+ * atomic against a user editing the same note — and cached in memory (parsed, body + version)
+ * so the synchronous, reactive staleness getter and the frequently-called system-prompt
+ * assembly don't hit disk on the hot path. Call {@link refresh} after any write / vault change
+ * to the agent folder.
  *
  * Because both files for one agent share a folder, rename/duplicate/delete are single directory
  * operations ({@link renameAgentPromptDir}, {@link deleteAgentPrompts}), not per-file ones.
@@ -151,13 +153,15 @@ function currentVersionOf(kind: PromptKind): number | string | undefined {
  * is the skill body under `Skills/<name>/SKILL.md`, edited via the note.)
  */
 export class PromptFilesService {
-	private adapter: DataAdapter;
+	private vault: Vault;
+	private fileManager: FileManager;
 
 	/** kind → (agentId → parsed note). An absent key means "file missing, use the fallback". */
 	private caches = new Map<PromptKind, Map<string, PromptFileSnapshot>>(ALL_KINDS.map((kind) => [kind, new Map()]));
 
 	constructor(app: App) {
-		this.adapter = app.vault.adapter;
+		this.vault = app.vault;
+		this.fileManager = app.fileManager;
 	}
 
 	/** A synchronous reader over the cache, injected into the data store for staleness detection. */
@@ -206,28 +210,22 @@ export class PromptFilesService {
 				const agent = agents[agentId] as unknown as MigrationCarrier;
 				const migrated = agent?.[kind.migratedField]?.trim() ? agent[kind.migratedField] : null;
 				try {
-					if (await this.adapter.exists(path)) {
+					const file = this.vault.getFileByPath(path);
+					if (file) {
 						// File already present — the migrated prompt is superseded by the
 						// on-disk file, so the transient is spent: clear it.
 						this.clearMigrated(kind, agent);
-						const raw = await this.adapter.read(path);
-						const parsed = parsePromptFile(raw);
-						const matched = shippedVersion(parsed.body, kind.history);
-						if (matched === null) {
-							// The user's own text: leave the body alone, but back-fill a
-							// baseline into the frontmatter when the note has none.
-							if (parsed.version === undefined && current !== undefined) {
-								await this.adapter.write(path, stampPromptVersion(raw, current));
+						// Decide from a cheap cached read; only when a rewrite is due does
+						// the file get touched, with the decision RE-DERIVED inside
+						// `Vault.process` so it applies to whatever is on disk at write
+						// time — the user may have the note open in an editor right now.
+						const initialRaw = await this.vault.cachedRead(file);
+						if (reconcileExistingRaw(kind, initialRaw, current) !== null) {
+							await this.vault.process(file, (raw) => reconcileExistingRaw(kind, raw, current) ?? raw);
+							const matched = shippedVersion(parsePromptFile(initialRaw).body, kind.history);
+							if (matched !== null && matched !== current) {
+								Log.info(`Updated ${kind.label} for ${agentId} from shipped v${matched} to current`);
 							}
-						} else if (matched !== current && current !== undefined) {
-							// An untouched old default: swap in the new body, but keep any
-							// frontmatter keys the user added to the note (see replacePromptBody).
-							await this.adapter.write(path, replacePromptBody(raw, kind.fallback, current));
-							Log.info(`Updated ${kind.label} for ${agentId} from shipped v${matched} to current`);
-						} else if (parsed.version !== current && current !== undefined) {
-							// Body is already the current default; only the metadata is
-							// missing or stale. Re-stamp in place.
-							await this.adapter.write(path, replacePromptBody(raw, kind.fallback, current));
 						}
 						continue;
 					}
@@ -235,7 +233,7 @@ export class PromptFilesService {
 					const body = migrated ?? kind.fallback;
 					// A migrated pre-file customization is the user's text, but it was written
 					// against the defaults current at migration time — stamp either way.
-					await this.adapter.write(path, current !== undefined ? serializePromptFile(body, current) : body);
+					await this.vault.create(path, current !== undefined ? serializePromptFile(body, current) : body);
 					// Only clear AFTER a successful write — the customized prompt is now durable in
 					// the file. On a write failure we deliberately keep the transient so a later
 					// seedDefaults (e.g. next startup / folder change) can retry, rather than
@@ -255,8 +253,9 @@ export class PromptFilesService {
 			for (const agentId of Object.keys(agents)) {
 				const path = kind.path(agentId);
 				try {
-					if (await this.adapter.exists(path)) {
-						next.set(agentId, parsePromptFile(await this.adapter.read(path)));
+					const file = this.vault.getFileByPath(path);
+					if (file) {
+						next.set(agentId, parsePromptFile(await this.vault.cachedRead(file)));
 					}
 				} catch (error) {
 					Log.error(`Failed to read ${kind.label} for ${agentId}:`, error);
@@ -298,12 +297,15 @@ export class PromptFilesService {
 
 	/**
 	 * Remove an agent's entire prompt subfolder (both Base.md and Memory.md). Call when an
-	 * agent is deleted so its notes don't outlive it. Best-effort.
+	 * agent is deleted so its notes don't outlive it. Goes through the user's configured
+	 * "Deleted files" preference (`FileManager.trashFile`) rather than a hard delete — the
+	 * notes can carry the user's own prompt text, so they stay recoverable. Best-effort.
 	 */
 	async deleteAgentPrompts(agentId: string): Promise<void> {
 		const dir = agentPromptDir(agentId);
 		try {
-			if (await this.adapter.exists(dir)) await this.adapter.rmdir(dir, true);
+			const folder = this.vault.getFolderByPath(dir);
+			if (folder) await this.fileManager.trashFile(folder);
 		} catch (error) {
 			Log.debug(`Could not remove prompt folder for ${agentId}:`, error);
 		}
@@ -315,18 +317,20 @@ export class PromptFilesService {
 	 * is renamed, passing the folder path captured BEFORE the rename was committed: if a folder
 	 * exists at the old path and the desired path (derived from the agent's current name)
 	 * differs, rename it on disk — moving both `Base.md` and `Memory.md` together — so the
-	 * folder tracks the agent name. The caches are keyed by id, so they need no update.
-	 * Best-effort.
+	 * folder tracks the agent name. Goes through `FileManager.renameFile`, so any links the
+	 * user made to these notes are updated too. The caches are keyed by id, so they need no
+	 * update. Best-effort.
 	 */
 	async renameAgentPromptDir(agentId: string, oldDir: string): Promise<void> {
 		const newDir = agentPromptDir(agentId);
 		if (newDir === oldDir) return;
 		try {
-			if (!(await this.adapter.exists(oldDir))) return;
+			const folder = this.vault.getFolderByPath(oldDir);
+			if (!folder) return;
 			// Don't clobber an existing folder at the target (e.g. a collision resolved elsewhere).
-			if (await this.adapter.exists(newDir)) return;
+			if (this.vault.getFolderByPath(newDir) || this.vault.getFileByPath(newDir)) return;
 			await this.ensureParent(newDir);
-			await this.adapter.rename(oldDir, newDir);
+			await this.fileManager.renameFile(folder, newDir);
 		} catch (error) {
 			Log.debug(`Could not rename prompt folder for ${agentId}:`, error);
 		}
@@ -344,12 +348,10 @@ export class PromptFilesService {
 	 */
 	async copyAgentPrompts(fromId: string, toId: string): Promise<void> {
 		for (const kind of ALL_KINDS) {
-			const srcPath = kind.path(fromId);
-			if (await this.adapter.exists(srcPath)) {
-				const raw = await this.adapter.read(srcPath);
-				const dstPath = kind.path(toId);
-				await this.ensureParent(dstPath);
-				await this.adapter.write(dstPath, raw);
+			const src = this.vault.getFileByPath(kind.path(fromId));
+			if (src) {
+				const raw = await this.vault.read(src);
+				await this.writeFile(kind.path(toId), raw);
 				this.cache(kind).set(toId, parsePromptFile(raw));
 			} else {
 				await this.write(kind, toId, kind.fallback);
@@ -381,16 +383,14 @@ export class PromptFilesService {
 	 */
 	private async write(kind: PromptKind, agentId: string, text: string): Promise<void> {
 		const path = kind.path(agentId);
-		await this.ensureParent(path);
 		const body = text.trim();
 		const current = currentVersionOf(kind);
-		await this.adapter.write(path, current !== undefined ? serializePromptFile(body, current) : body);
+		await this.writeFile(path, current !== undefined ? serializePromptFile(body, current) : body);
 		this.cache(kind).set(agentId, { body, version: typeof current === "number" ? current : undefined });
 	}
 
 	private async ensure(kind: PromptKind, agentId: string): Promise<void> {
-		const path = kind.path(agentId);
-		if (!(await this.adapter.exists(path))) {
+		if (!this.vault.getFileByPath(kind.path(agentId))) {
 			await this.write(kind, agentId, kind.fallback);
 		}
 	}
@@ -400,17 +400,33 @@ export class PromptFilesService {
 		if (agent && kind.migratedField in agent) agent[kind.migratedField] = undefined;
 	}
 
+	/**
+	 * Full-content upsert: modify the note when it exists, else create it (with its parent
+	 * folder). Used for writes whose content does NOT derive from what's on disk — modal
+	 * saves, resets, and duplication — where `Vault.modify` is the right tool; the
+	 * derive-from-current reconciles in {@link seedDefaults} go through `Vault.process`.
+	 */
+	private async writeFile(path: string, content: string): Promise<void> {
+		const existing = this.vault.getFileByPath(path);
+		if (existing) {
+			await this.vault.modify(existing, content);
+			return;
+		}
+		await this.ensureParent(path);
+		await this.vault.create(path, content);
+	}
+
 	private async ensureDirs(): Promise<void> {
-		// Create the configurable agent-root folder first, then the nested `System Prompts/` dir:
-		// Obsidian's DataAdapter.mkdir doesn't create intermediate parents, and the `agentFolder`
-		// setter's createFolder is unawaited — so a runtime folder change could reach here before
-		// the root exists. Ensuring the parent chain avoids a silent seed failure into a stale
-		// folder. Per-agent subfolders are created on demand by `ensureParent` in `write`.
+		// Create the configurable agent-root folder first, then the nested `System Prompts/`
+		// dir: the `agentFolder` setter's createFolder is unawaited, so a runtime folder change
+		// could reach here before the root exists. Ensuring the chain explicitly avoids a
+		// silent seed failure into a stale folder. Per-agent subfolders are created on demand
+		// by `ensureParent` in `writeFile`.
 		const root = agentRootDir();
 		const dir = systemPromptsDir();
 		try {
-			if (!(await this.adapter.exists(root))) await this.adapter.mkdir(root);
-			if (!(await this.adapter.exists(dir))) await this.adapter.mkdir(dir);
+			if (!this.vault.getFolderByPath(root)) await this.vault.createFolder(root);
+			if (!this.vault.getFolderByPath(dir)) await this.vault.createFolder(dir);
 		} catch (error) {
 			Log.error(`Failed to create ${dir}:`, error);
 		}
@@ -420,8 +436,37 @@ export class PromptFilesService {
 	private async ensureParent(filePath: string): Promise<void> {
 		const parent = filePath.slice(0, filePath.lastIndexOf("/"));
 		if (!parent) return;
-		if (!(await this.adapter.exists(parent))) {
-			await this.adapter.mkdir(parent);
+		if (!this.vault.getFolderByPath(parent)) {
+			await this.vault.createFolder(parent);
 		}
 	}
+}
+
+/**
+ * The seeding decision for an EXISTING note as a pure raw → raw transform: returns the
+ * rewritten file content, or null when the note needs no touch. Pure so `seedDefaults` can
+ * use it twice — once on a cached read to decide whether to write at all (avoiding an mtime
+ * bump on every startup), then again inside `Vault.process` so the rewrite is derived from
+ * the note's content at write time, not from the earlier read.
+ */
+function reconcileExistingRaw(kind: PromptKind, raw: string, current: number | string | undefined): string | null {
+	if (current === undefined) return null;
+	const parsed = parsePromptFile(raw);
+	const matched = shippedVersion(parsed.body, kind.history);
+	if (matched === null) {
+		// The user's own text: leave the body alone, but back-fill a baseline into the
+		// frontmatter when the note has none.
+		return parsed.version === undefined ? stampPromptVersion(raw, current) : null;
+	}
+	if (matched !== current) {
+		// An untouched old default: swap in the new body, but keep any frontmatter keys
+		// the user added to the note (see replacePromptBody).
+		return replacePromptBody(raw, kind.fallback, current);
+	}
+	if (parsed.version !== current) {
+		// Body is already the current default; only the metadata is missing or stale.
+		// Re-stamp in place.
+		return replacePromptBody(raw, kind.fallback, current);
+	}
+	return null;
 }

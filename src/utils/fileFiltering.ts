@@ -196,7 +196,7 @@ export async function readIndexableContent(vault: Vault, file: TFile): Promise<s
 	// index a multi-page PDF as a single title-only vector.
 	if (isBinaryTextFile(file)) {
 		try {
-			const bytes = await vault.adapter.readBinary(file.path);
+			const bytes = await readBinaryFile(vault, file);
 			const { text } = await extractTextFromPdf(new Uint8Array(bytes));
 			return text.trim();
 		} catch {
@@ -216,7 +216,7 @@ export async function readIndexableContent(vault: Vault, file: TFile): Promise<s
 	// the bytes and hand the decompressed JSON to the extractor.
 	if (file.extension === "chat") {
 		try {
-			const bytes = await vault.adapter.readBinary(file.path);
+			const bytes = await readBinaryFile(vault, file);
 			const raw = await gunzipToString(bytes);
 			return extractChatContent(raw);
 		} catch {
@@ -247,6 +247,19 @@ async function readTextFile(vault: Vault, file: TFile): Promise<string> {
 		return await vault.cachedRead(file);
 	} catch {
 		return await vault.adapter.read(file.path);
+	}
+}
+
+/**
+ * Read a file's raw bytes, preferring the Vault API (serialized against concurrent
+ * writes) with the same adapter fallback as {@link readTextFile}, in case the iOS
+ * reader gate ever applies to binary reads of unusual extensions too.
+ */
+async function readBinaryFile(vault: Vault, file: TFile): Promise<ArrayBuffer> {
+	try {
+		return await vault.readBinary(file);
+	} catch {
+		return await vault.adapter.readBinary(file.path);
 	}
 }
 

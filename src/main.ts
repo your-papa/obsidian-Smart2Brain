@@ -870,15 +870,15 @@ export default class SecondBrainPlugin extends Plugin {
 	 */
 	async reinitAgentFolder(): Promise<void> {
 		// Await the agent-root folder before seeding: the `agentFolder` setter's createFolder is
-		// fire-and-forget, so it may not have completed by the time we get here. Obsidian's
-		// DataAdapter.mkdir doesn't create intermediate parents, so bootstrapping the nested
-		// `Skills/`/`System Prompts/` dirs against a not-yet-created root would throw and abort
-		// the rest of reinit (prompt refresh + cache invalidation), leaving chats on the old
-		// folder's prompts. (bootstrapDefaultSkills/seedDefaults also ensure the root now, but
-		// making the dependency explicit here keeps reinit correct independent of their internals.)
+		// fire-and-forget, so it may not have completed by the time we get here. Bootstrapping
+		// the nested `Skills/`/`System Prompts/` dirs against a not-yet-created root could
+		// otherwise throw and abort the rest of reinit (prompt refresh + cache invalidation),
+		// leaving chats on the old folder's prompts. (bootstrapDefaultSkills/seedDefaults also
+		// ensure the root now, but making the dependency explicit here keeps reinit correct
+		// independent of their internals.)
 		const root = this.pluginData.agentFolder;
 		if (!this.app.vault.getFolderByPath(root)) {
-			await this.app.vault.adapter.mkdir(root).catch(() => {});
+			await this.app.vault.createFolder(root).catch(() => {});
 		}
 		await this.skillsService?.migrateCoreSkills();
 		await this.skillsService?.bootstrapDefaultSkills();
