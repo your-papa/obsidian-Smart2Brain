@@ -36,4 +36,16 @@ export function applyPromptSafeArea(promptEl: HTMLElement): void {
 	if (top >= inset) return;
 
 	promptEl.style.setProperty("top", `${inset}px`, "important");
+
+	// A theme that anchored the prompt at the top edge usually also sized it to
+	// the full viewport (Cupertino: `height: 100vh`); shifting it down by the
+	// inset would push its bottom — and the input pinned there — off screen.
+	// Compensate by the same amount, but only when the box really is full-bleed,
+	// so a theme that pulled a content-sized panel to the top keeps its height.
+	// `vh` on purpose, matching the unit such themes use: `dvh` tracks the
+	// keyboard-shrunken viewport on iOS and lands the cap mid-screen.
+	const height = Number.parseFloat(styles.height) || 0;
+	if (height >= window.innerHeight - 1) {
+		promptEl.style.setProperty("height", `calc(100vh - ${inset}px)`, "important");
+	}
 }
