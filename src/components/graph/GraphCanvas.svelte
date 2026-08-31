@@ -2730,6 +2730,16 @@ onMount(() => {
 				}
 			});
 
+			// Mobile WebViews reclaim the GPU when the app is backgrounded, losing
+			// the WebGL context. Pixi rebuilds its GPU state on restore, but with
+			// on-demand rendering nothing would repaint the cleared canvas until the
+			// next interaction — so schedule a full pass (including edge
+			// re-tessellation, since GPU-side geometry was dropped with the context).
+			renderer.onContextRestored(() => {
+				edgesViewportStale = true;
+				requestRender("world");
+			});
+
 			// If graphData arrived before pixi was ready (happens when GraphCanvas
 			// mounts while a build completes, e.g. on first open), do the initial
 			// snap/fit that setupForceSimulation missed.

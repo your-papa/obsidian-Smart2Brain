@@ -301,6 +301,16 @@ export class PixiRenderer {
 	// Shared-ticker callback that polls viewport.dirty (removed on destroy)
 	private _viewportDirtyFn: (() => void) | null = null;
 
+	// WebGL context loss (mobile WebViews reclaim the GPU when the app is
+	// backgrounded). Pixi's GlContextSystem preventDefault()s the lost event and
+	// rebuilds its GPU state on restore, but rendering here is on-demand
+	// (autoStart: false) — so without our own hooks the canvas would stay blank
+	// until the next user interaction happened to request a frame.
+	private _contextLost = false;
+	private _onContextRestored: (() => void) | null = null;
+	private _contextLostHandler: ((e: Event) => void) | null = null;
+	private _contextRestoredHandler: (() => void) | null = null;
+
 	// Public accessors
 	get theme(): ThemeColors {
 		return this._theme;
@@ -320,6 +330,15 @@ export class PixiRenderer {
 	/** Register a callback that fires whenever the viewport moves (pan/zoom). */
 	onViewportMoved(cb: () => void): void {
 		this._onViewportMoved = cb;
+	}
+
+	/**
+	 * Register a callback that fires after a lost WebGL context is restored (and
+	 * Pixi has rebuilt its GPU state). The owner should schedule a full render
+	 * pass; without one the canvas keeps showing the cleared framebuffer.
+	 */
+	onContextRestored(cb: () => void): void {
+		this._onContextRestored = cb;
 	}
 
 	// ── Lifecycle ──────────────────────────────────────────
@@ -364,6 +383,30 @@ export class PixiRenderer {
 		canvas.style.height = "100%";
 		canvas.style.touchAction = "none";
 		containerEl.prepend(canvas);
+
+		// Context-loss hooks. Pixi's GlContextSystem registered its listeners during
+		// app.init(), so they run first: on loss it preventDefault()s (which is what
+		// makes the browser willing to restore the context at all), and on restore it
+		// re-runs its contextChange runners to rebuild GPU state before our handler
+		// fires. Ours only tracks the lost window (renderFrame is skipped while the
+		// context is gone) and asks the owner for a full repaint once it's back.
+		this._contextLostHandler = (e: Event) => {
+			// Redundant with Pixi's own preventDefault, but kept as a guard against
+			// listener-order surprises: without it the context is never restored.
+			e.preventDefault();
+			this._contextLost = true;
+		};
+		this._contextRestoredHandler = () => {
+			this._contextLost = false;
+			if (this._destroyed) return;
+			// Text textures cannot survive a restore (see rebuildTextObjects) —
+			// swap in fresh Text objects before anything renders.
+			this.rebuildTextObjects();
+			if (this._onContextRestored) this._onContextRestored();
+			else this.renderFrame();
+		};
+		canvas.addEventListener("webglcontextlost", this._contextLostHandler);
+		canvas.addEventListener("webglcontextrestored", this._contextRestoredHandler);
 
 		// Viewport (zoom, pan, pinch)
 		// worldWidth/worldHeight must be set so the internal hit-area is non-zero;
@@ -461,13 +504,28 @@ export class PixiRenderer {
 		this.overlayStage.addChild(this.tooltipLayer);
 
 		// Pre-allocate label pool
+		this.buildLabelPool();
+
+		// Tooltip setup
+		this.tooltipContainer = new Container();
+		this.tooltipContainer.visible = false;
+		this.tooltipGraphics = new Graphics();
+		this.tooltipContainer.addChild(this.tooltipGraphics);
+		this.buildTooltipTexts();
+		this.tooltipLayer.addChild(this.tooltipContainer);
+
+		this._ready = true;
+	}
+
+	/** Fill the (empty) label pool with fresh Text objects attached to the label layer. */
+	private buildLabelPool(): void {
 		for (let i = 0; i < this.LABEL_POOL_SIZE; i++) {
 			const t = new Text({
 				text: "",
 				style: new TextStyle({
-					fontFamily: theme.font,
+					fontFamily: this._theme.font,
 					fontSize: 12,
-					fill: theme.textNormal,
+					fill: this._theme.textNormal,
 				}),
 			});
 			t.anchor.set(0.5, 1); // center-bottom
@@ -476,20 +534,17 @@ export class PixiRenderer {
 			this.labelPool.push(t);
 			this.labelPoolCache.push(null);
 		}
+	}
 
-		// Tooltip setup
-		this.tooltipContainer = new Container();
-		this.tooltipContainer.visible = false;
-		this.tooltipGraphics = new Graphics();
-		this.tooltipContainer.addChild(this.tooltipGraphics);
-		// Create 3 text lines for tooltip
+	/** Create the tooltip's three text lines inside the (existing) tooltip container. */
+	private buildTooltipTexts(): void {
 		for (let i = 0; i < 3; i++) {
 			const t = new Text({
 				text: "",
 				style: new TextStyle({
-					fontFamily: theme.font,
+					fontFamily: this._theme.font,
 					fontSize: 11,
-					fill: i === 0 ? theme.textNormal : theme.textMuted,
+					fill: i === 0 ? this._theme.textNormal : this._theme.textMuted,
 					fontWeight: i === 0 ? "bold" : "normal",
 				}),
 			});
@@ -497,9 +552,42 @@ export class PixiRenderer {
 			this.tooltipContainer.addChild(t);
 			this.tooltipTexts.push(t);
 		}
-		this.tooltipLayer.addChild(this.tooltipContainer);
+	}
 
-		this._ready = true;
+	/**
+	 * Destroy and recreate every Text object this renderer owns.
+	 *
+	 * Needed after a WebGL context restore: Pixi's WebGL text system uploads each
+	 * rasterized glyph canvas to the GPU and immediately returns the canvas to a
+	 * shared pool (`GpuTextSystem` passes `retainCanvasContext: false`), so unlike
+	 * sprite/canvas textures there is no CPU-side copy left to re-upload from — a
+	 * restored context comes back with every text texture permanently blank. And
+	 * re-setting the same string doesn't help: the text-texture cache is keyed by
+	 * content+style, so an unchanged key hands the dead texture straight back.
+	 * Destroying the Text objects drops those cache entries (refcount → 0), and
+	 * the fresh ones rasterize on the live context.
+	 */
+	private rebuildTextObjects(): void {
+		if (!this._ready) return;
+
+		// Node labels: rebuild the pool in place.
+		for (const t of this.labelPool) t.destroy();
+		this.labelPool = [];
+		this.labelPoolCache = [];
+		this.activeLabelCount = 0;
+		this.buildLabelPool();
+
+		// Cluster pills: drop the pool entirely; drawClusterPills re-creates
+		// pill objects on demand on the next overlay pass.
+		for (const obj of this.clusterPillObjects) obj.container.destroy({ children: true });
+		this.clusterPillObjects = [];
+
+		// Tooltip lines: recreate, and clear the layout cache so the next
+		// showNodeTooltip re-rasterizes instead of reusing the cached layout.
+		for (const t of this.tooltipTexts) t.destroy();
+		this.tooltipTexts = [];
+		this.buildTooltipTexts();
+		this._tooltipLayoutKey = "";
 	}
 
 	destroy(): void {
@@ -519,6 +607,15 @@ export class PixiRenderer {
 		// — which throws, aborting the caller's remaining cleanup. `init()` checks
 		// `_destroyed` after its await and releases the context itself in that case.
 		if (this._appInitialized) {
+			// The context-loss listeners were only registered once init() got past
+			// the same gate, so they exist exactly when the app does.
+			const canvas = this.app.canvas as HTMLCanvasElement;
+			if (this._contextLostHandler) canvas.removeEventListener("webglcontextlost", this._contextLostHandler);
+			if (this._contextRestoredHandler) {
+				canvas.removeEventListener("webglcontextrestored", this._contextRestoredHandler);
+			}
+			this._contextLostHandler = null;
+			this._contextRestoredHandler = null;
 			this.app.destroy(true, { children: true });
 		}
 	}
@@ -530,6 +627,9 @@ export class PixiRenderer {
 	 */
 	renderFrame(): void {
 		if (this._destroyed || !this._ready) return;
+		// GL calls against a lost context are no-ops at best; skip the draw and let
+		// the contextrestored handler request the repaint.
+		if (this._contextLost) return;
 		this.app.renderer.render(this.app.stage);
 	}
 
