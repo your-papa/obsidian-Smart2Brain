@@ -2309,6 +2309,34 @@ function handleHoverPreview(event: MouseEvent, path: string, targetEl: HTMLEleme
     {/if}
   {/snippet}
 
+  <!-- Mobile's answer to the desktop selection bar's "Immersed into X".
+       Immersion is a mode with no visible trace once the topic's own pill is
+       gone: the graph just shows fewer notes, with nothing saying which subset
+       or why. Desktop states that in the bar it already keeps on screen, but on
+       mobile that bar is a sheet driven by the selection, and immersion
+       deliberately does not hold it open (see below) — so the name had nowhere
+       to live and the only cue was the rail's exit button.
+
+       Top-left: the toolbar row is right-aligned at the same offset, so the two
+       share the strip without overlapping, and the bottom is already spoken for
+       by the selection sheet and Obsidian's navbar. Non-interactive — exiting
+       stays the rail's job, one control for one action. -->
+  {#if isImmersed && onMobile}
+    <div class="graph-immerse-banner">
+      <span class="selection-count">
+        {#if immerseTopicLabels}
+          Immersed into
+          <strong>{immerseTopicLabels.join(", ")}</strong>
+        {:else}
+          <!-- A raw lasso has no name to give, so fall back to the size of what
+               you're in — the same thing the desktop bar says in this case. -->
+          Immersed · <strong>{graphData.nodes.length}</strong>
+          {graphData.nodes.length === 1 ? "note" : "notes"}
+        {/if}
+      </span>
+    </div>
+  {/if}
+
   <!-- Immersion is a *mode* you work inside, not a transient result like a
        selection, so on mobile it must not hold the sheet open: a sheet plus its
        dismiss layer covers the canvas, which left the graph you just immersed
@@ -2554,6 +2582,49 @@ function handleHoverPreview(event: MouseEvent, path: string, targetEl: HTMLEleme
       opacity: 1;
       transform: translateX(-50%) translateY(0);
     }
+  }
+
+  /* Same flat surface language as the selection bar — page fill, border, no
+     shadow — so the two read as one family rather than two floating slabs. */
+  .graph-immerse-banner {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    display: flex;
+    align-items: center;
+    padding: 6px 12px;
+    background: var(--background-primary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-l);
+    /* Below the toolbar rail (13) and the sheet (14): this is a passive label,
+       so nothing it could cover should lose its tap. Above the canvas. */
+    z-index: 11;
+    /* The toolbar row is right-aligned at the same top offset and wraps to a
+       second row on narrow phones. Leave it the corner: 3 buttons at 44px plus
+       the 8px gutters is ~148px, and the banner truncates rather than pushing
+       into them. */
+    max-width: calc(100% - 160px);
+    animation: s2b-immerse-banner-in 120ms ease-out;
+  }
+
+  /* Drops in from above, mirroring the selection bar's rise from below — both
+     appear in response to something done on the canvas, not at their own edge. */
+  @keyframes s2b-immerse-banner-in {
+    from {
+      opacity: 0;
+      transform: translateY(-6px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  /* The banner's own box already caps the width against the toolbar, so the
+     sentence just fills it — the desktop bar's fixed 30ch would either overflow
+     a narrow phone or cut a name short on a wide one. */
+  .graph-immerse-banner .selection-count {
+    max-width: 100%;
   }
 
   .selection-count {
