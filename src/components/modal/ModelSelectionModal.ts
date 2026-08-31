@@ -65,6 +65,7 @@ export class ModelSelectionModal extends Modal {
 
 	onOpen() {
 		this.restoreLayout = applyModalLayout(this, {
+			fullScreenOnPhone: true,
 			width: "min(800px, 90vw)",
 			maxWidth: "90vw",
 			height: "min(600px, 80vh)",

@@ -61,6 +61,7 @@ export class MCPServerModal extends Modal {
 
 	onOpen() {
 		this.restoreLayout = applyModalLayout(this, {
+			fullScreenOnPhone: true,
 			width: "min(550px, 90vw)",
 			maxWidth: "90vw",
 			height: "auto",

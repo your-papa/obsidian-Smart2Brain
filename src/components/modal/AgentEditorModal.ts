@@ -21,6 +21,7 @@ export class AgentEditorModal extends Modal {
 		this.setTitle("Edit Agent");
 
 		this.restoreLayout = applyModalLayout(this, {
+			fullScreenOnPhone: true,
 			width: "min(720px, 94vw)",
 			maxWidth: "94vw",
 			height: "90vh",

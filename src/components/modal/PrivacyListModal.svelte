@@ -766,4 +766,40 @@ const excludedTitle = $derived.by(() => (privacyMode === "private-by-default" ? 
     background: var(--interactive-accent);
     color: var(--text-on-accent);
   }
+
+  /*
+   * Phone layout. The tab strip's `flex-wrap` is a desktop affordance; on a
+   * ~390px screen the two tabs cannot share a row at natural width, so they
+   * wrapped into stacked bars and the active tab no longer touched the panel it
+   * is supposed to merge into. Split the row 50/50 instead and let the long
+   * label wrap *inside* its tab — the strip stays one row, both tabs stretch to
+   * the taller one's height, and the merge survives.
+   */
+  :global(.is-phone) .privacy-list-switch {
+    flex-wrap: nowrap;
+    align-items: stretch;
+  }
+
+  :global(.is-phone) .privacy-list-switch-button {
+    flex: 1 1 0;
+    min-width: 0;
+    justify-content: center;
+    text-align: center;
+    /* Obsidian's button styling is nowrap, which turns the squeezed label into
+       clipped text; multi-line is the whole point of the 50/50 split. */
+    white-space: normal;
+    height: auto;
+  }
+
+  /* The mode pill overflows narrower phones at natural width; as a full-width
+     segmented control it fits any screen and reads more native on touch. */
+  :global(.is-phone) .privacy-mode-toggle {
+    display: flex;
+    width: 100%;
+  }
+
+  :global(.is-phone) .privacy-mode-button {
+    flex: 1 1 0;
+    min-width: 0;
+  }
 </style>

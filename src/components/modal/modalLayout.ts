@@ -8,17 +8,46 @@ interface ModalLayoutOptions {
 	contentPadding?: string;
 	contentOverflow?: string;
 	contentFill?: boolean;
+	/**
+	 * Present the modal as an edge-to-edge sheet on phones instead of the core
+	 * inset floating card (12px side margins, large radius, height fitted to
+	 * content). Opt-in per modal: the big editing surfaces want the full screen,
+	 * but small dialogs read better keeping the card look.
+	 */
+	fullScreenOnPhone?: boolean;
 }
 
 export function applyModalLayout(modal: Modal, options: ModalLayoutOptions): () => void {
-	const { width, maxWidth, height, maxHeight, contentPadding, contentOverflow, contentFill = true } = options;
+	const {
+		width,
+		maxWidth,
+		height,
+		maxHeight,
+		contentPadding,
+		contentOverflow,
+		contentFill = true,
+		fullScreenOnPhone = false,
+	} = options;
 
-	// Phones get Obsidian's native full-screen modal sheet; forcing a desktop-ish
-	// width/height (e.g. `min(720px, 94vw)` × `90vh`) turns it into a floating box
-	// that neither fills the screen nor respects the keyboard inset. Only the
-	// content-level tweaks (fill/overflow/padding) apply there.
+	// Phones never get the desktop width/height (e.g. `min(720px, 94vw)` × `90vh`
+	// turns the sheet into a floating box that neither fills the screen nor
+	// respects the keyboard inset). What they get instead is one of two native-ish
+	// presentations: core's inset card (default), or an edge-to-edge sheet
+	// (opt-in). The sheet pads with Obsidian's safe-area variables because the
+	// modal element itself carries no padding — without them the title sits under
+	// the notch and the footer under the home indicator.
 	const sizeOverrides = Platform.isPhone
-		? []
+		? fullScreenOnPhone
+			? ([
+					["width", "100vw"],
+					["max-width", "100vw"],
+					["height", "100%"],
+					["max-height", "100%"],
+					["border-radius", "0"],
+					["padding-top", "var(--safe-area-inset-top, 0px)"],
+					["padding-bottom", "var(--safe-area-inset-bottom, 0px)"],
+				] as const)
+			: []
 		: ([
 				["width", width],
 				["max-width", maxWidth],
@@ -35,6 +64,18 @@ export function applyModalLayout(modal: Modal, options: ModalLayoutOptions): () 
 		}
 
 		modal.modalEl.style.setProperty(property, value);
+	}
+
+	// Core's phone close button (`.modal-header-button`) is absolutely positioned
+	// at `top: 12px`, so the sheet's safe-area padding doesn't move it — it lands
+	// in the status-bar / Dynamic Island zone. Keep its 12px offset but measure it
+	// from below the inset instead (the variable is 0 on notch-less phones).
+	const headerButtons =
+		Platform.isPhone && fullScreenOnPhone
+			? [...modal.modalEl.querySelectorAll<HTMLElement>(".modal-header-button")]
+			: [];
+	for (const button of headerButtons) {
+		button.style.top = "calc(var(--safe-area-inset-top, 0px) + 12px)";
 	}
 
 	if (contentFill) {
@@ -68,6 +109,10 @@ export function applyModalLayout(modal: Modal, options: ModalLayoutOptions): () 
 	return () => {
 		for (const property of modalStyleMap.keys()) {
 			modal.modalEl.style.removeProperty(property);
+		}
+
+		for (const button of headerButtons) {
+			button.style.removeProperty("top");
 		}
 
 		modal.modalEl.style.removeProperty("display");

@@ -46,6 +46,7 @@ export class SystemPromptModal extends Modal {
 
 	onOpen() {
 		this.restoreLayout = applyModalLayout(this, {
+			fullScreenOnPhone: true,
 			width: "min(1200px, 94vw)",
 			maxWidth: "94vw",
 			height: "85vh",

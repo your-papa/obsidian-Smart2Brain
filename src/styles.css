@@ -67,6 +67,10 @@
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
+	/* Sizing the wrapper alone leaves the inner svg at Obsidian's default
+	   dimensions, overflowing the box — which reads as the icon sitting
+	   off-centre next to the title. The svg sizes itself from --icon-size. */
+	--icon-size: 16px;
 	width: 16px;
 	height: 16px;
 	color: var(--text-accent);

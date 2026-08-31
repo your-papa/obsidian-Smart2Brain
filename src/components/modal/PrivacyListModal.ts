@@ -20,6 +20,7 @@ export class PrivacyListModal extends Modal {
 		titleIconEl.setAttribute("aria-hidden", "true");
 		this.titleEl.prepend(titleIconEl);
 		this.restoreLayout = applyModalLayout(this, {
+			fullScreenOnPhone: true,
 			width: "min(960px, 96vw)",
 			maxWidth: "96vw",
 			height: "min(840px, 92vh)",

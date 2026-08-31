@@ -32,6 +32,7 @@ export class ToolsModal extends Modal {
 	onOpen() {
 		this.setTitle("Tools");
 		this.restoreLayout = applyModalLayout(this, {
+			fullScreenOnPhone: true,
 			width: "min(720px, 94vw)",
 			maxWidth: "94vw",
 			height: "85vh",
