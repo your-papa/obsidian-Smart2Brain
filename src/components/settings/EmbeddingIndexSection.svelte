@@ -205,7 +205,7 @@ function getSelectionGroupLabel(): string {
 </script>
 
 <ManagedEntitySection
-  heading="Embedding Indexes"
+  heading="Embedding indexes"
   actionsLayout="control"
   description={describeCurrentSelection()}
   emptyMessage="No embedding indexes configured yet."

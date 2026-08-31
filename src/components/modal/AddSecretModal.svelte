@@ -65,7 +65,7 @@ function handleSave() {
 	</div>
 
 	<SettingContainer
-		name="Secret Name"
+		name="Secret name"
 		desc={suggestedId
 			? "Suggested from where you opened this. Edit it to reuse a name across providers."
 			: "Unique name for this secret (lowercase letters, numbers, dashes)"}
@@ -78,7 +78,7 @@ function handleSave() {
 		/>
 	</SettingContainer>
 
-	<SettingContainer name="Secret Value" desc="The API key or secret value to store securely">
+	<SettingContainer name="Secret value" desc="The API key or secret value to store securely">
 		<Text inputType="password" placeholder="sk-..." bind:value={secretValue} />
 	</SettingContainer>
 

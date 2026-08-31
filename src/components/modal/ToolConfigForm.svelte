@@ -421,8 +421,8 @@ function openProcessorSelectionModal(currentProcessor: ChatModel | null, onSelec
       So this tool has no user-facing settings at all — nothing to render.
     -->
   {:else if capturedToolId === "grep_notes"}
-    <SettingGroup heading="Grep Settings">
-      <SettingContainer name="Context Lines" desc="Number of surrounding lines to show on each side of a match.">
+    <SettingGroup heading="Grep">
+      <SettingContainer name="Context lines" desc="Number of surrounding lines to show on each side of a match.">
         <Text
           inputType="number"
           value={contextLines}
@@ -436,10 +436,10 @@ function openProcessorSelectionModal(currentProcessor: ChatModel | null, onSelec
     </SettingGroup>
   {:else if capturedToolId === "read_content"}
     <SettingGroup
-      heading="Vision Processors"
+      heading="Vision processors"
       headingDesc="Configure how images and PDFs encountered during tool use are processed. Auto uses the chat model if it supports vision."
     >
-      <SettingContainer name="Image Processor" desc="Vision model to analyze images found in notes.">
+      <SettingContainer name="Image processor" desc="Vision model to analyze images found in notes.">
         <div class="processor-control">
           <Dropdown
             type="options"
@@ -495,8 +495,8 @@ function openProcessorSelectionModal(currentProcessor: ChatModel | null, onSelec
       </SettingContainer>
     </SettingGroup>
   {:else if capturedToolId === "manage_notes"}
-    <SettingGroup heading="Allowed Operations">
-      <SettingContainer name="Diff View Mode" desc="Choose how pending note edits are previewed in reading view.">
+    <SettingGroup heading="Allowed operations">
+      <SettingContainer name="Diff view mode" desc="Choose how pending note edits are previewed in reading view.">
         <Dropdown
           type="options"
           dropdown={diffViewModeOptions}
@@ -507,7 +507,7 @@ function openProcessorSelectionModal(currentProcessor: ChatModel | null, onSelec
           }}
         />
       </SettingContainer>
-      <SettingContainer name="Allow Create" desc="Permit the agent to propose new markdown notes.">
+      <SettingContainer name="Allow create" desc="Permit the agent to propose new markdown notes.">
         <Toggle
           checked={allowCreate}
           onchange={(checked) => {
@@ -516,7 +516,7 @@ function openProcessorSelectionModal(currentProcessor: ChatModel | null, onSelec
           }}
         />
       </SettingContainer>
-      <SettingContainer name="Allow Update" desc="Permit targeted edits to existing markdown notes.">
+      <SettingContainer name="Allow update" desc="Permit targeted edits to existing markdown notes.">
         <Toggle
           checked={allowUpdate}
           onchange={(checked) => {
@@ -525,7 +525,7 @@ function openProcessorSelectionModal(currentProcessor: ChatModel | null, onSelec
           }}
         />
       </SettingContainer>
-      <SettingContainer name="Allow Delete" desc="Permit the agent to propose note deletions.">
+      <SettingContainer name="Allow delete" desc="Permit the agent to propose note deletions.">
         <Toggle
           checked={allowDelete}
           onchange={(checked) => {
@@ -534,7 +534,7 @@ function openProcessorSelectionModal(currentProcessor: ChatModel | null, onSelec
           }}
         />
       </SettingContainer>
-      <SettingContainer name="Allow Move" desc="Permit renaming or relocating markdown notes.">
+      <SettingContainer name="Allow move" desc="Permit renaming or relocating markdown notes.">
         <Toggle
           checked={allowMove}
           onchange={(checked) => {
@@ -547,7 +547,7 @@ function openProcessorSelectionModal(currentProcessor: ChatModel | null, onSelec
   {:else if capturedToolId === "fetch_url"}
     <!-- no tool-specific settings -->
   {:else if capturedToolId === "web_search"}
-    <SettingGroup heading="Web Search Settings">
+    <SettingGroup heading="Web search">
       <SettingContainer
         name="Provider"
         desc="Search provider used by this tool. The provider and API key are shared across all agents that enable web_search."

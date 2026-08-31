@@ -28,6 +28,10 @@ Install **Smart Second Brain** from Obsidian's community plugins and enable it �
 
 Add an embedding model to unlock semantic search and graph clustering; add an AI provider to enable the agent. See the [getting started guide](https://smartsecondbrain.dev/start/installation/).
 
+## Network use
+
+The plugin only makes network requests to the AI providers **you** configure — a local one like Ollama, or cloud APIs such as OpenAI, Anthropic, or OpenRouter — to generate embeddings and chat responses, plus web requests on your agent's behalf when you enable the web skill. Out of the box, nothing leaves your machine, and notes on your privacy list are never sent to untrusted providers. There is no telemetry. See the [privacy documentation](https://smartsecondbrain.dev/privacy/model/) for details.
+
 ## Documentation
 
 Everything lives at **[smartsecondbrain.dev](https://smartsecondbrain.dev)**:

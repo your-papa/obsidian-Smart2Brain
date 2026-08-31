@@ -190,7 +190,7 @@ function getAgentSkillsSummary(agentId: string): { icons: string[]; overflow: nu
     {/each}
   </ManagedEntitySection>
 
-  <SettingGroup heading="Agents Storage">
+  <SettingGroup heading="Agents storage">
     <SettingItem
       name="Agents folder"
       desc="Vault folder holding agent context — skills, memories, and base prompts. Changing it seeds the new location; existing files are left in place."

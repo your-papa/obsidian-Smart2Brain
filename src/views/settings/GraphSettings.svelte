@@ -63,7 +63,7 @@ function openGraphModelSelection() {
 }
 </script>
 
-<SettingGroup heading="Topic Names">
+<SettingGroup heading="Topic names">
   <SettingItem name="Topic naming model" desc={namingModelDesc}>
     <ModelSettingControl
       available={models.hasProviders && models.hasModels}

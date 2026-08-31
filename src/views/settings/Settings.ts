@@ -1,11 +1,11 @@
 import { PluginSettingTab } from "obsidian";
-import { mount } from "svelte";
+import { mount, unmount } from "svelte";
 import QueryClientProvider from "../../lib/QueryClientProvider.svelte";
 import type SecondBrainPlugin from "../../main";
 import SettingsComponent from "./Settings.svelte";
 
 export default class SettingsTab extends PluginSettingTab {
-	// keep a handle so we can destroy it on hide()
+	// keep a handle so we can unmount it on hide()
 	instance: ReturnType<typeof mount> | null = null;
 	plugin: SecondBrainPlugin;
 
@@ -17,8 +17,9 @@ export default class SettingsTab extends PluginSettingTab {
 	display(): void {
 		this.containerEl.empty();
 
-		// Destroy any previous instance to avoid leaks (if display is called again)
-		this.instance?.destroy?.();
+		// Unmount any previous instance to avoid leaks (if display is called again).
+		// Svelte 5's mount() has no destroy(); effects keep running until unmount().
+		if (this.instance) void unmount(this.instance);
 
 		this.instance = mount(QueryClientProvider, {
 			target: this.containerEl,
@@ -33,7 +34,7 @@ export default class SettingsTab extends PluginSettingTab {
 
 	hide(): void {
 		// Clean up when leaving the settings tab
-		this.instance?.destroy?.();
+		if (this.instance) void unmount(this.instance);
 		this.instance = null;
 		this.containerEl.empty();
 	}

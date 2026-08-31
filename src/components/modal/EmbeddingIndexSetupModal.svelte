@@ -140,7 +140,7 @@ async function handleImport() {
   <div class="modal-intro">Pick a model, then adjust the batch size if needed.</div>
 
   <div class="settings-panel">
-    <SettingContainer name="Embedding Model" desc="Used to build and refresh this index.">
+    <SettingContainer name="Embedding model" desc="Used to build and refresh this index.">
       <ModelSettingControl
         available={availableModels.hasProviders && availableModels.hasEmbedModels}
         loading={availableModels.hasProviders && availableModels.isLoadingModels}
@@ -157,7 +157,7 @@ async function handleImport() {
     </SettingContainer>
 
     <SettingContainer
-      name="Batch Size"
+      name="Batch size"
       desc={`Notes per embedding request. Lower values are safer for local models; higher values are better for hosted providers. Range: ${MIN_EMBEDDING_BATCH_SIZE}-${MAX_EMBEDDING_BATCH_SIZE}.`}
     >
       <Text
@@ -173,7 +173,7 @@ async function handleImport() {
 
     {#if onImport}
       <SettingContainer
-        name="Import Existing Index"
+        name="Import existing index"
         desc="Load an index exported from another vault instead of building one. Rebuilding is only needed if the export is outdated."
       >
         <Button

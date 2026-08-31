@@ -959,7 +959,7 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
         </SettingItem>
       </SettingGroup>
 
-      <SettingGroup heading="Core Skills">
+      <SettingGroup heading="Core skills">
         <div class="setting-item agent-section-intro">
           <div class="setting-item-info">
             <div class="setting-item-description">

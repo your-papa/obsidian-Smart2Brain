@@ -148,7 +148,7 @@ const enabledCount = $derived.by(() => {
   </SettingContainer>
 
   <SettingContainer
-    name="Match Badges"
+    name="Match badges"
     desc="Show why a note matched, for example Title, Tag, or Content."
   >
     <Toggle
@@ -158,7 +158,7 @@ const enabledCount = $derived.by(() => {
   </SettingContainer>
 
   <SettingContainer
-    name="Content Snippets"
+    name="Content snippets"
     desc="Show the additional heading and snippet text under each search result."
   >
     <Toggle
@@ -168,7 +168,7 @@ const enabledCount = $derived.by(() => {
   </SettingContainer>
 
   <SettingContainer
-    name="Keyboard Shortcuts"
+    name="Keyboard shortcuts"
     desc="Show keyboard shortcut hints at the bottom of the search modal."
   >
     <Toggle

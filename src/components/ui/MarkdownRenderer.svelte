@@ -256,12 +256,12 @@ $effect(() => {
 		}
 
 		// `container` may have been unbound (component unmounted) while awaiting
-		// above. Re-check before touching it — otherwise `container.innerHTML`
-		// throws "Cannot set properties of null" during rapid mount/unmount
+		// above. Re-check before touching it — otherwise clearing `container`
+		// throws "Cannot read properties of null" during rapid mount/unmount
 		// (e.g. subagent tool cards folding in/out during streaming).
 		if (!container) return;
 
-		container.innerHTML = "";
+		container.empty();
 		await MarkdownRenderer.render(plugin.app, currentContent ?? "", container, currentSourcePath, plugin);
 
 		if (!container) return;

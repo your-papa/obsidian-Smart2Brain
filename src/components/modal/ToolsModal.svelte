@@ -147,7 +147,7 @@ function openToolConfig(toolId: BuiltInToolId) {
           hasItems={true}
         >
           <ManagedEntityItem
-            name="Load Skill"
+            name="Load skill"
             desc="Lets the agent load a skill's full instructions on demand. Always available whenever any skill exists."
           />
           {#each activeIntegrations as integ (integ.pluginId)}

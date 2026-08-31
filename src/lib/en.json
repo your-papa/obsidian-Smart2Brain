@@ -1,10 +1,10 @@
 {
 	"settings": {
-		"clear": "Cleanup Plugin Data",
+		"clear": "Clean up plugin data",
 		"clear_desc": "Deletes plugin settings and generated index data. Secrets, skill files, and chat files inside your vault are kept.",
 		"clear_label": "Cleanup",
 		"clear_modal": {
-			"title": "Cleanup Plugin Data",
+			"title": "Clean up plugin data",
 			"description": "Delete plugin settings and generated index data? Secrets, skill files, and chat files inside your vault will be kept."
 		},
 		"verbose": "Developer Console logging",

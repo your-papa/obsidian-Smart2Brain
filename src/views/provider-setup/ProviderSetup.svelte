@@ -449,7 +449,7 @@ $effect(() => {
 {:else}
   <div class="modal-content">
     <SettingItem
-      name="Provider Name"
+      name="Provider name"
       desc="Name this provider instance so you can distinguish it later."
     >
       <Text
