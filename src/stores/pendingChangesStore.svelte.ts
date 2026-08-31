@@ -397,14 +397,23 @@ export class PendingChangesStore {
 				if (!(file instanceof TFile)) {
 					throw new TypeError(`Cannot apply update — file not found: ${change.path}`);
 				}
-				// Conflict detection: compare current content with staged original
-				const currentContent = await app.vault.read(file);
-				if (currentContent !== change.originalContent) {
+				// Conflict detection inside `vault.process`: the compare-and-write is
+				// atomic against other Vault API writers (sync, other plugins), so the
+				// file can't change between the check and the write. On conflict the
+				// callback returns the data unchanged and we surface the error.
+				let conflict = false;
+				await app.vault.process(file, (data) => {
+					if (data !== change.originalContent) {
+						conflict = true;
+						return data;
+					}
+					return change.newContent;
+				});
+				if (conflict) {
 					throw new Error(
 						`File "${change.path}" was modified after the change was proposed. Please review and try again.`,
 					);
 				}
-				await app.vault.modify(file, change.newContent);
 			} else if (change.type === "delete") {
 				const file = app.vault.getAbstractFileByPath(normalizedPath);
 				if (!(file instanceof TFile)) {
@@ -523,11 +532,18 @@ export class PendingChangesStore {
 				const file = this.#plugin.app.vault.getAbstractFileByPath(change.path);
 				if (!(file instanceof TFile)) return;
 
-				const currentContent = await this.#plugin.app.vault.read(file);
-				if (currentContent !== change.originalContent) {
+				// Atomic compare-and-write via `vault.process` — see acceptChange.
+				let conflict = false;
+				await this.#plugin.app.vault.process(file, (data) => {
+					if (data !== change.originalContent) {
+						conflict = true;
+						return data;
+					}
+					return newVaultContent;
+				});
+				if (conflict) {
 					throw new Error(`File "${change.path}" was modified externally. Please review before accepting.`);
 				}
-				await this.#plugin.app.vault.modify(file, newVaultContent);
 
 				change.originalContent = newVaultContent;
 				if (change.originalContent === change.newContent) {
@@ -642,16 +658,24 @@ export class PendingChangesStore {
 				// Conflict check, matching acceptChange/acceptChangeGroup. Rejecting
 				// is not a licence to discard the user's own work: between the group
 				// accept and this reject they may have edited the note by hand, and
-				// `vault.modify` does not go through trash, so an unconditional
-				// overwrite destroys those edits with no way back.
+				// this revert does not go through trash, so an unconditional
+				// overwrite destroys those edits with no way back. `vault.process`
+				// makes the compare-and-revert atomic against other writers.
 				//
 				// `originalContent` is the right baseline, not `initialOriginalContent`:
 				// acceptChangeGroup advances `originalContent` to exactly what it wrote
 				// (see its `change.originalContent = newVaultContent`), so it tracks what
 				// we last put on disk. If the file still matches it, our writes are the
 				// only ones there and undoing them is safe.
-				const currentContent = await this.#plugin.app.vault.read(file);
-				if (currentContent !== change.originalContent) {
+				let conflict = false;
+				await this.#plugin.app.vault.process(file, (data) => {
+					if (data !== change.originalContent) {
+						conflict = true;
+						return data;
+					}
+					return initialOriginalContent;
+				});
+				if (conflict) {
 					Logger.warn(
 						`[PendingChanges] Skipped reverting "${change.path}" — it was modified after the group accept; leaving the file as-is.`,
 					);
@@ -659,8 +683,6 @@ export class PendingChangesStore {
 					// resolve the conflict and undo later.
 					return { path: change.path, reason: "conflict" as const };
 				}
-
-				await this.#plugin.app.vault.modify(file, initialOriginalContent);
 				// The note is back to its pre-proposal state, so there is nothing left
 				// to undo. Clearing this makes the revert idempotent: a later revert
 				// (or one after the user edits the note again) must not re-apply this

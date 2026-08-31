@@ -61,24 +61,35 @@ function makeTFile(path: string): TFile {
 }
 
 function createMockPlugin() {
+	const vault = {
+		adapter: {
+			exists: vi.fn().mockResolvedValue(false),
+			read: vi.fn().mockResolvedValue(""),
+			write: vi.fn().mockResolvedValue(undefined),
+			mkdir: vi.fn().mockResolvedValue(undefined),
+		},
+		getAbstractFileByPath: vi.fn((path: string) => makeTFile(path)),
+		read: vi.fn().mockResolvedValue("original content"),
+		modify: vi.fn().mockResolvedValue(undefined),
+		create: vi.fn().mockResolvedValue(undefined),
+		createFolder: vi.fn().mockResolvedValue(undefined),
+		trash: vi.fn().mockResolvedValue(undefined),
+		on: vi.fn().mockReturnValue({ id: "ref" }),
+		process: vi.fn(),
+	};
+	// Mirrors Vault.process by delegating to read/modify. Looks both up on `vault`
+	// at call time, so tests that reassign `plugin.app.vault.modify` to instrument
+	// gating/ordering still intercept the write.
+	vault.process.mockImplementation(async (file: unknown, fn: (data: string) => string) => {
+		const data = await vault.read(file);
+		const result = fn(data);
+		if (result !== data) await vault.modify(file, result);
+		return result;
+	});
 	return {
 		manifest: { dir: "test-plugin" },
 		app: {
-			vault: {
-				adapter: {
-					exists: vi.fn().mockResolvedValue(false),
-					read: vi.fn().mockResolvedValue(""),
-					write: vi.fn().mockResolvedValue(undefined),
-					mkdir: vi.fn().mockResolvedValue(undefined),
-				},
-				getAbstractFileByPath: vi.fn((path: string) => makeTFile(path)),
-				read: vi.fn().mockResolvedValue("original content"),
-				modify: vi.fn().mockResolvedValue(undefined),
-				create: vi.fn().mockResolvedValue(undefined),
-				createFolder: vi.fn().mockResolvedValue(undefined),
-				trash: vi.fn().mockResolvedValue(undefined),
-				on: vi.fn().mockReturnValue({ id: "ref" }),
-			},
+			vault,
 			fileManager: { renameFile: vi.fn().mockResolvedValue(undefined) },
 		},
 		registerEvent: vi.fn(),

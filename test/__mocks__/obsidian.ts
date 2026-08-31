@@ -54,6 +54,14 @@ export class Vault {
 	getName = vi.fn().mockReturnValue("test-vault");
 	read = vi.fn().mockResolvedValue("");
 	modify = vi.fn().mockResolvedValue(undefined);
+	// Delegates to the mocked read/modify (writes only when the callback changed
+	// the data), mirroring Vault.process's read → transform → write contract.
+	process = vi.fn().mockImplementation(async (file: unknown, fn: (data: string) => string) => {
+		const data = await this.read(file);
+		const result = fn(data);
+		if (result !== data) await this.modify(file, result);
+		return result;
+	});
 	create = vi.fn().mockImplementation(() => Promise.resolve(new TFile()));
 	delete = vi.fn().mockResolvedValue(undefined);
 }

@@ -33,31 +33,43 @@ function makeTFile(path: string) {
 }
 
 function createMockPlugin() {
+	const vault = {
+		adapter: {
+			exists: vi.fn().mockResolvedValue(false),
+			read: vi.fn().mockResolvedValue(""),
+			write: vi.fn().mockResolvedValue(undefined),
+			mkdir: vi.fn().mockResolvedValue(undefined),
+		},
+		getAbstractFileByPath: vi.fn(),
+		read: vi.fn().mockResolvedValue(""),
+		modify: vi.fn().mockResolvedValue(undefined),
+		create: vi.fn().mockResolvedValue(makeTFile("created.md")),
+		createFolder: vi.fn().mockResolvedValue(undefined),
+		trash: vi.fn().mockResolvedValue(undefined),
+		on: vi.fn().mockReturnValue({ id: "ref" }),
+		// Mirrors Vault.process's read → transform → write contract by delegating
+		// to the mocked read/modify, so tests keep simulating external edits via
+		// `read` and asserting writes via `modify`. Writes only when the callback
+		// changed the data — the store's conflict paths return it unchanged.
+		process: vi.fn(),
+	};
+	vault.process.mockImplementation(async (file: unknown, fn: (data: string) => string) => {
+		const data = await vault.read(file);
+		const result = fn(data);
+		if (result !== data) await vault.modify(file, result);
+		return result;
+	});
 	return {
 		manifest: { dir: "test-plugin" },
 		app: {
-			vault: {
-				adapter: {
-					exists: vi.fn().mockResolvedValue(false),
-					read: vi.fn().mockResolvedValue(""),
-					write: vi.fn().mockResolvedValue(undefined),
-					mkdir: vi.fn().mockResolvedValue(undefined),
-				},
-				getAbstractFileByPath: vi.fn(),
-				read: vi.fn().mockResolvedValue(""),
-				modify: vi.fn().mockResolvedValue(undefined),
-				create: vi.fn().mockResolvedValue(makeTFile("created.md")),
-				createFolder: vi.fn().mockResolvedValue(undefined),
-				trash: vi.fn().mockResolvedValue(undefined),
-				on: vi.fn().mockReturnValue({ id: "ref" }),
-			},
+			vault,
 			fileManager: {
 				renameFile: vi.fn().mockResolvedValue(undefined),
 			},
 		},
 		registerEvent: vi.fn(),
 		saveData: vi.fn().mockResolvedValue(undefined),
-	} as ConstructorParameters<typeof PendingChangesStore>[0];
+	} as unknown as ConstructorParameters<typeof PendingChangesStore>[0];
 }
 
 /* --------------------------------------------------------------------------
