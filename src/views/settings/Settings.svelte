@@ -16,7 +16,7 @@ let activeTab = $state(pendingTab ?? "general");
 const SETTINGS_TABS: SlidingTab<string>[] = [
 	{ id: "general", label: "General", icon: "settings" },
 	{ id: "search", label: "Search", icon: "search" },
-	{ id: "agents", label: "Agents", icon: "bot" },
+	{ id: "agents", label: "Agents", icon: "brain" },
 	{ id: "graph", label: "Graph", icon: "git-fork" },
 	{ id: "troubleshooting", label: "Troubleshooting", icon: "wrench" },
 	...(import.meta.env.DEV ? [{ id: "developer", label: "Developer", icon: "code" }] : []),

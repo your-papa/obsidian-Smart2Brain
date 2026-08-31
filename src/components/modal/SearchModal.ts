@@ -2199,7 +2199,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		const btn = row.createEl("button", { cls: "s2b-pill s2b-pill--interactive s2b-search-followup-action" });
 		btn.type = "button";
 		const icon = btn.createSpan({ cls: "s2b-search-mobile-icon" });
-		setIcon(icon, "bot");
+		setIcon(icon, "brain");
 		btn.appendChild(document.createTextNode("Ask the agent instead"));
 		btn.addEventListener("pointerdown", (evt) => {
 			evt.preventDefault();
