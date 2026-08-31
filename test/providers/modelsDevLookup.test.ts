@@ -19,6 +19,17 @@ function catalogue(providerId: string, models: Record<string, ModelsDevModelInfo
 	};
 }
 
+/** Insertion order matters: it is the order `Object.values` will iterate. */
+function multiProviderCatalogue(
+	...entries: [providerId: string, models: Record<string, ModelsDevModelInfo>][]
+): ModelsDevApiResponse {
+	const out: ModelsDevApiResponse = {};
+	for (const [providerId, models] of entries) {
+		out[providerId] = { id: providerId, name: providerId, models };
+	}
+	return out;
+}
+
 describe("lookupModelInfoSync", () => {
 	it("returns exact key matches", () => {
 		const data = catalogue("anthropic", {
@@ -60,5 +71,63 @@ describe("lookupModelInfoSync", () => {
 			"claude-sonnet-4-5": model("claude-sonnet-4-5", "Claude Sonnet 4.5"),
 		});
 		expect(lookupModelInfoSync(data, "anthropic", "claude-sonet-4-5")?.name).toBe("Claude Sonnet 4.5");
+	});
+
+	describe("cross-provider fallback precedence", () => {
+		// An unmapped provider id (a user-created openai-compatible instance, e.g. SAP HAI)
+		// goes straight to the cross-provider scan.
+		const UNMAPPED = "custom-instance-1";
+
+		it("prefers an exact id in a later provider over a fuzzy hit in an earlier one", () => {
+			const data = multiProviderCatalogue(
+				[
+					"digitalocean",
+					{ "anthropic-claude-4.1-opus": model("anthropic-claude-4.1-opus", "Anthropic Claude 4.1 Opus") },
+				],
+				[
+					"sap-ai-core",
+					{ "anthropic--claude-4.6-opus": model("anthropic--claude-4.6-opus", "anthropic--claude-4.6-opus") },
+				],
+			);
+			expect(lookupModelInfoSync(data, UNMAPPED, "anthropic--claude-4.6-opus")?.name).toBe(
+				"anthropic--claude-4.6-opus",
+			);
+		});
+
+		it("prefers an exact id in a later provider over a normalized hit in an earlier one", () => {
+			const data = multiProviderCatalogue(
+				[
+					"digitalocean",
+					{
+						"anthropic-claude-4.5-sonnet": model(
+							"anthropic-claude-4.5-sonnet",
+							"Anthropic Claude 4.5 Sonnet",
+						),
+					},
+				],
+				[
+					"sap-ai-core",
+					{
+						"anthropic--claude-4.5-sonnet": model(
+							"anthropic--claude-4.5-sonnet",
+							"anthropic--claude-4.5-sonnet",
+						),
+					},
+				],
+			);
+			expect(lookupModelInfoSync(data, UNMAPPED, "anthropic--claude-4.5-sonnet")?.name).toBe(
+				"anthropic--claude-4.5-sonnet",
+			);
+		});
+
+		it("still falls back to a fuzzy match when no provider holds the exact id", () => {
+			const data = multiProviderCatalogue([
+				"digitalocean",
+				{ "anthropic-claude-4.5-opus": model("anthropic-claude-4.5-opus", "Anthropic Claude 4.5 Opus") },
+			]);
+			expect(lookupModelInfoSync(data, UNMAPPED, "anthropic--claude-4.5-opus")?.name).toBe(
+				"Anthropic Claude 4.5 Opus",
+			);
+		});
 	});
 });

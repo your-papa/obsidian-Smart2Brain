@@ -256,24 +256,35 @@ export function lookupModelInfoSync(
 		}
 	}
 
-	// Search across all providers for the model ID
+	// Search across all providers for the model ID.
+	//
+	// Each tier is exhausted across every provider before the next one starts. Doing this
+	// per-provider instead lets an early-iterated provider win with a weak match while a
+	// later one holds the exact id: models.dev iterates "digitalocean" before "sap-ai-core",
+	// so "anthropic--claude-4.6-opus" fuzzy-matched DigitalOcean's "anthropic-claude-4.1-opus"
+	// and never reached its own vendor's verbatim entry. Provider order in the catalogue is
+	// not a relevance signal, so it must not outrank match quality.
 	for (const provider of Object.values(data)) {
-		if (provider.models) {
-			if (provider.models[modelId]) {
-				return provider.models[modelId];
-			}
+		if (provider.models?.[modelId]) {
+			return provider.models[modelId];
+		}
+	}
 
-			// Check for prefixed variants
-			for (const [key, value] of Object.entries(provider.models)) {
-				if (key.endsWith(`/${modelId}`) || key.split("/").pop() === modelId) {
-					return value;
-				}
+	// Prefixed variants (e.g. "openai/gpt-4o" for "gpt-4o")
+	for (const provider of Object.values(data)) {
+		if (!provider.models) continue;
+		for (const [key, value] of Object.entries(provider.models)) {
+			if (key.endsWith(`/${modelId}`) || key.split("/").pop() === modelId) {
+				return value;
 			}
+		}
+	}
 
-			const normalizedMatch = findNormalizedOrFuzzyModelMatch(provider.models, modelId);
-			if (normalizedMatch) {
-				return normalizedMatch;
-			}
+	for (const provider of Object.values(data)) {
+		if (!provider.models) continue;
+		const normalizedMatch = findNormalizedOrFuzzyModelMatch(provider.models, modelId);
+		if (normalizedMatch) {
+			return normalizedMatch;
 		}
 	}
 
