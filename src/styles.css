@@ -1187,6 +1187,32 @@ button.s2b-pill--interactive:hover {
 	display: none;
 }
 
+/* Keep these prompts a bottom sheet on phones when a theme has stretched them
+   full-screen.
+
+   Both surfaces are SuggestModals *because* Obsidian pins `.prompt` above the
+   keyboard and flows results upward (see the model-picker note below) — the
+   panel is meant to hug the bottom, sized to its content. Core does that
+   correctly, positioning the prompt below the safe-area inset via
+   `--prompt-top: calc(var(--safe-area-inset-top) + ...)`, so it is left alone.
+
+   Some themes make the phone prompt full-bleed instead (Cupertino:
+   `--prompt-top: 0; height: 100vh`). Then the container stretches over the whole
+   screen while its children stay bottom-anchored, so the results list — or our
+   injected filter / action bar — floats at y=0 behind the status bar and Dynamic
+   Island, with dead space between it and the input.
+
+   Only the height is handled here: `height: auto` shrinks the stretched box back
+   to its content, which is what removes the dead space between the results and
+   the input. The vertical anchor cannot be fixed in CSS — see
+   `applyPromptSafeArea` in `promptLayout.ts`, which sets `top` from script — so
+   this rule deliberately leaves `top` alone rather than half-solving it. */
+.is-phone .s2b-model-suggest-modal,
+.is-phone .s2b-search-modal {
+	height: auto !important;
+	max-height: calc(100dvh - var(--safe-area-inset-top, 0px) - var(--safe-area-inset-bottom, 0px)) !important;
+}
+
 /* Opt-in checkbox inside ConfirmModal, for a secondary destructive action the
    user can bundle with the deletion (e.g. also discarding a provider's
    embeddings). Sits between the message and the button row. */

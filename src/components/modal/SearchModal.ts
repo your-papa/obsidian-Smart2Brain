@@ -25,6 +25,7 @@ import { isAgentFilePath } from "../../utils/fileFiltering";
 import { isMobileUI } from "../../utils/platform";
 import { openChatAction, showActionNotice, showSettingsLinkNotice } from "../../utils/actionNotice";
 import { getPathIcon, getSearchResultNoteIcon, getTagIcon, resolveIconColor } from "../../utils/noteIcons";
+import { applyPromptSafeArea } from "./promptLayout";
 import {
 	formatHeadingLabel,
 	getBadgeIconId,
@@ -1009,6 +1010,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 
 		super.onOpen();
 
+		applyPromptSafeArea(this.modalEl);
 		this.schedulePostOpenHydration();
 		this.scheduleInputFocus();
 	}

@@ -9,6 +9,7 @@ import { getProviderDefinition } from "../../providers/index";
 import { getData } from "../../stores/dataStore.svelte";
 import type { HydratedChatModelMetadata, HydratedEmbeddingModelMetadata } from "../../types/modelMetadata";
 import type { ModelType, SelectedModel } from "./ModelSelectionModal";
+import { applyPromptSafeArea } from "./promptLayout";
 
 type HydratedModel = HydratedChatModelMetadata | HydratedEmbeddingModelMetadata;
 
@@ -75,6 +76,7 @@ export class ModelSuggestModal extends SuggestModal<HydratedModel> {
 	onOpen(): void {
 		super.onOpen();
 		this.buildFilterBar();
+		applyPromptSafeArea(this.modalEl);
 	}
 
 	private toClassifiable(model: HydratedModel): UiClassifiableModel {
