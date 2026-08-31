@@ -131,6 +131,10 @@ function normalizeModelToken(value: string): string {
 	return token;
 }
 
+function digitSequence(token: string): string {
+	return token.replace(/[^0-9]/g, "");
+}
+
 function levenshteinDistance(a: string, b: string): number {
 	if (a === b) return 0;
 	if (a.length === 0) return b.length;
@@ -176,6 +180,12 @@ function findNormalizedOrFuzzyModelMatch(
 
 			if (normalized === target) {
 				return value;
+			}
+
+			// A version digit is a one-character edit, so without this guard the
+			// fuzzy tier reads "claude-sonnet-4" as a typo of "claude-sonnet-4.5".
+			if (digitSequence(normalized) !== digitSequence(target)) {
+				continue;
 			}
 
 			if (Math.abs(normalized.length - target.length) > 2) {
