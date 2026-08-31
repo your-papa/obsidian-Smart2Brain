@@ -24,9 +24,21 @@ interface Props {
 	children?: Snippet;
 	/** Class applied to the Tabs.Root element. */
 	class?: string;
+	/** Phone-only: collapse inactive tabs to bare icons so the whole strip fits on
+	    screen without scrolling; the active tab expands to icon + label. Only tabs
+	    that have an icon collapse — label-only tabs keep their label. */
+	collapseInactiveOnPhone?: boolean;
 }
 
-let { value = $bindable(), tabs, onValueChange, trailing, children, class: className = "" }: Props = $props();
+let {
+	value = $bindable(),
+	tabs,
+	onValueChange,
+	trailing,
+	children,
+	class: className = "",
+	collapseInactiveOnPhone = false,
+}: Props = $props();
 
 // The list element + a live map of trigger elements, used to measure the active
 // tab so the sliding indicator can be positioned over it.
@@ -92,10 +104,6 @@ $effect(() => {
 		raf = requestAnimationFrame(tick);
 	};
 	raf = requestAnimationFrame(tick);
-	// When the strip scrolls horizontally (single-row mobile layout), keep the
-	// active tab fully visible. `nearest` makes this a no-op when it already is,
-	// so the wrapped desktop layout is unaffected.
-	triggerEls.get(value)?.scrollIntoView({ behavior: "smooth", inline: "nearest", block: "nearest" });
 	return () => cancelAnimationFrame(raf);
 });
 
@@ -142,7 +150,7 @@ function registerTrigger(node: HTMLElement, id: T) {
 <Tabs.Root bind:value onValueChange={(v) => onValueChange?.(v as T)} class={className}>
 	<Tabs.List
 		bind:ref={listEl}
-		class="s2b-sliding-tabs flex flex-wrap justify-center gap-1 border-b border-t-0 border-x-0 border-solid border-[--background-modifier-border] pb-2 mb-4"
+		class={`s2b-sliding-tabs ${collapseInactiveOnPhone ? "s2b-tabs-collapse " : ""}flex flex-wrap justify-center gap-1 border-b border-t-0 border-x-0 border-solid border-[--background-modifier-border] pb-2 mb-4`}
 	>
 		<!-- Sliding accent indicator: a soft pill that glides to the active trigger.
 		     Hidden until first measured to avoid a flash at 0,0. -->
@@ -166,7 +174,7 @@ function registerTrigger(node: HTMLElement, id: T) {
 					{#if tab.icon}
 						<span class="s2b-tab-icon" use:iconAction={tab.icon} aria-hidden="true"></span>
 					{/if}
-					<span>{tab.label}</span>
+					<span class="s2b-tab-text">{tab.label}</span>
 					{#if trailing}{@render trailing(tab)}{/if}
 				</span>
 			</Tabs.Trigger>
@@ -202,6 +210,41 @@ function registerTrigger(node: HTMLElement, id: T) {
 	:global(.is-mobile .s2b-sliding-tabs [data-tabs-trigger]) {
 		flex-shrink: 0;
 		white-space: nowrap;
+	}
+
+	/* Phone + collapse mode (opt-in via `collapseInactiveOnPhone`): inactive tabs
+	   shrink to bare icons so the whole strip fits on screen at once — no hidden
+	   tabs, no horizontal scrolling — and the active tab expands to icon + label
+	   inside the pill. The label animates via max-width/margin (not display), so
+	   the trigger's width change is continuous and the ResizeObserver-driven pill
+	   glides along with it. Timing mirrors the pill's transition so they move as
+	   one. Only `.s2b-tab-icon + .s2b-tab-text` is targeted: a tab without an icon
+	   never collapses, so label-only strips are unaffected even with the flag on. */
+	:global(.is-phone .s2b-tabs-collapse) {
+		justify-content: center;
+	}
+
+	:global(.is-phone .s2b-tabs-collapse) .s2b-tab-label {
+		gap: 0;
+	}
+
+	:global(.is-phone .s2b-tabs-collapse) .s2b-tab-icon + .s2b-tab-text {
+		display: inline-block;
+		overflow: hidden;
+		white-space: nowrap;
+		max-width: 8rem;
+		margin-left: 0.45rem;
+		opacity: 1;
+		transition:
+			max-width 240ms cubic-bezier(0.32, 0.72, 0, 1),
+			margin-left 240ms cubic-bezier(0.32, 0.72, 0, 1),
+			opacity 160ms ease;
+	}
+
+	:global(.is-phone .s2b-tabs-collapse [data-state="inactive"]) .s2b-tab-icon + .s2b-tab-text {
+		max-width: 0;
+		margin-left: 0;
+		opacity: 0;
 	}
 
 	/* Strip Obsidian's default <button> chrome so only the sliding accent pill shows
@@ -277,6 +320,10 @@ function registerTrigger(node: HTMLElement, id: T) {
 	/* Respect reduced-motion: snap instead of glide. */
 	@media (prefers-reduced-motion: reduce) {
 		.s2b-tab-indicator.animate {
+			transition: opacity 160ms ease;
+		}
+
+		:global(.is-phone .s2b-tabs-collapse) .s2b-tab-icon + .s2b-tab-text {
 			transition: opacity 160ms ease;
 		}
 	}

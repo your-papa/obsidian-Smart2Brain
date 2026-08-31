@@ -31,7 +31,7 @@ const SETTINGS_TABS: SlidingTab<string>[] = [
   </svg>
 </div>
 
-<SlidingTabs bind:value={activeTab} tabs={SETTINGS_TABS}>
+<SlidingTabs bind:value={activeTab} tabs={SETTINGS_TABS} collapseInactiveOnPhone>
   <Tabs.Content value="general">
     <GeneralSettings />
   </Tabs.Content>
