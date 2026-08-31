@@ -73,7 +73,8 @@ export class ModelSelectionModal extends Modal {
 			contentOverflow: "hidden",
 		});
 
-		this.setTitle(this.modelType === "chat" ? "Select Chat Model" : "Select Embedding Model");
+		// Sentence case per Obsidian's plugin UI guidelines.
+		this.setTitle(this.modelType === "chat" ? "Select chat model" : "Select embedding model");
 
 		this.component = mount(
 			ModalProvider<{

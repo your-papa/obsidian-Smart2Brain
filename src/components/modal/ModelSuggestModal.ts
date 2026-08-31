@@ -4,26 +4,13 @@ import { MODEL_CAPABILITY_ICONS } from "../../lib/modelCapabilityIcons";
 import { stripVendorPrefix } from "../../lib/modelMetadataNormalizer";
 import { extractVendor } from "../../lib/modelVendorClassification";
 import type { UiClassifiableModel } from "../../lib/modelVendorClassification";
-import { createVendorLogoElement } from "../../lib/vendorLogoSvg";
+import { createVendorLogoElement, VENDOR_CATALOG } from "../../lib/vendorLogoSvg";
 import { getProviderDefinition } from "../../providers/index";
 import { getData } from "../../stores/dataStore.svelte";
 import type { HydratedChatModelMetadata, HydratedEmbeddingModelMetadata } from "../../types/modelMetadata";
 import type { ModelType, SelectedModel } from "./ModelSelectionModal";
 
 type HydratedModel = HydratedChatModelMetadata | HydratedEmbeddingModelMetadata;
-
-/** Vendors offered in the filter strip, in display order. */
-const VENDOR_FILTERS = [
-	{ id: "openai", name: "OpenAI" },
-	{ id: "anthropic", name: "Anthropic" },
-	{ id: "google", name: "Google" },
-	{ id: "microsoft", name: "Microsoft" },
-	{ id: "meta-llama", name: "Meta" },
-	{ id: "deepseek", name: "DeepSeek" },
-	{ id: "x-ai", name: "xAI" },
-	{ id: "mistralai", name: "Mistral" },
-	{ id: "qwen", name: "Qwen" },
-] as const;
 
 function formatCost(costPer1M?: number): string {
 	if (costPer1M === undefined) return "—";
@@ -81,7 +68,7 @@ export class ModelSuggestModal extends SuggestModal<HydratedModel> {
 		this.openRouterModels = openRouterModels;
 
 		this.modalEl.addClass("s2b-model-suggest-modal");
-		this.setPlaceholder(modelType === "chat" ? "Search chat models..." : "Search embedding models...");
+		this.setPlaceholder(modelType === "chat" ? "Search chat models…" : "Search embedding models…");
 		this.limit = 200;
 	}
 
@@ -135,23 +122,24 @@ export class ModelSuggestModal extends SuggestModal<HydratedModel> {
 		setIcon(favIcon, "star");
 		favBtn.appendChild(favIcon);
 		favBtn.appendChild(document.createTextNode("Favorites"));
+		// Favorites and a vendor combine ("my favourite Qwen models"), matching
+		// the desktop modal's filter algebra — the two surfaces used to disagree.
 		favBtn.addEventListener("click", (evt) => {
 			evt.preventDefault();
 			this.showFavorites = !this.showFavorites;
-			if (this.showFavorites) this.selectedVendor = null;
 			this.refreshFilterBar();
 			this.rerunSearch();
 		});
 		bar.appendChild(favBtn);
 
-		for (const vendor of VENDOR_FILTERS) {
+		for (const vendor of VENDOR_CATALOG) {
 			if (!presentVendors.has(vendor.id)) continue;
 			const btn = document.createElement("button");
 			btn.type = "button";
 			btn.className = "s2b-pill s2b-pill--interactive";
 			btn.dataset.vendorId = vendor.id;
-			// Same artwork the rows use. Only the nine labs in VENDOR_LOGO_COMPONENTS
-			// have logos, so a miss falls back to the bare name rather than a
+			// Same artwork the rows use. Only the labs in VENDOR_CATALOG have
+			// logos, so a miss falls back to the bare name rather than a
 			// placeholder glyph — matches `renderSuggestion`. The marks are
 			// monochrome `currentColor` glyphs, so they follow the pill's own
 			// colour (muted at rest, accent while active) alongside the label.
@@ -166,7 +154,6 @@ export class ModelSuggestModal extends SuggestModal<HydratedModel> {
 			btn.addEventListener("click", (evt) => {
 				evt.preventDefault();
 				this.selectedVendor = this.selectedVendor === vendor.id ? null : vendor.id;
-				if (this.selectedVendor) this.showFavorites = false;
 				this.refreshFilterBar();
 				this.rerunSearch();
 			});
@@ -260,7 +247,11 @@ export class ModelSuggestModal extends SuggestModal<HydratedModel> {
 		});
 
 		if (isSelected) {
-			actions.createSpan({ text: "✓", cls: "s2b-model-suggestion-check" });
+			// A real check icon rather than the "✓" character, which renders
+			// differently per platform font.
+			const check = actions.createSpan({ cls: "s2b-model-suggestion-check" });
+			check.setAttribute("aria-hidden", "true");
+			setIcon(check, "check");
 		}
 
 		const meta = el.createDiv({ cls: "s2b-model-suggestion-meta" });

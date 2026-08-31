@@ -1222,7 +1222,12 @@ button.s2b-pill--interactive:hover {
 	gap: 6px;
 }
 
-.s2b-model-filter-bar .s2b-pill.s2b-pill--active {
+/* Shared active state for filter pills (mobile filter strip and the desktop
+   model modal's provider bar). The `:hover` selector keeps the active fill
+   from being washed out by the `--interactive`-hover rule, which otherwise
+   outspecifies this one on mouse-over. */
+.s2b-pill.s2b-pill--active,
+button.s2b-pill--interactive.s2b-pill--active:hover {
 	background: color-mix(in srgb, var(--interactive-accent) 18%, var(--background-secondary));
 	border-color: color-mix(in srgb, var(--interactive-accent) 45%, var(--background-modifier-border));
 	color: var(--text-accent);
@@ -1339,8 +1344,9 @@ button.s2b-pill--interactive:hover {
 }
 
 .s2b-model-suggestion-check {
+	display: inline-flex;
+	align-items: center;
 	color: var(--text-accent);
-	font-weight: bold;
 }
 
 .s2b-model-suggestion-meta {

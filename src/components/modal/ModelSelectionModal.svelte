@@ -5,32 +5,14 @@ import type { UiClassifiableModel } from "../../lib/modelVendorClassification";
 import { stripVendorPrefix } from "../../lib/modelMetadataNormalizer";
 import type { HydratedChatModelMetadata, HydratedEmbeddingModelMetadata } from "../../types/modelMetadata";
 import { MODEL_CAPABILITY_ICONS } from "../../lib/modelCapabilityIcons";
+import { VENDOR_CATALOG } from "../../lib/vendorLogoSvg";
+import type { VendorLogoComponent } from "../../lib/vendorLogoSvg";
 import { getProviderDefinition } from "../../providers/index";
 import { getData } from "../../stores/dataStore.svelte";
+import { addProviderAction } from "../../utils/actionNotice";
 import GenericAIIcon from "../ui/logos/GenericAIIcon.svelte";
-import OpenAILogo from "../ui/logos/OpenAILogo.svelte";
-import AnthropicLogo from "../ui/logos/AnthropicLogo.svelte";
-import GoogleLogo from "../ui/logos/GoogleLogo.svelte";
-import MicrosoftLogo from "../ui/logos/MicrosoftLogo.svelte";
-import MetaLogo from "../ui/logos/MetaLogo.svelte";
-import DeepSeekLogo from "../ui/logos/DeepSeekLogo.svelte";
-import MistralLogo from "../ui/logos/MistralLogo.svelte";
-import QwenLogo from "../ui/logos/QwenLogo.svelte";
-import XAILogo from "../ui/logos/XAILogo.svelte";
 import Icon from "../ui/Icon.svelte";
 import type { ModelSelectionModal, ModelType, SelectedModel } from "./ModelSelectionModal";
-
-const AI_VENDORS = [
-	{ id: "openai", name: "OpenAI", logo: OpenAILogo },
-	{ id: "anthropic", name: "Anthropic", logo: AnthropicLogo },
-	{ id: "google", name: "Google", logo: GoogleLogo },
-	{ id: "microsoft", name: "Microsoft", logo: MicrosoftLogo },
-	{ id: "meta-llama", name: "Meta", logo: MetaLogo },
-	{ id: "deepseek", name: "DeepSeek", logo: DeepSeekLogo },
-	{ id: "x-ai", name: "xAI", logo: XAILogo },
-	{ id: "mistralai", name: "Mistral", logo: MistralLogo },
-	{ id: "qwen", name: "Qwen", logo: QwenLogo },
-] as const;
 
 interface Props {
 	modal?: ModelSelectionModal;
@@ -50,6 +32,7 @@ let selectedVendor = $state<string | null>(null);
 let selectedConfiguredProvider = $state<string | null>(null);
 let showFavorites = $state(false);
 let searchInputEl: HTMLInputElement | undefined = $state();
+let modelsListEl: HTMLElement | undefined = $state();
 
 type HydratedModel = HydratedChatModelMetadata | HydratedEmbeddingModelMetadata;
 
@@ -81,6 +64,18 @@ $effect(() => {
 
 $effect(() => {
 	searchInputEl?.focus();
+});
+
+// With hundreds of models the current selection is easy to lose; bring it into
+// view once, when the (async-loading) model list first contains it. One-shot so
+// later filtering/refetching never yanks the scroll position around.
+let didRevealSelection = false;
+$effect(() => {
+	if (didRevealSelection || !currentSelection || models.length === 0) return;
+	didRevealSelection = true;
+	requestAnimationFrame(() => {
+		modelsListEl?.querySelector(".model-card.selected")?.scrollIntoView({ block: "center" });
+	});
 });
 
 // Group models by provider
@@ -115,7 +110,7 @@ const availableVendors = $derived.by(() => {
 		const vendor = extractVendor(toClassifiableModel(model), openRouterModels);
 		if (vendor) vendorSet.add(vendor);
 	}
-	return AI_VENDORS.filter((vendor) => vendorSet.has(vendor.id));
+	return VENDOR_CATALOG.filter((vendor) => vendorSet.has(vendor.id));
 });
 
 // Filter models by search query, AI vendor, configured provider, and favorites
@@ -183,11 +178,11 @@ function getProviderLogo(providerId: string) {
 	return GenericAIIcon;
 }
 
-/** Vendor artwork keyed by the ids `extractVendor` returns — the same nine the
+/** Vendor artwork keyed by the ids `extractVendor` returns — the same set the
  *  sidebar filters offer. Catalogues carry many more labs than that, so a miss
  *  is normal and callers must handle `null`. */
-const VENDOR_LOGOS: Record<string, (typeof AI_VENDORS)[number]["logo"]> = Object.fromEntries(
-	AI_VENDORS.map((vendor) => [vendor.id, vendor.logo]),
+const VENDOR_LOGOS: Record<string, VendorLogoComponent> = Object.fromEntries(
+	VENDOR_CATALOG.map((vendor) => [vendor.id, vendor.logo]),
 );
 
 /**
@@ -198,7 +193,7 @@ const VENDOR_LOGOS: Record<string, (typeof AI_VENDORS)[number]["logo"]> = Object
  * lab into one anonymous glyph. Mirrors `ModelSuggestModal.renderSuggestion`.
  */
 function getModelBranding(model: HydratedModel): {
-	logo: (typeof AI_VENDORS)[number]["logo"] | null;
+	logo: VendorLogoComponent | null;
 	name: string;
 } {
 	const vendor = extractVendor(toClassifiableModel(model), openRouterModels);
@@ -211,7 +206,6 @@ function formatCost(costPer1M?: number): string {
 	if (costPer1M === undefined) return "—";
 	if (costPer1M === 0) return "Free";
 	if (costPer1M < 0.01) return `$${costPer1M.toFixed(4)}`;
-	if (costPer1M < 1) return `$${costPer1M.toFixed(2)}`;
 	return `$${costPer1M.toFixed(2)}`;
 }
 
@@ -243,6 +237,48 @@ function handleSelect(provider: string, variantKey: string) {
 	onSelect({ provider, model: variantKey });
 }
 
+// --- Keyboard support ---
+// Search is the primary interaction (installs routinely discover 400+ models),
+// so the flow "type, Enter" must work without the mouse: Enter picks the top
+// visible model, ArrowDown steps into the list, and arrows walk the cards.
+
+function cardEls(): HTMLElement[] {
+	return Array.from(modelsListEl?.querySelectorAll<HTMLElement>(".model-card") ?? []);
+}
+
+function focusCard(index: number) {
+	const cards = cardEls();
+	if (cards.length === 0) return;
+	cards[Math.max(0, Math.min(index, cards.length - 1))].focus();
+}
+
+function handleSearchKeydown(event: KeyboardEvent) {
+	if (event.key === "Enter") {
+		const first = filteredModelsByProvider[0]?.models[0];
+		if (first) handleSelect(first.provider, first.variantKey);
+	} else if (event.key === "ArrowDown") {
+		event.preventDefault();
+		focusCard(0);
+	}
+}
+
+function handleCardKeydown(event: KeyboardEvent, provider: string, variantKey: string) {
+	if (event.key === "Enter" || event.key === " ") {
+		event.preventDefault();
+		handleSelect(provider, variantKey);
+		return;
+	}
+	if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+	event.preventDefault();
+	const cards = cardEls();
+	const index = cards.indexOf(event.currentTarget as HTMLElement);
+	if (event.key === "ArrowUp" && index <= 0) {
+		searchInputEl?.focus();
+		return;
+	}
+	focusCard(index + (event.key === "ArrowDown" ? 1 : -1));
+}
+
 // --- Model discovery refresh ---
 // Discovery can come back empty (bad/placeholder key, models not yet added to
 // the provider account, or a freshly-pulled Ollama model). Providers don't
@@ -252,6 +288,14 @@ const isLoadingModels = $derived(availableModels.isLoadingModels);
 
 function refreshModels() {
 	availableModels.refetchModels();
+}
+
+/** The way out of the "no provider configured" dead end: this modal can't do
+ *  anything useful until one exists, so close it and open provider setup
+ *  (same surface `addProviderAction` notices link to). */
+function openProviderSetup() {
+	modal?.close();
+	addProviderAction().run();
 }
 
 function getProviderListDisplay(): string {
@@ -269,7 +313,7 @@ function getProviderListDisplay(): string {
       <div class="model-provider-sidebar" aria-label="AI vendor filters">
         <button
           type="button"
-          class="model-provider-btn"
+          class="clickable-icon model-provider-btn"
           class:active={showFavorites}
           onclick={() => {
             showFavorites = !showFavorites;
@@ -279,14 +323,14 @@ function getProviderListDisplay(): string {
           aria-label="Favorites"
           aria-pressed={showFavorites}
         >
-          <Icon name="star" size="md" />
+          <Icon name="star" size="m" />
         </button>
 
         {#each availableVendors as vendorFilter (vendorFilter.id)}
           {@const VendorLogo = vendorFilter.logo}
           <button
             type="button"
-            class="model-provider-btn"
+            class="clickable-icon model-provider-btn"
             class:active={selectedVendor === vendorFilter.id}
             onclick={() => {
               selectedVendor = selectedVendor === vendorFilter.id ? null : vendorFilter.id;
@@ -295,7 +339,7 @@ function getProviderListDisplay(): string {
             aria-label={vendorFilter.name}
             aria-pressed={selectedVendor === vendorFilter.id}
           >
-            <VendorLogo width={38} height={38} />
+            <VendorLogo width={32} height={32} />
           </button>
         {/each}
       </div>
@@ -303,30 +347,37 @@ function getProviderListDisplay(): string {
 
     <div class="model-selection-main">
       <div class="model-search">
-        <Icon name="search" size="sm" />
+        <Icon name="search" size="s" />
         <input
           bind:this={searchInputEl}
           type="text"
           placeholder={modelType === "chat"
-            ? "Search chat models..."
-            : "Search embedding models..."}
+            ? "Search chat models…"
+            : "Search embedding models…"}
           bind:value={searchQuery}
+          onkeydown={handleSearchKeydown}
           class="search-input"
         />
         {#if searchQuery}
-          <button type="button" class="clear-search" onclick={() => (searchQuery = "")}>
+          <button
+            type="button"
+            class="clickable-icon clear-search"
+            aria-label="Clear search"
+            onclick={() => (searchQuery = "")}
+          >
             <Icon name="x" size="xs" />
           </button>
         {/if}
         <button
           type="button"
-          class="refresh-models"
+          class="clickable-icon refresh-models"
           class:is-loading={isLoadingModels}
           onclick={refreshModels}
           disabled={isLoadingModels}
+          aria-label="Re-fetch models from your configured providers"
           title="Re-fetch models from your configured providers"
         >
-          <Icon name="refresh-cw" size="sm" />
+          <Icon name="refresh-cw" size="s" />
         </button>
       </div>
 
@@ -336,8 +387,9 @@ function getProviderListDisplay(): string {
             {@const ProviderLogo = providerFilter.logo}
             <button
               type="button"
-              class="provider-filter-btn"
-              class:active={selectedConfiguredProvider === providerFilter.id}
+              class="s2b-pill s2b-pill--interactive provider-filter-btn"
+              class:s2b-pill--active={selectedConfiguredProvider === providerFilter.id}
+              aria-pressed={selectedConfiguredProvider === providerFilter.id}
               onclick={() => {
                 showFavorites = false;
                 selectedConfiguredProvider =
@@ -352,7 +404,7 @@ function getProviderListDisplay(): string {
         </div>
       {/if}
 
-      <div class="models-list">
+      <div class="models-list" bind:this={modelsListEl}>
         {#each filteredModelsByProvider as { provider, models } (provider)}
           {@const Logo = getProviderLogo(provider)}
           <div class="provider-group">
@@ -372,8 +424,7 @@ function getProviderListDisplay(): string {
                   class="model-card"
                   class:selected={isSelected(model.provider, model.variantKey)}
                   onclick={() => handleSelect(model.provider, model.variantKey)}
-                  onkeydown={(e) =>
-                    e.key === "Enter" && handleSelect(model.provider, model.variantKey)}
+                  onkeydown={(e) => handleCardKeydown(e, model.provider, model.variantKey)}
                 >
                   <div class="model-main">
                     {#if VendorLogo}
@@ -390,18 +441,22 @@ function getProviderListDisplay(): string {
                     <div class="model-actions">
                       <button
                         type="button"
-                        class="favorite-btn"
+                        class="clickable-icon favorite-btn"
                         class:is-favorite={isFavorite}
                         onclick={(e) => {
                           e.stopPropagation();
                           pluginData.toggleFavoriteModel(model.provider, model.variantKey);
                         }}
+                        aria-pressed={isFavorite}
+                        aria-label={isFavorite ? "Remove from favorites" : "Add to favorites"}
                         title={isFavorite ? "Remove from favorites" : "Add to favorites"}
                       >
-                        <Icon name="star" size="sm" />
+                        <Icon name="star" size="s" />
                       </button>
                       {#if isSelected(model.provider, model.variantKey)}
-                        <span class="check-icon">✓</span>
+                        <span class="check-icon" aria-hidden="true">
+                          <Icon name="check" size="s" />
+                        </span>
                       {/if}
                     </div>
                   </div>
@@ -480,10 +535,14 @@ function getProviderListDisplay(): string {
             <div class="no-models-guide">
               <div class="no-models-title">No provider configured</div>
               <div class="no-models-desc">
-                Add an AI provider in settings to discover {modelType === "embedding"
+                Add an AI provider to discover {modelType === "embedding"
                   ? "embedding"
                   : "chat"} models.
               </div>
+              <button type="button" class="mod-cta no-models-cta" onclick={openProviderSetup}>
+                <Icon name="plus" size="s" />
+                Add provider
+              </button>
             </div>
           {:else}
             <div class="no-models-guide">
@@ -500,12 +559,12 @@ function getProviderListDisplay(): string {
               </div>
               <button
                 type="button"
-                class="mod-cta no-models-refresh"
+                class="mod-cta no-models-cta"
                 class:is-loading={isLoadingModels}
                 onclick={refreshModels}
                 disabled={isLoadingModels}
               >
-                <Icon name="refresh-cw" size="sm" />
+                <Icon name="refresh-cw" size="s" />
                 {isLoadingModels ? "Refreshing…" : "Refresh models"}
               </button>
             </div>
@@ -539,35 +598,28 @@ function getProviderListDisplay(): string {
     padding: 12px 8px;
     margin: 16px 0 16px 16px;
     border: 1px solid var(--background-modifier-border);
-    border-radius: 12px;
+    border-radius: var(--radius-l);
     background: var(--background-secondary);
     overflow-y: auto;
     flex-shrink: 0;
     box-sizing: border-box;
   }
 
+  /* `.clickable-icon` supplies the native rest/hover treatment; this only
+     fixes the hit area so the rail stays a uniform column. */
   .model-provider-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
     width: 40px;
     height: 40px;
-    border-radius: 8px;
-    border: none;
-    cursor: pointer;
-    transition: all 0.15s ease;
-    background: transparent;
-    color: var(--text-muted);
     flex-shrink: 0;
-  }
-
-  .model-provider-btn:hover {
-    background: var(--background-modifier-hover);
-    color: var(--text-normal);
   }
 
   .model-provider-btn.active {
     background: var(--interactive-accent);
+    color: var(--text-on-accent);
+  }
+
+  .model-provider-btn.active:hover {
+    background: var(--interactive-accent-hover);
     color: var(--text-on-accent);
   }
 
@@ -587,7 +639,7 @@ function getProviderListDisplay(): string {
     gap: 8px;
     padding: 8px 12px;
     background: var(--background-secondary);
-    border-radius: 6px;
+    border-radius: var(--radius-m);
     border: 1px solid var(--background-modifier-border);
   }
 
@@ -599,36 +651,18 @@ function getProviderListDisplay(): string {
     padding-bottom: 4px;
   }
 
+  /* Base look and states come from the shared `.s2b-pill` family (the mobile
+     picker's filter strip uses the same classes); this only sizes the pill up
+     to carry 18px provider artwork. */
   .provider-filter-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
     min-height: 34px;
     padding: 6px 10px;
-    border: 1px solid var(--background-modifier-border);
-    border-radius: 999px;
-    background: var(--background-secondary);
-    color: var(--text-muted);
-    cursor: pointer;
-    transition: all 0.15s ease;
-  }
-
-  .provider-filter-btn:hover {
-    background: var(--background-modifier-hover);
-    color: var(--text-normal);
-    border-color: var(--interactive-accent-hover);
-  }
-
-  .provider-filter-btn.active {
-    background: color-mix(in srgb, var(--interactive-accent) 15%, var(--background-secondary));
-    border-color: var(--interactive-accent);
-    color: var(--text-normal);
+    gap: 8px;
+    font-size: var(--font-ui-smaller);
   }
 
   .provider-filter-btn span {
-    font-size: 12px;
     font-weight: 500;
-    white-space: nowrap;
   }
 
   .model-search:focus-within {
@@ -642,7 +676,7 @@ function getProviderListDisplay(): string {
     outline: none;
     box-shadow: none;
     color: var(--text-normal);
-    font-size: 14px;
+    font-size: var(--font-ui-small);
   }
 
   .search-input:focus,
@@ -656,21 +690,13 @@ function getProviderListDisplay(): string {
     color: var(--text-muted);
   }
 
-  .clear-search {
-    background: none;
-    border: none;
-    padding: 4px;
-    cursor: pointer;
-    color: var(--text-muted);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: 4px;
+  .clear-search,
+  .refresh-models {
+    flex-shrink: 0;
   }
 
-  .clear-search:hover {
-    color: var(--text-normal);
-    background: var(--background-modifier-hover);
+  .refresh-models:disabled {
+    cursor: default;
   }
 
   .models-list {
@@ -693,7 +719,7 @@ function getProviderListDisplay(): string {
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 12px;
+    font-size: var(--font-ui-smaller);
     font-weight: 600;
     color: var(--text-muted);
     text-transform: uppercase;
@@ -716,7 +742,7 @@ function getProviderListDisplay(): string {
     margin: 0;
     background: var(--background-secondary);
     border: 1px solid var(--background-modifier-border);
-    border-radius: 8px;
+    border-radius: var(--radius-m);
     cursor: pointer;
     text-align: left;
     width: 100%;
@@ -726,6 +752,11 @@ function getProviderListDisplay(): string {
   .model-card:hover {
     background: var(--background-modifier-hover);
     border-color: var(--interactive-accent-hover);
+  }
+
+  .model-card:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--interactive-accent) 45%, transparent);
   }
 
   .model-card.selected {
@@ -760,12 +791,12 @@ function getProviderListDisplay(): string {
 
   .model-name {
     font-weight: 500;
-    font-size: 14px;
+    font-size: var(--font-ui-small);
     color: var(--text-normal);
   }
 
   .model-description {
-    font-size: 12px;
+    font-size: var(--font-ui-smaller);
     color: var(--text-muted);
     margin-top: 2px;
   }
@@ -785,7 +816,7 @@ function getProviderListDisplay(): string {
     font-size: 11px;
     line-height: 1.2;
     background: var(--background-primary);
-    border-radius: 4px;
+    border-radius: var(--radius-s);
     color: var(--text-muted);
     white-space: nowrap;
   }
@@ -800,8 +831,9 @@ function getProviderListDisplay(): string {
   }
 
   .check-icon {
+    display: flex;
+    align-items: center;
     color: var(--text-accent);
-    font-weight: bold;
   }
 
   .model-actions {
@@ -812,31 +844,16 @@ function getProviderListDisplay(): string {
   }
 
   .favorite-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 28px;
-    height: 28px;
-    padding: 0;
-    border: none;
-    border-radius: 6px;
-    background: transparent;
     color: var(--text-faint);
-    cursor: pointer;
-    transition: all 0.15s ease;
-  }
-
-  .favorite-btn:hover {
-    background: var(--background-modifier-hover);
-    color: var(--text-muted);
   }
 
   .favorite-btn.is-favorite {
     color: var(--text-accent);
   }
 
-  .favorite-btn.is-favorite:hover {
-    color: var(--text-accent);
+  /* Filled star = favourited, matching the mobile picker's visual language. */
+  .favorite-btn.is-favorite :global(svg) {
+    fill: currentColor;
   }
 
   .no-models {
@@ -859,18 +876,18 @@ function getProviderListDisplay(): string {
   }
 
   .no-models-title {
-    font-size: 15px;
+    font-size: var(--font-ui-medium);
     font-weight: 600;
     color: var(--text-normal);
   }
 
   .no-models-desc {
-    font-size: 13px;
+    font-size: var(--font-ui-small);
     max-width: 34rem;
     line-height: 1.5;
   }
 
-  .no-models-refresh {
+  .no-models-cta {
     display: inline-flex;
     align-items: center;
     gap: 6px;
@@ -878,35 +895,13 @@ function getProviderListDisplay(): string {
     cursor: pointer;
   }
 
-  .no-models-refresh:disabled {
+  .no-models-cta:disabled {
     opacity: 0.6;
     cursor: default;
   }
 
-  .refresh-models {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 4px;
-    cursor: pointer;
-    color: var(--text-muted);
-    background: none;
-    border: none;
-    border-radius: 4px;
-    flex-shrink: 0;
-  }
-
-  .refresh-models:hover {
-    color: var(--text-normal);
-    background: var(--background-modifier-hover);
-  }
-
-  .refresh-models:disabled {
-    cursor: default;
-  }
-
   .refresh-models.is-loading :global(svg),
-  .no-models-refresh.is-loading :global(svg) {
+  .no-models-cta.is-loading :global(svg) {
     animation: s2b-model-refresh-spin 0.8s linear infinite;
   }
 
