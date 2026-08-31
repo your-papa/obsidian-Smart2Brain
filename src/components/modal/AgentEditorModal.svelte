@@ -74,9 +74,11 @@ const POPULAR_AGENT_ICONS = [
 	"workflow",
 ] as const;
 
-const BUILT_IN_AGENT_ICONS = getIconIds()
-	.slice()
-	.sort((left, right) => left.localeCompare(right));
+// getIconIds() returns lucide icons with a "lucide-" prefix, but setIcon (and every
+// stored agent icon, e.g. DEFAULT_AGENT_ICON "bot") uses the unprefixed name — strip it.
+const BUILT_IN_AGENT_ICONS = Array.from(new Set(getIconIds().map((id) => id.replace(/^lucide-/, "")))).sort(
+	(left, right) => left.localeCompare(right),
+);
 
 let agents = $derived(pluginData.agents);
 let selectedAgent = $derived(agents[agentId]);
