@@ -257,20 +257,26 @@ async function removeProvider(purgeEmbeddings = false) {
     filter: brightness(1.05);
   }
 
-  .provider-trust-icon {
+  /* --icon-size drives the injected svg too: Obsidian's .svg-icon reads it for
+     both axes, so sizing only the span leaves the glyph at the inherited 18px
+     height and it overflows the box. */
+  .provider-trust-icon,
+  .provider-status-icon {
+    --icon-size: 16px;
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 16px;
-    height: 16px;
+    width: var(--icon-size);
+    height: var(--icon-size);
   }
 
   .provider-status-icon {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 16px;
-    height: 16px;
     flex-shrink: 0;
+  }
+
+  .provider-trust-icon :global(svg.svg-icon),
+  .provider-status-icon :global(svg.svg-icon) {
+    width: var(--icon-size);
+    height: var(--icon-size);
   }
 </style>

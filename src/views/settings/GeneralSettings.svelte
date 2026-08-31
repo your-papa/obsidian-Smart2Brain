@@ -61,18 +61,26 @@ function handleOpenProviderSetup() {
 </SettingGroup>
 
 <style>
+  /* --icon-size drives the injected svg too: Obsidian's .svg-icon reads it for
+     both axes, so sizing only the span leaves the glyph at the inherited 18px
+     height and it overflows the box. */
   .privacy-trust-icon {
+    --icon-size: 16px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 16px;
-    height: 16px;
+    width: var(--icon-size);
+    height: var(--icon-size);
     color: var(--text-accent);
     flex-shrink: 0;
   }
 
+  .privacy-trust-icon :global(svg.svg-icon) {
+    width: var(--icon-size);
+    height: var(--icon-size);
+  }
+
   .privacy-trust-icon--label {
-    width: 14px;
-    height: 14px;
+    --icon-size: 14px;
   }
 </style>
