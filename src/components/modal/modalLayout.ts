@@ -33,17 +33,23 @@ export function applyModalLayout(modal: Modal, options: ModalLayoutOptions): () 
 	// turns the sheet into a floating box that neither fills the screen nor
 	// respects the keyboard inset). What they get instead is one of two native-ish
 	// presentations: core's inset card (default), or an edge-to-edge sheet
-	// (opt-in). The sheet pads with Obsidian's safe-area variables because the
-	// modal element itself carries no padding — without them the title sits under
-	// the notch and the footer under the home indicator.
+	// (opt-in).
+	//
+	// The sheet is sized in `dvh`, not `vh`/`%`: on iOS `vh` resolves against the
+	// largest possible viewport (ignoring the browser/app chrome that comes and
+	// goes), which overshoots the visible area, and `100%` depends on ancestors
+	// that core positions absolutely. It pads with Obsidian's safe-area variables
+	// because the modal element carries no padding of its own — without them the
+	// title sits under the notch and the footer under the home indicator.
 	const sizeOverrides = Platform.isPhone
 		? fullScreenOnPhone
 			? ([
 					["width", "100vw"],
 					["max-width", "100vw"],
-					["height", "100%"],
-					["max-height", "100%"],
+					["height", "100dvh"],
+					["max-height", "100dvh"],
 					["border-radius", "0"],
+					["margin", "0"],
 					["padding-top", "var(--safe-area-inset-top, 0px)"],
 					["padding-bottom", "var(--safe-area-inset-bottom, 0px)"],
 				] as const)
@@ -66,16 +72,17 @@ export function applyModalLayout(modal: Modal, options: ModalLayoutOptions): () 
 		modal.modalEl.style.setProperty(property, value);
 	}
 
-	// Core's phone close button (`.modal-header-button`) is absolutely positioned
-	// at `top: 12px`, so the sheet's safe-area padding doesn't move it — it lands
-	// in the status-bar / Dynamic Island zone. Keep its 12px offset but measure it
-	// from below the inset instead (the variable is 0 on notch-less phones).
+	// Core's phone close/header buttons are absolutely positioned near the sheet's
+	// top edge, which on a notched device is the status-bar / Dynamic Island zone.
+	// `top` on an absolutely-positioned child resolves against the padding box's
+	// outer edge, so the sheet's safe-area `padding-top` does NOT move them —
+	// the inset has to be added explicitly. It is 0 on phones without a notch.
 	const headerButtons =
 		Platform.isPhone && fullScreenOnPhone
-			? [...modal.modalEl.querySelectorAll<HTMLElement>(".modal-header-button")]
+			? [...modal.modalEl.querySelectorAll<HTMLElement>(".modal-header-button, .modal-close-button")]
 			: [];
 	for (const button of headerButtons) {
-		button.style.top = "calc(var(--safe-area-inset-top, 0px) + 12px)";
+		button.style.top = "calc(var(--safe-area-inset-top, 0px) + var(--size-4-3))";
 	}
 
 	if (contentFill) {
