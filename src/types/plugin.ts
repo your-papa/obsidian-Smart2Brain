@@ -430,7 +430,7 @@ export type SkillEnableState = Record<string, boolean>;
  * Configuration for an individual agent.
  * Each agent can have its own model, prompts, and tool configurations.
  */
-export const DEFAULT_AGENT_ICON = "bot";
+export const DEFAULT_AGENT_ICON = "brain";
 
 export interface AgentConfig {
 	/** Unique identifier for the agent */
