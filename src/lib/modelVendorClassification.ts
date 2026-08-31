@@ -21,9 +21,44 @@ export const UI_VENDOR_IDS = [
 	"x-ai",
 	"mistralai",
 	"qwen",
+	"z-ai",
+	"minimax",
+	"nvidia",
+	"moonshotai",
+	"tencent",
+	"bytedance-seed",
+	"openrouter",
+	"perplexity",
+	"kwaipilot",
+	"xiaomi",
+	"meituan",
+	"baidu",
 ] as const;
 
 const UI_VENDOR_ID_SET = new Set<string>(UI_VENDOR_IDS);
+
+/**
+ * Catalogue prefixes that mean a vendor we already draw, under another name.
+ * `meta` is Meta's own non-Llama line (the `muse-*` models) and shares Meta's
+ * mark; `bytedance` predates the `bytedance-seed` prefix. Mapping them here
+ * rather than adding artwork keeps one logo per lab.
+ */
+const VENDOR_ID_ALIASES: Record<string, string> = {
+	meta: "meta-llama",
+	bytedance: "bytedance-seed",
+};
+
+/**
+ * Canonicalizes a raw catalogue prefix.
+ *
+ * OpenRouter publishes floating aliases under a `~` prefix (`~anthropic/
+ * claude-opus-latest`), which is the same lab as `anthropic` and must resolve
+ * to the same logo rather than reading as an unknown vendor.
+ */
+export function normalizeVendorId(rawVendor: string): string {
+	const withoutAliasMarker = rawVendor.startsWith("~") ? rawVendor.slice(1) : rawVendor;
+	return VENDOR_ID_ALIASES[withoutAliasMarker] ?? withoutAliasMarker;
+}
 
 export type UnclassifiedUiModelReason = "no_vendor_match" | "vendor_not_in_ui";
 
@@ -84,8 +119,11 @@ function inferVendorFromBaseUrl(baseUrl?: string | null): string | null {
 
 function inferVendorFromModelName(modelId: string): string | null {
 	const prefix = extractPrefixFromOpenRouterModelId(modelId);
-	if (prefix && UI_VENDOR_ID_SET.has(prefix)) {
-		return prefix;
+	if (prefix) {
+		const normalizedPrefix = normalizeVendorId(prefix);
+		if (UI_VENDOR_ID_SET.has(normalizedPrefix)) {
+			return normalizedPrefix;
+		}
 	}
 
 	const normalized = modelId.toLowerCase().trim();
@@ -126,8 +164,9 @@ function inferOllamaVendorFromOpenRouter(
 		const matches = new Set<string>();
 		for (const modelInfo of openRouterModels.values()) {
 			const sourceId = modelInfo.canonical_slug ?? modelInfo.id;
-			const prefix = extractPrefixFromOpenRouterModelId(sourceId);
-			if (!prefix) continue;
+			const rawPrefix = extractPrefixFromOpenRouterModelId(sourceId);
+			if (!rawPrefix) continue;
+			const prefix = normalizeVendorId(rawPrefix);
 
 			const modelPart = sourceId.split("/").slice(1).join("/");
 			const modelPartNormalized = normalizeComparableToken(modelPart);
@@ -150,7 +189,7 @@ export function extractVendor(
 	openRouterModels?: Map<string, OpenRouterModelInfo> | null,
 ): string | null {
 	if ((model.templateId === "openrouter" || model.provider === "openrouter") && model.model.includes("/")) {
-		return model.model.split("/")[0];
+		return normalizeVendorId(model.model.split("/")[0]);
 	}
 
 	if (model.templateId === "openai-codex" || model.provider === "openai") {

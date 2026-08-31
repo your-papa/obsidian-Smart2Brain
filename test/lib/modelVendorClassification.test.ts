@@ -45,6 +45,43 @@ describe("modelVendorClassification", () => {
 		).toBe("anthropic");
 	});
 
+	it("resolves openrouter floating '~' aliases to the underlying vendor", () => {
+		expect(
+			extractVendor({
+				provider: "my-openrouter",
+				templateId: "openrouter",
+				model: "~anthropic/claude-opus-latest",
+			}),
+		).toBe("anthropic");
+	});
+
+	it("maps alias prefixes onto the vendor that already owns the artwork", () => {
+		expect(
+			extractVendor({
+				provider: "my-openrouter",
+				templateId: "openrouter",
+				model: "meta/muse-spark-1.2",
+			}),
+		).toBe("meta-llama");
+
+		expect(
+			extractVendor({
+				provider: "my-openrouter",
+				templateId: "openrouter",
+				model: "bytedance/ui-tars-1.5-7b",
+			}),
+		).toBe("bytedance-seed");
+	});
+
+	it("does not treat '~' aliases as unclassified", () => {
+		expect(
+			getUnclassifiedModelsForUi([
+				{ provider: "my-openrouter", templateId: "openrouter", model: "~openai/gpt-latest" },
+				{ provider: "my-openrouter", templateId: "openrouter", model: "~z-ai/glm-latest" },
+			]),
+		).toEqual([]);
+	});
+
 	it("classifies LiteLLM-style provider-prefixed model ids", () => {
 		expect(
 			extractVendor({
