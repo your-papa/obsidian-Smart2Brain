@@ -96,9 +96,12 @@ function handleTriggerClick() {
       box-shadow 0.12s ease;
   }
 
-  :global(.picker-popover-trigger:hover) {
-    background: var(--interactive-hover);
-    border-color: color-mix(in srgb, var(--background-modifier-border) 72%, var(--text-muted) 28%);
+  /* Guarded so a tap doesn't leave the trigger stuck in its hover state. */
+  @media (hover: hover) and (pointer: fine) {
+    :global(.picker-popover-trigger:hover) {
+      background: var(--interactive-hover);
+      border-color: color-mix(in srgb, var(--background-modifier-border) 72%, var(--text-muted) 28%);
+    }
   }
 
   :global(.picker-popover-trigger:focus-visible) {

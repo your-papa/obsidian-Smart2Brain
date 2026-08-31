@@ -30,7 +30,7 @@ let {
 </script>
 
 <div class="picker-option-row" class:is-active={active} class:is-muted={muted}>
-  <button type="button" class="picker-option menu-item" onclick={onClick}>
+  <button type="button" class="picker-option" onclick={onClick}>
     {#if leading}
       <span class="picker-option-leading menu-item-icon">
         {@render leading()}
@@ -38,12 +38,12 @@ let {
     {/if}
 
     <span class="picker-option-body">
-      <span class="picker-option-label menu-item-title">
+      <span class="picker-option-label">
         {@render content?.()}
       </span>
 
       {#if meta}
-        <span class="picker-option-meta menu-item-subtitle">
+        <span class="picker-option-meta">
           {@render meta()}
         </span>
       {/if}
@@ -75,9 +75,16 @@ let {
     min-width: 0;
   }
 
-  .picker-option-row:hover,
   .picker-option-row.is-active {
     background: var(--background-modifier-hover);
+  }
+
+  /* Touch devices keep a sticky :hover on the last-tapped element, which would
+     leave rows looking permanently highlighted. Only real pointers get hover. */
+  @media (hover: hover) and (pointer: fine) {
+    .picker-option-row:hover {
+      background: var(--background-modifier-hover);
+    }
   }
 
   .picker-option-row.is-muted {
@@ -160,7 +167,6 @@ let {
       color 0.12s ease;
   }
 
-  .picker-option-row:hover .picker-option-action,
   .picker-option-row:focus-within .picker-option-action {
     opacity: 0.92;
   }
@@ -169,9 +175,15 @@ let {
     opacity: 0.6;
   }
 
-  .picker-option-action:hover {
-    background: color-mix(in srgb, var(--background-primary) 55%, transparent);
-    color: var(--text-normal);
+  @media (hover: hover) and (pointer: fine) {
+    .picker-option-row:hover .picker-option-action {
+      opacity: 0.92;
+    }
+
+    .picker-option-action:hover {
+      background: color-mix(in srgb, var(--background-primary) 55%, transparent);
+      color: var(--text-normal);
+    }
   }
 
   .picker-option-action:focus-visible {
