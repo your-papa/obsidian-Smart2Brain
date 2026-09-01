@@ -28,18 +28,33 @@ const MOBILE_MAX_READ_BYTES = 10 * 1024 * 1024;
 const MOBILE_CHAT_MAX_EXTRACT_BYTES = 2 * 1024 * 1024;
 
 /**
- * Hard cap on the text handed to indexing, in UTF-16 code units.
+ * Hard caps on the text handed to indexing, in UTF-16 code units.
  *
- * Search relevance saturates long before either bound — no note needs its
- * second megabyte of prose to be findable — but index size and tokenization
- * cost keep growing linearly, and the cost is postings, not vocabulary: a long
- * document touches tens of thousands of terms, each of which stores a posting
- * object for it. Measured on a 7.2k-file vault, indexing full extracted text
- * put the mobile WebView at a 1.4GB resting footprint — a hair under the OS
- * kill ceiling. The mobile cap still covers a typical note completely (~99%
- * of notes are under 100K chars) and the first ~40 pages of a PDF.
+ * Search relevance saturates long before these bounds, but the index's memory
+ * cost keeps growing linearly — and the cost is postings, not vocabulary.
+ * MiniSearch keeps one object entry per (term, document) pair at roughly 60
+ * bytes of overhead, so a document's cost scales with its *unique term count*.
+ * Measured on a 7.2k-file vault (149K-term vocabulary): full extracted text
+ * put the mobile WebView's live JS heap at ~650MB (1.4GB footprint — a hair
+ * under the OS kill ceiling), and a uniform 100K-char cap only trimmed ~200MB
+ * because the PDF/clipping tail still contributed millions of pairs.
+ *
+ * So mobile caps by provenance: authored notes keep 100K (~99% of notes fit
+ * completely), while extracted/structured text (PDFs, chat logs, canvas/CSV/
+ * JSON) gets 10K — about four PDF pages — enough to find a document by its
+ * opening content, with title/path/tag search unaffected. Desktop has no
+ * memory ceiling and indexes up to 1M everywhere.
  */
-const MAX_INDEXED_TEXT_CHARS = Platform.isMobile ? 100_000 : 1_000_000;
+const MAX_INDEXED_TEXT_CHARS_DESKTOP = 1_000_000;
+const MOBILE_MAX_INDEXED_TEXT_CHARS_NOTES = 100_000;
+const MOBILE_MAX_INDEXED_TEXT_CHARS_EXTRACTED = 10_000;
+
+function maxIndexedTextChars(file: TFile): number {
+	if (!Platform.isMobile) return MAX_INDEXED_TEXT_CHARS_DESKTOP;
+	return file.extension === "md" || file.extension === "txt"
+		? MOBILE_MAX_INDEXED_TEXT_CHARS_NOTES
+		: MOBILE_MAX_INDEXED_TEXT_CHARS_EXTRACTED;
+}
 
 function normalizePattern(pattern: string): string {
 	return pattern.trim().replace(/^\/+|\/+$/g, "");
@@ -230,7 +245,8 @@ export function getEmbeddableVaultFiles(vault: Vault): TFile[] {
  */
 export async function readIndexableContent(vault: Vault, file: TFile): Promise<string> {
 	const content = await readIndexableContentRaw(vault, file);
-	return content.length > MAX_INDEXED_TEXT_CHARS ? content.slice(0, MAX_INDEXED_TEXT_CHARS) : content;
+	const cap = maxIndexedTextChars(file);
+	return content.length > cap ? content.slice(0, cap) : content;
 }
 
 async function readIndexableContentRaw(vault: Vault, file: TFile): Promise<string> {
