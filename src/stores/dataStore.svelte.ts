@@ -560,7 +560,13 @@ const MIGRATIONS: Migration[] = [
 	(data) => {
 		for (const agent of Object.values(data.agents ?? {})) {
 			const skills = agent.skills as unknown as Record<string, unknown>;
-			if (skills && "edit-notes" in skills) {
+			// Move only into a vacant destination: a pre-v11 vault can already hold a
+			// "manage-notes" entry (a user-created skill of that name — the same collision
+			// the folder migration refuses to guess about), and that preference must win
+			// over the legacy key. In that case the edit-notes key is also KEPT, because
+			// the folder migration leaves the legacy folder on disk when both exist, so an
+			// "edit-notes" skill remains discoverable and its veto stays meaningful.
+			if (skills && "edit-notes" in skills && !("manage-notes" in skills)) {
 				skills["manage-notes"] = skills["edit-notes"];
 				skills["edit-notes"] = undefined;
 			}

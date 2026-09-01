@@ -616,6 +616,38 @@ describe("createData", () => {
 		expect((agent.toolsConfig.manage_notes as { settings?: unknown }).settings).toBeUndefined();
 	});
 
+	/*
+	 * A pre-v11 vault can already hold a "manage-notes" entry — a user-created skill of
+	 * that name. Its preference must win over the legacy key, and the edit-notes key is
+	 * kept because the folder migration also leaves the legacy folder on disk when both
+	 * exist, so that skill remains discoverable and its veto stays meaningful.
+	 */
+	it("keeps an existing manage-notes preference when both skill keys are present (v10→v11)", async () => {
+		const plugin = {
+			...createMockPlugin(),
+			loadData: vi.fn().mockResolvedValue({
+				...structuredClone(DEFAULT_SETTINGS),
+				schemaVersion: 10,
+				agents: {
+					[DEFAULT_AGENT_ID]: {
+						id: DEFAULT_AGENT_ID,
+						name: "S2B Agent",
+						chatModel: null,
+						skills: { "edit-notes": { enabled: false }, "manage-notes": { enabled: true } },
+						toolsConfig: structuredClone(DEFAULT_TOOLS_CONFIG),
+						mcpServers: {},
+					},
+				},
+			}),
+		};
+
+		const store = await createData(plugin as never);
+
+		const agent = store.getAgent(DEFAULT_AGENT_ID)!;
+		expect(agent.skills["manage-notes"]?.enabled).toBe(true);
+		expect(agent.skills["edit-notes"]?.enabled).toBe(false);
+	});
+
 	it("de-duplicates persisted agent names that sanitize to the same prompt filename", async () => {
 		const mkAgent = (id: string, name: string) => ({
 			id,

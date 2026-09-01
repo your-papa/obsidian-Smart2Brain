@@ -650,6 +650,12 @@ export class SkillsService {
 
 		try {
 			if (!(await this.adapter.exists(oldDir))) {
+				// No legacy folder — but a PREVIOUS attempt may have renamed it and then
+				// failed before the frontmatter rewrite (the flag is only set on full
+				// success). Finish that rewrite here rather than reading "no edit-notes/"
+				// as "nothing to do", or the retry path would seal a manage-notes/ whose
+				// `name:` still says edit-notes — undiscoverable forever.
+				await this.rewriteLegacyEditNotesName(newDir);
 				data.manageNotesFolderMigrated = true;
 				return;
 			}
@@ -673,16 +679,32 @@ export class SkillsService {
 			}
 
 			await this.adapter.rename(oldDir, newDir);
-			const newPath = `${newDir}/${SKILL_FILENAME}`;
-			const raw = await this.adapter.read(newPath);
-			const updated = raw.replace(/^name:\s*edit-notes\s*$/m, "name: manage-notes");
-			if (updated !== raw) await this.adapter.write(newPath, updated);
+			await this.rewriteLegacyEditNotesName(newDir);
 
 			Log.info(`Renamed customized core-skill folder ${oldDir} -> ${newDir}`);
 			data.manageNotesFolderMigrated = true;
 		} catch (error) {
 			// Leave the flag unset so we retry next start.
 			Log.error("manage-notes folder migration failed:", error);
+		}
+	}
+
+	/**
+	 * Rewrite a migrated skill file's `name: edit-notes` frontmatter line to `manage-notes`.
+	 * Tolerates optionally quoted YAML (`name: "edit-notes"` / `'edit-notes'` are valid and
+	 * accepted by discovery, so they must be matched too — an unquoted-only regex would leave
+	 * the old name in place and the skill undiscoverable). A no-op when the file is absent or
+	 * already carries another name; throws on I/O failure so the caller's flag stays unset and
+	 * the migration retries.
+	 */
+	private async rewriteLegacyEditNotesName(skillDir: string): Promise<void> {
+		const path = `${skillDir}/${SKILL_FILENAME}`;
+		if (!(await this.adapter.exists(path))) return;
+		const raw = await this.adapter.read(path);
+		const updated = raw.replace(/^name:\s*(["']?)edit-notes\1\s*$/m, "name: manage-notes");
+		if (updated !== raw) {
+			await this.adapter.write(path, updated);
+			Log.info(`Rewrote legacy skill name in ${path}`);
 		}
 	}
 
