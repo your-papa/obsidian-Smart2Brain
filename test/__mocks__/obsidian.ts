@@ -200,6 +200,17 @@ export class WorkspaceLeaf {
 }
 
 // Utility functions
+export const Platform = {
+	isMobile: false,
+	isMobileApp: false,
+	isDesktop: true,
+	isDesktopApp: true,
+	isIosApp: false,
+	isAndroidApp: false,
+	isPhone: false,
+	isTablet: false,
+};
+
 export function normalizePath(path: string): string {
 	return path.replace(/\\/g, "/").replace(/\/+/g, "/");
 }

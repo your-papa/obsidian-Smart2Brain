@@ -12,7 +12,12 @@ import {
 } from "../search/lexicalScoring";
 import { Logger } from "../utils/logging";
 import { StartupProfiler } from "../utils/startupProfiler";
-import { getIndexableVaultFiles, isIndexableFile, readIndexableContent } from "../utils/fileFiltering";
+import {
+	getIndexableVaultFiles,
+	isBinaryTextFile,
+	isIndexableFile,
+	readIndexableContent,
+} from "../utils/fileFiltering";
 import {
 	MiniSearchService,
 	type AutocompleteCacheSnapshot,
@@ -203,28 +208,63 @@ export class LexicalSearchService {
 		return this.miniSearch.getAutocompleteCache();
 	}
 
-	private async buildIndex(): Promise<void> {
-		await StartupProfiler.logDuration("lexical:buildIndex", async () => {
-			const { vault } = this.plugin.app;
-			const files = getIndexableVaultFiles(vault);
+	/**
+	 * How many documents a bulk run indexes between IndexedDB checkpoints.
+	 *
+	 * Each checkpoint serializes the whole index, so the interval trades save cost
+	 * against how much progress a crash can lose. On mobile the process can be
+	 * killed by the OS mid-build; a checkpoint every few hundred documents lets the
+	 * next boot's validateIndex resume roughly where this run died instead of
+	 * starting over.
+	 */
+	private static readonly BULK_CHECKPOINT_INTERVAL = 250;
 
+	/**
+	 * Bulk-indexing file order: cheap text files first, binary-extraction files
+	 * (PDFs) last. PDF text extraction is minutes of work on a large vault, and
+	 * putting it first held the whole searchable corpus hostage to it — this way
+	 * every note is searchable early even if the PDF tail never finishes.
+	 */
+	private static orderForBulkIndexing(files: TFile[]): TFile[] {
+		return [...files].sort((a, b) => Number(isBinaryTextFile(a)) - Number(isBinaryTextFile(b)));
+	}
+
+	/** Index `files`, checkpointing to IndexedDB every {@link BULK_CHECKPOINT_INTERVAL} additions. */
+	private async bulkIndexFiles(files: TFile[]): Promise<number> {
+		const { vault } = this.plugin.app;
+		let added = 0;
+		this.miniSearch.suspendScheduledSaves();
+		try {
 			for (const file of files) {
 				try {
 					const content = await readIndexableContent(vault, file);
 					this.miniSearch.addDocument(file.path, file.basename, content, this.getSearchableTags(file));
+					added++;
 				} catch (error) {
 					Logger.error(`[LexicalSearch] Failed to read ${file.path}:`, error);
 				}
-			}
 
-			await this.miniSearch.flush();
+				if (added > 0 && added % LexicalSearchService.BULK_CHECKPOINT_INTERVAL === 0) {
+					await this.miniSearch.flush();
+				}
+			}
+		} finally {
+			this.miniSearch.resumeScheduledSaves();
+		}
+		await this.miniSearch.flush();
+		return added;
+	}
+
+	private async buildIndex(): Promise<void> {
+		await StartupProfiler.logDuration("lexical:buildIndex", async () => {
+			const files = LexicalSearchService.orderForBulkIndexing(getIndexableVaultFiles(this.plugin.app.vault));
+			await this.bulkIndexFiles(files);
 			Logger.log(`[LexicalSearch] Built lexical index: ${this.miniSearch.documentCount} documents`);
 		});
 	}
 
 	private async validateIndex(): Promise<void> {
-		const { vault } = this.plugin.app;
-		const files = getIndexableVaultFiles(vault);
+		const files = getIndexableVaultFiles(this.plugin.app.vault);
 		const vaultPaths = new Set(files.map((f) => f.path));
 
 		let removed = 0;
@@ -235,20 +275,10 @@ export class LexicalSearchService {
 			}
 		}
 
-		let added = 0;
-		for (const file of files) {
-			if (this.miniSearch.hasDocument(file.path)) {
-				continue;
-			}
-
-			try {
-				const content = await readIndexableContent(vault, file);
-				this.miniSearch.addDocument(file.path, file.basename, content, this.getSearchableTags(file));
-				added++;
-			} catch (error) {
-				Logger.error(`[LexicalSearch] Failed to read ${file.path}:`, error);
-			}
-		}
+		const missing = LexicalSearchService.orderForBulkIndexing(
+			files.filter((file) => !this.miniSearch.hasDocument(file.path)),
+		);
+		const added = await this.bulkIndexFiles(missing);
 
 		if (added > 0 || removed > 0) {
 			await this.miniSearch.flush();
@@ -333,12 +363,12 @@ export class LexicalSearchService {
 		return cache ? (getAllTags(cache) ?? []) : [];
 	}
 
-	private applyFilter(
+	private async applyFilter(
 		results: LexicalSearchResult[],
 		topK: number,
 		filter?: SearchFilter,
 		query?: string,
-	): VectorSearchResult[] {
+	): Promise<VectorSearchResult[]> {
 		const { metadataCache } = this.plugin.app;
 		const filteredResults: VectorSearchResult[] = [];
 		// Compile once before the loop so large path-prefix lists build their
@@ -354,12 +384,17 @@ export class LexicalSearchService {
 				continue;
 			}
 
+			// Only the results that survive the filter — at most topK of them — pay
+			// for a file read, and only when there is a query to explain.
+			const content =
+				query?.trim() && file instanceof TFile ? await this.readExplanationContent(file) : undefined;
+
 			const matchMetadata = this.resolveMatchMetadata(
 				query,
 				result.path,
 				result.name,
 				docTags,
-				result.content,
+				content,
 				result.features,
 				cache,
 			);
@@ -381,6 +416,24 @@ export class LexicalSearchService {
 		}
 
 		return filteredResults;
+	}
+
+	/**
+	 * Content for match explanations, read on demand. The index no longer stores
+	 * document text (see MiniSearchService storeFields), so snippets come from the
+	 * live file. Plain markdown only: binary formats (PDF) would need a full
+	 * re-extraction for a one-line snippet, and Excalidraw's raw JSON never matches
+	 * what was indexed — both fall back to badge-only explanations.
+	 */
+	private async readExplanationContent(file: TFile): Promise<string | undefined> {
+		if (file.extension !== "md" || file.path.toLowerCase().endsWith(".excalidraw.md")) {
+			return undefined;
+		}
+		try {
+			return await this.plugin.app.vault.cachedRead(file);
+		} catch {
+			return undefined;
+		}
 	}
 
 	private resolveMatchMetadata(

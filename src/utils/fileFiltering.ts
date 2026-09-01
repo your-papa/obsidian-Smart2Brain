@@ -1,7 +1,19 @@
-import type { TFile, Vault } from "obsidian";
+import { Platform, type TFile, type Vault } from "obsidian";
 import { getData } from "../stores/dataStore.svelte";
 import { gunzipToString } from "./gzip";
 import { extractTextFromPdf } from "./pdfExtractor";
+
+/**
+ * Largest PDF whose text gets extracted on mobile, in bytes.
+ *
+ * pdf.js keeps the whole document plus its parsed structures in memory while
+ * extracting, and the mobile WebView lives under an OS memory ceiling the
+ * desktop never meets. Text-heavy PDFs are almost always small; the ones above
+ * this size are predominantly scans, which yield no text anyway (no OCR). An
+ * oversized PDF is indexed by title/path only — the same result as an
+ * encrypted or scanned one.
+ */
+const MOBILE_PDF_MAX_EXTRACT_BYTES = 10 * 1024 * 1024;
 
 function normalizePattern(pattern: string): string {
 	return pattern.trim().replace(/^\/+|\/+$/g, "");
@@ -195,6 +207,9 @@ export async function readIndexableContent(vault: Vault, file: TFile): Promise<s
 	// lets the normal chunker split the document by length; returning "" would
 	// index a multi-page PDF as a single title-only vector.
 	if (isBinaryTextFile(file)) {
+		if (Platform.isMobile && file.stat.size > MOBILE_PDF_MAX_EXTRACT_BYTES) {
+			return "";
+		}
 		try {
 			const bytes = await readBinaryFile(vault, file);
 			const { text } = await extractTextFromPdf(new Uint8Array(bytes));

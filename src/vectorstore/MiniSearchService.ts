@@ -57,14 +57,13 @@ const STORE_NAME = "index";
 const OPEN_BLOCKED_TIMEOUT_MS = 10_000;
 const INDEX_KEY = "main";
 /** Bump whenever the indexed file set or field schema changes to force a full reindex. */
-const STORAGE_SCHEMA_VERSION = 7;
+const STORAGE_SCHEMA_VERSION = 8;
 
 export interface LexicalSearchResult {
 	path: string;
 	name: string;
 	aliases?: string[];
 	tags?: string[];
-	content?: string;
 	score: number;
 	features?: LexicalRankingFeatures;
 }
@@ -246,6 +245,7 @@ export class MiniSearchService {
 	private index: MiniSearch<IndexedDocument>;
 	private db: IDBDatabase | null = null;
 	private isDirty = false;
+	private savesSuspended = false;
 	private saveTimeout: ReturnType<typeof setTimeout> | null = null;
 	private documentPaths = new Set<string>();
 	private documentTitles = new Map<string, string>();
@@ -269,7 +269,12 @@ export class MiniSearchService {
 	private createIndex(): MiniSearch<IndexedDocument> {
 		return new MiniSearch<IndexedDocument>({
 			fields: ["title", "aliases", "tags", "pathSegments", "content"],
-			storeFields: ["path", "title", "aliases", "tags", "pathSegments", "content"],
+			// `content` is deliberately NOT a store field: the searchable terms live in
+			// the inverted index, and retaining the raw text of every note (and every
+			// extracted PDF) kept the whole vault's prose in the JS heap — the main
+			// reason mobile WebViews hit the OS memory ceiling. Explanation snippets
+			// re-read the file on demand instead.
+			storeFields: ["path", "title", "aliases", "tags", "pathSegments"],
 			idField: "id",
 			searchOptions: {
 				boost: { title: 2, aliases: 1.8, tags: 1.5, pathSegments: 1.2, content: 1 },
@@ -385,7 +390,7 @@ export class MiniSearchService {
 						}
 						this.index = MiniSearch.loadJS(data.indexData, {
 							fields: ["title", "aliases", "tags", "pathSegments", "content"],
-							storeFields: ["path", "title", "aliases", "tags", "pathSegments", "content"],
+							storeFields: ["path", "title", "aliases", "tags", "pathSegments"],
 							idField: "id",
 						});
 						// Rebuild paths set
@@ -460,12 +465,38 @@ export class MiniSearchService {
 	}
 
 	/**
+	 * Suspend the per-mutation debounced saves for the duration of a bulk index run.
+	 *
+	 * Each save serializes the ENTIRE index via `toJSON()`. During a bulk build that
+	 * debounce fires over and over against an ever-growing index, and on mobile those
+	 * repeated full serializations were the allocation spikes that pushed the WebView
+	 * past the OS memory ceiling. While suspended, mutations only mark the index dirty;
+	 * the bulk caller checkpoints explicitly via `flush()`.
+	 */
+	suspendScheduledSaves(): void {
+		this.savesSuspended = true;
+		if (this.saveTimeout) {
+			clearTimeout(this.saveTimeout);
+			this.saveTimeout = null;
+		}
+	}
+
+	/** Re-enable debounced saves after a bulk run. Does not save by itself — call `flush()`. */
+	resumeScheduledSaves(): void {
+		this.savesSuspended = false;
+	}
+
+	/**
 	 * Schedule a debounced save operation.
 	 * Uses requestIdleCallback so the heavy toJSON() + IndexedDB write only runs
 	 * when the browser is idle — never blocking an active user interaction.
 	 */
 	private scheduleSave(): void {
 		this.isDirty = true;
+
+		if (this.savesSuspended) {
+			return;
+		}
 
 		if (this.saveTimeout) {
 			clearTimeout(this.saveTimeout);
@@ -647,7 +678,6 @@ export class MiniSearchService {
 				result.id,
 			aliases: this.parseStoredAliases((result as MiniSearchResult & { aliases?: string }).aliases),
 			tags: this.parseStoredList((result as MiniSearchResult & { tags?: string }).tags),
-			content: (result as MiniSearchResult & { content?: string }).content,
 			score: adjustedScore,
 			features,
 		}));
@@ -721,7 +751,6 @@ export class MiniSearchService {
 					aliases?: string;
 					tags?: string;
 					pathSegments?: string;
-					content?: string;
 			  }
 			| undefined;
 
@@ -797,7 +826,6 @@ export class MiniSearchService {
 						aliases?: string;
 						tags?: string;
 						pathSegments?: string;
-						content?: string;
 				  }
 				| undefined;
 
@@ -839,7 +867,6 @@ export class MiniSearchService {
 						aliases?: string;
 						tags?: string;
 						pathSegments?: string;
-						content?: string;
 				  }
 				| undefined;
 
