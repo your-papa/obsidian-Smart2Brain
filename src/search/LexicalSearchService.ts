@@ -1,4 +1,4 @@
-import { TFile, getAllTags, type CachedMetadata } from "obsidian";
+import { Platform, TFile, getAllTags, type CachedMetadata } from "obsidian";
 import type SecondBrainPlugin from "../main";
 import { compileFilter, matchesPathFilter, matchesSearchFilter } from "../search/searchFilters";
 import { extractSearchTerms } from "../search/searchTermUtils";
@@ -148,11 +148,11 @@ export class LexicalSearchService {
 			}
 			if (loaded) {
 				this.plugin.app.workspace.onLayoutReady(() => {
-					void this.validateIndex();
+					this.scheduleBulkRun(() => this.validateIndex());
 				});
 			} else {
 				this.plugin.app.workspace.onLayoutReady(() => {
-					void this.buildIndex();
+					this.scheduleBulkRun(() => this.buildIndex());
 				});
 			}
 
@@ -219,6 +219,45 @@ export class LexicalSearchService {
 	 */
 	private static readonly BULK_CHECKPOINT_INTERVAL = 250;
 
+	/** Files indexed between pacing pauses during a bulk run. */
+	private static readonly BULK_BATCH_SIZE = 25;
+
+	/**
+	 * Pause between bulk batches, and after each checkpoint.
+	 *
+	 * Tokenizing text files back-to-back allocates garbage faster than the mobile
+	 * WebView's GC reclaims it, so an unthrottled loop balloons the footprint until
+	 * the OS kills the process — measured as a reload every ~10 s on a large vault.
+	 * (PDF extraction used to throttle the loop by accident; ordering PDFs last
+	 * removed that brake.) Real pauses give the collector room to keep up. Desktop
+	 * has no memory ceiling and only yields the event loop.
+	 */
+	private static readonly BULK_BATCH_PAUSE_MS = Platform.isMobile ? 100 : 0;
+
+	/** Extra pause after a checkpoint's full-index serialization, for the same reason. */
+	private static readonly BULK_CHECKPOINT_PAUSE_MS = Platform.isMobile ? 250 : 0;
+
+	/**
+	 * How long after layout-ready a bulk run may start on mobile.
+	 *
+	 * Boot is the highest-pressure window — the vault, the metadata cache, and
+	 * every plugin allocate at once, and the OS kill ceiling is effectively lower
+	 * because of it. Starting the indexer into that spike is what turned one kill
+	 * into a kill loop: each reload restarted indexing at second zero and died
+	 * again. Waiting lets the boot spike drain first; steady state idles at ~2% CPU.
+	 */
+	private static readonly MOBILE_BULK_START_DELAY_MS = 15_000;
+
+	private static bulkPause(ms: number): Promise<void> {
+		return new Promise((resolve) => setTimeout(resolve, ms));
+	}
+
+	/** Run `work` after the platform-appropriate bulk start delay. */
+	private scheduleBulkRun(work: () => Promise<void>): void {
+		const delay = Platform.isMobile ? LexicalSearchService.MOBILE_BULK_START_DELAY_MS : 0;
+		window.setTimeout(() => void work(), delay);
+	}
+
 	/**
 	 * Bulk-indexing file order: cheap text files first, binary-extraction files
 	 * (PDFs) last. PDF text extraction is minutes of work on a large vault, and
@@ -229,10 +268,11 @@ export class LexicalSearchService {
 		return [...files].sort((a, b) => Number(isBinaryTextFile(a)) - Number(isBinaryTextFile(b)));
 	}
 
-	/** Index `files`, checkpointing to IndexedDB every {@link BULK_CHECKPOINT_INTERVAL} additions. */
+	/** Index `files`, paced in batches and checkpointing every {@link BULK_CHECKPOINT_INTERVAL} additions. */
 	private async bulkIndexFiles(files: TFile[]): Promise<number> {
 		const { vault } = this.plugin.app;
 		let added = 0;
+		let processed = 0;
 		this.miniSearch.suspendScheduledSaves();
 		try {
 			for (const file of files) {
@@ -243,9 +283,13 @@ export class LexicalSearchService {
 				} catch (error) {
 					Logger.error(`[LexicalSearch] Failed to read ${file.path}:`, error);
 				}
+				processed++;
 
 				if (added > 0 && added % LexicalSearchService.BULK_CHECKPOINT_INTERVAL === 0) {
 					await this.miniSearch.flush();
+					await LexicalSearchService.bulkPause(LexicalSearchService.BULK_CHECKPOINT_PAUSE_MS);
+				} else if (processed % LexicalSearchService.BULK_BATCH_SIZE === 0) {
+					await LexicalSearchService.bulkPause(LexicalSearchService.BULK_BATCH_PAUSE_MS);
 				}
 			}
 		} finally {
