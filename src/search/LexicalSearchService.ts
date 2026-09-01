@@ -238,7 +238,7 @@ export class LexicalSearchService {
 	private static readonly BULK_CHECKPOINT_PAUSE_MS = Platform.isMobile ? 250 : 0;
 
 	/**
-	 * How long after layout-ready a bulk run may start on mobile.
+	 * How long after layout-ready a bulk run may start on mobile, before backoff.
 	 *
 	 * Boot is the highest-pressure window — the vault, the metadata cache, and
 	 * every plugin allocate at once, and the OS kill ceiling is effectively lower
@@ -246,15 +246,49 @@ export class LexicalSearchService {
 	 * into a kill loop: each reload restarted indexing at second zero and died
 	 * again. Waiting lets the boot spike drain first; steady state idles at ~2% CPU.
 	 */
-	private static readonly MOBILE_BULK_START_DELAY_MS = 15_000;
+	private static readonly MOBILE_BULK_BASE_DELAY_MS = 15_000;
+
+	/** Upper bound for the crash-backoff delay. */
+	private static readonly MOBILE_BULK_MAX_DELAY_MS = 300_000;
 
 	private static bulkPause(ms: number): Promise<void> {
 		return new Promise((resolve) => setTimeout(resolve, ms));
 	}
 
+	/**
+	 * How boot pressure varies is unknowable from inside the WebView (there is no
+	 * JS memory-pressure API), so no fixed delay can be right on every device: 15 s
+	 * was measured to land inside the boot spike on a phone already under system
+	 * pressure, where the OS killed the process seconds into the run. Instead the
+	 * delay adapts to observed deaths: every bulk attempt writes this marker and a
+	 * completed run clears it, so a marker still present at boot means the last
+	 * attempt died mid-run — and the next one waits twice as long. localStorage,
+	 * not plugin data: it survives the kill (the plugin's data debounce may not)
+	 * and stays out of sync.
+	 */
+	private bulkAttemptKey(): string {
+		return `s2b-lexical-bulk-attempts:${this.vaultId}`;
+	}
+
+	private readCrashedBulkAttempts(): number {
+		const raw = Number(window.localStorage.getItem(this.bulkAttemptKey()));
+		return Number.isFinite(raw) && raw > 0 ? raw : 0;
+	}
+
 	/** Run `work` after the platform-appropriate bulk start delay. */
 	private scheduleBulkRun(work: () => Promise<void>): void {
-		const delay = Platform.isMobile ? LexicalSearchService.MOBILE_BULK_START_DELAY_MS : 0;
+		const attempts = this.readCrashedBulkAttempts();
+		const delay = Platform.isMobile
+			? Math.min(
+					LexicalSearchService.MOBILE_BULK_BASE_DELAY_MS * 2 ** attempts,
+					LexicalSearchService.MOBILE_BULK_MAX_DELAY_MS,
+				)
+			: 0;
+		if (attempts > 0) {
+			Logger.warn(
+				`[LexicalSearch] Last bulk index attempt did not complete (${attempts} in a row) — delaying the next by ${Math.round(delay / 1000)}s`,
+			);
+		}
 		window.setTimeout(() => void work(), delay);
 	}
 
@@ -273,6 +307,9 @@ export class LexicalSearchService {
 		const { vault } = this.plugin.app;
 		let added = 0;
 		let processed = 0;
+		// Mark the attempt before the first read; cleared below only when the whole
+		// run survives. See bulkAttemptKey for why this drives the start backoff.
+		window.localStorage.setItem(this.bulkAttemptKey(), String(this.readCrashedBulkAttempts() + 1));
 		this.miniSearch.suspendScheduledSaves();
 		try {
 			for (const file of files) {
@@ -296,6 +333,7 @@ export class LexicalSearchService {
 			this.miniSearch.resumeScheduledSaves();
 		}
 		await this.miniSearch.flush();
+		window.localStorage.removeItem(this.bulkAttemptKey());
 		return added;
 	}
 
