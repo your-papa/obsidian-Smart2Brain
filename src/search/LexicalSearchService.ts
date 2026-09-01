@@ -1,4 +1,4 @@
-import { Platform, TFile, getAllTags, type CachedMetadata } from "obsidian";
+import { Notice, Platform, TFile, getAllTags, type CachedMetadata } from "obsidian";
 import type SecondBrainPlugin from "../main";
 import { compileFilter, matchesPathFilter, matchesSearchFilter } from "../search/searchFilters";
 import { extractSearchTerms } from "../search/searchTermUtils";
@@ -303,6 +303,12 @@ export class LexicalSearchService {
 	}
 
 	/** Index `files`, paced in batches and checkpointing every {@link BULK_CHECKPOINT_INTERVAL} additions. */
+	/**
+	 * Runs below this size stay silent: routine validateIndex catch-ups (a few
+	 * changed notes) shouldn't flash a progress notice on every boot.
+	 */
+	private static readonly PROGRESS_NOTICE_MIN_FILES = 100;
+
 	private async bulkIndexFiles(files: TFile[]): Promise<number> {
 		const { vault } = this.plugin.app;
 		let added = 0;
@@ -310,6 +316,8 @@ export class LexicalSearchService {
 		// Mark the attempt before the first read; cleared below only when the whole
 		// run survives. See bulkAttemptKey for why this drives the start backoff.
 		window.localStorage.setItem(this.bulkAttemptKey(), String(this.readCrashedBulkAttempts() + 1));
+		const notice = files.length >= LexicalSearchService.PROGRESS_NOTICE_MIN_FILES ? new Notice("", 0) : null;
+		if (notice) this.updateProgressNotice(notice, 0, files.length);
 		this.miniSearch.suspendScheduledSaves();
 		try {
 			for (const file of files) {
@@ -328,13 +336,50 @@ export class LexicalSearchService {
 				} else if (processed % LexicalSearchService.BULK_BATCH_SIZE === 0) {
 					await LexicalSearchService.bulkPause(LexicalSearchService.BULK_BATCH_PAUSE_MS);
 				}
+				if (notice && processed % LexicalSearchService.BULK_BATCH_SIZE === 0) {
+					this.updateProgressNotice(notice, processed, files.length);
+				}
 			}
+			await this.miniSearch.flush();
+			window.localStorage.removeItem(this.bulkAttemptKey());
+			if (notice) {
+				notice.setMessage(`✓ Search index updated: ${added} notes`);
+				setTimeout(() => notice.hide(), 3000);
+			}
+		} catch (error) {
+			// An unexpected abort (not a per-file failure) — don't leave a stuck
+			// notice behind on top of whatever surfaced the error.
+			notice?.hide();
+			throw error;
 		} finally {
 			this.miniSearch.resumeScheduledSaves();
 		}
-		await this.miniSearch.flush();
-		window.localStorage.removeItem(this.bulkAttemptKey());
 		return added;
+	}
+
+	/**
+	 * Render bulk progress into the sticky notice. Same layout as the embedding
+	 * indexer's notice (VectorStoreService.updateNotice) so the two indexing
+	 * surfaces read as one feature.
+	 */
+	private updateProgressNotice(notice: Notice, processed: number, total: number): void {
+		const percentage = total > 0 ? Math.round((processed / total) * 100) : 100;
+
+		const el = notice.noticeEl;
+		el.empty();
+		const container = el.createDiv({ cls: "s2b-indexing-notice" });
+		container.createDiv({
+			cls: "s2b-indexing-status",
+			text: `Indexing notes for search: ${processed}/${total}`,
+		});
+
+		const progressContainer = container.createDiv({ cls: "s2b-indexing-progress" });
+		progressContainer.style.cssText =
+			"width: 100%; height: 6px; background: var(--background-modifier-border); border-radius: 3px; overflow: hidden; margin: 8px 0;";
+		const progressFill = progressContainer.createDiv({ cls: "s2b-indexing-fill" });
+		progressFill.style.cssText = `width: ${percentage}%; height: 100%; background: var(--interactive-accent); border-radius: 3px; transition: width 0.2s ease;`;
+
+		container.createDiv({ cls: "s2b-indexing-percent", text: `${percentage}%` });
 	}
 
 	private async buildIndex(): Promise<void> {
