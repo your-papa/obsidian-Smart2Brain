@@ -21,7 +21,6 @@ import {
 import {
 	buildWikiGraph,
 	buildSemanticEdges,
-	readNativeGraphSettings,
 	resolveSegments,
 	type GraphFilter,
 } from "../../views/smart-graph/graphDataBuilder";
@@ -89,14 +88,8 @@ void loadPersistedTopicCaches();
 
 // Graph state
 
-// Native Obsidian graph settings — read from `.obsidian/graph.json` on mount
-// and used as a middle layer between hardcoded defaults and user-persisted
-// settings: DEFAULT → native Obsidian → user-defined.
-let nativeGraphSettings: Partial<SmartGraphSettings> = $state({});
-
 let settings: SmartGraphSettings = $derived({
 	...DEFAULT_SMART_GRAPH_SETTINGS,
-	...nativeGraphSettings,
 	...(data.smartGraphSettings ?? {}),
 });
 let isLoading = $state(false);
@@ -357,8 +350,8 @@ let displayGraphData: GraphData = $derived.by(() => {
 let currentBuild: AbortController | null = null;
 
 // Generation guard for async continuations. Bumped by every new build and by
-// onDestroy, so a slow await (buildWikiGraph tick, leidenAsync, native-settings
-// read) that resolves after a newer build started — or after the view was
+// onDestroy, so a slow await (buildWikiGraph tick, leidenAsync) that resolves
+// after a newer build started — or after the view was
 // closed — bails instead of writing stale state over the current graph or onto
 // a destroyed component. AbortController alone was insufficient: it was only
 // checked in the catch, so success-path writes ran unconditionally.
@@ -704,13 +697,6 @@ $effect(() => {
 		hasDerivedGranularityLadder = false;
 		void runLeidenSegmentation();
 	});
-});
-
-// Load native Obsidian graph settings (color groups, physics, etc.) as fallback
-readNativeGraphSettings(plugin.app).then((native) => {
-	// Guard against a resolve after the view was destroyed.
-	if (isDestroyed) return;
-	nativeGraphSettings = native;
 });
 
 onDestroy(() => {
@@ -1786,9 +1772,7 @@ function resolveAndApplySegments(gd: GraphData) {
 	// cluster below — the whole effect of the topics toggle. Suppressing it here
 	// rather than skipping the Leiden run keeps `leidenCommunities` intact, so
 	// turning topics back on is a re-render rather than a recompute.
-	const resolved = resolveSegments(plugin.app, gd, (settings.showTopics ?? true) ? "leiden" : "none", {
-		clusterMap: new Map(),
-		clusterLabels: effectiveClusterLabels,
+	const resolved = resolveSegments(gd, (settings.showTopics ?? true) ? "leiden" : "none", {
 		themeColors,
 		leidenCommunities,
 	});
