@@ -490,9 +490,20 @@ export class MiniSearchService {
 		}
 	}
 
-	/** Re-enable debounced saves after a bulk run. Does not save by itself — call `flush()`. */
+	/**
+	 * Re-enable debounced saves after a bulk run.
+	 *
+	 * A mutation that landed while the bulk run's final flush was already
+	 * serializing could neither make that flush's snapshot nor schedule a save
+	 * of its own (suspension swallowed the schedule; the generation check in
+	 * saveToStorage kept it marked dirty). Without rescheduling here it would
+	 * stay dirty-but-unscheduled forever and vanish on the next restart.
+	 */
 	resumeScheduledSaves(): void {
 		this.savesSuspended = false;
+		if (this.isDirty) {
+			this.scheduleSaveTimer();
+		}
 	}
 
 	/**
@@ -508,6 +519,10 @@ export class MiniSearchService {
 			return;
 		}
 
+		this.scheduleSaveTimer();
+	}
+
+	private scheduleSaveTimer(): void {
 		if (this.saveTimeout) {
 			clearTimeout(this.saveTimeout);
 			this.saveTimeout = null;
