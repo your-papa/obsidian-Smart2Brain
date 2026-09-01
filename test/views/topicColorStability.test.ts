@@ -1,9 +1,6 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { resolveSegments } from "../../src/views/smart-graph/graphDataBuilder";
-import type { App } from "obsidian";
 import type { GraphData, GraphNode } from "../../src/types/graph";
-
-const app = { metadataCache: { getCache: () => null } } as unknown as App;
 
 function note(id: string): GraphNode {
 	return { id, path: id, label: id, x: 0, y: 0, degree: 1, highlighted: false };
@@ -11,7 +8,7 @@ function note(id: string): GraphNode {
 
 /** Colour a topic ends up with, keyed by the note that anchors it. */
 function colorByAnchor(graph: GraphData, communities: Record<string, number>): Map<string, string> {
-	const segments = resolveSegments(app, graph, "leiden", { leidenCommunities: communities });
+	const segments = resolveSegments(graph, "leiden", { leidenCommunities: communities });
 	const result = new Map<string, string>();
 	for (const segment of segments) {
 		// Label is the representative note, which is what the colour is keyed to.
