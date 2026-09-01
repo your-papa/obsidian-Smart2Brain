@@ -710,6 +710,78 @@ function buildCheckpointMessageMappingFromGraph(
 	};
 }
 
+/**
+ * Rebuild the full visible history for a branch whose context was summarized.
+ *
+ * Summarization trims the LangGraph `messages` channel (summary + last few
+ * messages survive), so the active checkpoint no longer contains the earlier
+ * turns — but the checkpoint *tree* still does: every pre-summarization
+ * checkpoint on the active path keeps the messages that were removed (#434).
+ * Walk the path root→tip and collect each message the first time it appears;
+ * because the channel only ever grows except at summarization steps, this
+ * reproduces the conversation in order with the trimmed turns restored.
+ * Messages that survived into the tip keep the tip's copy, so the live window
+ * renders exactly as before.
+ *
+ * Marker placement: automatic summarization runs *mid-turn* (before the model
+ * answers the message that overflowed the context), so its summary message is
+ * moved in front of that turn's human message — otherwise the badge would
+ * split a turn between question and answer. Manual compaction runs between
+ * turns and stays at its chronological position.
+ *
+ * Only the rendered transcript changes; what the model sees on the next turn
+ * is still the tip's trimmed channel.
+ */
+function recoverSummarizedHistory(
+	graph: CheckpointGraphState,
+	activeCheckpointId: string,
+	tipMessages: BaseMessage[],
+): BaseMessage[] {
+	const hasSummary = tipMessages.some(
+		(msg) => isHumanMessage(msg) && isHiddenHumanSource(msg.additional_kwargs?.lc_source),
+	);
+	if (!hasSummary) return tipMessages;
+
+	const path = getPathToRoot(graph, activeCheckpointId)
+		.map((id) => graph.nodes.get(id))
+		.filter((node): node is CheckpointNode => !!node)
+		.sort(comparePathOrder);
+
+	const tipById = new Map<string, BaseMessage>();
+	for (const msg of tipMessages) {
+		if (msg.id) tipById.set(msg.id, msg);
+	}
+
+	const seen = new Set<string>();
+	const display: BaseMessage[] = [];
+	for (const node of path) {
+		for (const msg of node.messages) {
+			// Every message that went through LangGraph's reducer carries an id.
+			// If one doesn't, occurrences can't be deduplicated across
+			// checkpoints — bail out to the plain tip rather than risk
+			// rendering duplicated turns.
+			if (!msg.id) return tipMessages;
+			if (seen.has(msg.id)) continue;
+			seen.add(msg.id);
+
+			const rendered = tipById.get(msg.id) ?? msg;
+			if (isHumanMessage(msg) && msg.additional_kwargs?.lc_source === "summarization") {
+				let insertAt = display.length;
+				for (let i = display.length - 1; i >= 0; i--) {
+					if (isHumanMessage(display[i])) {
+						insertAt = i;
+						break;
+					}
+				}
+				display.splice(insertAt, 0, rendered);
+				continue;
+			}
+			display.push(rendered);
+		}
+	}
+	return display;
+}
+
 export function deriveMessagePairsFromActiveCheckpoint(
 	graph: CheckpointGraphState,
 	activeCheckpointId: string | undefined,
@@ -727,7 +799,8 @@ export function deriveMessagePairsFromActiveCheckpoint(
 	}
 
 	const checkpointMapping = buildCheckpointMessageMappingFromGraph(graph, activeCheckpointId);
-	return baseMessagesToMessagePairs(activeNode.messages, errorCount, checkpointMapping, lastErrorMessage);
+	const displayMessages = recoverSummarizedHistory(graph, activeCheckpointId, activeNode.messages);
+	return baseMessagesToMessagePairs(displayMessages, errorCount, checkpointMapping, lastErrorMessage);
 }
 
 /* -----------------------------------------------------------------------------
