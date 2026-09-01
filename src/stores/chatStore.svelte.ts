@@ -1767,12 +1767,7 @@ export class ChatSession {
 	private restoreLiveRunAnchor(): void {
 		const live = this.liveRun;
 		if (!live) return;
-		// `stableKey` is only compared when the run actually has one: an undefined
-		// key would otherwise match the first pair that also lacks one, stamping the
-		// anchor onto an unrelated turn.
-		const pair = this.messages.find(
-			(m) => m.id === live.pairId || (live.stableKey !== undefined && m.stableKey === live.stableKey),
-		);
+		const pair = this.findPairAcrossRebuild(live.pairId, live.stableKey);
 		if (!pair) return;
 		pair.assistantMessage.runStartedAtMs = live.startedAtMs;
 	}
@@ -1780,6 +1775,20 @@ export class ChatSession {
 	/** Find a message pair by id */
 	private findPair(id: UUIDv7): MessagePair | undefined {
 		return this.messages.find((m) => m.id === id);
+	}
+
+	/**
+	 * Find a message pair that may have been re-derived since its id was captured.
+	 *
+	 * `rebuildMessagePairs()` mints a fresh `MessagePair.id` for every pair, so a
+	 * plain `findPair(id)` silently returns undefined for any id captured before a
+	 * rebuild — and callers that stamp post-run state onto the pair then no-op
+	 * without a sound. `stableKey` survives the rebuild, so prefer it, and only
+	 * compare it when the caller actually has one: an undefined key would otherwise
+	 * match the first pair that also lacks one, stamping an unrelated turn.
+	 */
+	private findPairAcrossRebuild(id: UUIDv7, stableKey: string | undefined): MessagePair | undefined {
+		return this.messages.find((m) => m.id === id || (stableKey !== undefined && m.stableKey === stableKey));
 	}
 
 	private cloneGraphState(): CheckpointGraphState {
@@ -2152,8 +2161,14 @@ export class ChatSession {
 			// replaces the pair object we stamped above with a fresh one whose
 			// thinkingDurationMs is read from response_metadata — not yet written (that
 			// happens below). Without this re-stamp the label flips from "Thought for Ns"
-			// back to the step-count fallback the instant the stream settles.
-			const rebuiltPair = this.findPair(pairId);
+			// back to the 1s floor the instant the stream settles.
+			//
+			// The lookup must tolerate the rebuild: it also mints a fresh `MessagePair.id`,
+			// so matching on the pre-run `pairId` alone found nothing and this re-stamp
+			// silently no-opped — which is exactly how a long run came to report
+			// "Thought for 1s" (undefined duration → the UI's `Math.max(1, runningSeconds)`
+			// fallback, with runningSeconds already back to 0).
+			const rebuiltPair = this.findPairAcrossRebuild(pairId, pair.stableKey);
 			if (rebuiltPair) {
 				rebuiltPair.assistantMessage.thinkingDurationMs = thinkingDurationMs;
 			}
@@ -2192,7 +2207,7 @@ export class ChatSession {
 			// alike. A stale anchor left on a cancelled/errored pair would make a
 			// later retry count from the abandoned run's start.
 			this.liveRun = null;
-			const settledPair = this.findPair(pairId);
+			const settledPair = this.findPairAcrossRebuild(pairId, pair.stableKey);
 			if (settledPair) {
 				settledPair.assistantMessage.runStartedAtMs = undefined;
 			}
