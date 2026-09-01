@@ -57,7 +57,7 @@ const STORE_NAME = "index";
 const OPEN_BLOCKED_TIMEOUT_MS = 10_000;
 const INDEX_KEY = "main";
 /** Bump whenever the indexed file set or field schema changes to force a full reindex. */
-const STORAGE_SCHEMA_VERSION = 9;
+const STORAGE_SCHEMA_VERSION = 10;
 
 export interface LexicalSearchResult {
 	path: string;
