@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages";
+import { AIMessage, type BaseMessage, HumanMessage, ToolMessage } from "@langchain/core/messages";
 import {
 	buildCheckpointGraph,
 	deriveMessagePairsFromActiveCheckpoint,
@@ -41,7 +41,11 @@ function toolMsg(content: string, toolCallId: string) {
 function makeCheckpoint(
 	checkpointId: string,
 	step: number,
-	messages: ReturnType<typeof humanMsg>[],
+	// BaseMessage[], matching CheckpointHistoryItem: a checkpoint holds whatever the turn
+	// produced, so human/ai/tool messages mix freely. Typing this as the human-message
+	// helper's return made TS infer `HumanMessage[]` from a mixed array's first element and
+	// reject every `[human, ai]` fixture below.
+	messages: BaseMessage[],
 	parentCheckpointId?: string,
 	ts?: string,
 ): CheckpointHistoryItem {

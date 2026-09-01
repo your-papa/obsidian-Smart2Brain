@@ -121,8 +121,11 @@ describe("threadDataCodec", () => {
 		expect(msgs2[1]).toBe(msgs1[1]);
 
 		// metadata.writes and pending writes share the same objects too.
-		const metadataWrites = (inflated.checkpoints["cp-1"].metadata as { writes: { agent: { messages: unknown[] } } })
-			.writes;
+		// `writes` is present at runtime but absent from CheckpointMetadata, so this goes
+		// through unknown — the codec reads it structurally (isRecord), not by type.
+		const metadataWrites = (
+			inflated.checkpoints["cp-1"].metadata as unknown as { writes: { agent: { messages: unknown[] } } }
+		).writes;
 		expect(metadataWrites.agent.messages[0]).toBe(msgs1[1]);
 		const pendingWrite = inflated.writes["cp-1"][0] as unknown as [string, unknown[]];
 		expect(pendingWrite[1][0]).toBe(msgs1[1]);

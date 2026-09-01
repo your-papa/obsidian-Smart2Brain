@@ -43,6 +43,10 @@ function createMockPlugin() {
 }
 
 function makeCheckpoint(id: string, ts: string): Checkpoint {
+	// `pending_sends` is a legacy LangGraph field: it still turns up in checkpoints written
+	// by older versions, so the fixture keeps it, but it is no longer on the Checkpoint type
+	// (and nothing in src/ reads it). The cast records that this is on-disk shape, wider
+	// than the current type, rather than a field we expect to be checked.
 	return {
 		v: 1,
 		id,
@@ -51,16 +55,19 @@ function makeCheckpoint(id: string, ts: string): Checkpoint {
 		channel_versions: {},
 		versions_seen: {},
 		pending_sends: [],
-	};
+	} as Checkpoint & { pending_sends: unknown[] };
 }
 
 function makeMetadata(step: number, parentCheckpointId?: string): CheckpointMetadata {
+	// Same as makeCheckpoint: LangGraph writes `writes` into checkpoint metadata at runtime
+	// (the codec dedups through it — see threadDataCodec), but it is not declared on
+	// CheckpointMetadata. Cast rather than drop it, since its presence is the point.
 	return {
 		source: "loop",
 		step,
 		writes: {},
 		parents: parentCheckpointId ? { "": parentCheckpointId } : {},
-	};
+	} as CheckpointMetadata & { writes: Record<string, unknown> };
 }
 
 /* --------------------------------------------------------------------------

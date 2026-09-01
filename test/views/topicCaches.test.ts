@@ -26,7 +26,10 @@ function sampleSnapshot(): TopicCacheSnapshot {
 			[
 				"full-graph-sig",
 				{
-					leiden: new Map([
+					// Annotated because the two rungs below cover different node sets: without
+					// it TS unifies them into `{ "c.md"?: undefined }`, which no longer
+					// satisfies the Record<string, number> the cache declares.
+					leiden: new Map<string, Record<string, number>>([
 						["7:1:fused", { "a.md": 0, "b.md": 0, "c.md": 1 }],
 						// A different rung over the same graph may cover a different
 						// node set (e.g. link-only mode sees fewer edges).
@@ -79,7 +82,15 @@ describe("encodeTopicCaches / decodeTopicCaches", () => {
 		const original: TopicCacheSnapshot = {
 			activeSignature: "sig",
 			graphs: new Map([
-				["sig", { leiden: new Map([["7:1:fused", { "a.md": 0 }]]), granularityLadder: null, resolution: null, lastUsed: 1 }],
+				[
+					"sig",
+					{
+						leiden: new Map([["7:1:fused", { "a.md": 0 }]]),
+						granularityLadder: null,
+						resolution: null,
+						lastUsed: 1,
+					},
+				],
 			]),
 			semanticEdges: new Map(),
 			topicLabels: new Map(),

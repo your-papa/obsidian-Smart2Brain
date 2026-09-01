@@ -10,7 +10,7 @@ import {
 	resolveViewFilter,
 	rewriteViewFilterForRename,
 } from "../../src/lib/views";
-import type { ViewFilter, ViewFilterGroup } from "../../src/types/graph";
+import type { ViewFilter, ViewFilterGroup } from "../../src/types/viewFilter";
 import type { App, CachedMetadata, TFile } from "obsidian";
 
 // ---------------------------------------------------------------------------
@@ -736,7 +736,7 @@ describe("property leaf", () => {
 	it("survives a compile → parse round-trip as a simple rule", () => {
 		const draft = {
 			manualPaths: [],
-			autoIncludeRules: [{ type: "property", value: "client", values: ["Acme"] } as const],
+			autoIncludeRules: [{ type: "property", value: "client", values: ["Acme"] } satisfies ViewFilter],
 			excludedPaths: [],
 		};
 
@@ -747,7 +747,7 @@ describe("property leaf", () => {
 	});
 
 	it("agrees between the sync path matcher and the set resolver", () => {
-		const rule = { type: "property", value: "client", values: ["Acme"] } as const;
+		const rule = { type: "property", value: "client", values: ["Acme"] } satisfies ViewFilter;
 		const draft = { manualPaths: [], autoIncludeRules: [rule], excludedPaths: [] };
 		const resolved = resolveViewFilter(app(), rule, new Set(FILES));
 

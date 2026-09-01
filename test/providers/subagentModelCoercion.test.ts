@@ -26,6 +26,12 @@ class UnbrandedResultModel extends BaseChatModel {
 		return "unbranded-test";
 	}
 	// The agent invokes the (tool-bound) model; return a plain object.
+	//
+	// BaseChatModel.invoke is declared to return AIMessageChunk, and this deliberately
+	// returns a plain AIMessage-shaped object instead — that mismatch IS the bug being
+	// reproduced, so it is suppressed rather than fixed. Casting the return type would
+	// hide the very shape the test exists to pin down.
+	// @ts-expect-error - intentionally violates the AIMessageChunk return type (see above)
 	async invoke(_input: BaseLanguageModelInput, _options?: unknown): Promise<AIMessage> {
 		return {
 			content: "final answer from unbranded model",
@@ -53,6 +59,9 @@ describe("provider proxy coerces non-AIMessage model results (OpenRouter subagen
 	});
 
 	it("proxied invoke coerces the unbranded result into a valid AIMessage", async () => {
+		// Same deliberate mismatch as the invoke() override above: this model is not a
+		// valid BaseChatModel by design, which is the condition under test.
+		// @ts-expect-error - intentionally non-conforming model (see UnbrandedResultModel)
 		const proxied = createNormalizedChatModel(new UnbrandedResultModel({}));
 		const result = await proxied.invoke([new AIMessage("hi")]);
 		expect(AIMessage.isInstance(result as never)).toBe(true);
@@ -60,6 +69,9 @@ describe("provider proxy coerces non-AIMessage model results (OpenRouter subagen
 	});
 
 	it("agent + subAgentMiddleware run without 'expected AIMessage or Command, got object'", async () => {
+		// Same deliberate mismatch as the invoke() override above: this model is not a
+		// valid BaseChatModel by design, which is the condition under test.
+		// @ts-expect-error - intentionally non-conforming model (see UnbrandedResultModel)
 		const proxied = createNormalizedChatModel(new UnbrandedResultModel({}));
 		const agent = createAgent({
 			model: proxied as never,

@@ -26,7 +26,7 @@ interface SearchToolResultItem {
 	matchBadges?: SearchMatchBadge[];
 }
 
-interface SearchToolResultPayload {
+export interface SearchToolResultPayload {
 	query: string;
 	recentOnly: boolean;
 	/**

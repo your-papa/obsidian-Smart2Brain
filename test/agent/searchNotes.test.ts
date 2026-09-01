@@ -115,29 +115,11 @@ vi.mock("../../src/stores/pendingChangesStore.svelte", () => ({
 }));
 
 import type { App } from "obsidian";
-import { createSearchNotesTool, performSearch } from "../../src/agent/tools/searchNotes";
-
-interface SearchToolResultPayload {
-	query: string;
-	recentOnly: boolean;
-	algorithm: string;
-	maxResults: number;
-	filter?: { pathPrefixes?: string[]; tags?: string[] };
-	totalResults: number;
-	returnedResults: number;
-	skippedPrivateFiles: number;
-	results: Array<{
-		rank: number;
-		name: string;
-		path?: string;
-		score?: number;
-		frontmatter?: Record<string, unknown>;
-		tags?: string[];
-		matchExplanation?: { source: string; text: string; heading?: string };
-		matchBadges?: string[];
-	}>;
-	message?: string;
-}
+// The payload type is imported rather than re-declared here: this file used to keep its own
+// copy, which drifted from the real interface (it was missing `requestedAlgorithm` and typed
+// `algorithm` as a required string) and so quietly type-checked assertions against a shape
+// the tool never returns.
+import { createSearchNotesTool, performSearch, type SearchToolResultPayload } from "../../src/agent/tools/searchNotes";
 
 function createLexicalService() {
 	return {

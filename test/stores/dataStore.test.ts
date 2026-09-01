@@ -11,10 +11,11 @@ beforeAll(() => {
 		};
 	}
 
-	if (!(globalThis as typeof globalThis & { indexedDB?: { databases?: () => Promise<unknown[]> } }).indexedDB) {
-		(globalThis as typeof globalThis & { indexedDB?: { databases?: () => Promise<unknown[]> } }).indexedDB = {
-			databases: vi.fn().mockResolvedValue([]),
-		};
+	// jsdom ships no indexedDB. The store only ever calls `databases()` here, so this stubs
+	// that one method rather than the whole IDBFactory surface — hence the cast, which is
+	// deliberately narrowed to the assignment instead of widening the global's type.
+	if (!globalThis.indexedDB) {
+		globalThis.indexedDB = { databases: vi.fn().mockResolvedValue([]) } as unknown as IDBFactory;
 	}
 });
 
@@ -369,6 +370,7 @@ describe("PluginDataStore – Agent MCP Servers", () => {
 
 	it("should set and get MCP server for agent", () => {
 		store.setAgentMCPServer(DEFAULT_AGENT_ID, "my-server", {
+			displayName: "my-server",
 			transport: "stdio",
 			command: "npx",
 			args: ["-y", "@modelcontextprotocol/server-everything"],
@@ -383,6 +385,7 @@ describe("PluginDataStore – Agent MCP Servers", () => {
 
 	it("should delete MCP server from agent", () => {
 		store.setAgentMCPServer(DEFAULT_AGENT_ID, "to-delete", {
+			displayName: "to-delete",
 			transport: "http",
 			url: "http://localhost:3000",
 			enabled: true,
@@ -394,6 +397,7 @@ describe("PluginDataStore – Agent MCP Servers", () => {
 
 	it("should toggle MCP server enabled state", () => {
 		store.setAgentMCPServer(DEFAULT_AGENT_ID, "toggle-me", {
+			displayName: "toggle-me",
 			transport: "stdio",
 			command: "cmd",
 			args: [],
@@ -406,12 +410,14 @@ describe("PluginDataStore – Agent MCP Servers", () => {
 
 	it("should convert MCP config for client (only enabled servers)", () => {
 		store.setAgentMCPServer(DEFAULT_AGENT_ID, "enabled-server", {
+			displayName: "enabled-server",
 			transport: "stdio",
 			command: "npx",
 			args: ["-y", "server"],
 			enabled: true,
 		});
 		store.setAgentMCPServer(DEFAULT_AGENT_ID, "disabled-server", {
+			displayName: "disabled-server",
 			transport: "stdio",
 			command: "npx",
 			args: [],
@@ -464,7 +470,7 @@ describe("PluginDataStore – Chat Models", () => {
 
 	it("should clear agent chatModel reference when its model is deleted", () => {
 		store.addChatModel("openai", "gpt-4", {} as never);
-		store.updateAgent(DEFAULT_AGENT_ID, { chatModel: { provider: "openai", model: "gpt-4" } });
+		store.updateAgent(DEFAULT_AGENT_ID, { chatModel: { provider: "openai", model: "gpt-4", modelConfig: {} } });
 
 		store.deleteChatModel("openai", "gpt-4");
 		expect(store.getAgent(DEFAULT_AGENT_ID)!.chatModel).toBeNull();
@@ -667,7 +673,9 @@ describe("PluginDataStore – staleGuidance", () => {
 		// version constants so this keeps meaning "current" across prompt revisions.
 		store.setPromptFileReader(
 			makeReader({
-				basePrompt: { [DEFAULT_AGENT_ID]: { body: "my own custom prompt", version: BASE_SYSTEM_PROMPT_VERSION } },
+				basePrompt: {
+					[DEFAULT_AGENT_ID]: { body: "my own custom prompt", version: BASE_SYSTEM_PROMPT_VERSION },
+				},
 				memoryPrompt: {
 					[DEFAULT_AGENT_ID]: { body: "my own memory instructions", version: DEFAULT_MEMORY_PROMPT_VERSION },
 				},
@@ -934,14 +942,14 @@ describe("PluginDataStore – Settings", () => {
 
 	it("should get and set chatOpenLocation", () => {
 		expect(store.chatOpenLocation).toBe("tab");
-		store.chatOpenLocation = "sidebar";
-		expect(store.chatOpenLocation).toBe("sidebar");
+		store.chatOpenLocation = "right";
+		expect(store.chatOpenLocation).toBe("right");
 	});
 
 	it("should get and set diffViewMode", () => {
 		expect(store.diffViewMode).toBe("two-pane");
-		store.diffViewMode = "inline";
-		expect(store.diffViewMode).toBe("inline");
+		store.diffViewMode = "word-diff";
+		expect(store.diffViewMode).toBe("word-diff");
 	});
 });
 

@@ -1,0 +1,36 @@
+// Type-checking config for the test suites.
+//
+// Kept separate from tsconfig.json on purpose: that one describes the *build*, and the
+// production bundle must not be influenced by test files. This config adds `test/` and
+// `integration/` on top of it purely for `svelte-check`, which never emits.
+//
+// Why this exists at all: `tsconfig.json`'s `include` covers only `src/**` and `v2/src/**`,
+// so nothing type-checked the tests. That let a call to `resolveSegments` keep passing a
+// removed argument — the arguments shifted by one, the function returned [], and all four
+// assertions in that suite passed vacuously for as long as it took someone to notice.
+// A test that cannot fail is worse than no test, so the suites are now checked too.
+{
+	"extends": "./tsconfig.json",
+	"compilerOptions": {
+		// svelte-check never emits; saying so lets `noEmitOnError` from the base config be
+		// irrelevant here rather than interacting with a check-only run.
+		"noEmit": true,
+		// The integration suites import helpers by explicit `.ts` path (e.g.
+		// `./helpers/cli.ts`), which Vitest resolves natively. Without this, every one of
+		// those imports is a TS5097 error about the extension rather than a real finding.
+		"allowImportingTsExtensions": true,
+		// Tests reach for node builtins (node:child_process, node:fs) that the plugin itself
+		// never uses, so the build config deliberately omits these types.
+		"types": ["svelte", "vite/client", "node"]
+	},
+	"include": [
+		"src/**/*.d.ts",
+		"src/**/*.ts",
+		"src/**/*.js",
+		"src/**/*.svelte",
+		"v2/src/**/*.ts",
+		"v2/src/**/*.svelte",
+		"test/**/*.ts",
+		"integration/**/*.ts"
+	]
+}

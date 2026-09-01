@@ -26,7 +26,9 @@
   "scripts": {
     "dev": "NODE_ENV=development vite build --mode development --watch",
     "build": "vite build --mode production",
-    "check": "svelte-check --tsconfig ./tsconfig.json",
+    "check": "svelte-check --tsconfig ./tsconfig.json && svelte-check --tsconfig ./tsconfig.test.json",
+    "check:src": "svelte-check --tsconfig ./tsconfig.json",
+    "check:test": "svelte-check --tsconfig ./tsconfig.test.json",
     "format": "biome format --write ./src",
     "lint": "biome lint --write --unsafe ./src",
     "test": "vitest run",

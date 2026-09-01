@@ -6,18 +6,31 @@ const mockRequestUrl = vi.mocked(requestUrl);
 
 function lastHeaders(): Record<string, string> {
 	const call = mockRequestUrl.mock.calls.at(-1);
-	return (call?.[0].headers ?? {}) as Record<string, string>;
+	// requestUrl accepts `string | RequestUrlParam`; every call here passes the param
+	// object, and only that form carries headers.
+	const param = call?.[0];
+	if (typeof param !== "object") return {};
+	return (param.headers ?? {}) as Record<string, string>;
+}
+
+/**
+ * A requestUrl response carrying only the fields these tests read. RequestUrlResponse also
+ * declares `arrayBuffer`, which nothing here touches — stubbing it would just be noise, so
+ * the cast is centralized in this one helper rather than repeated at each mockResolvedValue.
+ */
+function okResponse(): Awaited<ReturnType<typeof requestUrl>> {
+	return {
+		status: 200,
+		headers: { "content-type": "application/json" },
+		text: '{"ok":true}',
+		json: { ok: true },
+	} as unknown as Awaited<ReturnType<typeof requestUrl>>;
 }
 
 describe("createObsidianFetch header normalization", () => {
 	beforeEach(() => {
 		mockRequestUrl.mockClear();
-		mockRequestUrl.mockResolvedValue({
-			status: 200,
-			headers: { "content-type": "application/json" },
-			text: '{"ok":true}',
-			json: { ok: true },
-		});
+		mockRequestUrl.mockResolvedValue(okResponse());
 	});
 
 	// The regression this file exists for: the OpenAI SDK always passes a `Headers`
@@ -186,7 +199,9 @@ describe("createObsidianFetch timeout", () => {
 			const nativeFetch = vi.fn(
 				(_input: RequestInfo | URL, init?: RequestInit) =>
 					new Promise<Response>((_, reject) => {
-						init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")));
+						init?.signal?.addEventListener("abort", () =>
+							reject(new DOMException("Aborted", "AbortError")),
+						);
 					}),
 			);
 			const fetchImpl = createObsidianFetch(nativeFetch);
@@ -204,12 +219,7 @@ describe("createObsidianFetch timeout", () => {
 	it("still falls back to requestUrl on an ordinary native-fetch failure", async () => {
 		// The CORS fallback must keep working — the timeout guard only suppresses it
 		// for aborts, not for genuine errors.
-		mockRequestUrl.mockResolvedValue({
-			status: 200,
-			headers: { "content-type": "application/json" },
-			text: '{"ok":true}',
-			json: { ok: true },
-		} as Awaited<ReturnType<typeof requestUrl>>);
+		mockRequestUrl.mockResolvedValue(okResponse());
 		const nativeFetch = vi.fn(async () => {
 			throw new TypeError("Failed to fetch");
 		});
@@ -224,12 +234,7 @@ describe("createObsidianFetch timeout", () => {
 	it("clears its timer on success, so a fast call leaves nothing pending", async () => {
 		vi.useFakeTimers();
 		try {
-			mockRequestUrl.mockResolvedValue({
-				status: 200,
-				headers: { "content-type": "application/json" },
-				text: '{"ok":true}',
-				json: { ok: true },
-			} as Awaited<ReturnType<typeof requestUrl>>);
+			mockRequestUrl.mockResolvedValue(okResponse());
 
 			const fetchImpl = createObsidianFetch();
 			await fetchImpl("https://example.com/v1/embeddings", { method: "POST", body: "{}" });

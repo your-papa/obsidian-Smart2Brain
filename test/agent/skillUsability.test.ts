@@ -14,10 +14,18 @@ import type { AgentConfig, SkillMetadata } from "../../src/types/plugin";
  */
 function callSkillHasUsableTools(
 	agent: Partial<AgentConfig>,
-	meta: Partial<SkillMetadata> & { frontmatter?: Partial<SkillMetadata["frontmatter"]> },
+	// `frontmatter` is overridden rather than intersected: `Partial<SkillMetadata>` already
+	// carries the full (required-field) frontmatter type, so intersecting a Partial of it
+	// still demanded name/description from every fixture. Omit-then-add makes the override
+	// the only definition, which is what lets a test pass just `{ allowedTools }`.
+	meta: Omit<Partial<SkillMetadata>, "frontmatter"> & { frontmatter?: Partial<SkillMetadata["frontmatter"]> },
 	opts: { execCapablePlugins?: string[] } = {},
 ): boolean {
-	const manager = Object.create(AgentManager.prototype) as AgentManager & {
+	// Both methods are private on AgentManager, so intersecting the class with public
+	// signatures for them reduces the whole type to `never` (a property cannot be both
+	// private and public). Describe just the surface this helper drives instead, and go
+	// through `unknown` since that shape deliberately isn't an AgentManager.
+	const manager = Object.create(AgentManager.prototype) as unknown as {
 		skillHasUsableTools(a: AgentConfig, m: SkillMetadata): boolean;
 		resolvePluginIntegrations(): Array<{ pluginId: string; displayName: string }>;
 	};
