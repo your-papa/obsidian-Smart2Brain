@@ -1,7 +1,7 @@
 import { Platform, type TFile, type Vault } from "obsidian";
 import { getData } from "../stores/dataStore.svelte";
-import { inflateThreadData } from "../agent/threadDataCodec";
-import { gunzipToString } from "./gzip";
+import { THREAD_DATA_DEDUP_VERSION, inflateThreadData, sniffThreadDataVersion } from "../agent/threadDataCodec";
+import { gunzipPrefixToString, gunzipToString } from "./gzip";
 import { extractTextFromPdf } from "./pdfExtractor";
 
 /**
@@ -17,14 +17,23 @@ import { extractTextFromPdf } from "./pdfExtractor";
 const MOBILE_MAX_READ_BYTES = 10 * 1024 * 1024;
 
 /**
- * Largest `.chat` file whose content gets extracted on mobile, in bytes.
+ * Largest **legacy-format** `.chat` file whose content gets extracted on
+ * mobile, in bytes.
  *
- * Tighter than {@link MOBILE_MAX_READ_BYTES} because `.chat` files are
- * gzip-compressed JSON: the on-disk size understates the in-memory cost by the
- * compression ratio, easily 5-10x for chat threads. A 72MB thread file in a
- * real vault decompressed to a string large enough to get the WebView killed
- * on the spot — and because bulk indexing resumes at the same place each boot,
+ * Tighter than {@link MOBILE_MAX_READ_BYTES} because legacy thread files
+ * repeat the full message history in every checkpoint (#431): gzip compresses
+ * that repetition extremely well, so the on-disk size understates the
+ * decompressed cost by orders of magnitude. A 72MB thread file in a real
+ * vault decompressed to a string large enough to get the WebView killed on
+ * the spot — and because bulk indexing resumes at the same place each boot,
  * that single file turned every restart into another death.
+ *
+ * Deduplicated (v2+) files are exempt: their size tracks unique content with
+ * an ordinary compression ratio, so only {@link MOBILE_MAX_READ_BYTES}
+ * applies. The format is identified by streaming just the first decompressed
+ * bytes (`version` is deliberately the file's first JSON key). An oversized
+ * legacy file stays title-indexed until it is migrated — which happens on the
+ * next load/save of the thread, after which sync delivers the small file.
  */
 const MOBILE_CHAT_MAX_EXTRACT_BYTES = 2 * 1024 * 1024;
 
@@ -253,13 +262,8 @@ export async function readIndexableContent(vault: Vault, file: TFile): Promise<s
 async function readIndexableContentRaw(vault: Vault, file: TFile): Promise<string> {
 	// Size gates come before any read: the cost of reading an oversized file is
 	// paid before truncation could help.
-	if (Platform.isMobile) {
-		if (file.stat.size > MOBILE_MAX_READ_BYTES) {
-			return "";
-		}
-		if (file.extension === "chat" && file.stat.size > MOBILE_CHAT_MAX_EXTRACT_BYTES) {
-			return "";
-		}
+	if (Platform.isMobile && file.stat.size > MOBILE_MAX_READ_BYTES) {
+		return "";
 	}
 
 	// PDFs carry real prose, but it lives inside a binary container. Extracting it
@@ -288,6 +292,17 @@ async function readIndexableContentRaw(vault: Vault, file: TFile): Promise<strin
 	if (file.extension === "chat") {
 		try {
 			const bytes = await readBinaryFile(vault, file);
+			if (Platform.isMobile && file.stat.size > MOBILE_CHAT_MAX_EXTRACT_BYTES) {
+				// Only the deduplicated format is safe to materialize at this
+				// size — a legacy file this large decompresses to a quadratic
+				// payload (see MOBILE_CHAT_MAX_EXTRACT_BYTES). Sniff the
+				// version from the first decompressed bytes before committing
+				// to a full gunzip.
+				const prefix = await gunzipPrefixToString(bytes, 64);
+				if (sniffThreadDataVersion(prefix) < THREAD_DATA_DEDUP_VERSION) {
+					return "";
+				}
+			}
 			const raw = await gunzipToString(bytes);
 			return extractChatContent(raw);
 		} catch {

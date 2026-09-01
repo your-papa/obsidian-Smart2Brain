@@ -30,6 +30,14 @@ import type { Checkpoint, CheckpointMetadata, PendingWrite } from "@langchain/la
 /** Bump when the ThreadData/CheckpointEntry schema changes. Absent in pre-versioning files → treated as 0. */
 export const THREAD_DATA_VERSION = 2;
 
+/**
+ * First version with content-addressed message dedup. Files at or above this
+ * are O(unique content) rather than O(N²), which is what the mobile indexing
+ * gate cares about — a property every later version keeps, so consumers must
+ * compare against this constant, not {@link THREAD_DATA_VERSION}.
+ */
+export const THREAD_DATA_DEDUP_VERSION = 2;
+
 export interface CheckpointEntry {
 	checkpoint: Checkpoint;
 	metadata: CheckpointMetadata;
@@ -169,13 +177,30 @@ export function deflateThreadData(data: ThreadData): Record<string, unknown> {
 		writes[id] = deflateNode(checkpointWrites, interner);
 	}
 
+	// `version` deliberately comes first: it lets consumers identify the format
+	// from the first few decompressed bytes (see `sniffThreadDataVersion`)
+	// without materializing the whole file — mobile indexing gates legacy
+	// quadratic files this way. A spread of `data` would place `checkpoints`/
+	// `writes` at their original (early) key positions, so exclude and re-add.
+	const { version: _version, checkpoints: _checkpoints, writes: _writes, messageTable: _table, ...rest } = data;
 	return {
-		...data,
 		version: THREAD_DATA_VERSION,
+		...rest,
 		checkpoints,
 		writes,
 		messageTable: interner.table,
 	};
+}
+
+/**
+ * Read the schema version from the leading bytes of a thread file's JSON.
+ * Only v2+ files (written by {@link deflateThreadData}) start with a
+ * `version` key; anything else — legacy files, truncated prefixes, non-thread
+ * JSON — reads as 0.
+ */
+export function sniffThreadDataVersion(jsonPrefix: string): number {
+	const match = /^\s*\{\s*"version"\s*:\s*(\d+)/.exec(jsonPrefix);
+	return match ? Number.parseInt(match[1], 10) : 0;
 }
 
 /**

@@ -77,6 +77,54 @@ export async function gzipString(input: string): Promise<Uint8Array> {
 	throw new Error("No gzip implementation available (missing CompressionStream and node:zlib).");
 }
 
+/**
+ * Decompress only the first `maxBytes` of a gzip stream into a UTF-8 string.
+ *
+ * Lets a caller peek at a file's header (e.g. the thread-file `version` key)
+ * without materializing the full decompressed payload — the whole point on
+ * mobile, where a legacy quadratic `.chat` file can gunzip to hundreds of MB.
+ * The prefix may end mid-multibyte character; the decoder replaces the
+ * fragment, which is fine for header sniffing.
+ */
+export async function gunzipPrefixToString(input: ArrayBuffer | Uint8Array, maxBytes: number): Promise<string> {
+	const bytes = input instanceof Uint8Array ? input : new Uint8Array(input);
+	if (hasDecompressionStream) {
+		const ds = new DecompressionStream("gzip");
+		const writer = ds.writable.getWriter();
+		// Not awaited: the writes only complete as the readable side is drained,
+		// and we stop draining early. Cancellation rejects them; that's expected.
+		writer.write(toWritableBytes(bytes)).catch(() => {});
+		writer.close().catch(() => {});
+		const reader = ds.readable.getReader();
+		const chunks: Uint8Array[] = [];
+		let total = 0;
+		while (total < maxBytes) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			if (value) {
+				chunks.push(value);
+				total += value.length;
+			}
+		}
+		await reader.cancel().catch(() => {});
+		const out = new Uint8Array(Math.min(total, maxBytes));
+		let offset = 0;
+		for (const chunk of chunks) {
+			const take = Math.min(chunk.length, out.length - offset);
+			out.set(chunk.subarray(0, take), offset);
+			offset += take;
+			if (offset >= out.length) break;
+		}
+		return new TextDecoder("utf-8").decode(out);
+	}
+	const zlib = tryRequireZlib();
+	if (zlib) {
+		// Desktop-only fallback: no memory ceiling there, so a full gunzip is fine.
+		return zlib.gunzipSync(bytes).subarray(0, maxBytes).toString("utf8");
+	}
+	throw new Error("No gunzip implementation available (missing DecompressionStream and node:zlib).");
+}
+
 /** Gunzip raw gzip bytes back into a UTF-8 string. */
 export async function gunzipToString(input: ArrayBuffer | Uint8Array): Promise<string> {
 	const bytes = input instanceof Uint8Array ? input : new Uint8Array(input);
