@@ -3,8 +3,15 @@ import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { gunzipSync } from "node:zlib";
 
-const VAULT_NAME = "S2B Test Vault";
-const CHAT_FILES_DIR = fileURLToPath(new URL("../S2B Test Vault/Chats/", import.meta.url));
+// Overridable so parallel agent slots can run the suite against their own
+// vault clone (see AGENTS.md "Parallel agent slots"). S2B_TEST_VAULT is the
+// vault NAME as registered in Obsidian; S2B_TEST_VAULT_PATH is the vault's
+// directory on disk (only needed when overriding the name).
+const VAULT_NAME = process.env.S2B_TEST_VAULT ?? "S2B Test Vault";
+export const VAULT_DIR = process.env.S2B_TEST_VAULT_PATH
+	? process.env.S2B_TEST_VAULT_PATH.replace(/\/$/, "")
+	: fileURLToPath(new URL("../S2B Test Vault", import.meta.url));
+const CHAT_FILES_DIR = `${VAULT_DIR}/Chats/`;
 
 interface PersistedCheckpointRecord {
 	checkpoint?: {

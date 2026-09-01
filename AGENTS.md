@@ -137,6 +137,56 @@ Stable manual flow:
 
 Known issue: on macOS, launching `obsidian` from Codex Desktop can cause Obsidian to quit unexpectedly (upstream `openai/codex#13706`). If that happens, run the CLI from a normal terminal instead, or reopen the vault and minimize CLI calls. Reference flow lives in `integration/helpers/cli.ts`; see also the `obsidian-integration-test` skill under `.github/skills/`.
 
+## Parallel agent slots
+
+Multiple agent sessions can work simultaneously without racing on builds or
+trampling each other's live vault. Three **fixed slots** live as siblings of
+this repo (created once by `bun run setup-slots`, which is idempotent):
+
+```
+s2b-dev/
+├── smart-second-brain/     ← main checkout: the USER's. Never build here
+│                             while working in a slot — vault symlinks for
+│                             the user's live testing point at ITS build/.
+└── agents/
+    ├── wt1/                ← git worktree (own node_modules, own build/)
+    ├── S2B WT1/            ← Obsidian vault, plugin symlinked → wt1/build/
+    ├── wt2/  +  S2B WT2/
+    ├── wt3/  +  S2B WT3/
+    └── .locks/             ← slot claims
+```
+
+**Protocol** for any task that needs a build or live verification:
+
+1. `scripts/claim-slot.sh <task-or-branch-name>` — claims the first free slot
+   and prints its worktree dir and vault name. If none is free, ask the user
+   rather than working in the main checkout. `--status` lists holders.
+2. `cd` into the slot worktree. It sits on a detached HEAD; create your task
+   branch there (`git fetch && git switch -c <branch> origin/dev`). Run
+   `bun install --frozen-lockfile` if deps changed.
+3. Build with a **one-shot** `bunx vite build --mode development` (never a
+   `--watch` — lingering watchers were the historical source of corrupt
+   bundles). Output goes to the slot's own `build/smart-second-brain/`.
+4. Verify live against **your slot's vault only**, e.g.
+   `obsidian vault="S2B WT1" command id=app:reload` then the usual
+   `command`/`dev:dom`/`dev:screenshot`/`dev:errors` flow. Never target
+   `S2B Test Vault` or the user's vaults from a slot session.
+5. Integration tests can target the slot vault via env vars:
+   `S2B_TEST_VAULT="S2B WT1" S2B_TEST_VAULT_PATH="../agents/S2B WT1" bun run test:integration`
+   (absolute path preferred). Caveat: running the full suite from **two slots
+   at the same time** is unvalidated — the suite assumes a quiet Obsidian
+   instance (`globalSetup` does a disable/enable cycle). Prefer live CLI
+   verification for parallel work; coordinate with the user before
+   concurrent full-suite runs.
+6. `scripts/release-slot.sh <wtN>` when the task is done (branch pushed /
+   PR opened). Leave the worktree clean.
+
+One-time host setup: each slot vault must be registered with Obsidian once.
+`setup-slots` does this automatically when Obsidian is closed; otherwise open
+each `agents/S2B WT<n>` folder as a vault by hand.
+
+`bun run check` / `format` / `lint` / `test` all work inside a slot worktree.
+
 ## Integration tests
 
 `integration/` runs Vitest against a live Obsidian via the CLI (`integration/helpers/cli.ts`). Setup:

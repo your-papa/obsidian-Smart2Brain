@@ -3,6 +3,12 @@ import { svelte, vitePreprocess } from "@sveltejs/vite-plugin-svelte";
 import { defineConfig } from "vite";
 import { copyFileSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+
+// Anchor all file paths to this config file's directory, NOT process.cwd():
+// builds must work identically from the main checkout and from any git
+// worktree (parallel agent slots), regardless of the caller's CWD.
+const configDir = fileURLToPath(new URL(".", import.meta.url));
 
 import builtinModules from "builtin-modules";
 
@@ -33,7 +39,7 @@ import builtinModules from "builtin-modules";
  * the polyfill and hand it back for `events`/`node:events` when no native require
  * exists, so the superclass is a real constructor on iOS/Android.
  */
-const EVENTS_POLYFILL_SRC = readFileSync(resolve("node_modules/events/events.js"), "utf8");
+const EVENTS_POLYFILL_SRC = readFileSync(resolve(configDir, "node_modules/events/events.js"), "utf8");
 
 function routeBuiltinRequiresThroughWindow() {
 	const builtinSet = new Set<string>();
@@ -118,12 +124,12 @@ const BANNER = PROCESS_SHIM;
 const setOutDir = (mode: string) => {
 	switch (mode) {
 		case "development":
-			return "./build/smart-second-brain/";
+			return resolve(configDir, "build/smart-second-brain");
 		case "production":
-			return "./build/prod";
+			return resolve(configDir, "build/prod");
 		default:
 			console.warn(`Unexpected mode: "${mode}". Defaulting to development output directory.`);
-			return "./build/smart-second-brain/";
+			return resolve(configDir, "build/smart-second-brain");
 	}
 };
 
@@ -143,7 +149,7 @@ export default defineConfig(({ mode }) => {
 				name: "copy-manifest",
 				closeBundle() {
 					const outDir = setOutDir(mode);
-					copyFileSync(resolve("manifest.json"), resolve(outDir, "manifest.json"));
+					copyFileSync(resolve(configDir, "manifest.json"), resolve(outDir, "manifest.json"));
 				},
 			},
 		],
@@ -163,7 +169,7 @@ export default defineConfig(({ mode }) => {
 				output: {
 					entryFileNames: "main.js",
 					assetFileNames: "styles.css",
-					sourcemapBaseUrl: new URL(setOutDir(mode), import.meta.url).toString(),
+					sourcemapBaseUrl: pathToFileURL(`${setOutDir(mode)}/`).toString(),
 					manualChunks: undefined,
 					inlineDynamicImports: true,
 						// Runs before all bundled code (survives minification): the

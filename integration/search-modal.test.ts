@@ -1,8 +1,9 @@
 import { rmSync, writeFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
 	PLUGIN,
+	VAULT_DIR,
 	clearBuffers,
 	closeAllModals,
 	createNote,
@@ -134,9 +135,7 @@ describe("search modal", () => {
 	const recentBoostRankingNoteContent = ["# Recent Boost Ranking Fixture", "", "Recent Boost Probe"].join("\n");
 	const filesystemFixtureBaseName = `Filesystem Created Recent Fixture ${Date.now()}`;
 	const filesystemFixtureNoteName = `${filesystemFixtureBaseName}.md`;
-	const filesystemFixturePath = fileURLToPath(
-		new URL(`./S2B Test Vault/${encodeURIComponent(filesystemFixtureNoteName)}`, import.meta.url),
-	);
+	const filesystemFixturePath = join(VAULT_DIR, filesystemFixtureNoteName);
 	const multiSelectCreateNoteName = `Search Modal Shift Enter Fixture ${Date.now()}.md`;
 	const multiSelectCreateNoteTitle = multiSelectCreateNoteName.replace(/\.md$/u, "");
 
