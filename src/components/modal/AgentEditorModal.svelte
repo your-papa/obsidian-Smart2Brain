@@ -896,7 +896,7 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
           </div>
         </div>
 
-        <!-- One row per core skill: the bundled explore-vault/edit-notes/web/manage-skills skills
+        <!-- One row per core skill: the bundled explore-vault/manage-notes/web/manage-skills skills
              (which attach built-in tools via allowed-tools) plus Obsidian core-plugin skills (Canvas, Bases, …).
              Per-tool configuration lives in the agent-level Tools modal (General section), not here —
              a skill's attached tools may be shared with other skills, so tool config isn't a

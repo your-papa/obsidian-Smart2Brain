@@ -336,12 +336,6 @@ export const DEFAULT_TOOLS_CONFIG: ToolsConfig = {
 		name: "manage_notes",
 		description:
 			"Create, update, delete, move, or find-and-replace across markdown notes in one staged batch. For a single note, use 'update' with targeted search-and-replace edits (add is_regex/replace_all to match by regex or replace every occurrence). For vault-wide or folder-scoped find-and-replace, use the 'replace' operation (find/replace, optional is_regex/case_sensitive/path_prefix) — preview its blast radius first with grep_notes. Batch related note operations together. Staged changes can still be revised: editing a note you already have a pending proposal for ADDS to that proposal, so set replace_pending on the update to replace it instead, or use the 'discard' operation with the proposal's id (reported when it was staged) to withdraw it entirely.",
-		settings: {
-			allowCreate: true,
-			allowUpdate: true,
-			allowDelete: true,
-			allowMove: true,
-		},
 	},
 	fetch_url: {
 		// Enabled by default, matching web_search: the web core skill ships enabled and
@@ -422,7 +416,7 @@ function createDefaultAgent(): AgentConfig {
 // ---------------------------------------------------------------------------
 
 /** Increment this when making any breaking change to PluginData. Add a corresponding entry to MIGRATIONS. */
-const CURRENT_SCHEMA_VERSION = 10;
+const CURRENT_SCHEMA_VERSION = 11;
 
 type Migration = (data: PluginData) => void;
 
@@ -553,6 +547,29 @@ const MIGRATIONS: Migration[] = [
 			(agent as unknown as Record<string, unknown>).memoryEnabled = undefined;
 		}
 	},
+	// v10 → v11: the `edit-notes` core skill renamed `manage-notes` (matching its attached
+	//            tool, `manage_notes`), and the manage_notes per-operation settings
+	//            (allowCreate/allowUpdate/allowDelete/allowMove) plus its diff-view-mode
+	//            dropdown were removed — the staged-review flow is the user's control point,
+	//            and `diffViewMode` is now toggled from the pending-changes review bars.
+	//            The skills key moves preserving an `enabled: false` veto (same reasoning as
+	//            v7 → v8); the stale settings object is dropped so it stops being carried
+	//            forward. The on-disk skill folder is renamed/cleaned by
+	//            SkillsService.migrateManageNotesFolder — migrations are synchronous and
+	//            data-only.
+	(data) => {
+		for (const agent of Object.values(data.agents ?? {})) {
+			const skills = agent.skills as unknown as Record<string, unknown>;
+			if (skills && "edit-notes" in skills) {
+				skills["manage-notes"] = skills["edit-notes"];
+				skills["edit-notes"] = undefined;
+			}
+			const manageNotes = agent.toolsConfig?.manage_notes as unknown as Record<string, unknown> | undefined;
+			if (manageNotes) {
+				manageNotes.settings = undefined;
+			}
+		}
+	},
 ];
 
 function runMigrations(data: PluginData): void {
@@ -589,6 +606,7 @@ export const DEFAULT_SETTINGS: PluginData = {
 	agentFolderMigrated: false,
 	coreSkillsSeeded: false,
 	manageSkillsFolderMigrated: false,
+	manageNotesFolderMigrated: false,
 
 	// Privacy
 	privacyMode: "private-by-default",
@@ -871,6 +889,14 @@ export class PluginDataStore {
 	}
 	set manageSkillsFolderMigrated(val: boolean) {
 		this.#data.manageSkillsFolderMigrated = val;
+		this.saveSettings();
+	}
+
+	get manageNotesFolderMigrated() {
+		return this.#data.manageNotesFolderMigrated ?? false;
+	}
+	set manageNotesFolderMigrated(val: boolean) {
+		this.#data.manageNotesFolderMigrated = val;
 		this.saveSettings();
 	}
 

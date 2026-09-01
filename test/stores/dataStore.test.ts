@@ -576,6 +576,46 @@ describe("createData", () => {
 		expect(off.memoryEnabled).toBeUndefined();
 	});
 
+	/*
+	 * v10→v11 renamed the `edit-notes` core skill to `manage-notes` and removed the
+	 * manage_notes per-operation settings. The skills key must move preserving an
+	 * `enabled: false` veto (otherwise the `?? true` fallback silently re-enables the
+	 * skill under its new name), and the stale settings object must not survive the load.
+	 */
+	it("moves the edit-notes skill key and drops manage_notes settings across the v10→v11 migration", async () => {
+		const toolsConfig = structuredClone(DEFAULT_TOOLS_CONFIG) as unknown as Record<string, { settings?: unknown }>;
+		toolsConfig.manage_notes.settings = {
+			allowCreate: true,
+			allowUpdate: true,
+			allowDelete: false,
+			allowMove: true,
+		};
+		const plugin = {
+			...createMockPlugin(),
+			loadData: vi.fn().mockResolvedValue({
+				...structuredClone(DEFAULT_SETTINGS),
+				schemaVersion: 10,
+				agents: {
+					[DEFAULT_AGENT_ID]: {
+						id: DEFAULT_AGENT_ID,
+						name: "S2B Agent",
+						chatModel: null,
+						skills: { "edit-notes": { enabled: false } },
+						toolsConfig,
+						mcpServers: {},
+					},
+				},
+			}),
+		};
+
+		const store = await createData(plugin as never);
+
+		const agent = store.getAgent(DEFAULT_AGENT_ID)!;
+		expect(agent.skills["manage-notes"]?.enabled).toBe(false);
+		expect(agent.skills["edit-notes"]).toBeUndefined();
+		expect((agent.toolsConfig.manage_notes as { settings?: unknown }).settings).toBeUndefined();
+	});
+
 	it("de-duplicates persisted agent names that sanitize to the same prompt filename", async () => {
 		const mkAgent = (id: string, name: string) => ({
 			id,

@@ -10,7 +10,7 @@ describe("humanizeSkillName", () => {
 
 	it("splits hyphenated ids into Title-Cased words", () => {
 		expect(humanizeSkillName("explore-vault")).toBe("Explore Vault");
-		expect(humanizeSkillName("edit-notes")).toBe("Edit Notes");
+		expect(humanizeSkillName("manage-notes")).toBe("Manage Notes");
 		expect(humanizeSkillName("manage-skills")).toBe("Manage Skills");
 	});
 
@@ -19,7 +19,7 @@ describe("humanizeSkillName", () => {
 	});
 
 	it("round-trips with slugifySkillName for well-formed slugs", () => {
-		for (const id of ["web", "explore-vault", "edit-notes", "manage-skills"]) {
+		for (const id of ["web", "explore-vault", "manage-notes", "manage-skills"]) {
 			expect(slugifySkillName(humanizeSkillName(id))).toBe(id);
 		}
 	});

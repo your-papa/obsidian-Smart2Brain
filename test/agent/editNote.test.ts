@@ -31,12 +31,6 @@ vi.mock("../../src/stores/dataStore.svelte", () => ({
 				manage_notes: {
 					name: "manage_notes",
 					description: "Manage notes",
-					settings: {
-						allowCreate: true,
-						allowUpdate: true,
-						allowDelete: true,
-						allowMove: true,
-					},
 				},
 			},
 		}),

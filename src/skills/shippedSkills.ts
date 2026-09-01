@@ -15,6 +15,7 @@ import { BUNDLED_SKILLS } from "./defaults";
 import { type ShippedHistory, currentShippedVersion, fingerprint } from "../utils/shippedDefaults";
 import dataview10 from "./history/dataview-1.0.md?raw";
 import editNotes10 from "./history/edit-notes-1.0.md?raw";
+import editNotes11 from "./history/edit-notes-1.1.md?raw";
 import exploreVault10 from "./history/explore-vault-1.0.md?raw";
 import tasknotes10 from "./history/tasknotes-1.0.md?raw";
 
@@ -50,8 +51,6 @@ import tasknotes10 from "./history/tasknotes-1.0.md?raw";
 const PRIOR_SKILL_FINGERPRINTS: ReadonlyMap<string, ReadonlyMap<string, string>> = new Map([
 	// 1.0: before the "Compute, don't estimate" execute_javascript guidance was added.
 	["explore-vault", new Map([["1.0", fingerprint(exploreVault10)]])],
-	// 1.0: before the "Correcting an Edit You Already Staged" section (replace_pending/discard).
-	["edit-notes", new Map([["1.0", fingerprint(editNotes10)]])],
 	// 1.0 as actually released in 2.0.2-beta — i.e. the post-#381 body, which #381 edited
 	// *without* bumping the version. That silent reuse is the same failure as an unretained
 	// body, just quieter: the new text went out still labelled 1.0, so the version could no
@@ -62,6 +61,24 @@ const PRIOR_SKILL_FINGERPRINTS: ReadonlyMap<string, ReadonlyMap<string, string>>
 	// released, so no vault holds it and fingerprinting it would protect nothing.
 	["dataview", new Map([["1.0", fingerprint(dataview10)]])],
 	["tasknotes", new Map([["1.0", fingerprint(tasknotes10)]])],
+]);
+
+/**
+ * Every released body of the `edit-notes` core skill, which was renamed `manage-notes`
+ * (schema v11) to match its attached tool, `manage_notes`. Like the earlier
+ * `update-skills` → `manage-skills` rename, the skill restarts at version 1.0 under its new
+ * name, so these fingerprints live outside {@link SHIPPED_SKILL_HISTORY} (which is keyed by
+ * bundled-skill name). Their one consumer is `SkillsService.migrateManageNotesFolder`, which
+ * uses them to tell an untouched shipped copy (delete the old folder and let bootstrap seed
+ * `manage-notes/` fresh) from a user-edited one (rename the folder in place so the edits
+ * survive).
+ *
+ * 1.0 shipped before the "Correcting an Edit You Already Staged" section; 1.1 (with it) was
+ * the current body when the skill was renamed.
+ */
+export const RELEASED_EDIT_NOTES_FINGERPRINTS: ReadonlySet<string> = new Set([
+	fingerprint(editNotes10),
+	fingerprint(editNotes11),
 ]);
 
 /**

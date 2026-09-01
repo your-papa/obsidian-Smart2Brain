@@ -18,8 +18,8 @@ import {
 } from "./defaults";
 import { isInternalPluginEnabled } from "../agent/integrations/pluginIntegrations";
 import { buildPluginApiSkill } from "./templates/pluginApiScripting";
-import { SHIPPED_SKILL_HISTORY, currentSkillVersion } from "./shippedSkills";
-import { shippedVersion } from "../utils/shippedDefaults";
+import { RELEASED_EDIT_NOTES_FINGERPRINTS, SHIPPED_SKILL_HISTORY, currentSkillVersion } from "./shippedSkills";
+import { fingerprint, shippedVersion } from "../utils/shippedDefaults";
 import { validateFrontmatter, type ValidationResult } from "./validation";
 
 /** SKILL.md filename per spec */
@@ -623,16 +623,81 @@ export class SkillsService {
 	}
 
 	/**
+	 * One-time migration (schema v11): the `edit-notes` core skill is renamed `manage-notes`,
+	 * matching its attached tool (`manage_notes`) — the same treatment `update-skills` got in
+	 * v8. Unlike v8 the skill restarts at version 1.0 under its new name, so an old folder
+	 * can't be reconciled by `bootstrapDefaultSkills` against `manage-notes`' shipped history;
+	 * this decides its fate instead:
+	 *
+	 * - untouched shipped copy (any released `edit-notes` body) → delete the folder, and let
+	 *   bootstrap seed a fresh `manage-notes/` right after;
+	 * - user-edited copy → rename the folder and rewrite the `name:` frontmatter line (the
+	 *   discovery key — see migrateManageSkillsFolder for why the rename alone isn't enough),
+	 *   preserving the edits. Bootstrap then flags it `customized`, which is accurate.
+	 *
+	 * A no-op (marked done immediately) when no legacy folder exists; never clobbers an
+	 * existing `manage-notes/`. Must run BEFORE bootstrap so it sees the folder state this
+	 * leaves behind. Idempotent via `manageNotesFolderMigrated`, set only on success so a
+	 * failure retries next start.
+	 */
+	async migrateManageNotesFolder(): Promise<void> {
+		const data = getData();
+		if (data.manageNotesFolderMigrated) return;
+
+		const dir = this.getSkillsDir();
+		const oldDir = `${dir}/edit-notes`;
+		const newDir = `${dir}/manage-notes`;
+
+		try {
+			if (!(await this.adapter.exists(oldDir))) {
+				data.manageNotesFolderMigrated = true;
+				return;
+			}
+			if (await this.adapter.exists(newDir)) {
+				// Both exist — leave the legacy folder in place rather than guess which to keep.
+				Log.debug(`Both ${oldDir} and ${newDir} exist; leaving legacy folder for manual cleanup`);
+				data.manageNotesFolderMigrated = true;
+				return;
+			}
+
+			const oldPath = `${oldDir}/${SKILL_FILENAME}`;
+			const customized =
+				(await this.adapter.exists(oldPath)) &&
+				!RELEASED_EDIT_NOTES_FINGERPRINTS.has(fingerprint(await this.adapter.read(oldPath)));
+
+			if (!customized) {
+				await this.adapter.rmdir(oldDir, true);
+				Log.info(`Removed untouched core-skill folder ${oldDir}; bootstrap will seed ${newDir}`);
+				data.manageNotesFolderMigrated = true;
+				return;
+			}
+
+			await this.adapter.rename(oldDir, newDir);
+			const newPath = `${newDir}/${SKILL_FILENAME}`;
+			const raw = await this.adapter.read(newPath);
+			const updated = raw.replace(/^name:\s*edit-notes\s*$/m, "name: manage-notes");
+			if (updated !== raw) await this.adapter.write(newPath, updated);
+
+			Log.info(`Renamed customized core-skill folder ${oldDir} -> ${newDir}`);
+			data.manageNotesFolderMigrated = true;
+		} catch (error) {
+			// Leave the flag unset so we retry next start.
+			Log.error("manage-notes folder migration failed:", error);
+		}
+	}
+
+	/**
 	 * Initialize the skills service.
 	 * Consolidates legacy skills into the agent folder's Skills/ dir, cleans up orphaned
 	 * core-skill guidance (v6 core-skill migration), renames update-skills -> manage-skills
-	 * (v8), bootstraps default skills if needed, then discovers all available skills. Call this
-	 * once on plugin load.
+	 * (v8) and edit-notes -> manage-notes (v11), bootstraps default skills if needed, then
+	 * discovers all available skills. Call this once on plugin load.
 	 */
 	async initialize(): Promise<void> {
 		await StartupProfiler.measure("skills:migrate", () => this.migrateAgentFolder());
 		await StartupProfiler.measure("skills:migrate-core", () => this.migrateCoreSkills());
 		await StartupProfiler.measure("skills:migrate-manage-skills", () => this.migrateManageSkillsFolder());
+		await StartupProfiler.measure("skills:migrate-manage-notes", () => this.migrateManageNotesFolder());
 		await StartupProfiler.measure("skills:bootstrap", () => this.bootstrapDefaultSkills());
 		await StartupProfiler.measure("skills:discover", () => this.discoverSkills());
 	}

@@ -262,26 +262,11 @@ export interface WebSearchSettings {
 }
 
 /**
- * Tool-specific settings for manage_notes tool
- */
-export interface ManageNotesSettings {
-	/** Whether note creation operations are allowed */
-	allowCreate: boolean;
-	/** Whether note update operations are allowed */
-	allowUpdate: boolean;
-	/** Whether note deletion operations are allowed */
-	allowDelete: boolean;
-	/** Whether note move operations are allowed */
-	allowMove: boolean;
-}
-
-/**
  * Union type of all tool-specific settings
  */
 export type ToolSpecificSettings =
 	| ReadContentSettings
 	| GrepNotesSettings
-	| ManageNotesSettings
 	| FetchUrlSettings
 	| WebSearchSettings
 	| Record<string, never>;
@@ -535,6 +520,12 @@ export interface PluginData {
 	 * `SkillsService.migrateManageSkillsFolder` on success; a no-op when no legacy folder exists.
 	 */
 	manageSkillsFolderMigrated: boolean;
+	/**
+	 * One-time flag: the `edit-notes` → `manage-notes` core-skill folder rename has run
+	 * (schema v11, matching the skill name to its attached `manage_notes` tool). Set by
+	 * `SkillsService.migrateManageNotesFolder` on success; a no-op when no legacy folder exists.
+	 */
+	manageNotesFolderMigrated: boolean;
 
 	// ============================================================================
 	// Privacy
