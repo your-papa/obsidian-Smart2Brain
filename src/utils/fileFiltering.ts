@@ -4,16 +4,39 @@ import { gunzipToString } from "./gzip";
 import { extractTextFromPdf } from "./pdfExtractor";
 
 /**
- * Largest PDF whose text gets extracted on mobile, in bytes.
+ * Largest file whose content gets read for indexing on mobile, in bytes.
  *
- * pdf.js keeps the whole document plus its parsed structures in memory while
- * extracting, and the mobile WebView lives under an OS memory ceiling the
- * desktop never meets. Text-heavy PDFs are almost always small; the ones above
- * this size are predominantly scans, which yield no text anyway (no OCR). An
- * oversized PDF is indexed by title/path only — the same result as an
- * encrypted or scanned one.
+ * The mobile WebView lives under an OS memory ceiling the desktop never meets,
+ * and reading a file costs a multiple of its size before any truncation could
+ * apply: Capacitor's bridge round-trips binary reads through base64, pdf.js
+ * keeps the parsed document alongside the bytes, and strings are UTF-16.
+ * Oversized files are indexed by title/path only. For PDFs that loses little —
+ * above this size they are predominantly scans, which yield no text anyway.
  */
-const MOBILE_PDF_MAX_EXTRACT_BYTES = 10 * 1024 * 1024;
+const MOBILE_MAX_READ_BYTES = 10 * 1024 * 1024;
+
+/**
+ * Largest `.chat` file whose content gets extracted on mobile, in bytes.
+ *
+ * Tighter than {@link MOBILE_MAX_READ_BYTES} because `.chat` files are
+ * gzip-compressed JSON: the on-disk size understates the in-memory cost by the
+ * compression ratio, easily 5-10x for chat threads. A 72MB thread file in a
+ * real vault decompressed to a string large enough to get the WebView killed
+ * on the spot — and because bulk indexing resumes at the same place each boot,
+ * that single file turned every restart into another death.
+ */
+const MOBILE_CHAT_MAX_EXTRACT_BYTES = 2 * 1024 * 1024;
+
+/**
+ * Hard cap on the text handed to indexing, in UTF-16 code units, all platforms.
+ *
+ * Search relevance saturates long before this — no note needs its second
+ * megabyte of prose to be findable — but index size and tokenization cost keep
+ * growing linearly. This is the last line of defense against any single
+ * pathological file (a giant CSV export, a decompressed chat log) dominating
+ * the index or the indexing run, independent of the file-size gates above.
+ */
+const MAX_INDEXED_TEXT_CHARS = 1_000_000;
 
 function normalizePattern(pattern: string): string {
 	return pattern.trim().replace(/^\/+|\/+$/g, "");
@@ -203,13 +226,26 @@ export function getEmbeddableVaultFiles(vault: Vault): TFile[] {
  * before calling this helper.
  */
 export async function readIndexableContent(vault: Vault, file: TFile): Promise<string> {
+	const content = await readIndexableContentRaw(vault, file);
+	return content.length > MAX_INDEXED_TEXT_CHARS ? content.slice(0, MAX_INDEXED_TEXT_CHARS) : content;
+}
+
+async function readIndexableContentRaw(vault: Vault, file: TFile): Promise<string> {
+	// Size gates come before any read: the cost of reading an oversized file is
+	// paid before truncation could help.
+	if (Platform.isMobile) {
+		if (file.stat.size > MOBILE_MAX_READ_BYTES) {
+			return "";
+		}
+		if (file.extension === "chat" && file.stat.size > MOBILE_CHAT_MAX_EXTRACT_BYTES) {
+			return "";
+		}
+	}
+
 	// PDFs carry real prose, but it lives inside a binary container. Extracting it
 	// lets the normal chunker split the document by length; returning "" would
 	// index a multi-page PDF as a single title-only vector.
 	if (isBinaryTextFile(file)) {
-		if (Platform.isMobile && file.stat.size > MOBILE_PDF_MAX_EXTRACT_BYTES) {
-			return "";
-		}
 		try {
 			const bytes = await readBinaryFile(vault, file);
 			const { text } = await extractTextFromPdf(new Uint8Array(bytes));
