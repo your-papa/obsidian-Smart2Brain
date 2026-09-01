@@ -1,5 +1,6 @@
 import { Platform, type TFile, type Vault } from "obsidian";
 import { getData } from "../stores/dataStore.svelte";
+import { inflateThreadData } from "../agent/threadDataCodec";
 import { gunzipToString } from "./gzip";
 import { extractTextFromPdf } from "./pdfExtractor";
 
@@ -504,7 +505,9 @@ function selectActiveMessages(checkpoints: Record<string, unknown>): unknown[] {
  */
 function extractChatContent(raw: string): string {
 	try {
-		const data = JSON.parse(raw);
+		// v2+ thread files store each message once in a table and reference it
+		// from checkpoints; resolve those references before walking the tree.
+		const data = inflateThreadData(JSON.parse(raw));
 		const parts: string[] = [];
 
 		// Include the chat title if present
