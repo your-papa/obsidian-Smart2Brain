@@ -331,25 +331,34 @@ async function seedEditAttachments(restored: ChatAttachment[]) {
 // cancel path puts the stashed draft back and clears the seeded attachment
 // chips; a successful saveEdit clears the stash first, so this no-ops there.
 let lastSeededEditId: string | null = null;
+
+/** Unwind one edit's seeding: stop any in-flight attachment seeding, put the
+ * pre-edit draft back, and remove the chips the edit seeded (the user's own
+ * attachments stay). Shared by the `editingPairId → null` cleanup and the
+ * direct A→B edit switch below — the two paths must stay identical, or
+ * whichever one drifts leaks the previous edit's text/attachments into
+ * whatever the composer does next. */
+function restorePreEditComposerState() {
+	seedEditToken++;
+	if (stashedDraft !== null) {
+		const draft = stashedDraft;
+		stashedDraft = null;
+		inputValue = draft;
+		markdownEditor?.setValue(draft);
+	}
+	for (const path of seededEditPaths) {
+		removeAttachmentByPath(path);
+	}
+	seededEditPaths = new Set();
+}
+
 $effect(() => {
 	if (editingPairId === null) {
 		if (lastSeededEditId !== null) {
 			lastSeededEditId = null;
 			// Untracked: the restore reads/writes composer state that must not
 			// become a dependency of this effect (it only reacts to the edit target).
-			untrack(() => {
-				if (stashedDraft !== null) {
-					const draft = stashedDraft;
-					stashedDraft = null;
-					inputValue = draft;
-					markdownEditor?.setValue(draft);
-				}
-				seedEditToken++;
-				for (const path of seededEditPaths) {
-					removeAttachmentByPath(path);
-				}
-				seededEditPaths = new Set();
-			});
+			untrack(() => restorePreEditComposerState());
 		}
 		return;
 	}
@@ -358,6 +367,14 @@ $effect(() => {
 	if (!pair) {
 		session?.cancelEdit();
 		return;
+	}
+	// Switching straight from editing one message to another never passes
+	// through null, so unwind the previous edit here first — otherwise its
+	// seeded attachments stay in the tray and get saved onto the new target,
+	// and its message text (stashed below as the "draft") would later be
+	// restored as if the user had typed it.
+	if (lastSeededEditId !== null) {
+		untrack(() => restorePreEditComposerState());
 	}
 	lastSeededEditId = editingPairId;
 	stashedDraft = inputValue;
