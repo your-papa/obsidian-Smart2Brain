@@ -5,7 +5,7 @@ license: MIT
 compatibility: Requires Dataview plugin to be installed and enabled in Obsidian
 metadata:
   author: "S2B"
-  version: "1.1"
+  version: "1.0"
   linkedPlugin: "dataview"
 ---
 

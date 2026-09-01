@@ -13,7 +13,10 @@
 
 import { BUNDLED_SKILLS } from "./defaults";
 import { type ShippedHistory, currentShippedVersion, fingerprint } from "../utils/shippedDefaults";
+import dataview10 from "./history/dataview-1.0.md?raw";
+import editNotes10 from "./history/edit-notes-1.0.md?raw";
 import exploreVault10 from "./history/explore-vault-1.0.md?raw";
+import tasknotes10 from "./history/tasknotes-1.0.md?raw";
 
 /**
  * Fingerprints of bundled-skill bodies we shipped in a PREVIOUS version and no longer ship
@@ -32,13 +35,33 @@ import exploreVault10 from "./history/explore-vault-1.0.md?raw";
  * entries to hex literals — log `fingerprint(...)` once and inline the string.
  *
  * Skip step 1-2 and existing vaults will read their untouched copy as a user customization:
- * they'll get a notice asking them to reconcile by hand instead of a silent update.
+ * they'll get a notice asking them to reconcile by hand instead of a silent update. Skip step
+ * 3 and it's the same outcome by a different route — the new body is recorded under the old
+ * version, so the body that actually shipped under it is no longer in history at all.
+ *
+ * You do not have to remember any of this: `test/skills/shippedSkillHistory.test.ts` replays
+ * every release tag and fails if a released body has no fingerprint or a version covers two
+ * bodies. Retain only bodies that were actually *released* (present at a tag) — an
+ * intermediate commit within one version never reached a vault, so pinning it protects
+ * nothing.
  *
  * Entries are append-only — removing one has the same effect as never adding it.
  */
 const PRIOR_SKILL_FINGERPRINTS: ReadonlyMap<string, ReadonlyMap<string, string>> = new Map([
 	// 1.0: before the "Compute, don't estimate" execute_javascript guidance was added.
 	["explore-vault", new Map([["1.0", fingerprint(exploreVault10)]])],
+	// 1.0: before the "Correcting an Edit You Already Staged" section (replace_pending/discard).
+	["edit-notes", new Map([["1.0", fingerprint(editNotes10)]])],
+	// 1.0 as actually released in 2.0.2-beta — i.e. the post-#381 body, which #381 edited
+	// *without* bumping the version. That silent reuse is the same failure as an unretained
+	// body, just quieter: the new text went out still labelled 1.0, so the version could no
+	// longer identify a body. Bumping the current body to 1.1 (and pinning the released text
+	// here) is what lets those installs update instead of reading as customized.
+	//
+	// Note this is the tagged body, not the pre-#381 one: that earlier text was never
+	// released, so no vault holds it and fingerprinting it would protect nothing.
+	["dataview", new Map([["1.0", fingerprint(dataview10)]])],
+	["tasknotes", new Map([["1.0", fingerprint(tasknotes10)]])],
 ]);
 
 /**
