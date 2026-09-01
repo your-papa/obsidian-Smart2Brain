@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { AIMessage, type BaseMessage, HumanMessage, ToolMessage } from "@langchain/core/messages";
 import {
 	buildCheckpointGraph,
+	collectAbandonedToolCallIds,
 	deriveMessagePairsFromActiveCheckpoint,
 	baseMessagesToMessagePairs,
 	baseMessageToAssistantMessage,
@@ -1011,5 +1012,70 @@ describe("message pair identity across rebuilds", () => {
 
 		const after = deriveMessagePairsFromActiveCheckpoint(persisted, "cp-2");
 		expect(after[0].assistantMessage.thinkingDurationMs).toBe(42_000);
+	});
+});
+
+/* --------------------------------------------------------------------------
+ * collectAbandonedToolCallIds — the tool calls an edit/regenerate abandons
+ * ------------------------------------------------------------------------*/
+
+describe("collectAbandonedToolCallIds", () => {
+	it("returns tool calls present at the tip but not at the fork checkpoint", () => {
+		const h1 = humanMsg("q1", "h1");
+		const ai1 = aiMsgWithToolCalls("", [{ id: "tc-1", name: "manage_notes", args: {} }], "ai1");
+		const t1 = toolMsg("staged", "tc-1");
+		const ai2 = aiMsg("answer 1", "ai2");
+		const h2 = humanMsg("q2", "h2");
+		const ai3 = aiMsgWithToolCalls("", [{ id: "tc-2", name: "manage_notes", args: {} }], "ai3");
+
+		const forkMessages = [h1, ai1, t1, ai2, h2]; // regenerate turn 2: fork where h2 is last
+		const tipMessages = [h1, ai1, t1, ai2, h2, ai3, toolMsg("staged", "tc-2"), aiMsg("answer 2", "ai4")];
+
+		expect(collectAbandonedToolCallIds(forkMessages, tipMessages)).toEqual(new Set(["tc-2"]));
+	});
+
+	it("keeps every call when the fork point is the tip (nothing abandoned)", () => {
+		const msgs = [
+			humanMsg("q", "h1"),
+			aiMsgWithToolCalls("", [{ id: "tc-1", name: "manage_notes", args: {} }], "ai1"),
+			toolMsg("ok", "tc-1"),
+			aiMsg("done", "ai2"),
+		];
+		expect(collectAbandonedToolCallIds(msgs, msgs)).toEqual(new Set());
+	});
+
+	it("abandons the whole branch when forking from the root (editing the first message)", () => {
+		const tipMessages = [
+			humanMsg("q1", "h1"),
+			aiMsgWithToolCalls("", [{ id: "tc-1", name: "manage_notes", args: {} }], "ai1"),
+			toolMsg("ok", "tc-1"),
+			humanMsg("q2", "h2"),
+			aiMsgWithToolCalls("", [{ id: "tc-2", name: "manage_notes", args: {} }], "ai2"),
+		];
+		expect(collectAbandonedToolCallIds([], tipMessages)).toEqual(new Set(["tc-1", "tc-2"]));
+	});
+
+	it("stays conservative when summarization trimmed old calls from the tip", () => {
+		const h1 = humanMsg("q1", "h1");
+		const ai1 = aiMsgWithToolCalls("", [{ id: "tc-old", name: "manage_notes", args: {} }], "ai1");
+		const forkMessages = [h1, ai1, toolMsg("ok", "tc-old"), aiMsg("a", "ai2")];
+		// Summarization dropped ai1 from the tip channel; only the new call remains.
+		const tipMessages = [
+			humanMsg("summary", "sum"),
+			humanMsg("q2", "h2"),
+			aiMsgWithToolCalls("", [{ id: "tc-new", name: "manage_notes", args: {} }], "ai3"),
+		];
+		// tc-old is absent from the tip, so it is NOT reported as abandoned — its
+		// proposals are left alone rather than withdrawn on a guess.
+		expect(collectAbandonedToolCallIds(forkMessages, tipMessages)).toEqual(new Set(["tc-new"]));
+	});
+
+	it("ignores messages without tool calls and calls without ids", () => {
+		const tipMessages = [
+			humanMsg("q", "h1"),
+			aiMsg("plain answer", "ai1"),
+			new AIMessage({ content: "", id: "ai2", tool_calls: [{ name: "manage_notes", args: {} }] }),
+		];
+		expect(collectAbandonedToolCallIds([], tipMessages)).toEqual(new Set());
 	});
 });

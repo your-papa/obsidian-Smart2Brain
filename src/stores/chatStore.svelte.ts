@@ -7,7 +7,7 @@ import {
 	isHumanMessage,
 	isToolMessage,
 } from "@langchain/core/messages";
-import { type TFile } from "obsidian";
+import { Notice, type TFile } from "obsidian";
 import { SvelteMap } from "svelte/reactivity";
 import type { AgentStreamChunk, CheckpointHistoryItem, ThreadHistory } from "../agent/Agent";
 import type { AgentManager } from "../agent/AgentManager";
@@ -1567,6 +1567,35 @@ export function baseMessagesToMessagePairs(
 }
 
 /**
+ * Tool-call ids present in `tipMessages` but not in `forkMessages` — the calls
+ * made by the turns an edit/regenerate is about to abandon.
+ *
+ * Both lists are full checkpoint channels (the channel is cumulative), so the
+ * fork checkpoint contains every call up to the fork and the difference is
+ * exactly the segment being replaced. Summarization can only TRIM messages from
+ * the later tip, which keeps this conservative: a call trimmed from the tip is
+ * absent from the diff and its proposals are left alone rather than withdrawn.
+ */
+export function collectAbandonedToolCallIds(forkMessages: BaseMessage[], tipMessages: BaseMessage[]): Set<string> {
+	const keptIds = new Set<string>();
+	for (const msg of forkMessages) {
+		if (!isAIMessage(msg)) continue;
+		for (const tc of (msg as AIMessage).tool_calls ?? []) {
+			if (tc.id) keptIds.add(tc.id);
+		}
+	}
+
+	const abandoned = new Set<string>();
+	for (const msg of tipMessages) {
+		if (!isAIMessage(msg)) continue;
+		for (const tc of (msg as AIMessage).tool_calls ?? []) {
+			if (tc.id && !keptIds.has(tc.id)) abandoned.add(tc.id);
+		}
+	}
+	return abandoned;
+}
+
+/**
  * Get the timestamp for when this message pair was created.
  * Returns the stable createdAt (derived from checkpoint ts), or null if unavailable.
  */
@@ -1914,6 +1943,51 @@ export class ChatSession {
 		return recovered?.length ? recovered : undefined;
 	}
 
+	/** The attachments an edit of this pair starts from — what the message being
+	 * edited carried. The composer seeds its tray with these so they're visible
+	 * and removable during the edit instead of riding along invisibly. */
+	getEditAttachments(pairId: UUIDv7): ChatAttachment[] {
+		const pair = this.findPair(pairId);
+		if (!pair) return [];
+		return this.resolveEditAttachments(pair) ?? [];
+	}
+
+	/**
+	 * Withdraw pending note proposals staged by the turns this fork abandons.
+	 *
+	 * Called by editMessage/regenerateResponse BEFORE the fork: the proposals
+	 * belong to an answer the user is replacing, and leaving them pending is what
+	 * produced orphaned review-bar rows, duplicated creates on rerun, and reruns
+	 * rebasing their updates onto the abandoned answer's content. Deliberately
+	 * NOT called on switchToBranch — switching is reversible navigation, so the
+	 * other branch's proposals stay reviewable.
+	 *
+	 * Partially-applied entries are kept (see the store method); a Notice tells
+	 * the user what was withdrawn so proposals never vanish silently.
+	 */
+	private withdrawAbandonedPendingChanges(forkCheckpointId: string): void {
+		const forkNode = this.graphState.nodes.get(forkCheckpointId);
+		if (!forkNode) return;
+		const abandoned = collectAbandonedToolCallIds(forkNode.messages, this.getActiveCheckpointMessages());
+		if (abandoned.size === 0) return;
+
+		try {
+			const { withdrawn, keptPartiallyApplied } = getPendingChangesStore().withdrawForToolCalls(
+				String(this.id),
+				abandoned,
+			);
+			if (withdrawn > 0) {
+				const kept =
+					keptPartiallyApplied > 0
+						? ` ${keptPartiallyApplied} partially applied change(s) were kept — resolve them in the review bar.`
+						: "";
+				new Notice(`Withdrew ${withdrawn} pending note change(s) proposed by the replaced response.${kept}`);
+			}
+		} catch {
+			// store not initialized (e.g. very early in startup) — nothing staged yet
+		}
+	}
+
 	/** Enter edit mode for a message pair. The composer reacts to
 	 * `editingPairId` changing to stash its draft and seed the message's text. */
 	beginEdit(pairId: UUIDv7): void {
@@ -1935,14 +2009,31 @@ export class ChatSession {
 	/**
 	 * Edit a user message and get a new AI response.
 	 * This creates a new branch from the checkpoint before the original message.
+	 *
+	 * `attachments` is what the edited message should carry. The composer always
+	 * passes it (the tray's contents at save time, `[]` meaning the user removed
+	 * them all); `undefined` means the caller doesn't manage attachments, so the
+	 * original message's own attachments are restored from the checkpoint.
 	 */
-	async editMessage(pairId: UUIDv7, newContent: string): Promise<void> {
+	async editMessage(pairId: UUIDv7, newContent: string, attachments?: ChatAttachment[]): Promise<void> {
 		const pair = this.findPair(pairId);
 		if (!pair) {
 			throw new Error("Message pair not found");
 		}
 
-		const attachments = this.resolveEditAttachments(pair);
+		// Same guard runStream applies, but BEFORE the withdrawal and the
+		// optimistic fork: reaching it only there would first withdraw pending
+		// proposals and mutate the graph for a run that is then refused.
+		if (this.running) {
+			throw new Error("A response is already in progress for this chat.");
+		}
+
+		const resolvedAttachments =
+			attachments === undefined
+				? this.resolveEditAttachments(pair)
+				: attachments.length > 0
+					? attachments
+					: undefined;
 
 		// Get the checkpoint to fork from for editing
 		const checkpointId = pair.editFromCheckpointId;
@@ -1952,18 +2043,20 @@ export class ChatSession {
 			);
 		}
 
+		this.withdrawAbandonedPendingChanges(checkpointId);
+
 		const parentMessages = this.graphState.nodes.get(checkpointId)?.messages ?? [];
 		const optimisticMessages = [
 			...parentMessages,
 			new HumanMessage({
 				content: newContent,
 				id: genUUIDv7(),
-				additional_kwargs: attachments?.length ? { attachments } : undefined,
+				additional_kwargs: resolvedAttachments?.length ? { attachments: resolvedAttachments } : undefined,
 			}),
 		];
 		const optimisticPair = this.applyOptimisticFork(checkpointId, optimisticMessages);
 		optimisticPair.userMessage.content = newContent;
-		optimisticPair.userMessage.attachments = attachments;
+		optimisticPair.userMessage.attachments = resolvedAttachments;
 		optimisticPair.assistantMessage.state = AssistantState.idle;
 		optimisticPair.assistantMessage.content = "";
 		optimisticPair.assistantMessage.toolCalls = undefined;
@@ -1972,7 +2065,7 @@ export class ChatSession {
 		optimisticPair.regenerateFromCheckpointId = undefined;
 
 		// Stream the edited response
-		await this.processEditReply(optimisticPair.id, newContent, checkpointId, attachments);
+		await this.processEditReply(optimisticPair.id, newContent, checkpointId, resolvedAttachments);
 	}
 
 	/**
@@ -1985,6 +2078,12 @@ export class ChatSession {
 			throw new Error("Message pair not found");
 		}
 
+		// Before the withdrawal/fork, for the same reason as editMessage: the
+		// regenerate affordance stays visible on earlier turns while a run streams.
+		if (this.running) {
+			throw new Error("A response is already in progress for this chat.");
+		}
+
 		// Get the checkpoint to fork from for regeneration
 		const checkpointId = pair.regenerateFromCheckpointId;
 		if (!checkpointId) {
@@ -1992,6 +2091,8 @@ export class ChatSession {
 				"Cannot regenerate: no checkpoint available for this message. Checkpoint graph may not be loaded.",
 			);
 		}
+
+		this.withdrawAbandonedPendingChanges(checkpointId);
 
 		const parentMessages = this.graphState.nodes.get(checkpointId)?.messages ?? [];
 		const optimisticPair = this.applyOptimisticFork(checkpointId, [...parentMessages]);

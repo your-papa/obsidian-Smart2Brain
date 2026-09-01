@@ -714,6 +714,47 @@ export class PendingChangesStore {
 		return skipped;
 	}
 
+	/**
+	 * Withdraw the pending proposals staged by specific tool calls — the
+	 * edit/regenerate path. When the user replaces a turn, the proposals its
+	 * response staged belong to an answer that no longer exists on the active
+	 * branch; leaving them pending orphans them in the review bar and makes the
+	 * rerun re-stage on top of them (duplicated creates, updates rebased onto an
+	 * abandoned answer's content).
+	 *
+	 * Withdrawn entries are marked `reportedToModel`: the model on the NEW branch
+	 * never made these proposals, so telling it "rejected by the user" in the next
+	 * review-outcome block would be both noise and false — the user replaced the
+	 * turn, they didn't review anything.
+	 *
+	 * Entries holding unreverted partially-applied content are left untouched
+	 * (still pending/actionable): the user accepted part of them, that content is
+	 * on disk, and this path must never discard their only undo record.
+	 */
+	withdrawForToolCalls(
+		threadId: string,
+		toolCallIds: ReadonlySet<string>,
+	): { withdrawn: number; keptPartiallyApplied: number } {
+		let withdrawn = 0;
+		let keptPartiallyApplied = 0;
+		for (const entry of this.#entries) {
+			if (entry.threadId !== threadId || entry.status !== "pending") continue;
+			if (!toolCallIds.has(entry.toolCallId)) continue;
+			if (this.hasUnrevertedApplication(entry)) {
+				keptPartiallyApplied++;
+				continue;
+			}
+			entry.status = "rejected";
+			entry.reportedToModel = true;
+			withdrawn++;
+		}
+		if (withdrawn > 0) {
+			this.scheduleSave();
+			this.notifyChange();
+		}
+		return { withdrawn, keptPartiallyApplied };
+	}
+
 	/** Reject all pending changes for a thread, reverting any partially-applied group writes.
 	 *
 	 *  Returns the paths whose revert was skipped because the file no longer matched what
