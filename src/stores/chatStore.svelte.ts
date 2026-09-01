@@ -125,6 +125,15 @@ export interface AssistantMessage {
 	// Ns" label survives reload. Absent for turns predating this / restored history
 	// with no stored duration (the UI falls back to the step count).
 	thinkingDurationMs?: number;
+	// Wall-clock epoch ms at which the CURRENT run began, present only while this
+	// message is streaming (cleared when the run settles, is cancelled, or errors).
+	// The live "Running… Ns" timer is computed from this rather than from a
+	// component-local anchor, because `syncGraphAfterRun` replaces every pair object
+	// mid-flight and `MessagePair.id` is a fresh UUID on each rebuild — a remount of
+	// the header would otherwise restart the timer from 0 in the middle of a run.
+	// Stamped on the pair AND re-stamped after the rebuild, exactly as
+	// `thinkingDurationMs` is, so it survives that replacement.
+	runStartedAtMs?: number;
 	// The aiMessageId of the text currently in `content` (streaming only). The UI uses
 	// this to decide when the last tool step folds into the thinking process: the step
 	// stays "current" (rendered below the label with its tools) until live content
@@ -1655,6 +1664,11 @@ export class ChatSession {
 	 * and target id, shared with MessageContainer.svelte so both react to it. */
 	editingPairId = $state<UUIDv7 | null>(null);
 
+	/** The in-flight run's identity + wall-clock start, held outside `messages` so
+	 * it survives the pair-object replacement a rebuild performs. Set when a run
+	 * starts, cleared in the run's `finally`. See `restoreLiveRunAnchor`. */
+	private liveRun: { pairId: UUIDv7; stableKey?: string; startedAtMs: number } | null = null;
+
 	private graphState: CheckpointGraphState;
 	private errorCount: number;
 	private lastErrorMessage: string | undefined;
@@ -1736,6 +1750,31 @@ export class ChatSession {
 			this.bootstrapMessages,
 			this.lastErrorMessage,
 		);
+		this.restoreLiveRunAnchor();
+	}
+
+	/**
+	 * Re-apply the in-flight run's start anchor onto the freshly derived pair.
+	 *
+	 * A rebuild replaces every `MessagePair` with a new object derived from the
+	 * checkpoint graph, which knows nothing about a run still in flight. That can
+	 * happen mid-stream — `switchToBranch` is explicitly allowed while streaming,
+	 * and a reload can land at any time — so without this the live timer's anchor
+	 * is dropped and the header restarts counting from 0 in the middle of a run.
+	 * Re-derived pairs also carry fresh `id`s, so the anchor is keyed on the run's
+	 * own pair id, resolved through `stableKey` when the rebuild renumbered it.
+	 */
+	private restoreLiveRunAnchor(): void {
+		const live = this.liveRun;
+		if (!live) return;
+		// `stableKey` is only compared when the run actually has one: an undefined
+		// key would otherwise match the first pair that also lacks one, stamping the
+		// anchor onto an unrelated turn.
+		const pair = this.messages.find(
+			(m) => m.id === live.pairId || (live.stableKey !== undefined && m.stableKey === live.stableKey),
+		);
+		if (!pair) return;
+		pair.assistantMessage.runStartedAtMs = live.startedAtMs;
 	}
 
 	/** Find a message pair by id */
@@ -2070,8 +2109,11 @@ export class ChatSession {
 			pair.assistantMessage.state = AssistantState.streaming;
 
 			// Wall-clock start of the turn — used to compute the run duration stamped on
-			// the message (live) and persisted onto the checkpoint below.
+			// the message (live) and persisted onto the checkpoint below, and stamped on
+			// the message itself so the live timer has a remount-proof anchor.
 			const runStartedAtMs = Date.now();
+			pair.assistantMessage.runStartedAtMs = runStartedAtMs;
+			this.liveRun = { pairId, stableKey: pair.stableKey, startedAtMs: runStartedAtMs };
 
 			await this.consumeStream(pair.assistantMessage, getStream(signal));
 			pair.assistantMessage.state = AssistantState.success;
@@ -2146,6 +2188,14 @@ export class ChatSession {
 				Logger.error("[ChatSession] Run failed:", _err);
 			}
 		} finally {
+			// Drop the live anchor on every exit path — success, cancel and error
+			// alike. A stale anchor left on a cancelled/errored pair would make a
+			// later retry count from the abandoned run's start.
+			this.liveRun = null;
+			const settledPair = this.findPair(pairId);
+			if (settledPair) {
+				settledPair.assistantMessage.runStartedAtMs = undefined;
+			}
 			this.abortController = null;
 			this.running = false;
 			this.cancelled = false;
