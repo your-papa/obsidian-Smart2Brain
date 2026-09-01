@@ -188,6 +188,29 @@ describe("readIndexableContent (.chat extraction)", () => {
 		expect(out.match(/you are a bold one/g)).toHaveLength(1);
 	});
 
+	it("extracts an oversized v2 chat file on mobile, but keeps legacy files title-only", async () => {
+		const { Platform } = await import("obsidian");
+		const legacyRaw = thread("Big", [message("m1", "needle in the legacy file"), reply("m2", "found it")]);
+		const v2Raw = JSON.stringify(deflateThreadData(JSON.parse(legacyRaw)));
+		// Over the 2MB legacy gate (stat.size is the compressed on-disk size).
+		const bigChatFile = {
+			path: "Chats/Big.chat",
+			extension: "chat",
+			basename: "Big",
+			stat: { size: 3 * 1024 * 1024 },
+		} as never;
+
+		(Platform as { isMobile: boolean }).isMobile = true;
+		try {
+			expect(await readIndexableContent(vaultReturning(legacyRaw), bigChatFile)).toBe("");
+			const out = await readIndexableContent(vaultReturning(v2Raw), bigChatFile);
+			expect(out).toContain("needle in the legacy file");
+			expect(out).toContain("found it");
+		} finally {
+			(Platform as { isMobile: boolean }).isMobile = false;
+		}
+	});
+
 	it("extracts content from a v2 deduplicated thread file", async () => {
 		const parsed = JSON.parse(thread("Dedup", [message("m1", "hello there"), reply("m2", "general kenobi")]));
 		const raw = JSON.stringify(deflateThreadData(parsed));

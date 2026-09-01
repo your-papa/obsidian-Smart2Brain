@@ -6,6 +6,7 @@ import {
 	adoptEqualMessages,
 	deflateThreadData,
 	inflateThreadData,
+	sniffThreadDataVersion,
 } from "../../src/agent/threadDataCodec";
 
 /* --------------------------------------------------------------------------
@@ -169,6 +170,19 @@ describe("threadDataCodec", () => {
 		const inflated = inflateThreadData(legacy);
 		expect(inflated).toBe(legacy);
 		expect(JSON.parse(JSON.stringify(inflated))).toEqual(pristine);
+	});
+
+	it("writes the schema version as the first key so it can be sniffed from a prefix", () => {
+		const json = JSON.stringify(deflateThreadData(makeQuadraticThread()));
+		expect(json.startsWith(`{"version":${THREAD_DATA_VERSION},`)).toBe(true);
+		expect(sniffThreadDataVersion(json.slice(0, 64))).toBe(THREAD_DATA_VERSION);
+	});
+
+	it("sniffs legacy and non-thread prefixes as version 0", () => {
+		expect(sniffThreadDataVersion(JSON.stringify(makeQuadraticThread()).slice(0, 64))).toBe(0);
+		expect(sniffThreadDataVersion('{"threadId":"Chats/t.chat"')).toBe(0);
+		expect(sniffThreadDataVersion("not json")).toBe(0);
+		expect(sniffThreadDataVersion("")).toBe(0);
 	});
 
 	it("leaves an unresolvable ref in place instead of throwing", () => {
