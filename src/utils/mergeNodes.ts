@@ -119,8 +119,8 @@ export function buildCollapsedGraph(graph: GraphData, options: CollapseOptions =
 		// Internal to a single collapsed topic — not a relationship between nodes.
 		if (source === target) continue;
 
-		// Track how many note-level links each collapsed topic sends outward, so a
-		// topic node can be sized by how connected it actually is.
+		// Track how many note-level links each collapsed topic sends outward, so
+		// the tooltip can report how connected it actually is.
 		if (source.startsWith("topic:")) crossingCount.set(source, (crossingCount.get(source) ?? 0) + 1);
 		if (target.startsWith("topic:")) crossingCount.set(target, (crossingCount.get(target) ?? 0) + 1);
 
@@ -168,9 +168,10 @@ export function buildCollapsedGraph(graph: GraphData, options: CollapseOptions =
 			y: positioned > 0 ? y / positioned : 0,
 			cluster,
 			color: isUnsorted ? (options.unsortedColor ?? members[0]?.color) : members[0]?.color,
-			// `degree` drives node radius, so a topic node sizes itself by how many
-			// note-level links cross its boundary — the existing renderer needs no
-			// change to make well-connected topics read as bigger.
+			// `degree` stays the crossing-link count — it feeds the tooltip's
+			// "N connections" line. Radius comes from `memberPaths` instead (see
+			// nodeDrawRadius): size says how many notes the topic holds, while
+			// connectivity is carried by the rolled-up edge widths.
 			degree: crossingCount.get(id) ?? 0,
 			highlighted: false,
 			kind: "topic",

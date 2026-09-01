@@ -78,40 +78,51 @@ describe("graphTopologySignature", () => {
 describe("nodeDrawRadius", () => {
 	const NODE_SIZE = 2;
 
+	const memberPaths = (count: number) => Array.from({ length: count }, (_, i) => `note${i}.md`);
+	const topic = (members: number) => nodeDrawRadius({ kind: "topic", memberPaths: memberPaths(members) }, NODE_SIZE);
+
 	it("caps note radius but never a topic's (smooth saturation)", () => {
 		// Note formula saturates hard: past the cap, more degree changes nothing.
 		const note = (degree: number) => nodeDrawRadius({ degree }, NODE_SIZE);
 		expect(note(200)).toBe(note(2000));
 
-		// Topic curve keeps growing: every doubling of connections stays visible.
-		const topic = (degree: number) => nodeDrawRadius({ degree, kind: "topic" }, NODE_SIZE);
+		// Topic curve keeps growing: every doubling of members stays visible.
 		let previous = topic(0);
-		for (const degree of [10, 50, 100, 200, 400, 800, 1600, 3200]) {
-			const radius = topic(degree);
+		for (const members of [5, 10, 25, 50, 100, 200, 400, 800, 1600]) {
+			const radius = topic(members);
 			expect(radius).toBeGreaterThan(previous);
 			previous = radius;
 		}
 	});
 
-	it("differentiates topics across the realistic crossing-link range", () => {
-		// The regression this curve replaces: a 180-note and a 2000-note topic
-		// (hundreds vs thousands of crossing links) rendered identically.
-		const topic = (degree: number) => nodeDrawRadius({ degree, kind: "topic" }, NODE_SIZE);
-		expect(topic(2000) - topic(180)).toBeGreaterThan(5);
+	it("differentiates topics across the realistic member-count range", () => {
+		// The everyday spread in a few-hundred-note vault: a dozen-note topic vs
+		// a fifty-note one must read as visibly different bubbles.
+		expect(topic(50) - topic(12)).toBeGreaterThan(3);
+		// And a mega-topic still clearly outranks an everyday one.
+		expect(topic(1000) - topic(50)).toBeGreaterThan(5);
+	});
+
+	it("sizes topics by member count, not connectivity", () => {
+		// Same members, wildly different crossing-link counts — identical radius.
+		// Connectivity is edge width's job; encoding it here would double-encode.
+		const linkHeavy = nodeDrawRadius({ kind: "topic", degree: 2000, memberPaths: memberPaths(30) }, NODE_SIZE);
+		const linkLight = nodeDrawRadius({ kind: "topic", degree: 3, memberPaths: memberPaths(30) }, NODE_SIZE);
+		expect(linkHeavy).toBe(linkLight);
 	});
 
 	it("stays bounded for a degenerate mega-topic", () => {
-		const huge = nodeDrawRadius({ degree: 1_000_000, kind: "topic" }, NODE_SIZE);
+		const huge = topic(1_000_000);
 		expect(huge).toBeLessThan(NODE_SIZE + 26);
 	});
 
 	it("keeps a small topic near note size", () => {
-		const smallTopic = nodeDrawRadius({ degree: 5, kind: "topic" }, NODE_SIZE);
+		const smallTopic = topic(4);
 		const hubNote = nodeDrawRadius({ degree: 20 }, NODE_SIZE);
 		expect(smallTopic).toBeLessThan(hubNote);
 	});
 
-	it("treats missing degree as zero and enforces the minimum base", () => {
+	it("treats missing degree/members as zero and enforces the minimum base", () => {
 		expect(nodeDrawRadius({}, 0)).toBe(1);
 		expect(nodeDrawRadius({ kind: "topic" }, 0)).toBe(1);
 	});

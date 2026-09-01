@@ -1259,7 +1259,7 @@ function render(mode: RenderMode) {
 	 * winning a cell is binary, two similar nodes drifting a pixel apart trade the
 	 * label back and forth every frame — that's the flicker, not the volume alone.
 	 *
-	 * Ranking by degree and captioning only the top slice fixes both: the hubs
+	 * Ranking by size and captioning only the top slice fixes both: the hubs
 	 * worth reading keep their labels (and keep them *stably*, since the ranking
 	 * only changes when the graph does), while the long tail stays quiet until you
 	 * hover it or zoom in far enough that few nodes are on screen at all.
@@ -1446,14 +1446,17 @@ function render(mode: RenderMode) {
 								? 3
 								: 4;
 			if (pa !== pb) return pa - pb;
-			return (b.degree ?? 0) - (a.degree ?? 0);
+			// Tie-break by the shared draw radius, so label priority always follows
+			// what size *means* for each kind — degree for notes, member count for
+			// topics — and the biggest circles claim label space first.
+			return getNodeRadius(b) - getNodeRadius(a);
 		});
 	}
 	const sortedLabelNodes = cachedSortedLabelNodes;
 
 	// Ordinary (untiered) labels placed so far this frame, against
-	// ORDINARY_LABEL_BUDGET. Nodes arrive degree-sorted, so the budget is spent on
-	// the most connected notes first.
+	// ORDINARY_LABEL_BUDGET. Nodes arrive size-sorted, so the budget is spent on
+	// the biggest (for notes: most connected) nodes first.
 	let ordinaryLabelsDrawn = 0;
 
 	const labelEntries: Array<{
