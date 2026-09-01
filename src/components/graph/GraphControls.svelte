@@ -218,8 +218,8 @@ function handleResolutionChange(resolution: number) {
 /**
  * Every knob this panel exposes, so "reset" restores exactly what it can change
  * — and nothing else. Listing the keys explicitly (rather than spreading the
- * whole defaults object) keeps the user's model choice, colour groups and
- * filters untouched, and makes a newly added control's absence here obvious.
+ * whole defaults object) keeps the user's model choice and filters untouched,
+ * and makes a newly added control's absence here obvious.
  */
 const DEV_TUNABLE_KEYS = [
 	"linkDistance",
@@ -232,7 +232,6 @@ const DEV_TUNABLE_KEYS = [
 	"leidenSeed",
 	"leidenResolution",
 	"bridgeThreshold",
-	"minClusterSize",
 	"linkOnlyTopics",
 	"directedWikiEdges",
 	"showTopicHulls",
@@ -748,9 +747,6 @@ $effect(() => {
           </SettingContainer>
           <SettingContainer name="Link-only topics" desc="Detect topics from authored links alone, ignoring inferred edges" compact>
             <Toggle checked={settings.linkOnlyTopics ?? false} onchange={(v) => onSettingsChange({ linkOnlyTopics: v })} />
-          </SettingContainer>
-          <SettingContainer name="Min cluster size" desc="Groups smaller than this aren't treated as topics" compact>
-            <RangeSlider value={settings.minClusterSize ?? 5} min={2} max={30} step={1} showValue={true} oncommit={(v) => onSettingsChange({ minClusterSize: v })} />
           </SettingContainer>
         {/if}
 

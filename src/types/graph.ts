@@ -1,44 +1,17 @@
 /**
  * Smart Graph View Types
  *
- * Types for the graph visualization feature. The smart graph uses semantic
- * embeddings for node positioning and clustering, with optional wiki link
- * overlay.
+ * Types for the graph visualization feature. Nodes are positioned by d3-force
+ * over the fused wiki + semantic edge graph, and grouped into topics by Leiden
+ * community detection over those same edges.
  */
-
-/**
- * Dimensionality reduction method for projecting embeddings into 2D.
- * - "pca": Principal Component Analysis (fast, linear)
- * - "umap": Uniform Manifold Approximation and Projection (non-linear, best quality)
- */
-export type ProjectionMethod = "pca" | "umap";
-
-/**
- * Clustering algorithm used for grouping document embeddings.
- * - "kmeans": K-Means with cosine distance (requires specifying K or auto-K)
- * - "hdbscan": Hierarchical Density-Based Spatial Clustering (auto-detects cluster count)
- */
-export type ClusteringAlgorithm = "kmeans" | "hdbscan";
-
-/**
- * Layout engine for positioning nodes.
- * - "force": Force-directed simulation using wiki link edges (d3-force)
- * - "semantic": 2D projection from embedding vectors (UMAP / PCA)
- */
-export type LayoutMode = "force" | "semantic";
-
-/**
- * Coloring strategy for graph nodes.
- * - "groups": User-defined color groups based on folder/tag queries
- * - "clusters": Automatic cluster coloring from K-Means / HDBSCAN
- * - "none": Default theme color, no special coloring
- */
-export type ColorMode = "groups" | "clusters" | "none";
 
 /**
  * How segments (visual partitions) are derived for node coloring.
+ * - "leiden": one segment per detected community
+ * - "none": no segments, so every node keeps the default colour
  */
-export type SegmentBy = "semantic" | "leiden" | "folder" | "tag" | "extension" | "none";
+export type SegmentBy = "leiden" | "none";
 
 /**
  * A resolved segment of graph nodes — a visual partition of the current scope.
@@ -65,17 +38,6 @@ export interface SpaceSegment {
 }
 
 /**
- * A user-defined color group that assigns a color to nodes matching a query.
- * Query matching: path prefix (folder), or tag (starts with #).
- */
-export interface ColorGroup {
-	/** Query string: folder path prefix or #tag */
-	query: string;
-	/** CSS color value */
-	color: string;
-}
-
-/**
  * The type of relationship an edge represents.
  * - "wiki": An explicit wiki link authored by the user in Obsidian
  * - "semantic": An inferred similarity link between notes whose embeddings are
@@ -98,17 +60,17 @@ export interface GraphNode {
 	path: string;
 	/** Display label (file basename without extension) */
 	label: string;
-	/** X position (wiki: set by d3-force simulation, smart: set by UMAP projection) */
+	/** X position (set by the d3-force simulation) */
 	x: number;
-	/** Y position (wiki: set by d3-force simulation, smart: set by UMAP projection) */
+	/** Y position (set by the d3-force simulation) */
 	y: number;
-	/** Velocity X (used by d3-force in wiki mode) */
+	/** Velocity X (used by d3-force) */
 	vx?: number;
-	/** Velocity Y (used by d3-force in wiki mode) */
+	/** Velocity Y (used by d3-force) */
 	vy?: number;
-	/** Cluster assignment index */
+	/** Topic assignment index */
 	cluster?: number;
-	/** Display color (derived from cluster) */
+	/** Display color (derived from the topic) */
 	color?: string;
 	/** Whether this node matches the current search query */
 	highlighted?: boolean;
@@ -152,10 +114,6 @@ export interface GraphData {
  * Settings for the graph view, persisted in plugin data.
  */
 export interface SmartGraphSettings {
-	/** Default number of clusters for K-Means */
-	defaultK: number;
-	/** Whether to auto-determine K via silhouette score */
-	autoK: boolean;
 	/** Target link distance for force layout */
 	linkDistance: number;
 	/** Charge strength (negative = repulsive). Controls how far apart nodes spread. */
@@ -186,14 +144,6 @@ export interface SmartGraphSettings {
 	graphChatModel: import("../stores/chatStore.svelte").ChatModel | null;
 	/** Whether to automatically generate cluster labels after clustering */
 	autoLabelClusters: boolean;
-	/** Clustering algorithm to use */
-	clusteringAlgorithm: ClusteringAlgorithm;
-	/** Minimum cluster size for HDBSCAN */
-	minClusterSize: number;
-	/** User-defined color groups for the wiki graph mode */
-	colorGroups: ColorGroup[];
-	/** How nodes are colored/grouped: none | folder | tag | similarity clusters */
-	segmentBy: SegmentBy;
 	/** When true, only include markdown files in the graph; otherwise all indexable files */
 	markdownOnly: boolean;
 	/** Leiden PRNG seed — controls community assignment reproducibility */
@@ -225,13 +175,13 @@ export interface SmartGraphSettings {
  * Default graph settings.
  */
 export const DEFAULT_SMART_GRAPH_SETTINGS: SmartGraphSettings = {
-	defaultK: 5,
-	autoK: true,
 	// Layout defaults are tuned for the *fused* graph (wiki + semantic edges),
 	// which is far denser than a wikilink-only one — most notes now have ~8 edges
 	// instead of none. Obsidian's own values (linkDistance 250, charge -1000)
 	// blow that apart into a ring of nodes with no visible grouping. Short links,
 	// mild repulsion and strong cluster cohesion keep topics as compact blobs.
+	// This is also why the user's native graph.json physics is deliberately not
+	// imported: it was tuned against a wikilink-only graph.
 	linkDistance: 60,
 	chargeStrength: -120,
 	centerStrength: 0.07,
@@ -245,10 +195,6 @@ export const DEFAULT_SMART_GRAPH_SETTINGS: SmartGraphSettings = {
 	directedWikiEdges: true,
 	graphChatModel: null,
 	autoLabelClusters: false,
-	clusteringAlgorithm: "kmeans",
-	minClusterSize: 5,
-	colorGroups: [],
-	segmentBy: "none",
 	markdownOnly: false,
 	leidenSeed: 42,
 	// Granularity level 3 on the ladder in topicHierarchy.ts. Kept exactly on a rung so
@@ -261,16 +207,6 @@ export const DEFAULT_SMART_GRAPH_SETTINGS: SmartGraphSettings = {
 	showTopicHulls: true,
 	showTopics: true,
 };
-
-/**
- * Detail about a focused (zoomed-in) cluster.
- */
-export interface FocusedClusterDetail {
-	cluster: number;
-	label: string;
-	noteCount: number;
-	topNotes: Array<{ label: string; path: string; degree: number }>;
-}
 
 export const THEME_COLOR_VARS = [
 	"--color-red",

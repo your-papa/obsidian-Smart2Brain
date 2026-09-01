@@ -3,8 +3,8 @@
  *
  * Encapsulates all Pixi.js display-object management, hit detection,
  * viewport zoom/pan, and theme-aware rendering. The Svelte component
- * (`GraphCanvas.svelte`) remains the orchestrator for layout engines
- * (d3-force / UMAP) and reactive state.
+ * (`GraphCanvas.svelte`) remains the orchestrator for the d3-force layout
+ * and reactive state.
  */
 
 import {
