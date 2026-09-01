@@ -819,6 +819,50 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 		return false;
 	}
 
+	/**
+	 * The payload of a serialized message, which lives under `kwargs` (LangChain's
+	 * Serializable form), `data` (the older envelope), or on the record itself.
+	 * Mirrors the shapes `getOrCreateResponseMetadata` writes through.
+	 */
+	private getSerializedPayload(message: Record<string, unknown>): Record<string, unknown> {
+		if (this.isRecord(message.kwargs)) return message.kwargs;
+		if (this.isRecord(message.data)) return message.data;
+		return message;
+	}
+
+	/** True when a serialized AI message carries tool calls (dispatch/subagent turn). */
+	private hasSerializedToolCalls(message: Record<string, unknown>): boolean {
+		const payload = this.getSerializedPayload(message);
+		if (Array.isArray(payload.tool_calls) && payload.tool_calls.length > 0) return true;
+		// Anthropic-style block content records the call as a `tool_use` block.
+		const content = payload.content;
+		if (Array.isArray(content)) {
+			return content.some((block) => this.isRecord(block) && block.type === "tool_use");
+		}
+		return false;
+	}
+
+	/**
+	 * True when a serialized AI message has non-whitespace text, matching the read
+	 * side's `converted.content.trim()` test. Content is either a flat string (a
+	 * replayed checkpoint) or an array of blocks (a live Anthropic response), in
+	 * which case only `text` blocks count.
+	 */
+	private hasSerializedTextContent(message: Record<string, unknown>): boolean {
+		const content = this.getSerializedPayload(message).content;
+		if (typeof content === "string") return content.trim().length > 0;
+		if (Array.isArray(content)) {
+			return content.some(
+				(block) =>
+					this.isRecord(block) &&
+					block.type === "text" &&
+					typeof block.text === "string" &&
+					block.text.trim().length > 0,
+			);
+		}
+		return false;
+	}
+
 	private getOrCreateResponseMetadata(message: Record<string, unknown>): Record<string, unknown> | undefined {
 		if (this.isRecord(message.kwargs)) {
 			const kwargs = message.kwargs;
@@ -887,9 +931,24 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 	 * survives reload. Mirrors annotateCheckpointMessagesWithGeneration: writes a
 	 * scalar into the message's response_metadata, which round-trips through the
 	 * NDJSON checkpoint. Called post-completion from ChatSession (the duration isn't
-	 * known during the graph's own `put`). Targets the LAST AI serialized message in
-	 * the checkpoint — the final answer — matching the read side, which takes the
-	 * last top-level non-empty AI message as the duration carrier.
+	 * known during the graph's own `put`).
+	 *
+	 * The target must be the message the READ side will look at, which is the last
+	 * top-level AI message with NON-EMPTY content (`mergeAssistantMessages` skips
+	 * empty turns, since their text is not the answer, and subagent turns, whose
+	 * text is intermediate reasoning). Targeting the last AI message outright — as
+	 * this did — disagreed with that rule whenever the checkpoint ended with a
+	 * tool-calling turn that had no prose, or with a subagent's own turn. The write
+	 * then landed on a message the reader ignores, the duration came back undefined
+	 * on reload, and the UI fell to its 1s floor: a long run redisplayed as
+	 * "Thought for 1s" after a restart.
+	 *
+	 * A subagent turn is identified the same way the reader identifies it: an AI
+	 * message carrying tool calls, none of which are `task`, that follows a closed
+	 * `task` call. Rather than duplicate that state machine here, we approximate it
+	 * conservatively — skip trailing AI messages that carry tool calls — which lands
+	 * on the same message for every shape the reader accepts, because any AI message
+	 * the reader treats as the answer carries prose and no pending tool calls.
 	 */
 	async annotateThinkingDuration(threadId: string, checkpointId: string, durationMs: number): Promise<void> {
 		if (!threadId || !checkpointId || !Number.isFinite(durationMs) || durationMs < 0) return;
@@ -898,14 +957,17 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 		if (!entry) return;
 
 		const messages = this.getCheckpointMessages(entry.checkpoint);
-		// Find the last AI message in the checkpoint (the final answer).
+		// Walk backwards for the last AI message the reader would accept as the
+		// answer: non-empty content, and no tool calls (which mark a dispatch or a
+		// subagent turn rather than the final answer).
 		let target: Record<string, unknown> | undefined;
 		for (let i = messages.length - 1; i >= 0; i--) {
 			const message = messages[i];
-			if (this.isRecord(message) && this.isAiSerializedMessage(message)) {
-				target = message;
-				break;
-			}
+			if (!this.isRecord(message) || !this.isAiSerializedMessage(message)) continue;
+			if (this.hasSerializedToolCalls(message)) continue;
+			if (!this.hasSerializedTextContent(message)) continue;
+			target = message;
+			break;
 		}
 		if (!target) return;
 

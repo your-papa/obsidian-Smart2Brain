@@ -588,4 +588,86 @@ describe("ObsidianChatManager", () => {
 			expect(aiMessage.kwargs.response_metadata.model).toBe("gpt-4");
 		});
 	});
+
+	describe("thinking duration annotation", () => {
+		async function annotateAndRead(cpId: string, messages: unknown[]) {
+			const threadId = `Chats/thread-${cpId}.chat`;
+			const checkpoint = makeCheckpoint(cpId, "2024-01-01T00:00:00Z");
+			(checkpoint.channel_values as Record<string, unknown>).messages = messages;
+			await manager.put({ configurable: { thread_id: threadId } }, checkpoint, makeMetadata(0), {});
+			await manager.annotateThinkingDuration(threadId, cpId, 42_000);
+
+			const tuple = await manager.getTuple({ configurable: { thread_id: threadId, checkpoint_id: cpId } });
+			const stored = (tuple!.checkpoint.channel_values as Record<string, unknown[]>).messages;
+			return stored.map(
+				(m) =>
+					((m as Record<string, Record<string, Record<string, unknown>>>).kwargs?.response_metadata
+						?.thinking_duration_ms as number | undefined) ?? undefined,
+			);
+		}
+
+		const human = { type: "human", kwargs: { content: "Hello" } };
+
+		it("stamps the final answer when it is the last AI message", async () => {
+			const durations = await annotateAndRead("cp-dur-plain", [
+				human,
+				{ type: "ai", kwargs: { content: "The answer" } },
+			]);
+			expect(durations[1]).toBe(42_000);
+		});
+
+		it("skips a trailing tool-calling turn with no prose, stamping the answer instead", async () => {
+			// The reader ignores empty-content AI messages, so stamping the trailing
+			// one lost the duration on reload ("Thought for 1s").
+			const durations = await annotateAndRead("cp-dur-empty", [
+				human,
+				{ type: "ai", kwargs: { content: "The answer" } },
+				{ type: "ai", kwargs: { content: "", tool_calls: [{ id: "c-1", name: "manage_notes", args: {} }] } },
+			]);
+			expect(durations[1]).toBe(42_000);
+			expect(durations[2]).toBeUndefined();
+		});
+
+		it("skips a trailing subagent turn, stamping the parent answer instead", async () => {
+			const durations = await annotateAndRead("cp-dur-sub", [
+				human,
+				{ type: "ai", kwargs: { content: "The answer" } },
+				{
+					type: "ai",
+					kwargs: {
+						content: "subagent reasoning",
+						tool_calls: [{ id: "c-9", name: "search_notes", args: {} }],
+					},
+				},
+			]);
+			expect(durations[1]).toBe(42_000);
+			expect(durations[2]).toBeUndefined();
+		});
+
+		it("skips a trailing tool_use block turn (Anthropic block content)", async () => {
+			const durations = await annotateAndRead("cp-dur-blocks", [
+				human,
+				{ type: "ai", kwargs: { content: "The answer" } },
+				{
+					type: "ai",
+					kwargs: {
+						content: [
+							{ type: "text", text: "Let me check" },
+							{ type: "tool_use", id: "c-2" },
+						],
+					},
+				},
+			]);
+			expect(durations[1]).toBe(42_000);
+			expect(durations[2]).toBeUndefined();
+		});
+
+		it("stamps nothing when no AI message qualifies as the answer", async () => {
+			const durations = await annotateAndRead("cp-dur-none", [
+				human,
+				{ type: "ai", kwargs: { content: "", tool_calls: [{ id: "c-1", name: "manage_notes", args: {} }] } },
+			]);
+			expect(durations.every((d) => d === undefined)).toBe(true);
+		});
+	});
 });

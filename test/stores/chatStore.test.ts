@@ -944,3 +944,72 @@ describe("baseMessageToAssistantMessage — preamble extraction from content blo
 		expect(preambleEvent?.toolCallId).toBe("call-x");
 	});
 });
+
+/* --------------------------------------------------------------------------
+ * Pair identity across rebuilds ("Thought for 1s")
+ *
+ * A rebuild mints a fresh `MessagePair.id` for every pair, so post-run code that
+ * re-finds its pair by the id captured BEFORE the rebuild finds nothing and
+ * silently no-ops. That is what dropped `thinkingDurationMs` on settle: the UI
+ * then fell back to its 1s floor and a long run reported "Thought for 1s".
+ * `stableKey` is the identity that survives, so these pin both halves.
+ * ------------------------------------------------------------------------*/
+
+describe("message pair identity across rebuilds", () => {
+	function buildTwoTurnGraph() {
+		const h = humanMsg("Hello", "h-1");
+		const a = aiMsg("Hi!", "a-1");
+		const graph = buildCheckpointGraph([
+			makeCheckpoint("cp-root", -1, []),
+			makeCheckpoint("cp-1", 0, [h], "cp-root", "2024-01-01T00:01:00Z"),
+			makeCheckpoint("cp-2", 1, [h, a], "cp-1", "2024-01-01T00:02:00Z"),
+		]);
+		graph.activeCheckpointId = "cp-2";
+		return graph;
+	}
+
+	it("mints a fresh pair id on every rebuild, so ids must not be held across one", () => {
+		const graph = buildTwoTurnGraph();
+
+		const first = deriveMessagePairsFromActiveCheckpoint(graph, "cp-2");
+		const second = deriveMessagePairsFromActiveCheckpoint(graph, "cp-2");
+
+		expect(first).toHaveLength(1);
+		expect(second).toHaveLength(1);
+		// The regression: same turn, same checkpoint, different id.
+		expect(second[0].id).not.toBe(first[0].id);
+	});
+
+	it("keeps stableKey identical across rebuilds so a pair stays findable", () => {
+		const graph = buildTwoTurnGraph();
+
+		const first = deriveMessagePairsFromActiveCheckpoint(graph, "cp-2");
+		const second = deriveMessagePairsFromActiveCheckpoint(graph, "cp-2");
+
+		expect(first[0].stableKey).toBeDefined();
+		expect(second[0].stableKey).toBe(first[0].stableKey);
+	});
+
+	it("derives no thinking duration until it is persisted, then reads it back", () => {
+		// Mirrors the settle ordering: the rebuild runs BEFORE the duration is
+		// written to response_metadata, so the rebuilt pair has none. Only the
+		// in-memory re-stamp bridges that window — hence it must actually find
+		// the pair.
+		const graph = buildTwoTurnGraph();
+		const before = deriveMessagePairsFromActiveCheckpoint(graph, "cp-2");
+		expect(before[0].assistantMessage.thinkingDurationMs).toBeUndefined();
+
+		const h = humanMsg("Hello", "h-1");
+		const annotated = new AIMessage({ content: "Hi!", id: "a-1" });
+		annotated.response_metadata = { thinking_duration_ms: 42_000 };
+		const persisted = buildCheckpointGraph([
+			makeCheckpoint("cp-root", -1, []),
+			makeCheckpoint("cp-1", 0, [h], "cp-root", "2024-01-01T00:01:00Z"),
+			makeCheckpoint("cp-2", 1, [h, annotated], "cp-1", "2024-01-01T00:02:00Z"),
+		]);
+		persisted.activeCheckpointId = "cp-2";
+
+		const after = deriveMessagePairsFromActiveCheckpoint(persisted, "cp-2");
+		expect(after[0].assistantMessage.thinkingDurationMs).toBe(42_000);
+	});
+});
