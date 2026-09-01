@@ -28,15 +28,18 @@ const MOBILE_MAX_READ_BYTES = 10 * 1024 * 1024;
 const MOBILE_CHAT_MAX_EXTRACT_BYTES = 2 * 1024 * 1024;
 
 /**
- * Hard cap on the text handed to indexing, in UTF-16 code units, all platforms.
+ * Hard cap on the text handed to indexing, in UTF-16 code units.
  *
- * Search relevance saturates long before this — no note needs its second
- * megabyte of prose to be findable — but index size and tokenization cost keep
- * growing linearly. This is the last line of defense against any single
- * pathological file (a giant CSV export, a decompressed chat log) dominating
- * the index or the indexing run, independent of the file-size gates above.
+ * Search relevance saturates long before either bound — no note needs its
+ * second megabyte of prose to be findable — but index size and tokenization
+ * cost keep growing linearly, and the cost is postings, not vocabulary: a long
+ * document touches tens of thousands of terms, each of which stores a posting
+ * object for it. Measured on a 7.2k-file vault, indexing full extracted text
+ * put the mobile WebView at a 1.4GB resting footprint — a hair under the OS
+ * kill ceiling. The mobile cap still covers a typical note completely (~99%
+ * of notes are under 100K chars) and the first ~40 pages of a PDF.
  */
-const MAX_INDEXED_TEXT_CHARS = 1_000_000;
+const MAX_INDEXED_TEXT_CHARS = Platform.isMobile ? 100_000 : 1_000_000;
 
 function normalizePattern(pattern: string): string {
 	return pattern.trim().replace(/^\/+|\/+$/g, "");
