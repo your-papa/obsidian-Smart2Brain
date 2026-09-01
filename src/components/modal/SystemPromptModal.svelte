@@ -1,7 +1,7 @@
 <script lang="ts">
 import { onDestroy, onMount } from "svelte";
 import { diffWords } from "diff";
-import { BASE_SYSTEM_PROMPT } from "../../agent/prompts";
+import { DEFAULT_AGENT_PROMPT } from "../../agent/prompts";
 import { EmbeddableMarkdownEditor } from "../../lib/editor";
 import type SecondBrainPlugin from "../../main";
 import Button from "../ui/Button.svelte";
@@ -32,7 +32,7 @@ $effect(() => {
 	if (showDiff) viewMode = "diff";
 });
 
-const defaultPrompt = $derived(accessors.defaultPrompt ?? BASE_SYSTEM_PROMPT);
+const defaultPrompt = $derived(accessors.defaultPrompt ?? DEFAULT_AGENT_PROMPT);
 const isDirty = $derived(promptValue !== initialPromptValue);
 const isAtDefault = $derived(promptValue === defaultPrompt);
 const canShowDiff = $derived(!readOnly && !isAtDefault);

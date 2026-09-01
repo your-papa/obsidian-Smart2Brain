@@ -4,21 +4,27 @@ import { getData } from "../stores/dataStore.svelte";
  * Fixed subdirectory names under the configurable agent root folder. The root itself
  * (`agentFolder`, default "Agents") is user-configurable; these subdirs are not.
  *
- * - `Memories/`        — the agent's shared working-memory notes (writes auto-approve here).
- *                        Holds the remembered *content* — contrast with `System Prompts/Memory.md`
- *                        below, which holds the *instructions* for how an agent uses it.
- * - `Skills/`          — skill `<name>/SKILL.md` dirs (including the bundled core skills that carry
- *                        built-in tools via `allowed-tools`). Discovered by their SKILL.md marker.
- * - `System Prompts/`  — one subfolder per agent, named after the agent (see
- *                        {@link agentPromptDir}), holding the fragments concatenated into that
- *                        agent's system prompt: `Base.md` (the base system prompt; see
- *                        {@link basePromptPath}) and `Memory.md` (memory-usage instructions,
- *                        injected right after the base prompt when memory is enabled; see
- *                        {@link memoryPromptPath}).
+ * - `Memories/` — the agents' shared working-memory notes (writes auto-approve here). Holds the
+ *                 remembered *content*; the *instructions* for using it are the `# Memory`
+ *                 section of each agent's own AGENT.md (see {@link agentDefinitionPath}).
+ * - `Skills/`   — skill `<name>/SKILL.md` dirs (including the bundled core skills that carry
+ *                 built-in tools via `allowed-tools`). Discovered by their SKILL.md marker.
+ *
+ * Everything else directly under the root is one folder per agent (see {@link agentDir}).
  */
 export const MEMORIES_SUBDIR = "Memories";
 export const SKILLS_SUBDIR = "Skills";
-export const SYSTEM_PROMPTS_SUBDIR = "System Prompts";
+
+/**
+ * The retired per-agent prompt folder, replaced by `<agentFolder>/<Agent Name>/AGENT.md`. The
+ * name stays reserved in {@link sanitizeAgentFileName} only because a vault predating that
+ * change can still have this tree on disk, and an agent literally named "System Prompts" must
+ * not resolve its folder onto it.
+ */
+const LEGACY_SYSTEM_PROMPTS_SUBDIR = "System Prompts";
+
+/** Filename of an agent's definition note inside its own folder. */
+export const AGENT_DEFINITION_FILENAME = "AGENT.md";
 
 /** Default agent root folder when unset. */
 export const DEFAULT_AGENT_FOLDER = "Agents";
@@ -38,19 +44,24 @@ export function skillsDir(): string {
 	return `${agentRootDir()}/${SKILLS_SUBDIR}`;
 }
 
-/** `<agentFolder>/System Prompts` — parent of each agent's own prompt subfolder. */
-export function systemPromptsDir(): string {
-	return `${agentRootDir()}/${SYSTEM_PROMPTS_SUBDIR}`;
-}
-
-/** Placeholder prompt-subfolder name when an agent's name sanitizes to nothing. */
+/** Placeholder folder name when an agent's name sanitizes to nothing. */
 const FALLBACK_AGENT_FILE_NAME = "Agent";
 
 /**
+ * Folder names directly under the agent root that belong to plugin machinery, not to an agent.
+ * An agent whose name sanitizes to one of these is suffixed rather than allowed to collide.
+ */
+const RESERVED_AGENT_FOLDER_NAMES = [MEMORIES_SUBDIR, SKILLS_SUBDIR, LEGACY_SYSTEM_PROMPTS_SUBDIR];
+
+/**
  * Turn an agent's display name into a safe filesystem name (no extension), used for its
- * `System Prompts/<name>/` subfolder. Strips characters Obsidian/OSes reject in filenames,
+ * `<agentFolder>/<name>/` folder. Strips characters Obsidian/OSes reject in filenames,
  * collapses whitespace, trims leading/trailing dots & spaces, and caps length. Falls back to
  * a placeholder when the result would be empty (e.g. a name of only slashes).
+ *
+ * Names colliding with the fixed sibling folders ({@link RESERVED_AGENT_FOLDER_NAMES}) are
+ * suffixed: agent folders are siblings of `Memories/` and `Skills/`, so an agent named
+ * "Skills" would otherwise write its AGENT.md into the skills tree.
  */
 export function sanitizeAgentFileName(name: string): string {
 	const cleaned = (name ?? "")
@@ -64,38 +75,42 @@ export function sanitizeAgentFileName(name: string): string {
 		.trim()
 		.slice(0, 100)
 		.trim();
-	return cleaned || FALLBACK_AGENT_FILE_NAME;
+	if (!cleaned) return FALLBACK_AGENT_FILE_NAME;
+	const reserved = RESERVED_AGENT_FOLDER_NAMES.some(
+		(reservedName) => reservedName.toLowerCase() === cleaned.toLowerCase(),
+	);
+	// Re-cap after suffixing so a 100-char reserved name can't push the result over the limit.
+	return reserved ? `${cleaned} (${FALLBACK_AGENT_FILE_NAME})`.slice(0, 100) : cleaned;
 }
 
 /**
- * Path to an agent's own prompt subfolder, named after the agent:
- * `<agentFolder>/System Prompts/<Agent Name>/`. Holds that agent's `Base.md` and `Memory.md`.
+ * An agent's own folder, named after the agent: `<agentFolder>/<Agent Name>/`. Holds that
+ * agent's `AGENT.md`, and is the unit rename/duplicate/delete operate on.
  *
  * The name is derived from the agent's *current* display name (looked up live from plugin
  * data), so callers that only hold an agent id still get the right path. Agent display names
  * are kept unique by the data store (see `uniqueAgentName`), so the sanitized names don't
  * collide in practice. Unknown ids fall back to the raw id so stale lookups stay safe.
  */
-export function agentPromptDir(agentId: string): string {
-	return `${systemPromptsDir()}/${agentFileStem(agentId)}`;
-}
-
-/** Path to an agent's base system prompt: `<agentPromptDir>/Base.md`. */
-export function basePromptPath(agentId: string): string {
-	return `${agentPromptDir(agentId)}/Base.md`;
-}
-
-/** Path to an agent's memory-usage instructions: `<agentPromptDir>/Memory.md`. */
-export function memoryPromptPath(agentId: string): string {
-	return `${agentPromptDir(agentId)}/Memory.md`;
+export function agentDir(agentId: string): string {
+	return `${agentRootDir()}/${agentFileStem(agentId)}`;
 }
 
 /**
- * The directory-name stem for an agent's prompt subfolder, derived from the agent's
- * *current* display name so callers holding only an id still resolve the right path. Agent
- * names are kept unique by the data store (see `uniqueAgentName`), so sanitized names don't
- * collide in practice. Unknown/stale ids (or a store that isn't ready) fall back to the id,
- * keeping the path stable and unique rather than throwing.
+ * Path to an agent's definition note: `<agentDir>/AGENT.md`. Its frontmatter carries the
+ * plugin-managed provenance (`author`, `version`); its body IS the agent's system prompt,
+ * memory instructions included.
+ */
+export function agentDefinitionPath(agentId: string): string {
+	return `${agentDir(agentId)}/${AGENT_DEFINITION_FILENAME}`;
+}
+
+/**
+ * The folder-name stem for an agent, derived from the agent's *current* display name so
+ * callers holding only an id still resolve the right path. Agent names are kept unique by the
+ * data store (see `uniqueAgentName`), so sanitized names don't collide in practice.
+ * Unknown/stale ids (or a store that isn't ready) fall back to the id, keeping the path stable
+ * and unique rather than throwing.
  */
 function agentFileStem(agentId: string): string {
 	const agents = getData()?.agents;

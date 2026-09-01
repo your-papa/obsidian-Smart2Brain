@@ -327,11 +327,12 @@ export function createListDirectoryTool(app: App, agentId = "") {
 
 			const store = getPendingChangesStore();
 			const currentProvider = resolveToolProvider(agentId);
-			// Resolved per call, not at factory time: memoryEnabled and the agent folder
-			// can both change mid-session.
-			const visibleMemoryFolder = resolveToolAgent(agentId).memoryEnabled
-				? normalizePath(memoriesDir())
-				: undefined;
+			// The one re-inclusion in the otherwise fully excluded agent folder: memory notes are
+			// absent from the search index, so listing them here is the agent's only way to
+			// discover what it remembers. Always visible — there is no per-agent memory flag;
+			// an agent that shouldn't use memory simply has no `# Memory` section telling it the
+			// folder exists. Resolved per call because the agent root can change mid-session.
+			const visibleMemoryFolder = normalizePath(memoriesDir());
 			const scanOptions: DirectoryScanOptions = {
 				rootPath,
 				recursive: effectiveRecursive,

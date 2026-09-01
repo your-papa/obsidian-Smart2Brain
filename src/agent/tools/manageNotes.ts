@@ -455,16 +455,13 @@ function isInsideFolder(path: string, folder: string): boolean {
 }
 
 /**
- * Reads the effective memory config for the agent that owns this run. Falls back
- * to the selected agent (api path with no agentId). The memory folder is the global
- * `Agents/Memories/`.
+ * The global memory folder, `Agents/Memories/`. Resolved per call because the agent root is
+ * user-configurable. There is no per-agent enable flag: the memory machinery is always on, and
+ * an agent participates only if its AGENT.md still has the `# Memory` section that tells it the
+ * folder exists (see `prompts.ts`).
  */
-function getMemoryConfig(agentId: string): { enabled: boolean; folder: string } {
-	const agent = getData().getAgent(agentId) ?? getData().getSelectedAgent();
-	return {
-		enabled: agent?.memoryEnabled ?? false,
-		folder: normalizePath(memoriesDir()),
-	};
+function getMemoryFolder(): string {
+	return normalizePath(memoriesDir());
 }
 
 /**
@@ -821,24 +818,22 @@ export async function stageNoteOperations(
 	// that folder itself, so those writes shouldn't wait in the review queue. We
 	// reuse acceptChange (locking, conflict/existence checks, folder creation)
 	// rather than a parallel write path. Non-memory changes stay pending.
-	const memory = getMemoryConfig(agentId);
+	const memoryFolder = getMemoryFolder();
 	let autoAppliedCount = 0;
 	const autoApplyFailures: string[] = [];
-	if (memory.enabled) {
-		for (let i = 0; i < stagedChanges.length; i++) {
-			const change = stagedChanges[i];
-			if (!isMemoryChange(change, memory.folder)) continue;
-			try {
-				// Sequential await respects the store's per-file lock ordering.
-				await store.acceptChange(entryIds[i]);
-				// This result already tells the model the write was applied — keep
-				// the next turn's review-outcome block from repeating it.
-				store.markReportedToModel([entryIds[i]]);
-				autoAppliedCount++;
-			} catch (e) {
-				const path = change.type === "move" ? change.newPath : change.path;
-				autoApplyFailures.push(`"${path}": ${e instanceof Error ? e.message : String(e)}`);
-			}
+	for (let i = 0; i < stagedChanges.length; i++) {
+		const change = stagedChanges[i];
+		if (!isMemoryChange(change, memoryFolder)) continue;
+		try {
+			// Sequential await respects the store's per-file lock ordering.
+			await store.acceptChange(entryIds[i]);
+			// This result already tells the model the write was applied — keep
+			// the next turn's review-outcome block from repeating it.
+			store.markReportedToModel([entryIds[i]]);
+			autoAppliedCount++;
+		} catch (e) {
+			const path = change.type === "move" ? change.newPath : change.path;
+			autoApplyFailures.push(`"${path}": ${e instanceof Error ? e.message : String(e)}`);
 		}
 	}
 
@@ -851,12 +846,12 @@ export async function stageNoteOperations(
 	if (stagedChanges.length === 0 && discardResults.length > 0) {
 		summary = discardSummary;
 	} else if (autoAppliedCount > 0 && stagedCount === 0 && autoApplyFailures.length === 0) {
-		summary = `Saved ${autoAppliedCount} memory note operation(s) (${summarizeOperations(stagedChanges)}) to \`${memory.folder}/\` — applied automatically, no user review needed.`;
+		summary = `Saved ${autoAppliedCount} memory note operation(s) (${summarizeOperations(stagedChanges)}) to \`${memoryFolder}/\` — applied automatically, no user review needed.`;
 		if (discardSummary) summary += ` ${discardSummary}`;
 	} else {
 		summary = `Proposed ${stagedChanges.length} note operation(s) across ${seenPaths.size} path(s) (${summarizeOperations(stagedChanges)}).`;
 		if (autoAppliedCount > 0) {
-			summary += ` ${autoAppliedCount} targeting \`${memory.folder}/\` were applied automatically (memory).`;
+			summary += ` ${autoAppliedCount} targeting \`${memoryFolder}/\` were applied automatically (memory).`;
 		}
 		if (stagedCount > 0) {
 			summary += ` ${stagedCount} will be reviewed by the user, who will approve or reject them.`;

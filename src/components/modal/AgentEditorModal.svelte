@@ -31,9 +31,9 @@ import {
 	coreSkillRank,
 	toExecToolId,
 } from "../../agent/integrations/pluginIntegrations";
-import { BASE_SYSTEM_PROMPT, DEFAULT_MEMORY_PROMPT } from "../../agent/prompts";
+import { DEFAULT_AGENT_PROMPT } from "../../agent/prompts";
 import { normalizeShipped } from "../../utils/shippedDefaults";
-import { agentPromptDir, basePromptPath, memoryPromptPath } from "../../utils/agentPaths";
+import { agentDefinitionPath, agentDir } from "../../utils/agentPaths";
 import { Logger } from "../../utils/logging";
 import { extractErrorMessage } from "../../utils/errorMessage";
 import { humanizeSkillName } from "../../skills";
@@ -90,12 +90,11 @@ function applyChanges() {
 }
 
 function updateAgentName(name: string) {
-	// Capture the prompt subfolder's current path (derived from the OLD name) before
-	// committing the rename, then move the whole folder (Base.md + Memory.md together) to
-	// the new name-based path.
-	const oldPromptDir = agentPromptDir(agentId);
+	// Capture the agent folder's current path (derived from the OLD name) before committing
+	// the rename, then move the folder — AGENT.md and all — to the new name-based path.
+	const oldDir = agentDir(agentId);
 	pluginData.updateAgent(agentId, { name });
-	void plugin.promptFilesService?.renameAgentPromptDir(agentId, oldPromptDir);
+	void plugin.promptFilesService?.renameAgentDir(agentId, oldDir);
 	modal.setTitle(`Edit Agent: ${name || "Untitled"}`);
 }
 
@@ -233,66 +232,40 @@ function resetTitleModel() {
 	void applyChanges();
 }
 
-function openBasePromptNote() {
+function openAgentNote() {
 	if (!selectedAgent) return;
-	const path = normalizePath(basePromptPath(agentId));
+	const path = normalizePath(agentDefinitionPath(agentId));
 	// Seed the file from the default if it doesn't exist yet (e.g. an agent created this
 	// session, before init-time seeding runs), then open it.
 	void (async () => {
-		await plugin.promptFilesService?.ensureBasePrompt(agentId);
+		await plugin.promptFilesService?.ensureAgentPrompt(agentId);
 		modal.close();
 		plugin.app.workspace.openLinkText(path, "", true);
 	})();
 }
 
-// Whether this agent's base-prompt FILE has drifted from the shipped default. Reads the
-// prompt-file cache (kept fresh by the vault-change handler); `basePromptDriftTick` lets us
+// Whether this agent's definition note has drifted from the shipped default. Reads the
+// prompt-file cache (kept fresh by the vault-change handler); `promptDriftTick` lets us
 // force a re-check after opening the diff modal. When false, we hide the "Diff with default"
 // button — matching the skill guidance behaviour (diff only shown when drifted).
-let basePromptDriftTick = $state(0);
-const basePromptDrifted = $derived.by(() => {
-	void basePromptDriftTick;
+let promptDriftTick = $state(0);
+const promptDrifted = $derived.by(() => {
+	void promptDriftTick;
 	if (!selectedAgent) return false;
-	const content = plugin.promptFilesService?.getBasePrompt(agentId) ?? BASE_SYSTEM_PROMPT;
+	const content = plugin.promptFilesService?.getAgentPrompt(agentId) ?? DEFAULT_AGENT_PROMPT;
 	// Same normalization the shipped-default check uses, so a file that differs only by
 	// line endings or a trailing newline doesn't offer a diff against identical text.
-	return normalizeShipped(content) !== normalizeShipped(BASE_SYSTEM_PROMPT);
+	return normalizeShipped(content) !== normalizeShipped(DEFAULT_AGENT_PROMPT);
 });
 
-function openBasePromptDiff() {
-	if (!selectedAgent) return;
-	plugin.agentManager?.openSystemPromptDiff(agentId);
-	// The diff modal can reset/realign the file; re-check drift when we return to this modal.
-	basePromptDriftTick++;
-}
-
-function openMemoryPromptNote() {
-	if (!selectedAgent) return;
-	const path = normalizePath(memoryPromptPath(agentId));
-	// Seed the file from the default if it doesn't exist yet, then open it.
-	void (async () => {
-		await plugin.promptFilesService?.ensureMemoryPrompt(agentId);
-		modal.close();
-		plugin.app.workspace.openLinkText(path, "", true);
-	})();
-}
-
-// Same staleness pattern as the base prompt above, but comparing against DEFAULT_MEMORY_PROMPT.
-let memoryPromptDriftTick = $state(0);
-const memoryPromptDrifted = $derived.by(() => {
-	void memoryPromptDriftTick;
-	if (!selectedAgent) return false;
-	const content = plugin.promptFilesService?.getMemoryPrompt(agentId) ?? DEFAULT_MEMORY_PROMPT;
-	return normalizeShipped(content) !== normalizeShipped(DEFAULT_MEMORY_PROMPT);
-});
-
-function openMemoryPromptDiff() {
+function openPromptDiff() {
 	if (!selectedAgent) return;
 	// Delegate rather than rebuild the modal here: AgentManager owns the save contract
 	// (invalidate caches on success, surface a Notice on failure), and duplicating it was
 	// how this call site ended up silently swallowing write errors.
-	plugin.agentManager?.openMemoryPromptDiff(agentId);
-	memoryPromptDriftTick++;
+	plugin.agentManager?.openSystemPromptDiff(agentId);
+	// The diff modal can reset/realign the file; re-check drift when we return to this modal.
+	promptDriftTick++;
 }
 
 function openRenderedSystemPromptModal() {
@@ -578,28 +551,6 @@ function getToolEnabled(toolId: BuiltInToolId): boolean {
 	return pluginData.isAgentToolEnabled(agentId, toolId);
 }
 
-// --- Memory: long-lived facts stored as notes in a per-agent folder ---
-
-const memoryEnabled = $derived(selectedAgent?.memoryEnabled ?? false);
-// Recording a memory is a note write, so memory needs manage_notes actually *bound* — its
-// toggle on AND some enabled skill attaching it. Reads `skills` so this re-derives when a
-// skill is toggled, not just when the tool's own toggle changes.
-const manageNotesEnabled = $derived.by(() => {
-	if (!selectedAgent) return false;
-	void selectedAgent.skills;
-	void selectedAgent.toolsConfig.manage_notes?.enabled;
-	return plugin.agentManager?.isToolBound(selectedAgent, "manage_notes") ?? false;
-});
-
-function handleMemoryToggle(next: boolean) {
-	pluginData.updateAgent(agentId, { memoryEnabled: next });
-	// Seed the editable memory-instructions note the first time memory is enabled, so a
-	// note exists for the user to open and tune (mirrors the base prompt's note lifecycle).
-	// Never clobbers an existing note — see PromptFilesService.ensureMemoryPrompt.
-	if (next) void plugin.promptFilesService?.ensureMemoryPrompt(agentId);
-	void applyChanges();
-}
-
 /** Icon for a core-skill row (shared with the agents-list strip via `skillIcon`). */
 function coreSkillIcon(skill: SkillDisplayInfo): string {
 	return skillIcon(skill);
@@ -848,19 +799,25 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
           />
         </SettingItem>
 
+        <!-- The agent's whole definition is one note: base instructions, the current-date
+             section, and the memory section, with live values written as placeholders that
+             assembly substitutes. There is no memory toggle — an agent participates in memory
+             iff its note still has the `# Memory` section, which the user can simply delete.
+             The memory FOLDER (Agents/Memories/) stays global, shared by every agent, because
+             remembered facts are properties of the user, not of one agent. -->
         <SettingItem
-          name="Base system prompt"
-          desc="Customize the base system instructions for this agent"
+          name="System prompt"
+          desc="This agent's instructions, including how it uses memory, stored as its own AGENT.md note in your vault"
         >
           <div class="flex items-center gap-2 justify-end">
             <Button
               iconId="pencil"
-              ariaLabel="Open base system prompt note"
-              tooltip="Open base system prompt note"
-              onClick={openBasePromptNote}
+              ariaLabel="Open agent note"
+              tooltip="Open agent note"
+              onClick={openAgentNote}
             />
-            {#if basePromptDrifted}
-              <Button buttonText="Diff with default" onClick={openBasePromptDiff} />
+            {#if promptDrifted}
+              <Button buttonText="Diff with default" onClick={openPromptDiff} />
             {/if}
             <Button
               iconId="eye"
@@ -868,39 +825,6 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
               tooltip="View final assembled prompt"
               onClick={openRenderedSystemPromptModal}
             />
-          </div>
-        </SettingItem>
-
-        <!-- Memory — durable facts and vault pointers the agent manages itself. Note the
-             deliberate split: the memory FOLDER (Agents/Memories/) is GLOBAL, shared by every
-             agent, because remembered facts are properties of the user, not of one agent. The
-             memory PROMPT note (Agents/System Prompts/<Agent Name>/Memory.md) is PER-AGENT,
-             because how eagerly to read/record is agent behavior — the same reason the base
-             prompt (Base.md, same folder) is per-agent. Enabling injects that note into the
-             system prompt and auto-applies note writes inside the memory folder. Needs the
-             Manage notes tool. Lives here (not the skills list) as an agent-level capability
-             that shapes the system prompt, alongside the base
-             prompt — same "open the note" + conditional diff pattern as Base System Prompt. -->
-        <SettingItem
-          name="Memory"
-          desc="Durable facts about you and pointers to where things live in your vault, stored in a memory folder shared by all agents. The prompt note sets how THIS agent uses it, and is not shared. Note writes inside the folder apply automatically."
-        >
-          {#snippet nameSuffix()}
-            {#if memoryEnabled && !manageNotesEnabled}
-              <Badge label="Needs Manage notes" tone="warning" />
-            {/if}
-          {/snippet}
-          <div class="flex items-center gap-2 justify-end">
-            <Button
-              iconId="pencil"
-              ariaLabel="Open memory prompt note"
-              tooltip="Open memory prompt note"
-              onClick={openMemoryPromptNote}
-            />
-            {#if memoryPromptDrifted}
-              <Button buttonText="Diff with default" onClick={openMemoryPromptDiff} />
-            {/if}
-            <Toggle checked={memoryEnabled} onchange={(next) => handleMemoryToggle(next)} />
           </div>
         </SettingItem>
 

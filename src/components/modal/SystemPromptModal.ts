@@ -12,7 +12,7 @@ export interface SystemPromptAccessors {
 	setPrompt?: (prompt: string) => void;
 	viewFinalPrompt?: () => void;
 	/**
-	 * Value the "Reset to Default" button restores to. Defaults to `BASE_SYSTEM_PROMPT`
+	 * Value the "Reset to Default" button restores to. Defaults to `DEFAULT_AGENT_PROMPT`
 	 * (the agent base prompt). Pass a different default when this modal edits something
 	 * other than the base prompt (e.g. memory instructions) so the reset is meaningful.
 	 */

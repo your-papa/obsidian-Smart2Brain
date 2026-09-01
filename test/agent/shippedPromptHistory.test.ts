@@ -1,80 +1,44 @@
 /**
- * Guards the shipped-prompt histories in `src/agent/prompts.ts` against the failure that hit
+ * Guards the shipped agent-prompt history (`SHIPPED_AGENT_PROMPTS`) against the failure that hit
  * the bundled skills: bumping a version without retaining the body that version replaced.
  *
  * The reconcile machinery itself is covered by promptFilesReconcile.test.ts, but that suite
- * substitutes *mocked* histories to exercise the state transitions. Nothing asserted anything
- * about the real SHIPPED_BASE_PROMPTS / SHIPPED_MEMORY_PROMPTS, so a missing entry would have
- * been caught by no test at all.
+ * substitutes *mocked* histories to exercise the state transitions, so nothing there asserts
+ * anything about the real one.
  *
- * Why this matters more here than for skills: a base prompt is assembled into every agent's
- * system prompt, so an orphaned version misclassifies every install at once — each one gets a
- * "your customized version was kept" notice for a file the user never touched, and never
- * receives the new prompt.
- *
- * These are structural checks, deliberately not fingerprint literals: asserting an expected
- * hex value would just restate the implementation and would have to be edited in lockstep
- * with every legitimate change, which is precisely the manual step that fails.
+ * Why this matters: the agent prompt is assembled into every agent's system prompt, so an
+ * orphaned version misclassifies every install at once — each gets a "your customized version
+ * was kept" notice for a file the user never touched, and never receives the new prompt.
  */
 
 import { describe, expect, it } from "vitest";
 
-import {
-	BASE_SYSTEM_PROMPT,
-	BASE_SYSTEM_PROMPT_VERSION,
-	DEFAULT_MEMORY_PROMPT,
-	DEFAULT_MEMORY_PROMPT_VERSION,
-	SHIPPED_BASE_PROMPTS,
-	SHIPPED_MEMORY_PROMPTS,
-} from "../../src/agent/prompts";
+import { AGENT_PROMPT_VERSION, DEFAULT_AGENT_PROMPT, SHIPPED_AGENT_PROMPTS } from "../../src/agent/prompts";
 import { type ShippedHistory, currentShippedVersion, fingerprint } from "../../src/utils/shippedDefaults";
 
-const surfaces = [
-	{
-		label: "base system prompt",
-		history: SHIPPED_BASE_PROMPTS,
-		current: BASE_SYSTEM_PROMPT,
-		version: BASE_SYSTEM_PROMPT_VERSION,
-	},
-	{
-		label: "memory prompt",
-		history: SHIPPED_MEMORY_PROMPTS,
-		current: DEFAULT_MEMORY_PROMPT,
-		version: DEFAULT_MEMORY_PROMPT_VERSION,
-	},
-] satisfies { label: string; history: ShippedHistory; current: string; version: number }[];
-
 /**
- * Fingerprint of each prompt's text as it stands at the current version — stored as a
- * literal, on purpose.
+ * Fingerprint of the history's newest text — stored as a literal, on purpose.
  *
- * This is the one check that cannot be structural. Every other assertion here compares the
- * history against the constants, but the history *is built from* those constants, so editing
- * a prompt without bumping its version keeps everything self-consistent: `history.get(2)` is
- * recomputed from the edited text and still matches. That is exactly the bug that shipped in
- * `dataview`/`tasknotes` — new body, unchanged version, so the version no longer identified
- * a body and every existing install read as customized.
+ * This is the one check that cannot be structural. Every other assertion compares a history
+ * against the constants it is built from, so editing a prompt without bumping its version keeps
+ * everything self-consistent: `history.get(n)` is recomputed from the edited text and still
+ * matches. That is exactly the bug that shipped in `dataview`/`tasknotes` — new body, unchanged
+ * version, so the version no longer identified a body and every install read as customized.
  *
- * For skills the equivalent check replays release tags, but a prompt's prior text is a
- * constant in this same file rather than a standalone .md, so there is nothing external to
- * diff against. Pinning the hash here is what makes an unbumped edit fail loudly.
- *
- * WHEN THIS FAILS: you changed a prompt. Either bump its *_VERSION and retain the old text as
- * a new *_V<n> constant (see the doc comments in prompts.ts), or — if the edit is genuinely
- * cosmetic and no shipped build carries the old text — update the literal below.
+ * WHEN THIS FAILS: you changed DEFAULT_AGENT_PROMPT (or one of its building blocks). Either bump
+ * AGENT_PROMPT_VERSION and retain the old text as a new constant (see the doc in prompts.ts), or
+ * — if the edit is genuinely cosmetic and no shipped build carries the old text — update the
+ * literal below.
  */
-const CURRENT_FINGERPRINTS: Record<string, string> = {
-	"base system prompt": "b9ecc80dc4496cf1", // BASE_SYSTEM_PROMPT at v2
-	"memory prompt": "4545e67125dc25fe", // DEFAULT_MEMORY_PROMPT at v2
-};
+const CURRENT_FINGERPRINT = "182f169c1d5c75fc"; // DEFAULT_AGENT_PROMPT at v1
 
-describe.each(surfaces)("$label shipped history", ({ label, history, current, version }) => {
-	it("registers the current text under the current version", () => {
-		expect(history.get(version)).toBe(fingerprint(current));
-	});
+const history: ShippedHistory = SHIPPED_AGENT_PROMPTS;
+const version = AGENT_PROMPT_VERSION;
 
-	it("has not changed without a version bump", () => {
-		expect(fingerprint(current)).toBe(CURRENT_FINGERPRINTS[label]);
+describe("agent prompt shipped history", () => {
+	it("registers the newest text under the current version", () => {
+		expect(history.get(version)).toBe(fingerprint(DEFAULT_AGENT_PROMPT));
+		expect(history.get(version)).toBe(CURRENT_FINGERPRINT);
 	});
 
 	/**
@@ -105,5 +69,22 @@ describe.each(surfaces)("$label shipped history", ({ label, history, current, ve
 	 */
 	it("has a distinct body per version", () => {
 		expect(new Set(history.values()).size).toBe(history.size);
+	});
+});
+
+/**
+ * The combined default must actually contain the sections the rest of the system reasons about:
+ * assembly substitutes both placeholders, and "delete the `# Memory` section to disable memory"
+ * is the only way a user can turn memory off now that the toggle is gone.
+ */
+describe("default agent prompt composition", () => {
+	it("carries both runtime placeholders", () => {
+		expect(DEFAULT_AGENT_PROMPT).toContain("{{memoryFolder}}");
+		expect(DEFAULT_AGENT_PROMPT).toContain("{{date}}");
+	});
+
+	it("orders the sections base → date → memory", () => {
+		const headings = DEFAULT_AGENT_PROMPT.split("\n").filter((line) => line.startsWith("# "));
+		expect(headings).toEqual(["# Role", "# User Context", "# Tools", "# Formatting", "# Current Date", "# Memory"]);
 	});
 });

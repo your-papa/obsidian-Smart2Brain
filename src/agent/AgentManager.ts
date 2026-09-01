@@ -32,7 +32,7 @@ import {
 import type { ChatAttachment, ReviewStatusRef } from "../types/shared";
 import { gzipString, toArrayBuffer } from "../utils/gzip";
 import { Logger } from "../utils/logging";
-import { basePromptPath, memoriesDir, memoryPromptPath } from "../utils/agentPaths";
+import { agentDefinitionPath, memoriesDir } from "../utils/agentPaths";
 import {
 	editProviderAction,
 	openNoteAction,
@@ -54,12 +54,12 @@ import {
 import { ObsidianChatManager } from "./ObsidianChatManager";
 import type { ThreadSnapshot } from "./memory/ThreadStore";
 import {
-	BASE_SYSTEM_PROMPT,
-	DEFAULT_MEMORY_PROMPT,
+	DEFAULT_AGENT_PROMPT,
+	MEMORY_FOLDER_PLACEHOLDER,
 	NO_WRITE_TOOLS_GUARD,
-	buildCurrentDateSection,
-	buildMemoryFolderHeader,
+	currentDateValue,
 	localIsoDate,
+	substitutePromptPlaceholders,
 } from "./prompts";
 import { getBundledSkill } from "../skills/defaults";
 import { extractErrorMessage } from "../utils/errorMessage";
@@ -370,32 +370,24 @@ export class AgentManager {
 		const pluginData = getData();
 		const selectedAgent = agent ?? pluginData.getSelectedAgent();
 
-		let prompt = this.plugin.promptFilesService?.getBasePrompt(selectedAgent.id) ?? BASE_SYSTEM_PROMPT;
+		// The agent's AGENT.md body IS the prompt: base instructions, the `# Current Date`
+		// section and the `# Memory` section all live in that one editable note. Only the
+		// irreducibly dynamic parts are appended below (skills, and the no-write-tools guard).
+		const body = this.plugin.promptFilesService?.getAgentPrompt(selectedAgent.id) ?? DEFAULT_AGENT_PROMPT;
 
-		// The model has no reliable notion of "now"; without this, relative-time questions
-		// ("this week's daily notes") silently resolve against the training cutoff. Injected
-		// here rather than stored in the editable base-prompt note so it can't go stale; the
-		// runnable cache key carries the same local date (see buildRunnableCacheKey), so a
-		// cached runnable is rebuilt at most once per day.
-		prompt += `\n\n${buildCurrentDateSection()}`;
+		const memoryFolder = normalizePath(memoriesDir());
 
-		// Must test actual binding, not just the per-tool toggle: `manage_notes` also needs an
-		// enabled skill to attach it. Gating on the toggle alone would inject memory
-		// instructions telling the agent to record memories with a tool it doesn't have
-		// (e.g. toggle on, but the Edit Notes skill disabled).
-		const hasWriteTools = this.isToolBound(selectedAgent, "manage_notes");
+		// The model has no reliable notion of "now", and the memory folder is user-configurable;
+		// both are written into the note as placeholders and substituted here, so nothing stale
+		// is ever baked into stored text. The runnable cache key carries the same local date (see
+		// buildRunnableCacheKey), so a cached runnable is rebuilt at most once per day.
+		let prompt = substitutePromptPlaceholders(body, { memoryFolder, date: currentDateValue() });
 
-		// Memory: long-lived facts stored as notes in the shared memory folder. Gated on the
-		// agent opting in AND manage_notes being enabled (recording a memory is a note
-		// write). The guidance lives in the user-editable
-		// System Prompts/<Agent Name>/Memory.md note (see PromptFilesService) and is placed
-		// right after the base prompt — adjacent to it, NOT buried in the auto-appended
-		// tool-guideline tail — so it reads as (and is tunable as) agent behavior. Writes
-		// inside the folder auto-apply (see stageNoteOperations).
-		if (selectedAgent.memoryEnabled && hasWriteTools) {
-			const memoryFolder = normalizePath(memoriesDir());
-			// Best-effort ensure the folder exists so search_notes/list_directory have
-			// somewhere to look before the first memory is written.
+		// Best-effort ensure the memory folder exists so list_directory has somewhere to look
+		// before the first memory is written. Only for agents that actually reference it — the
+		// placeholder is the signal that this agent's prompt still has its `# Memory` section
+		// (deleting that section is how a user opts out of memory).
+		if (body.includes(MEMORY_FOLDER_PLACEHOLDER)) {
 			try {
 				if (!this.plugin.app.vault.getFolderByPath(memoryFolder)) {
 					void this.plugin.app.vault.createFolder(memoryFolder).catch(() => {});
@@ -403,14 +395,11 @@ export class AgentManager {
 			} catch {
 				// ignore — folder is created on first write anyway
 			}
-			// The live memory folder is named by a header we always prepend, so it tracks the
-			// configurable agent folder. The note's instructions are path-agnostic (no baked-in
-			// path to go stale); an absent file falls back to DEFAULT_MEMORY_PROMPT (see
-			// PromptFilesService.getMemoryPrompt).
-			const instructions =
-				this.plugin.promptFilesService?.getMemoryPrompt(selectedAgent.id) ?? DEFAULT_MEMORY_PROMPT;
-			prompt += `\n\n${buildMemoryFolderHeader(memoryFolder)}\n\n${instructions}`;
 		}
+
+		// Must test actual binding, not just the per-tool toggle: `manage_notes` also needs an
+		// enabled skill to attach it.
+		const hasWriteTools = this.isToolBound(selectedAgent, "manage_notes");
 
 		// Note: tool how-to and skill guidance are no longer injected eagerly here.
 		// Every former capability is now a core *skill* (a SKILL.md with tools attached via
@@ -475,6 +464,11 @@ export class AgentManager {
 		this.agent?.invalidateAllRunnables();
 	}
 
+	/**
+	 * Two-way diff (yours vs the current default) over the agent's AGENT.md body, with reset.
+	 * Lives here rather than only in AgentEditorModal so the stale-guidance notice can open it
+	 * directly from the chat recommendations surface.
+	 */
 	openSystemPromptDiff(agentId: string): void {
 		const pluginData = getData();
 		const agent = pluginData.agents[agentId];
@@ -483,65 +477,30 @@ export class AgentManager {
 		new SystemPromptModal(
 			this.plugin,
 			{
-				getPrompt: () => promptFiles?.getBasePrompt(agentId) ?? BASE_SYSTEM_PROMPT,
+				getPrompt: () => promptFiles?.getAgentPrompt(agentId) ?? DEFAULT_AGENT_PROMPT,
 				// The modal closes synchronously after this, so a rejected write would read as
 				// a successful save (and leave an unhandled rejection). The edit only exists
 				// in the closed editor at that point — say so rather than letting the user
 				// believe it landed. Same contract as `openSkillDiff`.
 				setPrompt: (prompt: string) => {
 					void promptFiles
-						?.writeBasePrompt(agentId, prompt)
+						?.writeAgentPrompt(agentId, prompt)
 						.then(() => {
 							this.invalidateSystemPromptCaches();
 						})
 						.catch((error) => {
-							Logger.error(`Failed to save the base prompt for ${agent.name}:`, error);
+							Logger.error(`Failed to save the system prompt for ${agent.name}:`, error);
 							// The edit is gone with the closed editor; the link shows what is
 							// actually on disk so the user can redo it against the real content.
 							showActionNotice(
 								`Could not save the system prompt: ${extractErrorMessage(error)}`,
-								openNoteAction(basePromptPath(agentId), "Open the prompt note"),
+								openNoteAction(agentDefinitionPath(agentId), "Open the agent note"),
 							);
 						});
 				},
-				defaultPrompt: BASE_SYSTEM_PROMPT,
+				defaultPrompt: DEFAULT_AGENT_PROMPT,
 			},
 			{ title: `System Prompt — ${agent.name}`, showDiff: true },
-		).open();
-	}
-
-	/**
-	 * Memory-instructions counterpart of {@link openSystemPromptDiff}. Same modal and same
-	 * two-way diff (yours vs the current default); lives here rather than only in
-	 * AgentEditorModal so the stale-guidance notice can open it directly from the chat
-	 * recommendations surface.
-	 */
-	openMemoryPromptDiff(agentId: string): void {
-		const agent = getData().agents[agentId];
-		if (!agent) return;
-		const promptFiles = this.plugin.promptFilesService;
-		new SystemPromptModal(
-			this.plugin,
-			{
-				getPrompt: () => promptFiles?.getMemoryPrompt(agentId) ?? DEFAULT_MEMORY_PROMPT,
-				// See `openSystemPromptDiff` — same close-then-save race.
-				setPrompt: (prompt: string) => {
-					void promptFiles
-						?.writeMemoryPrompt(agentId, prompt)
-						.then(() => {
-							this.invalidateSystemPromptCaches();
-						})
-						.catch((error) => {
-							Logger.error(`Failed to save the memory prompt for ${agent.name}:`, error);
-							showActionNotice(
-								`Could not save the memory instructions: ${extractErrorMessage(error)}`,
-								openNoteAction(memoryPromptPath(agentId), "Open the memory note"),
-							);
-						});
-				},
-				defaultPrompt: DEFAULT_MEMORY_PROMPT,
-			},
-			{ title: `Memory Instructions — ${agent.name}`, showDiff: true },
 		).open();
 	}
 
@@ -1177,7 +1136,12 @@ export class AgentManager {
 				// Give it a distinct selector name so it never collides with a
 				// sibling subagent, and describe it as a clean-context worker.
 				const name = isSelf ? `${ref.name} (isolated)` : ref.name;
-				const refBasePrompt = this.plugin.promptFilesService?.getBasePrompt(ref.id) ?? BASE_SYSTEM_PROMPT;
+				// Substituted up front so neither the delegated prompt nor the hint below (which
+				// the parent model reads as the tool's description) ever shows a raw placeholder.
+				const refBasePrompt = substitutePromptPlaceholders(
+					this.plugin.promptFilesService?.getAgentPrompt(ref.id) ?? DEFAULT_AGENT_PROMPT,
+					{ memoryFolder: normalizePath(memoriesDir()), date: currentDateValue() },
+				);
 				const promptHint = refBasePrompt.trim().replace(/\s+/g, " ").slice(0, 160);
 				let description: string;
 				if (isSelf) {
@@ -1318,7 +1282,7 @@ export class AgentManager {
 		// Guarantee the base-prompt cache is seeded + loaded before we assemble any system
 		// prompt. main.ts's deferred startup runs promptFiles:init before agent:init, but a chat
 		// opened during cold startup can trigger lazy ensureAgent() → initialize() *first*; without
-		// this, getBasePrompt() would read an empty cache and fall back to BASE_SYSTEM_PROMPT,
+		// this, getAgentPrompt() would read an empty cache and fall back to DEFAULT_AGENT_PROMPT,
 		// dropping the user's file-backed instructions for that request. Both calls are idempotent
 		// and cheap (skip-if-exists writes over a bounded file set).
 		const promptFiles = this.plugin.promptFilesService;
@@ -1517,14 +1481,14 @@ export class AgentManager {
 			if (!sub) return { id, missing: true };
 			return {
 				id,
-				systemPrompt: promptFiles?.getBasePrompt(id) ?? null,
+				systemPrompt: promptFiles?.getAgentPrompt(id) ?? null,
 				chatModel: sub.chatModel ? `${sub.chatModel.provider}:${sub.chatModel.model}` : null,
 				toolsConfig: sub.toolsConfig,
 				pluginExecTools: sub.pluginExecTools ?? null,
 			};
 		});
 		return JSON.stringify({
-			systemPrompt: promptFiles?.getBasePrompt(agent.id) ?? null,
+			systemPrompt: promptFiles?.getAgentPrompt(agent.id) ?? null,
 			skills: agent.skills,
 			toolsConfig: agent.toolsConfig,
 			pluginExecTools: agent.pluginExecTools ?? null,

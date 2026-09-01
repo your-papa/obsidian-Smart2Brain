@@ -166,12 +166,12 @@ export function isBinaryTextFile(file: TFile): boolean {
 
 /**
  * Returns `true` when `path` lives inside the configurable agent root folder (default
- * "Agents"). That folder holds all agent context — `Memories/`, `Skills/` (skill dirs,
- * core skills included), and `System Prompts/` (per-agent subfolders). These are plugin
- * machinery, not user notes, so they must be kept out of indexing, search, graph, and the
- * agent's vault-facing tools. (One deliberate exemption: `list_directory` shows the
- * `Memories/` subtree when the owning agent has memory enabled — memory notes are absent
- * from the search index, so that listing is the agent's only memory-discovery path.)
+ * "Agents"). That folder holds all agent context — `Memories/`, `Skills/` (skill dirs, core
+ * skills included), and one `<Agent Name>/` folder per agent holding its `AGENT.md`. These are
+ * plugin machinery, not user notes, so they must be kept out of indexing, search, graph, and the
+ * agent's vault-facing tools. (One deliberate exemption: `list_directory` always shows the
+ * `Memories/` subtree — memory notes are absent from the search index, so that listing is the
+ * agent's only memory-discovery path.)
  * `agentFolder` is pure/injectable for testing; callers that don't have it use
  * `isAgentFilePath`, which reads it from plugin data.
  */

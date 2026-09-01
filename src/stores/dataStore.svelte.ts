@@ -1,5 +1,5 @@
 import { normalizePath } from "obsidian";
-import { SHIPPED_BASE_PROMPTS, SHIPPED_MEMORY_PROMPTS } from "../agent/prompts";
+import { SHIPPED_AGENT_PROMPTS } from "../agent/prompts";
 import {
 	createEmptyPrivacyFilter,
 	matchesPrivacyMembershipDraftPath,
@@ -10,7 +10,7 @@ import {
 import { getSecret, listSecrets, removeSecret, setSecret } from "../lib/secretStorage";
 import { isAgentFilePath } from "../utils/fileFiltering";
 import { sanitizeAgentFileName } from "../utils/agentPaths";
-import { type ShippedHistory, currentShippedVersion, isShippedDefault, shippedVersion } from "../utils/shippedDefaults";
+import { type ShippedHistory, currentShippedVersion, shippedVersion } from "../utils/shippedDefaults";
 import { currentSkillVersion } from "../skills/shippedSkills";
 import type SecondBrainPlugin from "../main";
 import { DEFAULT_AGENT_ICON } from "../types/plugin";
@@ -30,7 +30,6 @@ import type {
 	PrivacyMode,
 	PromptFileReader,
 	PromptFileSnapshot,
-	PromptKindId,
 	RecentNoteEntry,
 	SearchAlgorithm,
 	StaleGuidance,
@@ -397,7 +396,6 @@ export function createDefaultAgentConfig(id?: string, name?: string): AgentConfi
 		toolsConfig: structuredClone(DEFAULT_TOOLS_CONFIG),
 		mcpServers: {},
 		subAgentIds: [],
-		memoryEnabled: false,
 	};
 }
 
@@ -416,7 +414,6 @@ function createDefaultAgent(): AgentConfig {
 		toolsConfig: structuredClone(DEFAULT_TOOLS_CONFIG),
 		mcpServers: {},
 		subAgentIds: [],
-		memoryEnabled: false,
 	};
 }
 
@@ -425,7 +422,7 @@ function createDefaultAgent(): AgentConfig {
 // ---------------------------------------------------------------------------
 
 /** Increment this when making any breaking change to PluginData. Add a corresponding entry to MIGRATIONS. */
-const CURRENT_SCHEMA_VERSION = 9;
+const CURRENT_SCHEMA_VERSION = 10;
 
 type Migration = (data: PluginData) => void;
 
@@ -469,13 +466,10 @@ const MIGRATIONS: Migration[] = [
 		// Drop removed per-agent fields — their content is now file-backed or global.
 		for (const agent of Object.values(data.agents ?? {})) {
 			const a = agent as unknown as Record<string, unknown>;
-			// The base system prompt moves from this config field to a file (Base Prompts/<id>.md).
-			// If the user CUSTOMIZED it (not equal to any shipped default), stash it in a transient so
-			// the async seed writes it to the new file instead of clobbering it with the factory
-			// default. A recognized/absent default is dropped — the file seeds fresh from the default.
-			const oldPrompt = typeof a.systemPrompt === "string" ? (a.systemPrompt as string) : "";
-			const recognized = !oldPrompt.trim() || isShippedDefault(oldPrompt, SHIPPED_BASE_PROMPTS);
-			if (!recognized) a.migratedBasePrompt = oldPrompt;
+			// The base system prompt moved from this config field to a file. A customization used
+			// to be stashed in a transient for the async seed to write out, but the seeding path
+			// that consumed it went away with the AGENT.md consolidation (v10) — the field is now
+			// simply dropped.
 			a.systemPrompt = undefined;
 			a.systemPromptVersion = undefined;
 			a.capabilityPrompts = undefined;
@@ -500,19 +494,13 @@ const MIGRATIONS: Migration[] = [
 			}
 		}
 	},
-	// v6 → v7: the memory prompt moves from this config field to a file
-	//          (Memory Prompts/<Agent Name>.md), same treatment as the v4→v5 base-prompt move.
-	//          If the user CUSTOMIZED it (non-empty and not any memory prompt we ever shipped),
-	//          stash it in a transient so the async seed (PromptFilesService.seedDefaults)
-	//          writes it to the new file instead of clobbering it with the factory default.
-	//          A recognized/absent default is dropped — the file seeds fresh from the default.
+	// v6 → v7: the memory prompt moved from this config field to a file, same treatment as the
+	//          v4→v5 base-prompt move — and, like it, the seeding path that consumed the stashed
+	//          customization went away with the AGENT.md consolidation (v10), so the field is now
+	//          simply dropped.
 	(data) => {
 		for (const agent of Object.values(data.agents ?? {})) {
-			const a = agent as unknown as Record<string, unknown>;
-			const oldPrompt = typeof a.memoryPrompt === "string" ? (a.memoryPrompt as string) : "";
-			const recognized = !oldPrompt.trim() || isShippedDefault(oldPrompt, SHIPPED_MEMORY_PROMPTS);
-			if (!recognized) a.migratedMemoryPrompt = oldPrompt;
-			a.memoryPrompt = undefined;
+			(agent as unknown as Record<string, unknown>).memoryPrompt = undefined;
 		}
 	},
 	// v7 → v8: `update_skill` renamed to `manage_skills` (tool now also creates/deletes skills,
@@ -552,6 +540,17 @@ const MIGRATIONS: Migration[] = [
 			if (auth && auth.authMode === "codex") {
 				auth.authMode = "apiKey";
 			}
+		}
+	},
+	// v9 → v10: the per-agent `System Prompts/<Agent Name>/{Base,Memory}.md` pair consolidated
+	//           into one `<Agent Name>/AGENT.md`, and `memoryEnabled` was removed — the memory
+	//           machinery is always on, and an agent participates iff its AGENT.md body has a
+	//           `# Memory` section (which the user can just delete). The file half ran as a
+	//           one-shot service that has since been deleted along with the pre-AGENT.md
+	//           defaults it needed; only the stale config key is stripped here.
+	(data) => {
+		for (const agent of Object.values(data.agents ?? {})) {
+			(agent as unknown as Record<string, unknown>).memoryEnabled = undefined;
 		}
 	},
 ];
@@ -2421,26 +2420,19 @@ export class PluginDataStore {
 let _pluginDataStore: PluginDataStore | null = null;
 
 /**
- * The two file-backed prompt surfaces under `System Prompts/<Agent Name>/`, each paired with
- * the history it is checked against and how its notice reads.
+ * The file-backed prompt surface (`<Agent Name>/AGENT.md`), paired with the history it is
+ * checked against and how its notice reads. A list of one: the memory instructions are now a
+ * section of this same body rather than a second file, but the shape is kept so a future
+ * surface is an entry rather than a refactor.
  */
 const PROMPT_SURFACES = [
 	{
-		id: "base",
 		kind: "system-prompt",
 		label: "system prompt",
-		history: SHIPPED_BASE_PROMPTS,
-		read: (reader: PromptFileReader, agentId: string) => reader.getBasePromptFile(agentId),
-	},
-	{
-		id: "memory",
-		kind: "memory-prompt",
-		label: "memory instructions",
-		history: SHIPPED_MEMORY_PROMPTS,
-		read: (reader: PromptFileReader, agentId: string) => reader.getMemoryPromptFile(agentId),
+		history: SHIPPED_AGENT_PROMPTS,
+		read: (reader: PromptFileReader, agentId: string) => reader.getAgentPromptFile(agentId),
 	},
 ] as const satisfies readonly {
-	id: PromptKindId;
 	kind: StaleGuidance["kind"];
 	label: string;
 	history: ShippedHistory;
@@ -2448,10 +2440,10 @@ const PROMPT_SURFACES = [
 }[];
 
 /**
- * Per-agent staleness for the file-backed prompts (`System Prompts/<Agent Name>/Base.md` and
- * `Memory.md`): stale when the file holds an OLD shipped default — i.e. the shipped default
- * moved since the user's copy was written, but the user never touched it, so we could not
- * silently update it either (the file is theirs to edit).
+ * Per-agent staleness for the file-backed prompt (`<Agent Name>/AGENT.md`): stale when the file
+ * holds an OLD shipped default — i.e. the shipped default moved since the user's copy was
+ * written, but the user never touched it, so we could not silently update it either (the file is
+ * theirs to edit).
  *
  * A customization we don't recognize is deliberately NOT flagged: the user wrote it on
  * purpose, and nagging about it would be noise. Absence ⇒ the live default is used.

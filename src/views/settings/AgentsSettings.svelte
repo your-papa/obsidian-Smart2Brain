@@ -48,7 +48,7 @@ function createNewAgent() {
 	const agent = pluginData.createAgent("New Agent");
 	pluginData.selectedAgentId = agent.id;
 	// Seed the base prompt note immediately so it exists in the vault before the editor opens.
-	void plugin.promptFilesService?.ensureBasePrompt(agent.id);
+	void plugin.promptFilesService?.ensureAgentPrompt(agent.id);
 	openAgentEditor(agent.id);
 }
 
@@ -58,7 +58,7 @@ function duplicateAgent(agentId: string) {
 	const duplicated = pluginData.duplicateAgent(agentId, `${sourceAgent.name} (Copy)`);
 	pluginData.selectedAgentId = duplicated.id;
 	// Carry over the source's edited base + memory prompts to the duplicate's own notes.
-	void plugin.promptFilesService?.copyAgentPrompts(agentId, duplicated.id);
+	void plugin.promptFilesService?.copyAgentPrompt(agentId, duplicated.id);
 	openAgentEditor(duplicated.id);
 }
 
@@ -70,12 +70,12 @@ async function deleteAgent(agentId: string) {
 	const agent = agents[agentId];
 	if (!(await confirmDelete(plugin.app, agent?.name ?? agentId))) return;
 	try {
-		// Remove the prompt folder BEFORE the agent leaves config, and AWAIT it:
-		// deleteAgentPrompts resolves the folder path from the agent's (name-based) entry, and
+		// Remove the agent's folder BEFORE the agent leaves config, and AWAIT it:
+		// deleteAgentDir resolves the folder path from the agent's (name-based) entry, and
 		// only once the agent is gone can its name be reused by another agent. Fully ordering
 		// the removal closes the window where a reused name could point deletion at the wrong
 		// folder.
-		await plugin.promptFilesService?.deleteAgentPrompts(agentId);
+		await plugin.promptFilesService?.deleteAgentDir(agentId);
 		pluginData.deleteAgent(agentId);
 		plugin.agentManager?.invalidateAgentRunnable(agentId);
 	} catch (error) {
