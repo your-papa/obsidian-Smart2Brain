@@ -32,6 +32,7 @@ import { type ThreadSnapshot, type ThreadStore, createSnapshot } from "./memory/
 import {
 	getSummarizationTriggerTokens,
 	getTrimTokensToSummarize,
+	guardSummarizationFailure,
 	SUMMARY_KEEP_MESSAGE_COUNT,
 	SUMMARY_PREFIX,
 	SUMMARY_PROMPT,
@@ -648,14 +649,18 @@ export class Agent {
 		const trimTokensToSummarize = getTrimTokensToSummarize(triggerTokens);
 
 		return [
-			summarizationMiddleware({
-				model,
-				trigger: { tokens: triggerTokens, messages: SUMMARY_KEEP_MESSAGE_COUNT + 2 },
-				keep: { messages: SUMMARY_KEEP_MESSAGE_COUNT },
-				summaryPrefix: SUMMARY_PREFIX,
-				summaryPrompt: SUMMARY_PROMPT,
-				trimTokensToSummarize,
-			}),
+			// Guarded so a failed summary aborts the trim instead of replacing the
+			// trimmed history with an error stub (#435).
+			guardSummarizationFailure(
+				summarizationMiddleware({
+					model,
+					trigger: { tokens: triggerTokens, messages: SUMMARY_KEEP_MESSAGE_COUNT + 2 },
+					keep: { messages: SUMMARY_KEEP_MESSAGE_COUNT },
+					summaryPrefix: SUMMARY_PREFIX,
+					summaryPrompt: SUMMARY_PROMPT,
+					trimTokensToSummarize,
+				}),
+			),
 		] as const;
 	}
 
