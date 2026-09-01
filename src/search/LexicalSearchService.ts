@@ -552,8 +552,19 @@ export class LexicalSearchService {
 	 * re-extraction for a one-line snippet, and Excalidraw's raw JSON never matches
 	 * what was indexed — both fall back to badge-only explanations.
 	 */
+	/**
+	 * Largest file worth reading back for a snippet, in bytes. Files above the
+	 * mobile indexing gate are title-indexed and so still appear in results —
+	 * without this bound, explaining such a match would re-read the very file
+	 * indexing skipped for memory safety.
+	 */
+	private static readonly EXPLANATION_MAX_FILE_BYTES = 1_000_000;
+
 	private async readExplanationContent(file: TFile): Promise<string | undefined> {
 		if (file.extension !== "md" || file.path.toLowerCase().endsWith(".excalidraw.md")) {
+			return undefined;
+		}
+		if (file.stat.size > LexicalSearchService.EXPLANATION_MAX_FILE_BYTES) {
 			return undefined;
 		}
 		try {
