@@ -27,7 +27,20 @@ import type { Checkpoint, CheckpointMetadata, PendingWrite } from "@langchain/la
  * `.chat` extractor in `utils/fileFiltering.ts`).
  */
 
-/** Bump when the ThreadData/CheckpointEntry schema changes. Absent in pre-versioning files → treated as 0. */
+/**
+ * Bump when the ThreadData/CheckpointEntry schema changes. Absent in
+ * pre-versioning files → treated as 0.
+ *
+ * **Forward-compatibility contract:** older plugins decode newer files with
+ * v2 semantics as a best effort (they warn and refuse to overwrite — see
+ * `newerVersionThreadIds` in `ObsidianChatManager` — but still display and
+ * index what they can). Every future version must therefore keep the v2
+ * invariants intact: `version` stays the first JSON key, `messageTable`
+ * stays a flat array of messages, and a single-key `{"$msg": n}` record
+ * outside the table always means "table entry n". A change that can't keep
+ * those invariants must use *new* key names (e.g. a differently named marker
+ * or table) so v2 decoding degrades to partial display instead of misreading.
+ */
 export const THREAD_DATA_VERSION = 2;
 
 /**
@@ -208,9 +221,17 @@ export function sniffThreadDataVersion(jsonPrefix: string): number {
  * table objects, in place. Every occurrence of a message resolves to the
  * *same* object, so checkpoints share content in memory. Pre-v2 data (which
  * stores messages inline) passes through unchanged.
+ *
+ * Versions newer than {@link THREAD_DATA_VERSION} are also decoded with v2
+ * semantics, deliberately: that's the best-effort read the manager promises
+ * for files written by a newer plugin (display what we can, never save), and
+ * the forward-compatibility contract on {@link THREAD_DATA_VERSION} makes it
+ * safe — future versions keep the `$msg`/`messageTable` invariants, and
+ * anything this decoder doesn't understand is left in place rather than
+ * misread.
  */
 export function inflateThreadData(data: ThreadData): ThreadData {
-	if ((data.version ?? 0) < 2) return data;
+	if ((data.version ?? 0) < THREAD_DATA_DEDUP_VERSION) return data;
 
 	const table = Array.isArray(data.messageTable) ? data.messageTable : [];
 	if (isRecord(data.checkpoints)) {
