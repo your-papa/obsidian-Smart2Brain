@@ -1332,9 +1332,13 @@ function handleClearSelection() {
  * the selected paths. Clicking a topic label selects its notes, but the user can
  * then add or remove notes by hand, and a selection that merely *overlaps* a
  * topic isn't that topic.
+ *
+ * The canvas call reads its non-reactive `simNodes`, but every path that
+ * changes a topic's membership also runs `handleSelectionChange` or resets
+ * `focusedClusters` — both tracked here — so this can't go stale in between.
  */
-function resolveImmerseTopicLabels(): string[] | null {
-	if (focusedClusters.size === 0) return null;
+let selectedTopicLabels: string[] | null = $derived.by(() => {
+	if (focusedClusters.size === 0 || selectedPaths.length === 0) return null;
 	const topicPaths = new Set(canvasComponent?.getNodePathsForClusters(focusedClusters) ?? []);
 	const selected = new Set(selectedPaths);
 	if (topicPaths.size !== selected.size || ![...topicPaths].every((path) => selected.has(path))) return null;
@@ -1346,7 +1350,7 @@ function resolveImmerseTopicLabels(): string[] | null {
 			? "Unsorted"
 			: (effectiveClusterLabels[cluster] ?? segments[cluster]?.label ?? `Topic ${cluster}`),
 	);
-}
+});
 
 async function handleImmerse() {
 	if (selectedPaths.length === 0) return;
@@ -1355,7 +1359,7 @@ async function handleImmerse() {
 	// Only a pure topic selection earns a name: if the user lassoed extra notes
 	// on top of a focused topic, the paths no longer match the topic's members
 	// and calling the immersion by that topic's name would misdescribe it.
-	immerseTopicLabels = resolveImmerseTopicLabels();
+	immerseTopicLabels = selectedTopicLabels;
 	// Immersing rebuilds the graph to contain ONLY these notes, so "selected"
 	// stops meaning anything — every remaining node is in the set. Clearing just
 	// `selectedPaths` + the canvas (as this did) left the focused clusters/segments
@@ -2273,8 +2277,19 @@ function handleHoverPreview(event: MouseEvent, path: string, targetEl: HTMLEleme
   <!-- What the selection bar says about itself, shared by both modalities. -->
   {#snippet selectionCount()}
     {#if selectedPaths.length > 0}
-      <strong>{selectedPaths.length}</strong>
-      {selectedPaths.length === 1 ? "note" : "notes"} selected{isImmersed ? " · immersed" : ""}
+      {#if selectedTopicLabels}
+        <!-- The selection IS one or more whole topics (strict match — see
+             `selectedTopicLabels`), so name them the way the pill the user
+             clicked did. The count stays: the name says *what*, the count says
+             *how much*, and the mid-dot joins them as the independent facts
+             they are — the same composition " · immersed" already uses. -->
+        <strong title={selectedTopicLabels.join(", ")}>{selectedTopicLabels.join(", ")}</strong>
+        · {selectedPaths.length}
+        {selectedPaths.length === 1 ? "note" : "notes"} selected{isImmersed ? " · immersed" : ""}
+      {:else}
+        <strong>{selectedPaths.length}</strong>
+        {selectedPaths.length === 1 ? "note" : "notes"} selected{isImmersed ? " · immersed" : ""}
+      {/if}
     {:else if immerseTopicLabels}
       <!-- Immersed into topics: name them. The count is what the graph already
            shows, whereas the name is the one thing that isn't on screen once
