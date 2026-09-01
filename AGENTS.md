@@ -178,8 +178,20 @@ s2b-dev/
    instance (`globalSetup` does a disable/enable cycle). Prefer live CLI
    verification for parallel work; coordinate with the user before
    concurrent full-suite runs.
-6. `scripts/release-slot.sh <wtN>` when the task is done (branch pushed /
-   PR opened). Leave the worktree clean.
+6. **After opening the PR, drive the automated review to a clean state
+   before calling the task done.** The repo has a PR review bot (Greptile);
+   it reviews every pushed commit within a few minutes. Poll with
+   `gh pr view <n> --json comments,reviews` (summary) and
+   `gh api repos/s2b-dev/smart-second-brain/pulls/<n>/comments` (inline
+   findings), every ~2 minutes. Address EVERY finding: fix real issues and
+   push, or reply on the comment with a short justification when the bot is
+   wrong. Repeat until the bot's latest review covers your newest commit
+   with no unresolved findings (the bot's summary comment footer names the
+   last reviewed commit). Do not merge — merging is the user's call after
+   their own live test.
+7. `scripts/release-slot.sh <wtN>` once the PR is bot-clean. Leave the
+   worktree clean. If the user's live test later requires rework, claim a
+   slot again for the follow-up.
 
 One-time host setup: each slot vault must be registered with Obsidian once.
 `setup-slots` does this automatically when Obsidian is closed; otherwise open
