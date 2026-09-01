@@ -245,6 +245,8 @@ export class MiniSearchService {
 	private index: MiniSearch<IndexedDocument>;
 	private db: IDBDatabase | null = null;
 	private isDirty = false;
+	/** Bumped on every mutation; lets an in-flight save detect it saved stale data. */
+	private mutationGeneration = 0;
 	private savesSuspended = false;
 	private saveTimeout: ReturnType<typeof setTimeout> | null = null;
 	private documentPaths = new Set<string>();
@@ -443,6 +445,11 @@ export class MiniSearchService {
 			return;
 		}
 
+		// Snapshot the generation with the data. A mutation that lands while the
+		// async IndexedDB write is in flight is NOT in this snapshot — clearing
+		// `isDirty` unconditionally on success would unmark it, and if nothing
+		// dirtied the index again it would silently vanish on the next restart.
+		const generation = this.mutationGeneration;
 		const indexData = this.index.toJSON();
 		const paths = Array.from(this.documentPaths);
 
@@ -452,7 +459,9 @@ export class MiniSearchService {
 			const request = store.put({ indexData, paths, schemaVersion: STORAGE_SCHEMA_VERSION }, INDEX_KEY);
 
 			request.onsuccess = () => {
-				this.isDirty = false;
+				if (this.mutationGeneration === generation) {
+					this.isDirty = false;
+				}
 				Logger.log(`[MiniSearch] Saved index with ${this.documentPaths.size} documents`);
 				resolve();
 			};
@@ -493,6 +502,7 @@ export class MiniSearchService {
 	 */
 	private scheduleSave(): void {
 		this.isDirty = true;
+		this.mutationGeneration++;
 
 		if (this.savesSuspended) {
 			return;
