@@ -878,6 +878,7 @@ $effect(() => {
                     contentAiMessageId={messagePair.assistantMessage.contentAiMessageId}
                     isStreaming={messagePair.assistantMessage.state === AssistantState.streaming}
                     thinkingDurationMs={messagePair.assistantMessage.thinkingDurationMs}
+                    runStartedAtMs={messagePair.assistantMessage.runStartedAtMs}
                     summarizingHistory={index === messages.length - 1 &&
                       !!session?.summarizingHistory}
                     {isLocalModel}

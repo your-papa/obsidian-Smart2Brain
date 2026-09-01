@@ -25,6 +25,12 @@ interface Props {
 	isStreaming?: boolean;
 	/** Persisted wall-clock duration of the turn (ms), for the "Thought for Ns" label. */
 	thinkingDurationMs?: number;
+	/** Epoch ms the in-flight run began; present only while this turn is streaming.
+	 *  The live timer counts from this. It comes from the store rather than being
+	 *  captured here so it survives a remount — the pair object is replaced (with a
+	 *  fresh `id`) whenever the checkpoint graph is rebuilt, which can happen
+	 *  mid-stream via a branch switch or reload. */
+	runStartedAtMs?: number;
 	/** The session is running its pre-flight context summarization pass. */
 	summarizingHistory?: boolean;
 	/** The chat model runs on this machine (Ollama/oMLX), so a slow first token is a
@@ -41,6 +47,7 @@ const {
 	contentAiMessageId,
 	isStreaming,
 	thinkingDurationMs,
+	runStartedAtMs,
 	summarizingHistory,
 	isLocalModel,
 	ontoggle,
@@ -334,25 +341,24 @@ const summaryRunning = $derived(!!isStreaming);
 // phases that genuinely have nothing more specific to report.
 let runningSeconds = $state(0);
 
-// Drive the timer from a wall-clock anchor captured once on the rising edge of the
-// stream, so elapsed is monotonic and can't drift or reset on mid-stream state
-// churn. The anchor is set on the isStreaming rising edge; the interval ticks while
-// summaryRunning (i.e. the whole stream) and stops when streaming ends, at which
-// point the precise persisted duration takes over via settledSeconds below.
-let runStartMs = 0;
-let wasStreaming = false;
-
+// Drive the timer from the run's wall-clock start as recorded BY THE STORE, so
+// elapsed is monotonic across everything the UI does to this row. An anchor captured
+// here on the isStreaming rising edge was not enough: a rebuild of the checkpoint
+// graph replaces the pair object and gives it a fresh `id`, so the keyed {#each}
+// destroys and recreates this component — and because that can happen mid-stream (a
+// branch switch is explicitly allowed while streaming, and a reload can land any
+// time), the remounted component re-armed its own anchor and the timer restarted
+// from 0 in the middle of a run. Reading the anchor as a prop makes a remount a
+// no-op: the new instance computes the same elapsed value as the old one.
+//
+// The interval ticks while summaryRunning (i.e. the whole stream) and stops when
+// streaming ends, at which point the precise persisted duration takes over via
+// settledSeconds below.
 $effect(() => {
-	if (isStreaming && !wasStreaming) {
-		runStartMs = Date.now();
-		runningSeconds = 0;
-	}
-	wasStreaming = !!isStreaming;
-
-	if (!summaryRunning) return;
+	if (!summaryRunning || runStartedAtMs === undefined) return;
 
 	const tick = () => {
-		runningSeconds = Math.floor((Date.now() - runStartMs) / 1000);
+		runningSeconds = Math.max(0, Math.floor((Date.now() - runStartedAtMs) / 1000));
 	};
 	tick();
 	const timer = setInterval(tick, 1000);
