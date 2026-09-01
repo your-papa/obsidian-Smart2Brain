@@ -31,12 +31,14 @@ For each task Leo gives:
 1. Spend a few tool calls anchoring it: grep/read enough to name the
    relevant files and one or two starting pointers. Don't solve it.
 2. Write a SELF-CONTAINED brief (workers start cold) and dispatch it.
-   **Default: auto-dispatch** — launch a background worker with the Agent
-   tool (`run_in_background: true`), no user click needed. Pick the model
-   per task: strong model for real engineering, smaller for mechanical
-   chores. Fall back to a `spawn_task` chip only if Leo wants the task as
-   a separate visible session he can chat with directly. The brief must
-   contain, in this order:
+   **Default: a `spawn_task` chip** (cwd = the main checkout) — Leo prefers
+   workers as separate sidebar sessions he can inspect and chat with
+   directly; the one click per chip is the accepted cost (sessions cannot
+   be created programmatically). Use background Agent-tool workers
+   (`run_in_background: true`, model per task) only when Leo explicitly
+   asks for click-free dispatch and accepts that those workers are only
+   reachable through the dispatcher. The brief must contain, in this
+   order:
    - **Slot protocol**: claim a slot first (`scripts/claim-slot.sh <label>`),
      work on a branch from origin/dev in the slot worktree, one-shot dev
      builds only, live-verify ONLY against the slot's own `S2B WT<n>` vault,
