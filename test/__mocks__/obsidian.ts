@@ -169,6 +169,9 @@ export class ItemView {
 	containerEl = document.createElement("div");
 	contentEl = document.createElement("div");
 	leaf: WorkspaceLeaf;
+	// Real Obsidian defaults this to false; the workspace treats non-navigation
+	// views as sidebar utilities (its Escape handler jumps away from them).
+	navigation = false;
 
 	constructor(leaf: WorkspaceLeaf) {
 		this.leaf = leaf;
@@ -183,6 +186,7 @@ export class ItemView {
 
 export class FileView extends ItemView {
 	file: TFile | null = null;
+	navigation = true;
 
 	getViewType = vi.fn().mockReturnValue("file-view");
 	canAcceptExtension = vi.fn().mockReturnValue(true);

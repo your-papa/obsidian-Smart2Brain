@@ -9,6 +9,12 @@ export const VIEW_TYPE_SMART_GRAPH = "smart-second-brain-graph";
 export class SmartGraphView extends ItemView {
 	plugin: SecondBrainPlugin;
 	component: ReturnType<typeof mount> | null = null;
+	// A main-area tab, like Obsidian's core graph (which also sets this). Left at
+	// ItemView's default (false), Obsidian classifies the view as a sidebar
+	// utility: its window-level Escape handler then yanks focus to the
+	// most-recently-active navigation leaf, so pressing Escape in the graph
+	// appeared to open a random note.
+	navigation = true;
 
 	constructor(leaf: WorkspaceLeaf, plugin: SecondBrainPlugin) {
 		super(leaf);
