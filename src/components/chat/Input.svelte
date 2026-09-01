@@ -272,14 +272,25 @@ let stashedDraft: string | null = null;
  * can remove exactly these and leave the user's own attachments alone. */
 let seededEditPaths = new Set<string>();
 
+/** Invalidates an in-flight `seedEditAttachments` pass. Seeding awaits vault
+ * reads (image previews), so the edit can end — save, cancel, or a new edit —
+ * while the loop is suspended; without this the resumed loop would inject the
+ * abandoned edit's remaining attachments into a tray that was already cleared,
+ * and they'd ride along into a later, unrelated message. Bumped wherever the
+ * seeded state is reset, checked after every await. Same last-started-wins
+ * idiom as `assembledPromptRequestVersion` above. */
+let seedEditToken = 0;
+
 /** Seed the edited message's attachments into the composer tray so they are
  * visible and removable during the edit — previously they rode along
  * invisibly, and anything the user attached during the edit was silently
  * dropped from the save. Seeded chips are not "managed" (removing one never
  * deletes the underlying vault file). Image previews load best-effort. */
 async function seedEditAttachments(restored: ChatAttachment[]) {
+	const token = ++seedEditToken;
 	const plugin = getPlugin();
 	for (const att of restored) {
+		if (token !== seedEditToken) return; // the edit ended mid-seed — stop
 		if (attachments.some((a) => a.vaultPath === att.vaultPath)) continue;
 		const file = plugin.app.vault.getAbstractFileByPath(att.vaultPath);
 		if (!(file instanceof TFile)) {
@@ -295,6 +306,10 @@ async function seedEditAttachments(restored: ChatAttachment[]) {
 		if (att.mimeType.startsWith("image/")) {
 			try {
 				const buffer = await plugin.app.vault.readBinary(file);
+				// Re-check before publishing: the URL would leak (nothing left to
+				// revoke it) and the map write would resurrect a removed chip's
+				// preview if the edit ended during the read.
+				if (token !== seedEditToken) return;
 				previewUrls.set(att.vaultPath, URL.createObjectURL(new Blob([buffer], { type: att.mimeType })));
 				previewUrls = new Map(previewUrls);
 			} catch {
@@ -329,6 +344,7 @@ $effect(() => {
 					inputValue = draft;
 					markdownEditor?.setValue(draft);
 				}
+				seedEditToken++;
 				for (const path of seededEditPaths) {
 					removeAttachmentByPath(path);
 				}
@@ -433,6 +449,9 @@ $effect(() => {
 });
 
 onDestroy(() => {
+	// Stop any in-flight edit-attachment seeding; its writes would land on a
+	// dead component's state (and mint object URLs nothing revokes).
+	seedEditToken++;
 	editorContainer?.removeEventListener("touchend", handleMobileTapFocus);
 	markdownEditor?.destroy();
 	// Clean up object URLs
@@ -651,6 +670,7 @@ function saveEdit() {
 	// cancel-restore from firing on this transition.
 	session.editingPairId = null;
 	stashedDraft = null;
+	seedEditToken++;
 	seededEditPaths = new Set();
 	// The tray's attachments were consumed into the edited message — clear them
 	// exactly as sendMessage does (files stay in the vault; they're now sent).
