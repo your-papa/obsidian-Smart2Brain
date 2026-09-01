@@ -355,6 +355,161 @@ describe("ObsidianChatManager", () => {
 	});
 
 	/* --------------------------------------------------------------------------
+	 * Deduplicated persistence (v2 format, issue #431)
+	 * ------------------------------------------------------------------------*/
+
+	describe("deduplicated persistence", () => {
+		function makeMessage(role: "human" | "ai", content: string) {
+			return {
+				lc: 1,
+				type: "constructor",
+				id: ["langchain_core", "messages", role === "human" ? "HumanMessage" : "AIMessage"],
+				kwargs: { content, additional_kwargs: {} },
+			};
+		}
+
+		const longAnswer = "The answer, in detail: ".repeat(40);
+
+		/** Simulate LangGraph's full-history-per-checkpoint puts for two turns. */
+		async function putTwoTurns(threadId: string) {
+			const history = [makeMessage("human", "First question?"), makeMessage("ai", longAnswer)];
+			const cp1 = makeCheckpoint("cp-1", "2024-01-01T00:00:00Z");
+			(cp1.channel_values as Record<string, unknown>).messages = JSON.parse(JSON.stringify(history));
+			await manager.put({ configurable: { thread_id: threadId } }, cp1, makeMetadata(0), {});
+
+			history.push(makeMessage("human", "Second question?"), makeMessage("ai", "Short answer."));
+			const cp2 = makeCheckpoint("cp-2", "2024-01-01T00:01:00Z");
+			(cp2.channel_values as Record<string, unknown>).messages = JSON.parse(JSON.stringify(history));
+			await manager.put(
+				{ configurable: { thread_id: threadId, checkpoint_id: "cp-1" } },
+				cp2,
+				makeMetadata(1, "cp-1"),
+				{},
+			);
+		}
+
+		it("writes each message once even when checkpoints repeat the history", async () => {
+			await putTwoTurns("Chats/dedup.chat");
+			await manager.flush("Chats/dedup.chat");
+
+			const [, buf] = (plugin.app.vault.adapter.writeBinary as ReturnType<typeof vi.fn>).mock.calls[0];
+			const json = gunzipSync(Buffer.from(buf)).toString("utf8");
+
+			expect(json).toContain('"version":2');
+			expect(json).toContain('"messageTable"');
+			// The long first answer is part of both checkpoints' histories but
+			// must be serialized exactly once.
+			expect(json.split(longAnswer).length - 1).toBe(1);
+		});
+
+		it("restores full checkpoint messages after a save/reload cycle", async () => {
+			await putTwoTurns("Chats/reload.chat");
+			await manager.flush("Chats/reload.chat");
+			const [, buf] = (plugin.app.vault.adapter.writeBinary as ReturnType<typeof vi.fn>).mock.calls[0];
+
+			// Fresh manager backed by the file we just wrote.
+			const plugin2 = createMockPlugin();
+			(plugin2.app.vault.adapter.exists as ReturnType<typeof vi.fn>).mockResolvedValue(true);
+			(plugin2.app.vault.adapter.readBinary as ReturnType<typeof vi.fn>).mockResolvedValue(buf);
+			const manager2 = new ObsidianChatManager(plugin2 as never);
+
+			const tuple = await manager2.getTuple({
+				configurable: { thread_id: "Chats/reload.chat", checkpoint_id: "cp-2" },
+			});
+			const messages = (tuple!.checkpoint.channel_values as Record<string, unknown[]>).messages as {
+				kwargs: { content: string };
+			}[];
+			expect(messages).toHaveLength(4);
+			expect(messages[1].kwargs.content).toBe(longAnswer);
+			expect(messages[3].kwargs.content).toBe("Short answer.");
+
+			// The older checkpoint kept its own (shorter) history.
+			const tuple1 = await manager2.getTuple({
+				configurable: { thread_id: "Chats/reload.chat", checkpoint_id: "cp-1" },
+			});
+			expect((tuple1!.checkpoint.channel_values as Record<string, unknown[]>).messages).toHaveLength(2);
+		});
+
+		it("shares unchanged history messages with the parent checkpoint in memory", async () => {
+			await putTwoTurns("Chats/shared.chat");
+
+			const storage = (
+				manager as unknown as {
+					storage: Map<
+						string,
+						{ checkpoints: Record<string, { checkpoint: { channel_values: { messages: unknown[] } } }> }
+					>;
+				}
+			).storage;
+			const checkpoints = storage.get("Chats/shared.chat")!.checkpoints;
+			const messages1 = checkpoints["cp-1"].checkpoint.channel_values.messages;
+			const messages2 = checkpoints["cp-2"].checkpoint.channel_values.messages;
+			expect(messages2[0]).toBe(messages1[0]);
+			expect(messages2[1]).toBe(messages1[1]);
+		});
+
+		it("migrates a legacy v1 file to the deduplicated format on load", async () => {
+			const message = makeMessage("ai", longAnswer);
+			const legacy = {
+				version: 1,
+				threadId: "Chats/legacy.chat",
+				createdAt: 1,
+				updatedAt: 2,
+				checkpoints: {
+					"cp-1": {
+						checkpoint: {
+							v: 1,
+							id: "cp-1",
+							ts: "2024-01-01T00:00:00Z",
+							channel_values: { messages: [message] },
+							channel_versions: {},
+							versions_seen: {},
+							pending_sends: [],
+						},
+						metadata: { source: "loop", step: 0, writes: {}, parents: {} },
+					},
+					"cp-2": {
+						checkpoint: {
+							v: 1,
+							id: "cp-2",
+							ts: "2024-01-01T00:01:00Z",
+							channel_values: { messages: [message, makeMessage("human", "next")] },
+							channel_versions: {},
+							versions_seen: {},
+							pending_sends: [],
+						},
+						metadata: { source: "loop", step: 1, writes: {}, parents: {} },
+					},
+				},
+				writes: {},
+			};
+			const legacyBuf = gzipSync(Buffer.from(JSON.stringify(legacy)));
+			(plugin.app.vault.adapter.exists as ReturnType<typeof vi.fn>).mockResolvedValue(true);
+			(plugin.app.vault.adapter.readBinary as ReturnType<typeof vi.fn>).mockResolvedValue(
+				legacyBuf.buffer.slice(legacyBuf.byteOffset, legacyBuf.byteOffset + legacyBuf.byteLength),
+			);
+
+			const tuple = await manager.getTuple({
+				configurable: { thread_id: "Chats/legacy.chat", checkpoint_id: "cp-2" },
+			});
+			expect((tuple!.checkpoint.channel_values as Record<string, unknown[]>).messages).toHaveLength(2);
+
+			// Loading a pre-dedup file marks the thread dirty so the debounced
+			// save rewrites it in the new format.
+			const dirtyVersions = (manager as unknown as { dirtyThreadVersions: Map<string, number> })
+				.dirtyThreadVersions;
+			expect(dirtyVersions.get("Chats/legacy.chat")).toBeGreaterThanOrEqual(1);
+
+			await manager.flush("Chats/legacy.chat");
+			expect(plugin.app.vault.adapter.writeBinary).toHaveBeenCalled();
+			const [, buf] = (plugin.app.vault.adapter.writeBinary as ReturnType<typeof vi.fn>).mock.calls[0];
+			const json = gunzipSync(Buffer.from(buf)).toString("utf8");
+			expect(json).toContain('"version":2');
+			expect(json.split(longAnswer).length - 1).toBe(1);
+		});
+	});
+
+	/* --------------------------------------------------------------------------
 	 * Index rebuild from .chat files
 	 * ------------------------------------------------------------------------*/
 

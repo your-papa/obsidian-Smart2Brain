@@ -16,6 +16,7 @@ import {
 	isIndexableFile,
 	readIndexableContent,
 } from "../../src/utils/fileFiltering";
+import { deflateThreadData } from "../../src/agent/threadDataCodec";
 import { gzipString, toArrayBuffer } from "../../src/utils/gzip";
 
 describe("isAgentPath (pure)", () => {
@@ -185,6 +186,18 @@ describe("readIndexableContent (.chat extraction)", () => {
 		expect(out.match(/hello there/g)).toHaveLength(1);
 		expect(out.match(/general kenobi/g)).toHaveLength(1);
 		expect(out.match(/you are a bold one/g)).toHaveLength(1);
+	});
+
+	it("extracts content from a v2 deduplicated thread file", async () => {
+		const parsed = JSON.parse(thread("Dedup", [message("m1", "hello there"), reply("m2", "general kenobi")]));
+		const raw = JSON.stringify(deflateThreadData(parsed));
+		// Sanity: the checkpoints really reference messages via the table.
+		expect(raw).toContain('"$msg"');
+
+		const out = await readIndexableContent(vaultReturning(raw), chatFile);
+
+		expect(out).toContain("hello there");
+		expect(out).toContain("general kenobi");
 	});
 
 	it("pairs each question with its answer in transcript order", async () => {

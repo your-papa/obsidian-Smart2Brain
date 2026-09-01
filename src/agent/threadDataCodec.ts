@@ -1,0 +1,238 @@
+import type { RunnableConfig } from "@langchain/core/runnables";
+import type { Checkpoint, CheckpointMetadata, PendingWrite } from "@langchain/langgraph-checkpoint";
+
+/**
+ * On-disk codec for `.chat` thread files.
+ *
+ * LangGraph persists a checkpoint per step, and every checkpoint's
+ * `channel_values.messages` carries the *entire* message history up to that
+ * point — the naive encoding of the checkpoint tree is therefore O(N²) in
+ * content for a thread with N turns (issue #431: one real thread reached
+ * 72 MB gzipped). `metadata.writes` and pending writes duplicate the same
+ * message payloads again.
+ *
+ * Version 2 of the file format deduplicates messages content-addressed:
+ * every message object is stored once in a flat `messageTable`, and each
+ * occurrence inside a checkpoint (or write) is replaced by a `{"$msg": n}`
+ * reference. Deduplication is byte-exact — two copies collapse only when
+ * their JSON serialization is identical — so inflating restores precisely
+ * the structure that was saved (divergent copies, e.g. an annotated vs.
+ * unannotated variant of the same message, are kept as separate entries).
+ *
+ * Inflation resolves every reference to the *same* table object, so a loaded
+ * thread also shares message content in memory: O(N) content plus cheap
+ * per-checkpoint pointer arrays, instead of O(N²) materialized copies.
+ *
+ * Pure module: no Obsidian dependency (also consumed by the search indexer's
+ * `.chat` extractor in `utils/fileFiltering.ts`).
+ */
+
+/** Bump when the ThreadData/CheckpointEntry schema changes. Absent in pre-versioning files → treated as 0. */
+export const THREAD_DATA_VERSION = 2;
+
+export interface CheckpointEntry {
+	checkpoint: Checkpoint;
+	metadata: CheckpointMetadata;
+	parentConfig?: RunnableConfig;
+}
+
+export interface ThreadData {
+	/** Schema version written on save; absent (0) on files predating versioning. */
+	version?: number;
+	// Metadata (ThreadSnapshot)
+	threadId: string;
+	title?: string;
+	metadata?: Record<string, unknown>;
+	createdAt: number;
+	updatedAt: number;
+
+	// Checkpoint data
+	checkpoints: Record<string, CheckpointEntry>;
+	writes: Record<string, PendingWrite[]>; // checkpoint_id -> writes
+
+	/** v2+: deduplicated message objects referenced via `{"$msg": n}` markers. Present only on disk. */
+	messageTable?: unknown[];
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+interface MessageRef {
+	$msg: number;
+}
+
+function isMessageRef(value: unknown): value is MessageRef {
+	return isRecord(value) && typeof value.$msg === "number" && Object.keys(value).length === 1;
+}
+
+/**
+ * Assigns each distinct object a stable index in a flat table. Identity hits
+ * are free (checkpoints that share message objects in memory — see
+ * `adoptEqualMessages` — skip re-serialization); otherwise exact JSON content
+ * decides, so byte-identical copies from different checkpoints collapse.
+ */
+class MessageInterner {
+	readonly table: unknown[] = [];
+	private byIdentity = new Map<unknown, number>();
+	private byContent = new Map<string, number>();
+
+	intern(value: Record<string, unknown>): MessageRef {
+		let index = this.byIdentity.get(value);
+		if (index === undefined) {
+			const content = JSON.stringify(value);
+			index = this.byContent.get(content);
+			if (index === undefined) {
+				index = this.table.length;
+				this.table.push(value);
+				this.byContent.set(content, index);
+			}
+			this.byIdentity.set(value, index);
+		}
+		return { $msg: index };
+	}
+}
+
+/**
+ * A record that carries message payload and should be interned wholesale.
+ * Matches the serialized LangChain constructor format (`kwargs` record) and
+ * the StoredMessage format (`type` + `data` record). Messages don't only live
+ * in `channel_values.messages`: LangGraph `Send` payloads (`__pregel_tasks`
+ * channel and pending writes) nest the full history under `args.messages`,
+ * which is why detection is by shape at any depth rather than by position.
+ * A false positive is harmless — interning is content-preserving either way.
+ */
+function isSerializedMessage(value: Record<string, unknown>): boolean {
+	if (isRecord(value.kwargs)) return true;
+	return typeof value.type === "string" && isRecord(value.data);
+}
+
+/**
+ * Recursively replace message objects with table references. Genuine records
+ * that happen to look like a `{"$msg": n}` marker are interned too — that IS
+ * the escape mechanism: after deflation, every marker-shaped record outside
+ * the table is one of ours. Interned records are taken wholesale (their
+ * interior is never walked), so nothing nested inside message content can be
+ * misread on inflate.
+ */
+function deflateNode(value: unknown, interner: MessageInterner): unknown {
+	if (Array.isArray(value)) {
+		return value.map((element) => deflateNode(element, interner));
+	}
+	if (isRecord(value)) {
+		if (isSerializedMessage(value) || isMessageRef(value)) return interner.intern(value);
+		const result: Record<string, unknown> = {};
+		for (const [key, entry] of Object.entries(value)) {
+			result[key] = deflateNode(entry, interner);
+		}
+		return result;
+	}
+	return value;
+}
+
+/**
+ * Exact inverse of {@link deflateNode}: resolve refs in place, never walking
+ * into a resolved replacement (or the table itself), so message interiors are
+ * left untouched.
+ */
+function inflateNode(value: unknown, table: unknown[]): unknown {
+	if (Array.isArray(value)) {
+		for (let i = 0; i < value.length; i++) value[i] = inflateNode(value[i], table);
+		return value;
+	}
+	if (isRecord(value)) {
+		if (isMessageRef(value)) return table[value.$msg] ?? value;
+		for (const key of Object.keys(value)) {
+			value[key] = inflateNode(value[key], table);
+		}
+		return value;
+	}
+	return value;
+}
+
+/**
+ * Produce the JSON-ready v2 representation of a thread: messages interned into
+ * `messageTable`, occurrences replaced by refs. Does not mutate `data` — the
+ * in-memory thread keeps its inflated shape (table entries are shared with it,
+ * not copied).
+ */
+export function deflateThreadData(data: ThreadData): Record<string, unknown> {
+	const interner = new MessageInterner();
+
+	const checkpoints: Record<string, unknown> = {};
+	for (const [id, entry] of Object.entries(data.checkpoints ?? {})) {
+		checkpoints[id] = deflateNode(entry, interner);
+	}
+
+	const writes: Record<string, unknown> = {};
+	for (const [id, checkpointWrites] of Object.entries(data.writes ?? {})) {
+		writes[id] = deflateNode(checkpointWrites, interner);
+	}
+
+	return {
+		...data,
+		version: THREAD_DATA_VERSION,
+		checkpoints,
+		writes,
+		messageTable: interner.table,
+	};
+}
+
+/**
+ * Resolve `{"$msg": n}` references in a freshly parsed thread back to the
+ * table objects, in place. Every occurrence of a message resolves to the
+ * *same* object, so checkpoints share content in memory. Pre-v2 data (which
+ * stores messages inline) passes through unchanged.
+ */
+export function inflateThreadData(data: ThreadData): ThreadData {
+	if ((data.version ?? 0) < 2) return data;
+
+	const table = Array.isArray(data.messageTable) ? data.messageTable : [];
+	if (isRecord(data.checkpoints)) {
+		for (const [id, entry] of Object.entries(data.checkpoints)) {
+			data.checkpoints[id] = inflateNode(entry, table) as (typeof data.checkpoints)[string];
+		}
+	}
+	if (isRecord(data.writes)) {
+		for (const [id, checkpointWrites] of Object.entries(data.writes)) {
+			data.writes[id] = inflateNode(checkpointWrites, table) as (typeof data.writes)[string];
+		}
+	}
+
+	data.messageTable = undefined;
+	return data;
+}
+
+function getCheckpointMessages(checkpoint: unknown): unknown[] | undefined {
+	if (!isRecord(checkpoint)) return undefined;
+	const channelValues = checkpoint.channel_values;
+	if (!isRecord(channelValues)) return undefined;
+	const messages = channelValues.messages;
+	return Array.isArray(messages) ? messages : undefined;
+}
+
+/**
+ * Share message objects between a new checkpoint and its parent: any message
+ * whose JSON serialization equals the parent's message at the same index is
+ * replaced by the parent's object. Messages are append-only along a branch, so
+ * this makes the shared history prefix one set of objects in memory instead of
+ * a fresh deep copy per step — the live-session counterpart of the on-disk
+ * dedup (and it lets the save-path interner hit its identity fast path).
+ * Copies that diverged (e.g. the parent's copy carries annotations written
+ * post-hoc) simply stay separate.
+ */
+export function adoptEqualMessages(childCheckpoint: unknown, parentCheckpoint: unknown): void {
+	const childMessages = getCheckpointMessages(childCheckpoint);
+	const parentMessages = getCheckpointMessages(parentCheckpoint);
+	if (!childMessages || !parentMessages) return;
+
+	const shared = Math.min(childMessages.length, parentMessages.length);
+	for (let i = 0; i < shared; i++) {
+		const child = childMessages[i];
+		const parent = parentMessages[i];
+		if (child === parent || !isRecord(child) || !isRecord(parent)) continue;
+		if (JSON.stringify(child) === JSON.stringify(parent)) {
+			childMessages[i] = parent;
+		}
+	}
+}

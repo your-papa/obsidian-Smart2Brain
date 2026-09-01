@@ -17,30 +17,14 @@ import { Logger } from "../utils/logging";
 import { toBase64, toBase64DataUri } from "../utils/attachments";
 import { gunzipToString, gzipString, toArrayBuffer } from "../utils/gzip";
 import type { ChatAttachment } from "../types/shared";
-
-/** Bump when the ThreadData/CheckpointEntry schema changes. Absent in pre-versioning files → treated as 0. */
-const THREAD_DATA_VERSION = 1;
-
-interface CheckpointEntry {
-	checkpoint: Checkpoint;
-	metadata: CheckpointMetadata;
-	parentConfig?: RunnableConfig;
-}
-
-interface ThreadData {
-	/** Schema version written on save; absent (0) on files predating versioning. */
-	version?: number;
-	// Metadata (ThreadSnapshot)
-	threadId: string;
-	title?: string;
-	metadata?: Record<string, unknown>;
-	createdAt: number;
-	updatedAt: number;
-
-	// Checkpoint data
-	checkpoints: Record<string, CheckpointEntry>;
-	writes: Record<string, PendingWrite[]>; // checkpoint_id -> writes
-}
+import {
+	type CheckpointEntry,
+	THREAD_DATA_VERSION,
+	type ThreadData,
+	adoptEqualMessages,
+	deflateThreadData,
+	inflateThreadData,
+} from "./threadDataCodec";
 
 interface GenerationMetadata {
 	agentId?: string;
@@ -167,7 +151,7 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 			);
 			this.newerVersionThreadIds.add(parsed.threadId);
 		}
-		return parsed;
+		return inflateThreadData(parsed);
 	}
 
 	private stripBase64FromChannelValues(channelValues: Record<string, unknown> | undefined): void {
@@ -389,6 +373,15 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 				const data = await this.readThreadFile(threadId);
 				data.threadId = threadId; // Ensure threadId matches the file path
 				this.storage.set(threadId, data);
+				// Migrate pre-dedup files (quadratic full-history-per-checkpoint
+				// encoding, issue #431): rewriting in the current format shrinks
+				// them by orders of magnitude. Saving is a no-op content-wise, so
+				// scheduling it here is safe even for read-only consumers.
+				if ((data.version ?? 0) < THREAD_DATA_VERSION && Object.keys(data.checkpoints).length > 0) {
+					data.version = THREAD_DATA_VERSION;
+					this.markThreadDirty(threadId);
+					this.saveDebounced(threadId);
+				}
 				return data;
 			}
 		} catch (e) {
@@ -524,7 +517,7 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 		let savePromise: Promise<void> | null = null;
 		savePromise = (async () => {
 			try {
-				const compressed = await gzipString(JSON.stringify({ ...data, version: THREAD_DATA_VERSION }));
+				const compressed = await gzipString(JSON.stringify(deflateThreadData(data)));
 				await this.adapter.writeBinary(safePath, toArrayBuffer(compressed));
 				if ((this.dirtyThreadVersions.get(threadId) ?? 0) === targetVersion) {
 					this.persistedThreadVersions.set(threadId, targetVersion);
@@ -948,6 +941,13 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 		const generation = this.extractGenerationMetadata(config.metadata);
 		this.annotateCheckpointMessagesWithGeneration(plainCheckpoint, parentMessageCount, generation);
 		this.stripBase64FromChannelValues(plainCheckpoint.channel_values);
+
+		// Share unchanged history with the parent checkpoint so a live session
+		// holds each message once instead of one deep copy per step (#431).
+		const parentCheckpointId = config.configurable?.checkpoint_id;
+		if (typeof parentCheckpointId === "string") {
+			adoptEqualMessages(plainCheckpoint, threadData.checkpoints[parentCheckpointId]?.checkpoint);
+		}
 
 		threadData.checkpoints[checkpointId] = {
 			checkpoint: plainCheckpoint,
