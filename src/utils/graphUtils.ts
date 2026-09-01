@@ -18,33 +18,17 @@ export function splitEdgeKey(key: string): [string, string] {
 
 /**
  * Ceiling (in world px, on top of the base size) that a collapsed topic's
- * radius approaches asymptotically as its connection count grows.
+ * radius approaches asymptotically as its member count grows.
  */
 const TOPIC_RADIUS_CEILING = 26;
 /**
- * √degree at which a topic reaches half the ceiling. Chosen so the everyday
- * range differentiates most: half size at ~320 crossing links, with real
- * growth still visible out past a few thousand.
+ * √memberCount at which a topic reaches half the ceiling. Chosen so the
+ * everyday range differentiates most: half size at ~36 notes — the typical
+ * Leiden topic in a few-hundred-note vault — with real growth still visible
+ * out past a thousand-note mega-topic.
  */
-const TOPIC_RADIUS_HALF_POINT = 18;
+const TOPIC_RADIUS_HALF_POINT = 6;
 
-/**
- * Draw radius for a graph node, from its degree and the auto-tuned base size.
- *
- * Size encodes exactly one thing — connectedness — so it stays unambiguous.
- * The single source of truth shared by the canvas (hit-testing, collision
- * spacing, label offsets) and the Pixi renderer (sprite/ring radius); the two
- * must agree or hover targets drift off the drawn circles.
- *
- * Notes use a log curve under a hard cap: their degrees are small and
- * heavy-tailed, and past a point "very connected" is all a size can say.
- * Collapsed topics get their own curve because their degree is a *crossing
- * link count* spanning a few to several thousand — under the note formula
- * everything past ~55 links saturated, so a 180-note and a 2000-note topic
- * rendered identically. A smooth saturating curve over √degree keeps every
- * doubling of connections visible while approaching the ceiling
- * asymptotically instead of hitting it.
- */
 /**
  * Auto-tuned base node radius from how many notes the graph *represents* —
  * larger for small vaults, smaller for dense ones, on a continuous log scale.
@@ -55,13 +39,35 @@ export function autoNodeSize(representedNoteCount: number): number {
 	return Math.max(2, Math.round(7 - Math.log10(Math.max(representedNoteCount, 10)) * 1.8));
 }
 
-export function nodeDrawRadius(node: { degree?: number; kind?: string }, nodeSize: number): number {
+/**
+ * Draw radius for a graph node, from the auto-tuned base size plus what the
+ * node *is*. The single source of truth shared by the canvas (hit-testing,
+ * collision spacing, label offsets) and the Pixi renderer (sprite/ring
+ * radius); the two must agree or hover targets drift off the drawn circles.
+ *
+ * Each kind's size encodes exactly one thing, so it stays unambiguous:
+ *
+ * - **Notes** encode connectedness (degree), on a log curve under a hard cap —
+ *   degrees are small and heavy-tailed, and past a point "very connected" is
+ *   all a size can say.
+ * - **Collapsed topics** encode *member count* — how many notes the bubble
+ *   stands for, the natural "how big is this area of my vault" reading.
+ *   Connectivity is deliberately NOT in the radius: rolled-up edge width
+ *   already carries it, and encoding it twice left member count encoded
+ *   nowhere. Member counts span 1..thousands, so a smooth saturating curve
+ *   over √members keeps every doubling visible while approaching the ceiling
+ *   asymptotically instead of hitting it.
+ */
+export function nodeDrawRadius(
+	node: { degree?: number; kind?: string; memberPaths?: string[] },
+	nodeSize: number,
+): number {
 	const base = Math.max(1, nodeSize);
-	const degree = Math.max(0, node.degree ?? 0);
 	if (node.kind === "topic") {
-		const spread = Math.sqrt(degree);
+		const spread = Math.sqrt(Math.max(0, node.memberPaths?.length ?? 0));
 		return base + TOPIC_RADIUS_CEILING * (spread / (spread + TOPIC_RADIUS_HALF_POINT));
 	}
+	const degree = Math.max(0, node.degree ?? 0);
 	return base + Math.min(Math.log1p(degree) * 2.5, base * 5);
 }
 

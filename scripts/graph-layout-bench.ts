@@ -222,6 +222,9 @@ function generateCollapsedVault(seed: number, shape: VaultShape): Pick<Scenario,
 		cluster: topic,
 		// Crossing-link count scales with topic size, heavy-tailed like reality.
 		degree: Math.round(size * shape.wikiLinksPerNote * shape.interTopicFraction * (2 + rng() * 3)),
+		// Member count drives the topic radius (and thus collide spacing) — the
+		// paths themselves are never dereferenced, only counted.
+		memberPaths: Array.from({ length: size }, (_, i) => `topic${topic}/note${i}`),
 		x: 0,
 		y: 0,
 	}));
@@ -521,8 +524,13 @@ function buildScenarios(): Scenario[] {
 			collapsed: true,
 		},
 		{
+			// breathe/gap bands sit near 1 like collapsed huge's: both are ratios
+			// over the topic radii, and member-count sizing draws this scenario's
+			// Zipf-tail mega-topics as much larger discs in a similar footprint —
+			// adjacent-but-not-overlapping is the intended reading (ovl% guards
+			// actual overlap).
 			name: "collapsed large",
-			expect: { breatheMin: 1.3, gapMin: 1.5, satMax: 1.1, fillMin: 0.55, wasteMax: 2.0 },
+			expect: { breatheMin: 1.0, gapMin: 1.1, satMax: 1.1, fillMin: 0.55, wasteMax: 2.0, ovlMax: 5 },
 			shape: {
 				noteCount: 2000,
 				topicCount: 14,

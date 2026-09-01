@@ -35,6 +35,8 @@ export interface LayoutNode extends SimulationNodeDatum {
 	degree?: number;
 	kind?: string;
 	cluster?: number;
+	/** For topic nodes — drives their draw (and thus collide) radius. */
+	memberPaths?: string[];
 }
 
 /** The link shape the physics needs — a structural subset of the canvas's SimLink. */
