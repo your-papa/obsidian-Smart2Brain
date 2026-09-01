@@ -70,10 +70,7 @@ describe("labelTopics", () => {
 			.mockResolvedValueOnce({ content: "Typography" });
 		createChatInstance.mockReturnValue({ invoke });
 
-		const labels = await labelTopics(
-			[topic(0, ["A"], "fallback-0"), topic(1, ["B"], "fallback-1")],
-			chatModel,
-		);
+		const labels = await labelTopics([topic(0, ["A"], "fallback-0"), topic(1, ["B"], "fallback-1")], chatModel);
 
 		expect(labels[0]).toBe("fallback-0");
 		expect(labels[1]).toBe("Typography");

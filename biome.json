@@ -1,5 +1,8 @@
 {
 	"$schema": "https://biomejs.dev/schemas/1.9.4/schema.json",
+	"files": {
+		"ignore": ["build/**", "integration/S2B Test Vault/**"]
+	},
 	"organizeImports": {
 		"enabled": true
 	},
@@ -25,5 +28,17 @@
 			"semicolons": "always",
 			"trailingCommas": "all"
 		}
-	}
+	},
+	"overrides": [
+		{
+			"include": ["test/**", "integration/**"],
+			"linter": {
+				"rules": {
+					"style": {
+						"noNonNullAssertion": "off"
+					}
+				}
+			}
+		}
+	]
 }

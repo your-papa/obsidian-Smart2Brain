@@ -15,11 +15,7 @@ describe("selectUnresolvedPendingIds", () => {
 	});
 
 	it("leaves calls that actually started or finished alone", () => {
-		const ids = selectUnresolvedPendingIds([
-			call("a", "running"),
-			call("b", "completed"),
-			call("c", "failed"),
-		]);
+		const ids = selectUnresolvedPendingIds([call("a", "running"), call("b", "completed"), call("c", "failed")]);
 		expect(ids.size).toBe(0);
 	});
 
@@ -46,11 +42,7 @@ describe("selectUnresolvedPendingIds", () => {
 	});
 
 	it("sweeps every stale announcement when no reference is given", () => {
-		const ids = selectUnresolvedPendingIds([
-			call("a", "pending"),
-			call("b", "completed"),
-			call("c", "pending"),
-		]);
+		const ids = selectUnresolvedPendingIds([call("a", "pending"), call("b", "completed"), call("c", "pending")]);
 		expect([...ids].sort()).toEqual(["a", "c"]);
 	});
 

@@ -391,8 +391,6 @@ describe("PromptFilesService", () => {
 
 		await svc.writeMemoryPrompt("default-agent", "edited");
 		await svc.ensureMemoryPrompt("default-agent");
-		expect(fake.files.get(MEMORY_DEFAULT_PATH)).toBe(
-			serializePromptFile("edited", DEFAULT_MEMORY_PROMPT_VERSION),
-		);
+		expect(fake.files.get(MEMORY_DEFAULT_PATH)).toBe(serializePromptFile("edited", DEFAULT_MEMORY_PROMPT_VERSION));
 	});
 });

@@ -176,8 +176,8 @@ describe.skipIf(!providerAvailable)("multi-turn conversation", () => {
 	});
 
 	it("should summarize older turns instead of throwing when the configured context window is small", async () => {
-		const configKey = "__s2bSummaryCfg_" + Date.now();
-		const restoreKey = "__s2bSummaryRestore_" + Date.now();
+		const configKey = `__s2bSummaryCfg_${Date.now()}`;
+		const restoreKey = `__s2bSummaryRestore_${Date.now()}`;
 		const filler = "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu ".repeat(35);
 
 		const originalConfig = await pollEval(

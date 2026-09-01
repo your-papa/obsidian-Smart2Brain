@@ -72,8 +72,7 @@ describe("agent interaction", () => {
 			() => {
 				const summary = getLatestPersistedChatSummary();
 				return Boolean(
-					summary &&
-						summary.humanContents.includes("Reply with exactly: PONG") &&
+					summary?.humanContents.includes("Reply with exactly: PONG") &&
 						summary.assistantContents.some((content) => content.includes("PONG")),
 				);
 			},
@@ -124,8 +123,7 @@ describe("agent with tool use", () => {
 				() => {
 					const summary = getLatestPersistedChatSummary();
 					return Boolean(
-						summary &&
-							summary.humanContents.includes(prompt) &&
+						summary?.humanContents.includes(prompt) &&
 							summary.toolCallNames.length > 0 &&
 							summary.toolOutputCount > 0 &&
 							summary.assistantContents.length > 0,

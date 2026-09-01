@@ -33,9 +33,9 @@ describe.skipIf(!providerAvailable)("ai transport concurrency", () => {
 	});
 
 	it("should isolate buffered fallback to the downgraded run", async () => {
-		const globalKey = "__s2bAiTransportConcurrency_" + Date.now();
-		const downgradedThreadId = "transport-downgrade-" + Date.now();
-		const defaultThreadId = "transport-default-" + Date.now();
+		const globalKey = `__s2bAiTransportConcurrency_${Date.now()}`;
+		const downgradedThreadId = `transport-downgrade-${Date.now()}`;
+		const defaultThreadId = `transport-default-${Date.now()}`;
 		createdThreadIds.push(downgradedThreadId, defaultThreadId);
 
 		const raw = await pollEval(

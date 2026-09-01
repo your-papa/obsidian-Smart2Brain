@@ -104,7 +104,7 @@ describe("listDirectory tool", () => {
 		expect(Object.keys(parsed.tree.folders)).toEqual(["2026"]);
 		expect(Object.keys(parsed.tree.folders["2026"]?.folders ?? {})).toEqual(["Q1"]);
 		expect(parsed.tree.folders["2026"]?.files.map((file) => file.name)).toEqual(["Plan.md"]);
-		expect(parsed.tree.folders["2026"]?.folders["Q1"]?.files.map((file) => file.name)).toEqual(["Goals.md"]);
+		expect(parsed.tree.folders["2026"]?.folders.Q1?.files.map((file) => file.name)).toEqual(["Goals.md"]);
 	});
 
 	it("treats maxDepth as enabling recursive listing automatically", async () => {

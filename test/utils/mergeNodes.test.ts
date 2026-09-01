@@ -99,7 +99,9 @@ describe("buildCollapsedGraph", () => {
 			edges: [edge("a1", "b1")],
 		};
 
-		const topicA = buildCollapsedGraph(graph, { collapsedTopics: new Set([0, 1]) }).nodes.find((n) => n.id === topicNodeId(0));
+		const topicA = buildCollapsedGraph(graph, { collapsedTopics: new Set([0, 1]) }).nodes.find(
+			(n) => n.id === topicNodeId(0),
+		);
 
 		expect(topicA?.x).toBe(20);
 		expect(topicA?.y).toBe(20);
@@ -113,7 +115,9 @@ describe("buildCollapsedGraph", () => {
 			edges: [edge("a1", "b1")],
 		};
 
-		const topicA = buildCollapsedGraph(graph, { collapsedTopics: new Set([0, 1]) }).nodes.find((n) => n.id === topicNodeId(0));
+		const topicA = buildCollapsedGraph(graph, { collapsedTopics: new Set([0, 1]) }).nodes.find(
+			(n) => n.id === topicNodeId(0),
+		);
 
 		expect(topicA?.x).toBe(100);
 		expect(topicA?.y).toBe(100);
@@ -138,7 +142,10 @@ describe("buildCollapsedGraph", () => {
 	});
 
 	it("uses supplied topic labels", () => {
-		const collapsed = buildCollapsedGraph(twoTopicGraph(), { collapsedTopics: new Set([0, 1]), topicLabels: { 0: "Marine Biology" } });
+		const collapsed = buildCollapsedGraph(twoTopicGraph(), {
+			collapsedTopics: new Set([0, 1]),
+			topicLabels: { 0: "Marine Biology" },
+		});
 
 		expect(collapsed.nodes.find((n) => n.id === topicNodeId(0))?.label).toBe("Marine Biology");
 		// Unlabelled topics still get something readable.

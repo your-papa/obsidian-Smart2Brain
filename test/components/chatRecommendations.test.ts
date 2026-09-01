@@ -187,13 +187,7 @@ describe("mergeSuggestions", () => {
 	it("caps the combined list", () => {
 		const generic = [q("g1"), q("g2"), q("g3")];
 		const integration = [q("i1"), q("i2"), q("i3"), q("i4")];
-		expect(mergeSuggestions(generic, integration).map((s) => s.id)).toEqual([
-			"g1",
-			"g2",
-			"g3",
-			"i1",
-			"i2",
-		]);
+		expect(mergeSuggestions(generic, integration).map((s) => s.id)).toEqual(["g1", "g2", "g3", "i1", "i2"]);
 	});
 
 	/* The generic catalog was deliberately trimmed to three; the cap is what stops a
@@ -280,11 +274,7 @@ describe("plugin nudges", () => {
 
 		it("preserves relative order within a group so rows do not shuffle", () => {
 			const nudges = [skillBacked("dataview"), skillBacked("tasks"), skillBacked("tasknotes")];
-			expect(filterPluginNudges(nudges, []).map((n) => n.pluginId)).toEqual([
-				"dataview",
-				"tasks",
-				"tasknotes",
-			]);
+			expect(filterPluginNudges(nudges, []).map((n) => n.pluginId)).toEqual(["dataview", "tasks", "tasknotes"]);
 		});
 
 		it("does not mutate the caller's candidate array while sorting", () => {
@@ -344,9 +334,7 @@ describe("plugin nudges", () => {
 		});
 
 		it("collapses no later on mobile than on desktop", () => {
-			expect(PLUGIN_NUDGE_COLLAPSE_THRESHOLD_MOBILE).toBeLessThanOrEqual(
-				PLUGIN_NUDGE_COLLAPSE_THRESHOLD_DESKTOP,
-			);
+			expect(PLUGIN_NUDGE_COLLAPSE_THRESHOLD_MOBILE).toBeLessThanOrEqual(PLUGIN_NUDGE_COLLAPSE_THRESHOLD_DESKTOP);
 		});
 	});
 });

@@ -190,7 +190,6 @@ describe("Agent streamTokens subagent-content suppression", () => {
 	function makeResolvedRun(tuples: StreamTuple[]) {
 		return {
 			runnable: {
-				// biome-ignore lint/suspicious/useAwait: async generator for the stream contract
 				stream: async () =>
 					(async function* () {
 						for (const t of tuples) yield t;

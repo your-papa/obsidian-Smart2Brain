@@ -283,8 +283,7 @@ async function applyRecentNotes(paths: readonly string[]): Promise<void> {
 	const expected = [...ordered].reverse();
 	if (JSON.stringify(actual) !== JSON.stringify(expected)) {
 		throw new Error(
-			`recent-notes fixture mismatch — expected [${expected.join(", ")}], got [${actual.join(", ")}]. ` +
-				`A note opened in the vault during the run can land here; leave the test vault idle while the benchmark runs.`,
+			`recent-notes fixture mismatch — expected [${expected.join(", ")}], got [${actual.join(", ")}]. A note opened in the vault during the run can land here; leave the test vault idle while the benchmark runs.`,
 		);
 	}
 }
@@ -385,8 +384,7 @@ async function scoreQueries(
 	const withFixtures = judgments.filter((j) => (j.recentNotes?.length ?? 0) > 0);
 	if (withFixtures.length > 0) {
 		throw new Error(
-			`cannot run in parallel — these set recentNotes: ${withFixtures.map((j) => j.query).join(", ")}. ` +
-				`Pass { parallel: false }.`,
+			`cannot run in parallel — these set recentNotes: ${withFixtures.map((j) => j.query).join(", ")}. Pass { parallel: false }.`,
 		);
 	}
 

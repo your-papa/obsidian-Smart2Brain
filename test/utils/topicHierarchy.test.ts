@@ -144,7 +144,8 @@ describe("granularity mapping", () => {
 		// So adjacent-level ratios should shrink as levels get finer, spending more
 		// rungs in the range that produces distinct groupings.
 		const firstRatio = granularityToResolution(2) / granularityToResolution(1);
-		const lastRatio = granularityToResolution(maxGranularityLevel()) / granularityToResolution(maxGranularityLevel() - 1);
+		const lastRatio =
+			granularityToResolution(maxGranularityLevel()) / granularityToResolution(maxGranularityLevel() - 1);
 		expect(lastRatio).toBeLessThan(firstRatio);
 	});
 

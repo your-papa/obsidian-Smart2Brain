@@ -58,10 +58,7 @@ async function makeResolved(agent: Agent): Promise<ResolvedRun> {
 
 /** An AI message delta as the `messages` stream mode delivers it. */
 function aiDelta(id: string, content: string, toolCalls?: { id: string }[]) {
-	return [
-		"messages",
-		[{ getType: () => "ai", id, content, tool_calls: toolCalls }, {} as Record<string, unknown>],
-	];
+	return ["messages", [{ getType: () => "ai", id, content, tool_calls: toolCalls }, {} as Record<string, unknown>]];
 }
 
 const FINAL_VALUES = ["values", { messages: [{ getType: () => "ai", text: "final", content: "final" }] }];
@@ -226,14 +223,12 @@ describe("stream input shape per entry point", () => {
 
 		const c = makeAgent();
 		const resolvedC = await makeResolved(c);
-		await collect(
-			c.regenerateFromCheckpoint({ resolved: resolvedC, threadId: THREAD_ID, checkpointId: "cp-1" }),
-		);
+		await collect(c.regenerateFromCheckpoint({ resolved: resolvedC, threadId: THREAD_ID, checkpointId: "cp-1" }));
 		const streamC = (resolvedC.runnable as unknown as { stream: ReturnType<typeof vi.fn> }).stream;
 		// Regenerate continues from the checkpoint without adding a message.
 		expect(streamC.mock.calls[0][0]).toBeNull();
-		expect((streamC.mock.calls[0][1] as { configurable: { checkpoint_id: string } }).configurable.checkpoint_id).toBe(
-			"cp-1",
-		);
+		expect(
+			(streamC.mock.calls[0][1] as { configurable: { checkpoint_id: string } }).configurable.checkpoint_id,
+		).toBe("cp-1");
 	});
 });

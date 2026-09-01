@@ -262,7 +262,9 @@ describe("SkillsService.bootstrapDefaultSkills", () => {
 	});
 
 	it("still seeds the bundled skill when nothing else covers that plugin", async () => {
-		const subject = BUNDLED_SKILLS.find((s) => s.linkedPluginId === "obsidian-tasks-plugin") as (typeof BUNDLED_SKILLS)[number];
+		const subject = BUNDLED_SKILLS.find(
+			(s) => s.linkedPluginId === "obsidian-tasks-plugin",
+		) as (typeof BUNDLED_SKILLS)[number];
 		const adapter = makeAdapter();
 		const svc = makeService(adapter);
 		await svc.discoverSkills();

@@ -186,7 +186,7 @@ describe("HNSWVectorStore reads — transaction abort", () => {
 		expect(capturedTx).not.toBeNull();
 		(capturedTx as unknown as { onabort: () => void }).onabort();
 
-        await expect(opened).rejects.toThrow(/aborted/i);
+		await expect(opened).rejects.toThrow(/aborted/i);
 	});
 });
 

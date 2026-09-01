@@ -12,9 +12,23 @@ Use `bun` (not npm/yarn). The lockfile is `bun.lock`.
 
 - `bun run dev` — Vite watch build to `build/smart-second-brain/` (development).
 - `bun run build` — production build to `build/prod`.
-- `bun run check` — `svelte-check` over `tsconfig.json`. **Run after each implementation.**
-- `bun run format` — Biome formatter (writes). **Run after each implementation.**
-- `bun run lint` — Biome linter with `--unsafe` autofixes.
+- `bun run check` — `svelte-check` over both `tsconfig.json` (src) and `tsconfig.test.json` (tests + integration). **Run after each implementation.** `check:src` / `check:test` run one pass each.
+- `bun run format` — Biome formatter (writes) over `src`, `test`, `integration`. **Run after each implementation.**
+- `bun run lint` — Biome linter with `--unsafe` autofixes, same three dirs.
+
+Tests are type-checked, not just formatted: `tsconfig.json` covers only `src/**`, so
+`tsconfig.test.json` extends it to `test/**` and `integration/**` (it stays separate so test
+files can never influence the production build). This is not cosmetic — while the suites went
+unchecked, a `resolveSegments` call kept passing a removed argument, silently returned `[]`,
+and made four assertions pass vacuously.
+
+Two Biome settings exist for the test tree, both in `biome.json` (which is strict JSON and
+rejects comments, hence the note here):
+- `files.ignore` excludes `integration/S2B Test Vault/**` — third-party plugin bundles,
+  themes, and Obsidian's own config, which Obsidian rewrites on every launch. Never format it.
+- An `overrides` entry disables `style/noNonNullAssertion` for `test/**` and `integration/**`.
+  `expect(store.getAgent(id)!.name)` is the point in a test: if the lookup fails, the test
+  should throw. The rule stays on for `src/`.
 - `bun run test` — Vitest unit tests (single run). `bun run test:watch` for watch mode. `bun run test:coverage` for coverage.
 - `bun run test -- <pattern>` — single file/pattern, e.g. `bun run test -- test/providers/openai.test.ts`.
 - `bun run test:integration` — end-to-end tests against a live Obsidian instance (see Integration tests below).

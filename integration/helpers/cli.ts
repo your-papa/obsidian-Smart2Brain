@@ -331,7 +331,7 @@ export function deleteAllChatFiles(): void {
 	if (!files) return;
 	for (const line of files.split("\n")) {
 		const path = line.trim();
-		if (path && path.endsWith(".chat")) {
+		if (path !== "" && path.endsWith(".chat")) {
 			obsidian(`delete path="${path}"`, { ignoreError: true });
 		}
 	}

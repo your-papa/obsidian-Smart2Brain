@@ -149,6 +149,9 @@ describe("registrySync", () => {
 
 			// Rename, as `renameProvider` rewrites it.
 			data.remove("custom-old");
+			// A rename must actually remove the key: assigning undefined would leave
+			// `"custom-old" in meta` true, which is not what renameProvider produces.
+			// biome-ignore lint/performance/noDelete: see above
 			delete data.meta["custom-old"];
 			data.meta["custom-new"] = { templateId: "openai-compatible", displayName: "Custom" };
 			data.add("custom-new");
