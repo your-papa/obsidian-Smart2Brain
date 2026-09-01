@@ -14,7 +14,12 @@ Use `bun` (not npm/yarn). The lockfile is `bun.lock`.
 - `bun run build` — production build to `build/prod`.
 - `bun run check` — `svelte-check` over both `tsconfig.json` (src) and `tsconfig.test.json` (tests + integration). **Run after each implementation.** `check:src` / `check:test` run one pass each.
 - `bun run format` — Biome formatter (writes) over `src`, `test`, `integration`. **Run after each implementation.**
-- `bun run lint` — Biome linter with `--unsafe` autofixes, same three dirs.
+- `bun run lint` — Biome linter, safe autofixes only, same three dirs.
+- `bun run lint:unsafe` — adds `--unsafe`. Review the diff afterwards; these fixes can
+  change behaviour rather than just style. Two real examples from this repo: `delete obj[k]`
+  → `obj[k] = undefined` (leaves the key present, so a rename stops being a rename), and
+  `x && x.f()` → `x?.f()` where `x` is a non-nullable string (turns an emptiness check into
+  a nullishness one). Prefer fixing by hand when the rule touches control flow.
 
 Tests are type-checked, not just formatted: `tsconfig.json` covers only `src/**`, so
 `tsconfig.test.json` extends it to `test/**` and `integration/**` (it stays separate so test
