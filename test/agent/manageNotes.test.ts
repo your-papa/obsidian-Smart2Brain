@@ -70,12 +70,7 @@ function createMockApp() {
 	} as unknown as App;
 }
 
-function setManageNotesPermissions(permissions?: {
-	allowCreate?: boolean;
-	allowUpdate?: boolean;
-	allowDelete?: boolean;
-	allowMove?: boolean;
-}) {
+function setMockAgentData() {
 	mockGetData.mockReturnValue({
 		getAgent: () => undefined,
 		getSelectedAgent: () => ({
@@ -83,14 +78,7 @@ function setManageNotesPermissions(permissions?: {
 			// `shouldBlockFile` is only consulted when one is resolved.
 			chatModel: { provider: "test-provider" },
 			toolsConfig: {
-				manage_notes: {
-					settings: {
-						allowCreate: permissions?.allowCreate ?? true,
-						allowUpdate: permissions?.allowUpdate ?? true,
-						allowDelete: permissions?.allowDelete ?? true,
-						allowMove: permissions?.allowMove ?? true,
-					},
-				},
+				manage_notes: {},
 			},
 		}),
 	});
@@ -111,7 +99,7 @@ describe("manageNotes tool", () => {
 		mockGetEntry.mockReturnValue(undefined);
 		mockAddChanges.mockReturnValue(["mock-id"]);
 		mockGetIndexableVaultFiles.mockReturnValue([]);
-		setManageNotesPermissions();
+		setMockAgentData();
 		app = createMockApp();
 		tool = createManageNotesTool(app);
 	});
@@ -248,25 +236,6 @@ describe("manageNotes tool", () => {
 		);
 
 		expect(result).toContain("targeted more than once in this batch");
-		expect(mockAddChanges).not.toHaveBeenCalled();
-	});
-
-	it("respects per-operation permissions from manage_notes settings", async () => {
-		setManageNotesPermissions({ allowCreate: true, allowUpdate: true, allowDelete: false });
-
-		const result = await tool.invoke(
-			{
-				operations: [
-					{
-						type: "delete",
-						path: "Notes/test.md",
-					},
-				],
-			},
-			THREAD_CONFIG,
-		);
-
-		expect(result).toContain("Delete operations are disabled");
 		expect(mockAddChanges).not.toHaveBeenCalled();
 	});
 
@@ -426,26 +395,6 @@ describe("manageNotes tool", () => {
 			expect.any(String),
 			"test-thread-id",
 		);
-	});
-
-	it("respects move permissions from manage_notes settings", async () => {
-		setManageNotesPermissions({ allowCreate: true, allowUpdate: true, allowDelete: true, allowMove: false });
-
-		const result = await tool.invoke(
-			{
-				operations: [
-					{
-						type: "move",
-						path: "Notes/source.md",
-						newPath: "Archive/source.md",
-					},
-				],
-			},
-			THREAD_CONFIG,
-		);
-
-		expect(result).toContain("Move operations are disabled");
-		expect(mockAddChanges).not.toHaveBeenCalled();
 	});
 
 	it("warns when another chat has a pending update to the same file", async () => {
@@ -1065,22 +1014,6 @@ describe("manageNotes tool", () => {
 			expect(result).toContain("No occurrences");
 			expect(mockAddChanges).not.toHaveBeenCalled();
 		});
-
-		it("requires update permission", async () => {
-			setManageNotesPermissions({ allowCreate: true, allowUpdate: false, allowDelete: true, allowMove: true });
-			tool = createManageNotesTool(app);
-			const a = makeFile("Notes/a.md");
-			mockGetIndexableVaultFiles.mockReturnValue([a]);
-			vi.mocked(app.vault.read).mockResolvedValue("#todo");
-
-			const result = await tool.invoke(
-				{ operations: [{ type: "replace", find: "#todo", replace: "#task" }] },
-				THREAD_CONFIG,
-			);
-
-			expect(result).toContain("update permission");
-			expect(mockAddChanges).not.toHaveBeenCalled();
-		});
 	});
 
 	/**
@@ -1169,20 +1102,6 @@ describe("manageNotes tool", () => {
 			await tool.invoke({ operations: [{ type: "discard", id: "4f2a9c" }] }, THREAD_CONFIG);
 
 			expect(mockDiscardPendingById).toHaveBeenCalledWith("4f2a9c", "test-thread-id");
-		});
-
-		it("does not require update permission", async () => {
-			// Discarding only ever REMOVES a proposed write, so a permission change
-			// must not strand proposals the agent could otherwise clean up.
-			setManageNotesPermissions({ allowCreate: false, allowUpdate: false, allowDelete: false, allowMove: false });
-			tool = createManageNotesTool(app);
-			mockGetPendingByShortId.mockReturnValue({ change: { path: "Notes/doc.md" } });
-			mockDiscardPendingById.mockReturnValue("discarded");
-
-			const result = await tool.invoke({ operations: [{ type: "discard", id: "4f2a9c" }] }, THREAD_CONFIG);
-
-			expect(result).not.toContain("disabled for this agent");
-			expect(result).toContain("Withdrew 1 pending proposal(s)");
 		});
 	});
 

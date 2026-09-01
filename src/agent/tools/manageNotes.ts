@@ -98,24 +98,6 @@ const manageNotesSchema = z.object({
 
 type ManageNotesInput = z.infer<typeof manageNotesSchema>;
 
-function getManageNotesSettings(agentId: string): {
-	allowCreate: boolean;
-	allowUpdate: boolean;
-	allowDelete: boolean;
-	allowMove: boolean;
-} {
-	const settings = (getData().getAgent(agentId) ?? getData().getSelectedAgent()).toolsConfig.manage_notes.settings as
-		| { allowCreate?: boolean; allowUpdate?: boolean; allowDelete?: boolean; allowMove?: boolean }
-		| undefined;
-
-	return {
-		allowCreate: settings?.allowCreate ?? true,
-		allowUpdate: settings?.allowUpdate ?? true,
-		allowDelete: settings?.allowDelete ?? true,
-		allowMove: settings?.allowMove ?? true,
-	};
-}
-
 function getManageNotesToolConfig(agentId: string): { name: string; description: string } {
 	const selectedConfig = (getData().getAgent(agentId) ?? getData().getSelectedAgent()).toolsConfig.manage_notes;
 	const defaultConfig = DEFAULT_TOOLS_CONFIG.manage_notes;
@@ -493,7 +475,6 @@ export async function stageNoteOperations(
 	agentId = "",
 ): Promise<string> {
 	const store = getPendingChangesStore();
-	const settings = getManageNotesSettings(agentId);
 	const seenPaths = new Set<string>();
 	const stagedChanges: PendingChange[] = [];
 	// Paths this update touches that ANOTHER chat already has a pending update for.
@@ -524,10 +505,6 @@ export async function stageNoteOperations(
 		const operationNumber = i + 1;
 
 		if (operation.type === "create") {
-			if (!settings.allowCreate) {
-				return `Error in operation ${operationNumber}: Create operations are disabled for this agent.`;
-			}
-
 			const normalizedPath = normalizePath(operation.path);
 			const duplicateError = ensureUniqueTarget(seenPaths, normalizedPath, operationNumber);
 			if (duplicateError) return duplicateError;
@@ -544,9 +521,9 @@ export async function stageNoteOperations(
 			// exfiltration control: it stops vault content reaching an untrusted
 			// provider. A create flows the other way — the content originates from
 			// the model, so nothing private leaves the vault. Write authorization is
-			// already covered by `settings.allowCreate` plus the staged-review step
-			// in `pendingChangesStore`, where the user sees the path and content
-			// before `vault.create` ever runs. Gating creates on `shouldBlockFile`
+			// the staged-review step in `pendingChangesStore`, where the user sees
+			// the path and content before `vault.create` ever runs. Gating creates
+			// on `shouldBlockFile`
 			// also made behaviour depend on `privacyMode`: under `public-by-default`
 			// tag/property rules silently missed (the file doesn't exist yet, so
 			// there's no frontmatter to match), while `private-by-default` blocked
@@ -567,10 +544,6 @@ export async function stageNoteOperations(
 		}
 
 		if (operation.type === "update") {
-			if (!settings.allowUpdate) {
-				return `Error in operation ${operationNumber}: Update operations are disabled for this agent.`;
-			}
-
 			const result = validateExistingMarkdownFile(app, operation.path, operationNumber, "update", agentId);
 			if ("error" in result) return result.error;
 
@@ -603,12 +576,7 @@ export async function stageNoteOperations(
 		}
 
 		if (operation.type === "discard") {
-			// No permission gate, deliberately. Discarding is strictly
-			// de-escalatory — it can only REMOVE a proposed write, never cause
-			// one. Gating it on `allowUpdate` would let a permission change
-			// strand proposals the agent is otherwise able to clean up.
-			//
-			// Also exempt from `ensureUniqueTarget`, which keys on paths: a discard
+			// Exempt from `ensureUniqueTarget`, which keys on paths: a discard
 			// names an id, and `discard` + `update` touching one note in a single
 			// batch is the natural correction idiom. The update branch still guards
 			// against a *second* update to that path.
@@ -626,15 +594,6 @@ export async function stageNoteOperations(
 		}
 
 		if (operation.type === "delete") {
-			// Permission check inside the type branch, matching create/update/move below.
-			// This used to be an outer `if (!settings.allowDelete)` wrapping an inner
-			// `if (operation.type === "delete")` — correct, but only because the inner
-			// condition carried all the logic; hoisting the outer branch during a later
-			// edit would have silently blocked move/replace too.
-			if (!settings.allowDelete) {
-				return `Error in operation ${operationNumber}: Delete operations are disabled for this agent.`;
-			}
-
 			const result = validateExistingMarkdownFile(app, operation.path, operationNumber, "delete", agentId);
 			if ("error" in result) return result.error;
 
@@ -650,10 +609,6 @@ export async function stageNoteOperations(
 		}
 
 		if (operation.type === "move") {
-			if (!settings.allowMove) {
-				return `Error in operation ${operationNumber}: Move operations are disabled for this agent.`;
-			}
-
 			const result = validateExistingMarkdownFile(app, operation.path, operationNumber, "move", agentId);
 			if ("error" in result) return result.error;
 
@@ -697,10 +652,6 @@ export async function stageNoteOperations(
 		}
 
 		// operation.type === "replace" — vault-wide (or folder-scoped) find-and-replace.
-		if (!settings.allowUpdate) {
-			return `Error in operation ${operationNumber}: Replace operations require update permission, which is disabled for this agent.`;
-		}
-
 		const built = buildGrepMatcher(operation.find, operation.is_regex ?? false, operation.case_sensitive ?? false);
 		if (!built.ok) {
 			return `Error in operation ${operationNumber}: ${built.error.replace(/^Error: /, "")}`;

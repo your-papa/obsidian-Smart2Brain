@@ -408,7 +408,7 @@ export class AgentManager {
 		// must always be in front of the model belongs in the skill's description.
 
 		// Honesty guard when no write tool is enabled (the write policy otherwise lives
-		// inside the "edit-notes" core skill's body, loaded on demand).
+		// inside the "manage-notes" core skill's body, loaded on demand).
 		if (!hasWriteTools) {
 			prompt += NO_WRITE_TOOLS_GUARD;
 		}
@@ -1017,7 +1017,7 @@ export class AgentManager {
 	 * The skills switched on for an agent, in a stable display order, each with a resolved
 	 * icon id. Everything is a skill now, so this is:
 	 *   - each enabled, available core / community / auto-discovered plugin skill (the 4 former
-	 *     capabilities — explore-vault/edit-notes/web/manage-skills — are core skills here);
+	 *     capabilities — explore-vault/manage-notes/web/manage-skills — are core skills here);
 	 *   - each api-plugin with no skill covering it yet whose exec tool is enabled;
 	 *   - each enabled user-authored custom skill;
 	 *   - each enabled MCP server.

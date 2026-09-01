@@ -3,7 +3,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("obsidian", () => import("../__mocks__/obsidian"));
 
 // migrateAgentFolder reads/sets the agentFolderMigrated flag and agentFolder via getData().
-const state = { agentFolderMigrated: false, coreSkillsSeeded: false, agentFolder: "Agents" };
+const state = {
+	agentFolderMigrated: false,
+	coreSkillsSeeded: false,
+	manageNotesFolderMigrated: false,
+	agentFolder: "Agents",
+};
 vi.mock("../../src/stores/dataStore.svelte", () => ({
 	getData: () => ({
 		get agentFolderMigrated() {
@@ -18,6 +23,12 @@ vi.mock("../../src/stores/dataStore.svelte", () => ({
 		set coreSkillsSeeded(v: boolean) {
 			state.coreSkillsSeeded = v;
 		},
+		get manageNotesFolderMigrated() {
+			return state.manageNotesFolderMigrated;
+		},
+		set manageNotesFolderMigrated(v: boolean) {
+			state.manageNotesFolderMigrated = v;
+		},
 		get agentFolder() {
 			return state.agentFolder;
 		},
@@ -25,6 +36,7 @@ vi.mock("../../src/stores/dataStore.svelte", () => ({
 }));
 
 import { SkillsService } from "../../src/skills/SkillsService";
+import editNotes10 from "../../src/skills/history/edit-notes-1.0.md?raw";
 
 const SKILLS = "Agents/Skills";
 
@@ -60,6 +72,24 @@ function makeAdapter(initial: Record<string, string>) {
 				if (parent === dir) folders.add(d);
 			}
 			return { files: [], folders: [...folders] };
+		}),
+		rename: vi.fn(async (from: string, to: string) => {
+			for (const [p, c] of [...files]) {
+				if (p === from || p.startsWith(`${from}/`)) {
+					files.delete(p);
+					files.set(to + p.slice(from.length), c);
+				}
+			}
+			for (const d of [...dirs]) {
+				if (d === from || d.startsWith(`${from}/`)) {
+					dirs.delete(d);
+					dirs.add(to + d.slice(from.length));
+				}
+			}
+		}),
+		rmdir: vi.fn(async (p: string, _recursive: boolean) => {
+			for (const f of [...files.keys()]) if (f === p || f.startsWith(`${p}/`)) files.delete(f);
+			for (const d of [...dirs]) if (d === p || d.startsWith(`${p}/`)) dirs.delete(d);
 		}),
 	};
 }
@@ -193,5 +223,101 @@ describe("SkillsService.migrateCoreSkills (v6 orphan-guidance cleanup)", () => {
 
 		expect(adapter.remove).not.toHaveBeenCalled();
 		expect(state.coreSkillsSeeded).toBe(true);
+	});
+});
+
+describe("SkillsService.migrateManageNotesFolder (v11 edit-notes → manage-notes rename)", () => {
+	beforeEach(() => {
+		state.manageNotesFolderMigrated = false;
+		state.agentFolder = "Agents";
+	});
+
+	it("deletes an untouched shipped copy so bootstrap can seed manage-notes fresh", async () => {
+		const adapter = makeAdapter({ [`${SKILLS}/edit-notes/SKILL.md`]: editNotes10 });
+		const svc = makeService(adapter);
+
+		await svc.migrateManageNotesFolder();
+
+		expect(adapter.files.has(`${SKILLS}/edit-notes/SKILL.md`)).toBe(false);
+		expect(adapter.files.has(`${SKILLS}/manage-notes/SKILL.md`)).toBe(false);
+		expect(state.manageNotesFolderMigrated).toBe(true);
+	});
+
+	it("renames a customized copy in place and rewrites the name: frontmatter line", async () => {
+		const customized = editNotes10.replace("## Write Operations", "## Write Operations\nMY EDIT");
+		const adapter = makeAdapter({ [`${SKILLS}/edit-notes/SKILL.md`]: customized });
+		const svc = makeService(adapter);
+
+		await svc.migrateManageNotesFolder();
+
+		const migrated = adapter.files.get(`${SKILLS}/manage-notes/SKILL.md`);
+		expect(adapter.files.has(`${SKILLS}/edit-notes/SKILL.md`)).toBe(false);
+		expect(migrated).toContain("name: manage-notes");
+		expect(migrated).toContain("MY EDIT");
+		expect(state.manageNotesFolderMigrated).toBe(true);
+	});
+
+	it("rewrites a quoted name: line too — quoting is valid YAML a customized copy may carry", async () => {
+		const customized = editNotes10
+			.replace("name: edit-notes", 'name: "edit-notes"')
+			.replace("## Write Operations", "## Write Operations\nMY EDIT");
+		const adapter = makeAdapter({ [`${SKILLS}/edit-notes/SKILL.md`]: customized });
+		const svc = makeService(adapter);
+
+		await svc.migrateManageNotesFolder();
+
+		const migrated = adapter.files.get(`${SKILLS}/manage-notes/SKILL.md`);
+		expect(migrated).toContain("name: manage-notes");
+		expect(migrated).not.toContain("edit-notes");
+	});
+
+	it("repairs stale frontmatter left by a run that renamed but failed before the rewrite", async () => {
+		// A previous attempt moved the folder but crashed before rewriting `name:` —
+		// so on retry there is no edit-notes/ dir, only a misnamed manage-notes/.
+		const adapter = makeAdapter({
+			[`${SKILLS}/manage-notes/SKILL.md`]: editNotes10.replace("## Write Operations", "MY EDIT"),
+		});
+		const svc = makeService(adapter);
+
+		await svc.migrateManageNotesFolder();
+
+		expect(adapter.files.get(`${SKILLS}/manage-notes/SKILL.md`)).toContain("name: manage-notes");
+		expect(state.manageNotesFolderMigrated).toBe(true);
+	});
+
+	it("leaves both folders untouched when edit-notes and manage-notes both exist", async () => {
+		const adapter = makeAdapter({
+			[`${SKILLS}/edit-notes/SKILL.md`]: editNotes10,
+			[`${SKILLS}/manage-notes/SKILL.md`]: "---\nname: manage-notes\n---\nusers own skill",
+		});
+		const svc = makeService(adapter);
+
+		await svc.migrateManageNotesFolder();
+
+		expect(adapter.files.get(`${SKILLS}/edit-notes/SKILL.md`)).toBe(editNotes10);
+		expect(adapter.files.get(`${SKILLS}/manage-notes/SKILL.md`)).toContain("users own skill");
+		expect(state.manageNotesFolderMigrated).toBe(true);
+	});
+
+	it("marks done without writes on a fresh install", async () => {
+		const adapter = makeAdapter({});
+		const svc = makeService(adapter);
+
+		await svc.migrateManageNotesFolder();
+
+		expect(adapter.write).not.toHaveBeenCalled();
+		expect(adapter.rename).not.toHaveBeenCalled();
+		expect(state.manageNotesFolderMigrated).toBe(true);
+	});
+
+	it("is idempotent — a second run does nothing", async () => {
+		const adapter = makeAdapter({ [`${SKILLS}/edit-notes/SKILL.md`]: editNotes10 });
+		const svc = makeService(adapter);
+
+		await svc.migrateManageNotesFolder();
+		adapter.rmdir.mockClear();
+		await svc.migrateManageNotesFolder();
+
+		expect(adapter.rmdir).not.toHaveBeenCalled();
 	});
 });

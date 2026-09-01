@@ -1,6 +1,7 @@
 <script lang="ts">
 import { Notice } from "obsidian";
 import { firstChangedLine, revealAndScroll } from "../../lib/pendingChangeNavigation";
+import { getData } from "../../stores/dataStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
 import { getPendingChangesStore } from "../../stores/pendingChangesStore.svelte";
 import type { PendingChangeEntry } from "../../types/shared";
@@ -17,6 +18,24 @@ interface Props {
 
 const { threadPath }: Props = $props();
 const store = getPendingChangesStore();
+const pluginData = getData();
+
+/**
+ * The global in-note diff rendering preference, surfaced here because this bar is where
+ * review starts — the same toggle the in-note and reading-view diff bars carry. The icon
+ * shows the mode a click switches TO (matching those bars): columns for two-pane, a
+ * file-diff glyph for inline word diff.
+ */
+const diffViewMode = $derived(pluginData.diffViewMode);
+
+function toggleDiffViewMode(e: Event) {
+	e.stopPropagation();
+	pluginData.diffViewMode = diffViewMode === "word-diff" ? "two-pane" : "word-diff";
+	// Same dedicated event the in-note bars dispatch: a mode flip is not a
+	// pending-changes mutation, so it must not trigger the reading views'
+	// destructive rerender (see readingViewDiffProcessor).
+	document.dispatchEvent(new CustomEvent("s2b-diff-mode-changed"));
+}
 
 const threadId = $derived(threadPath);
 /**
@@ -408,6 +427,17 @@ function previewChange(evt: Event, entry: PendingChangeEntry) {
         </span>
       </div>
       <div class="pcb-summary-right">
+        <button
+          class="clickable-icon pcb-diff-toggle"
+          onclick={toggleDiffViewMode}
+          title={diffViewMode === "word-diff"
+            ? "Switch in-note diffs to two-pane view"
+            : "Switch in-note diffs to inline word diff"}
+          aria-label="Toggle diff view mode"
+          type="button"
+        >
+          <div use:icon={diffViewMode === "word-diff" ? "columns-2" : "file-diff"} style="--icon-size: 12px"></div>
+        </button>
         {#if pendingCount > 0}
           <button
             class="pcb-action pcb-action-accept"
@@ -776,6 +806,16 @@ function previewChange(evt: Event, entry: PendingChangeEntry) {
 
   .pcb-action-icon[disabled]:hover {
     background: transparent;
+  }
+
+  /* Native .clickable-icon supplies the at-rest/hover treatment; only compact it
+     to this row's control height so it doesn't inflate the summary bar. */
+  .pcb-diff-toggle {
+    padding: 2px 4px;
+  }
+
+  :global(.is-mobile) .pcb-diff-toggle {
+    padding: 8px;
   }
 
   .pcb-chevron {

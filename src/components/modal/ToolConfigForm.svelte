@@ -5,7 +5,7 @@ import {
 	getReadContentDescription,
 	getSearchNotesDescription,
 } from "../../stores/dataStore.svelte";
-import type { BuiltInToolId, DiffViewMode, SearchAlgorithm, ToolConfig } from "../../types/plugin";
+import type { BuiltInToolId, SearchAlgorithm, ToolConfig } from "../../types/plugin";
 import type { ChatModel } from "../../stores/chatStore.svelte";
 import type SecondBrainPlugin from "../../main";
 import { ModelSelectionModal, type SelectedModel } from "./ModelSelectionModal";
@@ -17,7 +17,6 @@ import SettingGroup from "../settings/SettingGroup.svelte";
 import Button from "../ui/Button.svelte";
 import Dropdown from "../ui/Dropdown.svelte";
 import Text from "../ui/Text.svelte";
-import Toggle from "../ui/Toggle.svelte";
 import { getToolDisplayName } from "../../agent/builtInToolMeta";
 import type { ToolConfigAccessors } from "./ToolConfigModal";
 
@@ -76,33 +75,6 @@ let contextLines = $state(
 		(defaultConfig.settings as { contextLines?: number })?.contextLines ??
 		2,
 );
-let allowCreate = $state(
-	(initialToolConfig?.settings as { allowCreate?: boolean })?.allowCreate ??
-		(defaultConfig.settings as { allowCreate?: boolean })?.allowCreate ??
-		true,
-);
-let allowUpdate = $state(
-	(initialToolConfig?.settings as { allowUpdate?: boolean })?.allowUpdate ??
-		(defaultConfig.settings as { allowUpdate?: boolean })?.allowUpdate ??
-		true,
-);
-let allowDelete = $state(
-	(initialToolConfig?.settings as { allowDelete?: boolean })?.allowDelete ??
-		(defaultConfig.settings as { allowDelete?: boolean })?.allowDelete ??
-		true,
-);
-let allowMove = $state(
-	(initialToolConfig?.settings as { allowMove?: boolean })?.allowMove ??
-		(defaultConfig.settings as { allowMove?: boolean })?.allowMove ??
-		true,
-);
-let diffViewMode = $state<DiffViewMode>(pluginData.diffViewMode);
-
-const diffViewModeOptions = [
-	{ display: "Two Pane (rendered markdown)", value: "two-pane" as const },
-	{ display: "Word Diff (inline text)", value: "word-diff" as const },
-];
-
 const webSearchProviderOptions = [
 	{ display: "Firecrawl (keyless)", value: "firecrawl" },
 	{ display: "Brave Search", value: "brave" },
@@ -181,11 +153,6 @@ interface ToolConfigSnapshot {
 	name: string;
 	description: string;
 	maxResults: number;
-	allowCreate: boolean;
-	allowUpdate: boolean;
-	allowDelete: boolean;
-	allowMove: boolean;
-	diffViewMode: DiffViewMode;
 	imageProcessorKey: string;
 	pdfProcessorKey: string;
 }
@@ -203,23 +170,6 @@ const initialSnapshot: ToolConfigSnapshot = {
 		(initialToolConfig?.settings as { maxResults?: number })?.maxResults ??
 		(defaultConfig.settings as { maxResults?: number })?.maxResults ??
 		10,
-	allowCreate:
-		(initialToolConfig?.settings as { allowCreate?: boolean })?.allowCreate ??
-		(defaultConfig.settings as { allowCreate?: boolean })?.allowCreate ??
-		true,
-	allowUpdate:
-		(initialToolConfig?.settings as { allowUpdate?: boolean })?.allowUpdate ??
-		(defaultConfig.settings as { allowUpdate?: boolean })?.allowUpdate ??
-		true,
-	allowDelete:
-		(initialToolConfig?.settings as { allowDelete?: boolean })?.allowDelete ??
-		(defaultConfig.settings as { allowDelete?: boolean })?.allowDelete ??
-		true,
-	allowMove:
-		(initialToolConfig?.settings as { allowMove?: boolean })?.allowMove ??
-		(defaultConfig.settings as { allowMove?: boolean })?.allowMove ??
-		true,
-	diffViewMode: capturedToolId === "manage_notes" ? pluginData.diffViewMode : "two-pane",
 	imageProcessorKey: processorKey(initialImageProcessor),
 	pdfProcessorKey: processorKey(initialPdfProcessor),
 };
@@ -228,11 +178,6 @@ const defaultSnapshot: ToolConfigSnapshot = {
 	name: defaultConfig.name,
 	description: defaultConfig.description,
 	maxResults: (defaultConfig.settings as { maxResults?: number })?.maxResults ?? 10,
-	allowCreate: (defaultConfig.settings as { allowCreate?: boolean })?.allowCreate ?? true,
-	allowUpdate: (defaultConfig.settings as { allowUpdate?: boolean })?.allowUpdate ?? true,
-	allowDelete: (defaultConfig.settings as { allowDelete?: boolean })?.allowDelete ?? true,
-	allowMove: (defaultConfig.settings as { allowMove?: boolean })?.allowMove ?? true,
-	diffViewMode: "two-pane",
 	// Default is "auto" for both processors
 	imageProcessorKey: "auto",
 	pdfProcessorKey: "auto",
@@ -252,11 +197,6 @@ const isDirty = $derived.by(() => {
 		name,
 		description,
 		maxResults,
-		allowCreate,
-		allowUpdate,
-		allowDelete,
-		allowMove,
-		diffViewMode: capturedToolId === "manage_notes" ? diffViewMode : "two-pane",
 		imageProcessorKey: processorKey(imageProcessor),
 		pdfProcessorKey: processorKey(pdfProcessor),
 	};
@@ -272,11 +212,6 @@ const isAtDefault = $derived.by(() => {
 		// untouched config look "non-default" and offer a pointless "Reset to default".
 		description: defaultConfig.description,
 		maxResults,
-		allowCreate,
-		allowUpdate,
-		allowDelete,
-		allowMove,
-		diffViewMode: capturedToolId === "manage_notes" ? diffViewMode : "two-pane",
 		imageProcessorKey: processorKey(imageProcessor),
 		pdfProcessorKey: processorKey(pdfProcessor),
 	};
@@ -319,8 +254,6 @@ function buildConfigPatch(): Partial<ToolConfig> {
 		if (imageProcessor !== undefined) settings.imageProcessor = imageProcessor;
 		if (pdfProcessor !== undefined) settings.pdfProcessor = pdfProcessor;
 		updatedConfig.settings = settings as ToolConfig["settings"];
-	} else if (capturedToolId === "manage_notes") {
-		updatedConfig.settings = { allowCreate, allowUpdate, allowDelete, allowMove };
 	} else if (capturedToolId === "grep_notes") {
 		updatedConfig.settings = { contextLines };
 	} else if (capturedToolId === "web_search") {
@@ -332,13 +265,11 @@ function buildConfigPatch(): Partial<ToolConfig> {
 /** Persist immediately (used by inline/live mode on every field commit). */
 function commit() {
 	if (commitMode !== "onChange") return;
-	if (capturedToolId === "manage_notes") pluginData.diffViewMode = diffViewMode;
 	writeToolConfig(buildConfigPatch());
 	onChange?.();
 }
 
 function handleSave() {
-	if (capturedToolId === "manage_notes") pluginData.diffViewMode = diffViewMode;
 	writeToolConfig(buildConfigPatch());
 	onSave?.();
 	onCancel?.(); // footer="modal" wires onCancel to modal.close(); harmless otherwise
@@ -360,18 +291,6 @@ function handleResetToDefault() {
 		pdfProcessor = undefined;
 		imageProcessorMode = "auto";
 		pdfProcessorMode = "auto";
-	} else if (capturedToolId === "manage_notes" && defaultConfig.settings) {
-		const settings = defaultConfig.settings as {
-			allowCreate: boolean;
-			allowUpdate: boolean;
-			allowDelete: boolean;
-			allowMove: boolean;
-		};
-		allowCreate = settings.allowCreate;
-		allowUpdate = settings.allowUpdate;
-		allowDelete = settings.allowDelete;
-		allowMove = settings.allowMove;
-		diffViewMode = "two-pane";
 	} else if (capturedToolId === "grep_notes" && defaultConfig.settings) {
 		const settings = defaultConfig.settings as { contextLines: number };
 		contextLines = settings.contextLines;
@@ -492,56 +411,6 @@ function openProcessorSelectionModal(currentProcessor: ChatModel | null, onSelec
             </Button>
           {/if}
         </div>
-      </SettingContainer>
-    </SettingGroup>
-  {:else if capturedToolId === "manage_notes"}
-    <SettingGroup heading="Allowed operations">
-      <SettingContainer name="Diff view mode" desc="Choose how pending note edits are previewed in reading view.">
-        <Dropdown
-          type="options"
-          dropdown={diffViewModeOptions}
-          selected={diffViewMode}
-          onchange={(value) => {
-            diffViewMode = value;
-            commit();
-          }}
-        />
-      </SettingContainer>
-      <SettingContainer name="Allow create" desc="Permit the agent to propose new markdown notes.">
-        <Toggle
-          checked={allowCreate}
-          onchange={(checked) => {
-            allowCreate = checked;
-            commit();
-          }}
-        />
-      </SettingContainer>
-      <SettingContainer name="Allow update" desc="Permit targeted edits to existing markdown notes.">
-        <Toggle
-          checked={allowUpdate}
-          onchange={(checked) => {
-            allowUpdate = checked;
-            commit();
-          }}
-        />
-      </SettingContainer>
-      <SettingContainer name="Allow delete" desc="Permit the agent to propose note deletions.">
-        <Toggle
-          checked={allowDelete}
-          onchange={(checked) => {
-            allowDelete = checked;
-            commit();
-          }}
-        />
-      </SettingContainer>
-      <SettingContainer name="Allow move" desc="Permit renaming or relocating markdown notes.">
-        <Toggle
-          checked={allowMove}
-          onchange={(checked) => {
-            allowMove = checked;
-            commit();
-          }}
-        />
       </SettingContainer>
     </SettingGroup>
   {:else if capturedToolId === "fetch_url"}

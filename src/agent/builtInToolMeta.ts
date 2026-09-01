@@ -120,9 +120,12 @@ const TOOLS_WITH_SETTINGS = new Set<BuiltInToolId>([
 	// are per-call tool parameters the model picks (it holds the query context; the user
 	// does not), and the result-detail flags are hardcoded on for the agent — those
 	// remain user-facing for the search *modal*, under Settings → Search → Display.
+	// `manage_notes` is likewise absent: its per-operation allow-toggles were removed (the
+	// staged-review flow in pendingChangesStore is the user's control point, so a tool-level
+	// permission matrix only duplicated it), and the diff-view-mode preference moved onto the
+	// pending-changes review bars where diffs are actually seen.
 	"grep_notes",
 	"read_content",
-	"manage_notes",
 	"web_search",
 ]);
 
