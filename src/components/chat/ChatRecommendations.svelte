@@ -307,8 +307,7 @@ function reviewNotice(notice: UpdateNotice): void {
 
 	const mgr = plugin.agentManager;
 	if (!mgr || !notice.agentId) return;
-	if (notice.kind === "system-prompt") mgr.openSystemPromptDiff(notice.agentId);
-	else mgr.openMemoryPromptDiff(notice.agentId);
+	mgr.openSystemPromptDiff(notice.agentId);
 }
 </script>
 

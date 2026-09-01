@@ -871,7 +871,7 @@ export default class SecondBrainPlugin extends Plugin {
 	async reinitAgentFolder(): Promise<void> {
 		// Await the agent-root folder before seeding: the `agentFolder` setter's createFolder is
 		// fire-and-forget, so it may not have completed by the time we get here. Bootstrapping
-		// the nested `Skills/`/`System Prompts/` dirs against a not-yet-created root could
+		// the nested `Skills/` dir or a per-agent folder against a not-yet-created root could
 		// otherwise throw and abort the rest of reinit (prompt refresh + cache invalidation),
 		// leaving chats on the old folder's prompts. (bootstrapDefaultSkills/seedDefaults also
 		// ensure the root now, but making the dependency explicit here keeps reinit correct
@@ -884,7 +884,7 @@ export default class SecondBrainPlugin extends Plugin {
 		await this.skillsService?.bootstrapDefaultSkills();
 		await this.skillsService?.discoverSkills();
 		await this.promptFilesService?.seedDefaults(this.pluginData.agents);
-		// Reload the base-prompt cache from the *new* folder — seedDefaults only writes files,
+		// Reload the prompt cache from the *new* folder — seedDefaults only writes files,
 		// it doesn't touch the cache, so without this the assembled prompt keeps serving the old
 		// folder's content (or the default) until a later vault event refreshes it.
 		await this.promptFilesService?.refresh(this.pluginData.agents);

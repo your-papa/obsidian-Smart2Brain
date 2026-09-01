@@ -42,12 +42,7 @@ import {
 import { compilePrivacyMembershipDraft } from "../../src/lib/views";
 import type { StoredProviderState } from "../../src/stores/dataStore.svelte";
 import type { PromptFileReader, PromptFileSnapshot } from "../../src/types/plugin";
-import {
-	BASE_SYSTEM_PROMPT,
-	BASE_SYSTEM_PROMPT_VERSION,
-	DEFAULT_MEMORY_PROMPT,
-	DEFAULT_MEMORY_PROMPT_VERSION,
-} from "../../src/agent/prompts";
+import { AGENT_PROMPT_VERSION, DEFAULT_AGENT_PROMPT } from "../../src/agent/prompts";
 import { fingerprint, shippedVersion } from "../../src/utils/shippedDefaults";
 
 /* --------------------------------------------------------------------------
@@ -516,10 +511,11 @@ describe("createData", () => {
 		expect(store.getAgent(DEFAULT_AGENT_ID)?.summarizationModel).toBeNull();
 	});
 
-	// v4→v5 moves the base system prompt from the `systemPrompt` config field to a file. A
-	// CUSTOMIZED prompt must survive the move (stashed on `migratedBasePrompt` for the async seed
-	// to write); a shipped default is discarded so the file seeds fresh. (Regression: PR #370.)
-	it("preserves a customized systemPrompt across the v4→v5 migration via migratedBasePrompt", async () => {
+	// v4→v5 moved the base system prompt from the `systemPrompt` config field to a file. A
+	// customization used to be stashed on `migratedBasePrompt` for the async seed to write out,
+	// but the seeding path that consumed it went away with the AGENT.md consolidation (v10), so
+	// the field is now simply dropped either way.
+	it("drops the legacy systemPrompt field across the v4→v5 migration", async () => {
 		const plugin = {
 			...createMockPlugin(),
 			loadData: vi.fn().mockResolvedValue({
@@ -544,33 +540,40 @@ describe("createData", () => {
 			systemPrompt?: unknown;
 			migratedBasePrompt?: string;
 		};
-		expect(agent.migratedBasePrompt).toBe("MY CUSTOM PROMPT");
 		expect(agent.systemPrompt).toBeUndefined();
+		expect(agent.migratedBasePrompt).toBeUndefined();
 	});
 
-	it("does not stash a shipped-default systemPrompt across the v4→v5 migration", async () => {
+	/*
+	 * v9→v10 removed `memoryEnabled`: the memory machinery is always on, and participation is
+	 * expressed by the `# Memory` section of the agent's AGENT.md instead. The stale config key
+	 * must not survive the load.
+	 */
+	it("strips memoryEnabled across the v9→v10 migration", async () => {
+		const mkAgent = (id: string, memoryEnabled: boolean) => ({
+			id,
+			name: id,
+			chatModel: null,
+			skills: {},
+			toolsConfig: structuredClone(DEFAULT_TOOLS_CONFIG),
+			mcpServers: {},
+			memoryEnabled,
+		});
 		const plugin = {
 			...createMockPlugin(),
 			loadData: vi.fn().mockResolvedValue({
 				...structuredClone(DEFAULT_SETTINGS),
-				schemaVersion: 4,
-				agents: {
-					[DEFAULT_AGENT_ID]: {
-						id: DEFAULT_AGENT_ID,
-						name: "S2B Agent",
-						chatModel: null,
-						systemPrompt: BASE_SYSTEM_PROMPT,
-						skills: {},
-						toolsConfig: structuredClone(DEFAULT_TOOLS_CONFIG),
-						mcpServers: {},
-					},
-				},
+				schemaVersion: 9,
+				agents: { [DEFAULT_AGENT_ID]: mkAgent(DEFAULT_AGENT_ID, true), off: mkAgent("off", false) },
 			}),
 		};
 
 		const store = await createData(plugin as never);
-		const agent = store.getAgent(DEFAULT_AGENT_ID) as unknown as { migratedBasePrompt?: string };
-		expect(agent.migratedBasePrompt).toBeUndefined();
+
+		const on = store.getAgent(DEFAULT_AGENT_ID) as unknown as { memoryEnabled?: boolean };
+		const off = store.getAgent("off") as unknown as { memoryEnabled?: boolean };
+		expect(on.memoryEnabled).toBeUndefined();
+		expect(off.memoryEnabled).toBeUndefined();
 	});
 
 	it("de-duplicates persisted agent names that sanitize to the same prompt filename", async () => {
@@ -630,15 +633,11 @@ describe("PluginDataStore – staleGuidance", () => {
 		};
 	}
 
-	// A reader over both file-backed prompt surfaces. Values are parsed snapshots:
-	// the frontmatter-stripped body plus the baseline version the note's frontmatter records.
-	function makeReader(files: {
-		basePrompt?: Record<string, PromptFileSnapshot>;
-		memoryPrompt?: Record<string, PromptFileSnapshot>;
-	}): PromptFileReader {
+	// A reader over the file-backed prompt surface. Values are parsed snapshots: the
+	// frontmatter-stripped body plus the baseline version the note's frontmatter records.
+	function makeReader(files: { agentPrompt?: Record<string, PromptFileSnapshot> }): PromptFileReader {
 		return {
-			getBasePromptFile: (agentId) => files.basePrompt?.[agentId] ?? null,
-			getMemoryPromptFile: (agentId) => files.memoryPrompt?.[agentId] ?? null,
+			getAgentPromptFile: (agentId) => files.agentPrompt?.[agentId] ?? null,
 		};
 	}
 
@@ -647,14 +646,11 @@ describe("PluginDataStore – staleGuidance", () => {
 		expect(store.staleGuidance).toEqual([]);
 	});
 
-	it("does NOT flag prompt files that equal the current defaults", () => {
+	it("does NOT flag a prompt file that equals the current default", () => {
 		const { store } = makeStore(agentData() as never);
 		store.setPromptFileReader(
 			makeReader({
-				basePrompt: { [DEFAULT_AGENT_ID]: { body: BASE_SYSTEM_PROMPT, version: BASE_SYSTEM_PROMPT_VERSION } },
-				memoryPrompt: {
-					[DEFAULT_AGENT_ID]: { body: DEFAULT_MEMORY_PROMPT, version: DEFAULT_MEMORY_PROMPT_VERSION },
-				},
+				agentPrompt: { [DEFAULT_AGENT_ID]: { body: DEFAULT_AGENT_PROMPT, version: AGENT_PROMPT_VERSION } },
 			}),
 		);
 		expect(store.staleGuidance).toEqual([]);
@@ -673,12 +669,7 @@ describe("PluginDataStore – staleGuidance", () => {
 		// version constants so this keeps meaning "current" across prompt revisions.
 		store.setPromptFileReader(
 			makeReader({
-				basePrompt: {
-					[DEFAULT_AGENT_ID]: { body: "my own custom prompt", version: BASE_SYSTEM_PROMPT_VERSION },
-				},
-				memoryPrompt: {
-					[DEFAULT_AGENT_ID]: { body: "my own memory instructions", version: DEFAULT_MEMORY_PROMPT_VERSION },
-				},
+				agentPrompt: { [DEFAULT_AGENT_ID]: { body: "my own custom prompt", version: AGENT_PROMPT_VERSION } },
 			}),
 		);
 		expect(store.staleGuidance).toEqual([]);
@@ -688,7 +679,7 @@ describe("PluginDataStore – staleGuidance", () => {
 		const { store } = makeStore(agentData() as never);
 		// version: undefined = the user removed (or predates) the note's frontmatter.
 		store.setPromptFileReader(
-			makeReader({ basePrompt: { [DEFAULT_AGENT_ID]: { body: "my own custom prompt", version: undefined } } }),
+			makeReader({ agentPrompt: { [DEFAULT_AGENT_ID]: { body: "my own custom prompt", version: undefined } } }),
 		);
 		// No baseline ⇒ we cannot substantiate that the default moved under this edit.
 		// Staying silent beats asserting drift we can't prove.
@@ -705,7 +696,7 @@ describe("PluginDataStore – staleGuidance", () => {
 		const { store } = makeStore(agentData() as never);
 		// The note's frontmatter records a baseline older than the current shipped version.
 		store.setPromptFileReader(
-			makeReader({ basePrompt: { [DEFAULT_AGENT_ID]: { body: "my own custom prompt", version: 0 } } }),
+			makeReader({ agentPrompt: { [DEFAULT_AGENT_ID]: { body: "my own custom prompt", version: 0 } } }),
 		);
 
 		const stale = store.staleGuidance;
@@ -720,16 +711,10 @@ describe("PluginDataStore – staleGuidance", () => {
 		const { store } = makeStore(agentData() as never);
 		store.setPromptFileReader(
 			makeReader({
-				basePrompt: {
+				agentPrompt: {
 					[DEFAULT_AGENT_ID]: {
-						body: `${BASE_SYSTEM_PROMPT.replace(/\n/g, "\r\n")}\n`,
-						version: BASE_SYSTEM_PROMPT_VERSION,
-					},
-				},
-				memoryPrompt: {
-					[DEFAULT_AGENT_ID]: {
-						body: `${DEFAULT_MEMORY_PROMPT}\n\n`,
-						version: DEFAULT_MEMORY_PROMPT_VERSION,
+						body: `${DEFAULT_AGENT_PROMPT.replace(/\n/g, "\r\n")}\n`,
+						version: AGENT_PROMPT_VERSION,
 					},
 				},
 			}),
@@ -744,19 +729,19 @@ describe("PluginDataStore – staleGuidance", () => {
 	// versions have actually shipped. This is the case that was previously untestable and
 	// that the memory prompt had no mechanism for at all.
 	it("flags a prompt file that matches an OLD shipped default", () => {
-		const oldBase = "an older base prompt we used to ship";
-		const oldMemory = "older memory instructions we used to ship";
+		const oldPrompt = "an older agent prompt we used to ship";
+		const neverShipped = "text we never shipped";
 
-		expect(shippedVersion(oldBase, new Map([[1, fingerprint(oldBase)]]))).toBe(1);
+		expect(shippedVersion(oldPrompt, new Map([[1, fingerprint(oldPrompt)]]))).toBe(1);
 
 		// Two versions: the old one is not the newest key, so it reads as stale.
 		const history = new Map([
-			[1, fingerprint(oldBase)],
-			[2, fingerprint(BASE_SYSTEM_PROMPT)],
+			[1, fingerprint(oldPrompt)],
+			[2, fingerprint(DEFAULT_AGENT_PROMPT)],
 		]);
-		expect(shippedVersion(oldBase, history)).toBe(1);
-		expect(shippedVersion(BASE_SYSTEM_PROMPT, history)).toBe(2);
-		expect(shippedVersion(oldMemory, history)).toBeNull();
+		expect(shippedVersion(oldPrompt, history)).toBe(1);
+		expect(shippedVersion(DEFAULT_AGENT_PROMPT, history)).toBe(2);
+		expect(shippedVersion(neverShipped, history)).toBeNull();
 	});
 
 	it("flags stale skills reported by the skills service, keyed globally", () => {

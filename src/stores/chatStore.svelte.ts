@@ -11,7 +11,7 @@ import { type TFile } from "obsidian";
 import { SvelteMap } from "svelte/reactivity";
 import type { AgentStreamChunk, CheckpointHistoryItem, ThreadHistory } from "../agent/Agent";
 import type { AgentManager } from "../agent/AgentManager";
-import { BASE_SYSTEM_PROMPT } from "../agent/prompts";
+import { DEFAULT_AGENT_PROMPT } from "../agent/prompts";
 import type { ChatModelConfig } from "../providers/index";
 import type { ChatAttachment, ReviewStatusRef, ThreadError } from "../types/shared";
 import type { AgentConfig } from "../types/plugin";
@@ -2231,11 +2231,11 @@ export class ChatSession {
 	): Promise<boolean> {
 		const selectedAgent = getData().getSelectedAgent();
 		const contextWindow = selectedAgent.chatModel?.modelConfig?.contextWindow;
-		let systemPrompt = BASE_SYSTEM_PROMPT;
+		let systemPrompt = DEFAULT_AGENT_PROMPT;
 		try {
 			systemPrompt = await getPlugin().agentManager.assembleSystemPrompt();
 		} catch {
-			// Fall back to the base prompt if prompt assembly fails.
+			// Fall back to the default prompt if assembly fails.
 		}
 		const estimatedTokens =
 			estimateConversationBaseTokens(this.getActiveCheckpointMessages(), {

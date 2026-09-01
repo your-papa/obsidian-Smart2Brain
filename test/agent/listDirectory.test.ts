@@ -140,12 +140,11 @@ describe("listDirectory tool", () => {
 		expect(parsed.tree.folders.Public?.files.map((file) => file.name)).toEqual(["plan.md"]);
 	});
 
-	function mockDataWithAgentFolder(memoryEnabled: boolean) {
+	function mockDataWithAgentFolder() {
 		mockGetData.mockReturnValue({
 			agentFolder: "Agents",
 			getSelectedAgent: () => ({
 				chatModel: { provider: "openai" },
-				memoryEnabled,
 				toolsConfig: {
 					list_directory: {
 						name: "list_directory",
@@ -162,8 +161,8 @@ describe("listDirectory tool", () => {
 		createFile("Notes/todo.md"),
 	];
 
-	it("exposes the memory folder (and only it) from the agent tree when memory is enabled", async () => {
-		mockDataWithAgentFolder(true);
+	it("exposes the memory folder (and only it) from the agent tree", async () => {
+		mockDataWithAgentFolder();
 		const tool = createListDirectoryTool(createMockApp(agentTreeFiles()));
 
 		const result = await tool.invoke({ recursive: true, maxDepth: 4 });
@@ -180,9 +179,16 @@ describe("listDirectory tool", () => {
 		expect(parsed.tree.folders.Agents?.folders?.Skills).toBeUndefined();
 	});
 
-	it("hides the whole agent tree, memory folder included, when memory is disabled", async () => {
-		mockDataWithAgentFolder(false);
-		const tool = createListDirectoryTool(createMockApp(agentTreeFiles()));
+	/**
+	 * There is no per-agent memory flag any more: an agent that shouldn't use memory simply has
+	 * no `# Memory` section pointing it at the folder. Everything else under the agent root
+	 * stays hidden regardless.
+	 */
+	it("keeps the rest of the agent tree hidden", async () => {
+		mockDataWithAgentFolder();
+		const tool = createListDirectoryTool(
+			createMockApp([createFile("Agents/Skills/web/SKILL.md"), createFile("Notes/todo.md")]),
+		);
 
 		const result = await tool.invoke({ recursive: true, maxDepth: 4 });
 		const parsed = JSON.parse(String(result)) as { tree: { folders: Record<string, unknown> } };

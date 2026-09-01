@@ -23,29 +23,22 @@ vi.mock("../../src/stores/dataStore.svelte", () => ({
  * regardless of what has actually shipped — the same situation every install is in when a
  * default changes.
  */
-// The four strings are inlined in the factory rather than referenced from the consts below:
+// The two strings are inlined in the factory rather than referenced from the consts below:
 // `vi.mock` is hoisted above every top-level declaration, so closing over them would throw
 // "Cannot access before initialization". The consts mirror them for use in the tests.
 vi.mock("../../src/agent/prompts", async () => {
 	const { fingerprint } = await import("../../src/utils/shippedDefaults");
 	return {
-		BASE_SYSTEM_PROMPT: "the base prompt we ship at v2",
-		DEFAULT_MEMORY_PROMPT: "the memory prompt we ship at v2",
-		SHIPPED_BASE_PROMPTS: new Map([
-			[1, fingerprint("the base prompt we shipped at v1")],
-			[2, fingerprint("the base prompt we ship at v2")],
-		]),
-		SHIPPED_MEMORY_PROMPTS: new Map([
-			[1, fingerprint("the memory prompt we shipped at v1")],
-			[2, fingerprint("the memory prompt we ship at v2")],
+		DEFAULT_AGENT_PROMPT: "the agent prompt we ship at v2",
+		SHIPPED_AGENT_PROMPTS: new Map([
+			[1, fingerprint("the agent prompt we shipped at v1")],
+			[2, fingerprint("the agent prompt we ship at v2")],
 		]),
 	};
 });
 
-const OLD_BASE = "the base prompt we shipped at v1";
-const CURRENT_BASE = "the base prompt we ship at v2";
-const OLD_MEMORY = "the memory prompt we shipped at v1";
-const CURRENT_MEMORY = "the memory prompt we ship at v2";
+const OLD_PROMPT = "the agent prompt we shipped at v1";
+const CURRENT_PROMPT = "the agent prompt we ship at v2";
 
 import { PromptFilesService, parsePromptFile, serializePromptFile } from "../../src/agent/promptFiles";
 
@@ -57,9 +50,8 @@ function makeService(fake: ReturnType<typeof makeVaultFake>) {
 }
 
 const AGENTS = { "default-agent": { id: "default-agent" } } as never;
-const AGENT_DIR = "Agents/System Prompts/S2B Agent";
-const BASE_PATH = `${AGENT_DIR}/Base.md`;
-const MEMORY_PATH = `${AGENT_DIR}/Memory.md`;
+const AGENT_DIR = "Agents/S2B Agent";
+const PROMPT_PATH = `${AGENT_DIR}/AGENT.md`;
 
 describe("PromptFilesService.seedDefaults — reconciling existing files against shipped history", () => {
 	beforeEach(() => {
@@ -67,46 +59,40 @@ describe("PromptFilesService.seedDefaults — reconciling existing files against
 		state.agents = { "default-agent": { id: "default-agent", name: "S2B Agent" } };
 	});
 
-	// The mock factory inlines these same four strings (hoisting forbids referencing the
+	// The mock factory inlines these same two strings (hoisting forbids referencing the
 	// consts), so pin that the two copies agree — otherwise a typo in one would quietly turn
 	// every assertion below into a test of the wrong thing.
 	it("keeps the mocked defaults and the test constants in sync", async () => {
 		const prompts = await import("../../src/agent/prompts");
 		const { fingerprint } = await import("../../src/utils/shippedDefaults");
-		expect(prompts.BASE_SYSTEM_PROMPT).toBe(CURRENT_BASE);
-		expect(prompts.DEFAULT_MEMORY_PROMPT).toBe(CURRENT_MEMORY);
-		expect(prompts.SHIPPED_BASE_PROMPTS.get(1)).toBe(fingerprint(OLD_BASE));
-		expect(prompts.SHIPPED_MEMORY_PROMPTS.get(1)).toBe(fingerprint(OLD_MEMORY));
+		expect(prompts.DEFAULT_AGENT_PROMPT).toBe(CURRENT_PROMPT);
+		expect(prompts.SHIPPED_AGENT_PROMPTS.get(1)).toBe(fingerprint(OLD_PROMPT));
 	});
 
 	it("silently updates files still holding an OLD shipped default", async () => {
-		const fake = makeVaultFake({
-			[BASE_PATH]: serializePromptFile(OLD_BASE, 1),
-			[MEMORY_PATH]: serializePromptFile(OLD_MEMORY, 1),
-		});
+		const fake = makeVaultFake({ [PROMPT_PATH]: serializePromptFile(OLD_PROMPT, 1) });
 		await makeService(fake).seedDefaults(AGENTS);
 
-		expect(fake.files.get(BASE_PATH)).toBe(serializePromptFile(CURRENT_BASE, 2));
-		expect(fake.files.get(MEMORY_PATH)).toBe(serializePromptFile(CURRENT_MEMORY, 2));
+		expect(fake.files.get(PROMPT_PATH)).toBe(serializePromptFile(CURRENT_PROMPT, 2));
 	});
 
 	it("recognizes an old default through CRLF and a trailing newline", async () => {
 		// A round-trip through the vault adapter or an editor can reformat the file without
 		// the user editing it; that must not demote the copy to "customized".
-		const fake = makeVaultFake({ [BASE_PATH]: `${serializePromptFile(OLD_BASE, 1).replace(/\n/g, "\r\n")}\n` });
+		const fake = makeVaultFake({ [PROMPT_PATH]: `${serializePromptFile(OLD_PROMPT, 1).replace(/\n/g, "\r\n")}\n` });
 		await makeService(fake).seedDefaults(AGENTS);
 
-		expect(fake.files.get(BASE_PATH)).toBe(serializePromptFile(CURRENT_BASE, 2));
+		expect(fake.files.get(PROMPT_PATH)).toBe(serializePromptFile(CURRENT_PROMPT, 2));
 	});
 
 	it("leaves a file already on the current default untouched", async () => {
-		const fake = makeVaultFake({ [BASE_PATH]: serializePromptFile(CURRENT_BASE, 2) });
+		const fake = makeVaultFake({ [PROMPT_PATH]: serializePromptFile(CURRENT_PROMPT, 2) });
 		await makeService(fake).seedDefaults(AGENTS);
 
 		// No rewrite at all — reconcile decides from a cached read and must not even
 		// open a `process` transaction (which would bump the note's mtime) here.
 		expect(fake.vault.process).not.toHaveBeenCalledWith(
-			expect.objectContaining({ path: BASE_PATH }),
+			expect.objectContaining({ path: PROMPT_PATH }),
 			expect.anything(),
 		);
 		expect(fake.vault.modify).not.toHaveBeenCalled();
@@ -116,24 +102,19 @@ describe("PromptFilesService.seedDefaults — reconciling existing files against
 	// only the metadata block is missing. Rewriting canonically is what stamps existing
 	// vaults without anyone touching them.
 	it("self-heals a current-default file that lacks the frontmatter block", async () => {
-		const fake = makeVaultFake({ [BASE_PATH]: CURRENT_BASE });
+		const fake = makeVaultFake({ [PROMPT_PATH]: CURRENT_PROMPT });
 		await makeService(fake).seedDefaults(AGENTS);
 
-		expect(fake.files.get(BASE_PATH)).toBe(serializePromptFile(CURRENT_BASE, 2));
+		expect(fake.files.get(PROMPT_PATH)).toBe(serializePromptFile(CURRENT_PROMPT, 2));
 	});
 
 	it("never touches a user-customized file that already carries a baseline", async () => {
-		const editedBase = serializePromptFile(`${CURRENT_BASE}\n\nMy own additions.`, 2);
-		const editedMemory = serializePromptFile("entirely my own memory rules", 2);
-		const fake = makeVaultFake({ [BASE_PATH]: editedBase, [MEMORY_PATH]: editedMemory });
+		const edited = serializePromptFile(`${CURRENT_PROMPT}\n\nMy own additions.`, 2);
+		const fake = makeVaultFake({ [PROMPT_PATH]: edited });
 		await makeService(fake).seedDefaults(AGENTS);
 
 		expect(fake.vault.process).not.toHaveBeenCalledWith(
-			expect.objectContaining({ path: BASE_PATH }),
-			expect.anything(),
-		);
-		expect(fake.vault.process).not.toHaveBeenCalledWith(
-			expect.objectContaining({ path: MEMORY_PATH }),
+			expect.objectContaining({ path: PROMPT_PATH }),
 			expect.anything(),
 		);
 		expect(fake.vault.modify).not.toHaveBeenCalled();
@@ -143,8 +124,7 @@ describe("PromptFilesService.seedDefaults — reconciling existing files against
 		const fake = makeVaultFake();
 		await makeService(fake).seedDefaults(AGENTS);
 
-		expect(fake.files.get(BASE_PATH)).toBe(serializePromptFile(CURRENT_BASE, 2));
-		expect(fake.files.get(MEMORY_PATH)).toBe(serializePromptFile(CURRENT_MEMORY, 2));
+		expect(fake.files.get(PROMPT_PATH)).toBe(serializePromptFile(CURRENT_PROMPT, 2));
 	});
 
 	/*
@@ -154,26 +134,26 @@ describe("PromptFilesService.seedDefaults — reconciling existing files against
 	 */
 	it("keeps user-added properties when silently updating an old default", async () => {
 		const fake = makeVaultFake({
-			[BASE_PATH]: `---\nauthor: S2B\nversion: 1\ntags: [prompts]\ncssclass: wide\n---\n\n${OLD_BASE}\n`,
+			[PROMPT_PATH]: `---\nauthor: S2B\nversion: 1\ntags: [prompts]\ncssclass: wide\n---\n\n${OLD_PROMPT}\n`,
 		});
 		await makeService(fake).seedDefaults(AGENTS);
 
-		const raw = fake.files.get(BASE_PATH) ?? "";
+		const raw = fake.files.get(PROMPT_PATH) ?? "";
 		expect(raw).toContain("tags: [prompts]");
 		expect(raw).toContain("cssclass: wide");
-		expect(parsePromptFile(raw)).toEqual({ body: CURRENT_BASE, version: 2 });
+		expect(parsePromptFile(raw)).toEqual({ body: CURRENT_PROMPT, version: 2 });
 	});
 
 	it("keeps user-added properties when re-stamping a current-default body", async () => {
 		// Body already current, metadata stale — the canonical re-stamp path.
 		const fake = makeVaultFake({
-			[BASE_PATH]: `---\ntags: [prompts]\n---\n\n${CURRENT_BASE}\n`,
+			[PROMPT_PATH]: `---\ntags: [prompts]\n---\n\n${CURRENT_PROMPT}\n`,
 		});
 		await makeService(fake).seedDefaults(AGENTS);
 
-		const raw = fake.files.get(BASE_PATH) ?? "";
+		const raw = fake.files.get(PROMPT_PATH) ?? "";
 		expect(raw).toContain("tags: [prompts]");
-		expect(parsePromptFile(raw)).toEqual({ body: CURRENT_BASE, version: 2 });
+		expect(parsePromptFile(raw)).toEqual({ body: CURRENT_PROMPT, version: 2 });
 	});
 });
 
@@ -193,34 +173,33 @@ describe("PromptFilesService — baseline version in the note's frontmatter", ()
 		const fake = makeVaultFake();
 		await makeService(fake).seedDefaults(AGENTS);
 
-		expect(parsePromptFile(fake.files.get(BASE_PATH) ?? "").version).toBe(2);
-		expect(parsePromptFile(fake.files.get(MEMORY_PATH) ?? "").version).toBe(2);
+		expect(parsePromptFile(fake.files.get(PROMPT_PATH) ?? "").version).toBe(2);
 	});
 
 	it("stamps after the silent update of an old default", async () => {
-		const fake = makeVaultFake({ [BASE_PATH]: serializePromptFile(OLD_BASE, 1) });
+		const fake = makeVaultFake({ [PROMPT_PATH]: serializePromptFile(OLD_PROMPT, 1) });
 		await makeService(fake).seedDefaults(AGENTS);
 
-		expect(parsePromptFile(fake.files.get(BASE_PATH) ?? "").version).toBe(2);
+		expect(parsePromptFile(fake.files.get(PROMPT_PATH) ?? "").version).toBe(2);
 	});
 
 	it("stamps the user's save, so their edit is baselined at today's default", async () => {
 		const fake = makeVaultFake();
 		const svc = makeService(fake);
-		await svc.writeBasePrompt("default-agent", "my own prompt");
+		await svc.writeAgentPrompt("default-agent", "my own prompt");
 
 		// Their text is theirs, but it was written against v2 — a later v3 is what should
 		// raise the drift notice, not this save.
-		expect(parsePromptFile(fake.files.get(BASE_PATH) ?? "")).toEqual({ body: "my own prompt", version: 2 });
+		expect(parsePromptFile(fake.files.get(PROMPT_PATH) ?? "")).toEqual({ body: "my own prompt", version: 2 });
 	});
 
 	it("back-fills a baseline into a customized file that has none", async () => {
-		const fake = makeVaultFake({ [BASE_PATH]: "customized before stamps existed" });
+		const fake = makeVaultFake({ [PROMPT_PATH]: "customized before stamps existed" });
 		await makeService(fake).seedDefaults(AGENTS);
 
 		// Stamped at the current version, not backdated: backdating would claim their edit
 		// predates a change it may already incorporate. The body is untouched.
-		expect(parsePromptFile(fake.files.get(BASE_PATH) ?? "")).toEqual({
+		expect(parsePromptFile(fake.files.get(PROMPT_PATH) ?? "")).toEqual({
 			body: "customized before stamps existed",
 			version: 2,
 		});
@@ -228,23 +207,23 @@ describe("PromptFilesService — baseline version in the note's frontmatter", ()
 
 	it("back-fills the version without discarding user-added frontmatter keys", async () => {
 		const fake = makeVaultFake({
-			[BASE_PATH]: "---\ntags: [prompts]\n---\n\ncustomized with my own properties",
+			[PROMPT_PATH]: "---\ntags: [prompts]\n---\n\ncustomized with my own properties",
 		});
 		await makeService(fake).seedDefaults(AGENTS);
 
-		const raw = fake.files.get(BASE_PATH) ?? "";
+		const raw = fake.files.get(PROMPT_PATH) ?? "";
 		expect(raw).toContain("tags: [prompts]");
 		expect(parsePromptFile(raw)).toEqual({ body: "customized with my own properties", version: 2 });
 	});
 
 	it("never overwrites an existing older baseline on seed", async () => {
 		const fake = makeVaultFake({
-			[BASE_PATH]: serializePromptFile("my customization, written against v1", 1),
+			[PROMPT_PATH]: serializePromptFile("my customization, written against v1", 1),
 		});
 		await makeService(fake).seedDefaults(AGENTS);
 
 		// Overwriting with 2 here would erase exactly the drift the stamp exists to detect.
-		expect(parsePromptFile(fake.files.get(BASE_PATH) ?? "").version).toBe(1);
+		expect(parsePromptFile(fake.files.get(PROMPT_PATH) ?? "").version).toBe(1);
 	});
 
 	/*
@@ -254,25 +233,25 @@ describe("PromptFilesService — baseline version in the note's frontmatter", ()
 	 */
 	it("carries the source's older baseline to a duplicated agent", async () => {
 		state.agents.copy = { id: "copy", name: "Copy" };
-		const fake = makeVaultFake({ [BASE_PATH]: serializePromptFile("customization based on v1", 1) });
+		const fake = makeVaultFake({ [PROMPT_PATH]: serializePromptFile("customization based on v1", 1) });
 		const svc = makeService(fake);
 		await svc.refresh(AGENTS);
 
-		await svc.copyAgentPrompts("default-agent", "copy");
+		await svc.copyAgentPrompt("default-agent", "copy");
 
-		const copied = fake.files.get("Agents/System Prompts/Copy/Base.md") ?? "";
+		const copied = fake.files.get("Agents/Copy/AGENT.md") ?? "";
 		expect(parsePromptFile(copied)).toEqual({ body: "customization based on v1", version: 1 });
 	});
 
 	it("keeps a duplicate's baseline unknown when the source note has no frontmatter", async () => {
 		state.agents.copy = { id: "copy", name: "Copy" };
-		const fake = makeVaultFake({ [BASE_PATH]: "customization with the frontmatter removed" });
+		const fake = makeVaultFake({ [PROMPT_PATH]: "customization with the frontmatter removed" });
 		const svc = makeService(fake);
 		await svc.refresh(AGENTS);
 
-		await svc.copyAgentPrompts("default-agent", "copy");
+		await svc.copyAgentPrompt("default-agent", "copy");
 
-		const copied = fake.files.get("Agents/System Prompts/Copy/Base.md") ?? "";
+		const copied = fake.files.get("Agents/Copy/AGENT.md") ?? "";
 		expect(parsePromptFile(copied).version).toBeUndefined();
 	});
 
@@ -281,8 +260,8 @@ describe("PromptFilesService — baseline version in the note's frontmatter", ()
 		const fake = makeVaultFake();
 		const svc = makeService(fake);
 
-		await svc.copyAgentPrompts("default-agent", "copy");
+		await svc.copyAgentPrompt("default-agent", "copy");
 
-		expect(fake.files.get("Agents/System Prompts/Copy/Base.md")).toBe(serializePromptFile(CURRENT_BASE, 2));
+		expect(fake.files.get("Agents/Copy/AGENT.md")).toBe(serializePromptFile(CURRENT_PROMPT, 2));
 	});
 });

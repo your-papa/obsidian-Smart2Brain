@@ -273,7 +273,7 @@ export function filterPluginNudges(candidates: readonly PluginNudge[], dismissed
  * from types/plugin — duplicated here to keep this module free of the plugin-types
  * import (it stays pure/unit-testable). Keep the two in sync.
  */
-export type UpdateNoticeKind = "system-prompt" | "memory-prompt" | "skill";
+export type UpdateNoticeKind = "system-prompt" | "skill";
 
 /**
  * A notice that a shipped default changed upstream while the user had a customization of

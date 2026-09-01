@@ -155,7 +155,7 @@ export const BUILT_IN_TOOL_IDS = [
 export type BuiltInToolId = (typeof BUILT_IN_TOOL_IDS)[number];
 
 /**
- * A parsed prompt file (`Base.md` / `Memory.md`): the prompt text with the plugin-managed
+ * A parsed agent definition note (`AGENT.md`): the prompt text with the plugin-managed
  * metadata frontmatter stripped, plus the shipped baseline version that frontmatter records.
  *
  * `version` is what makes "the default moved out from under YOUR edit" detectable. A
@@ -174,16 +174,14 @@ export interface PromptFileSnapshot {
 }
 
 /**
- * Reader for the file-backed prompt surfaces (per-agent base + memory prompt). Returns the
+ * Reader for the file-backed prompt surface (each agent's own definition note). Returns the
  * current cached parse, or null when the file is absent. Implemented by the prompt-file
  * layer and injected into the data store so staleness detection stays synchronous inside
  * the reactive `staleGuidance` getter.
  */
 export interface PromptFileReader {
-	/** Cached parse of `System Prompts/<Agent Name>/Base.md`, or null if absent. */
-	getBasePromptFile(agentId: string): PromptFileSnapshot | null;
-	/** Cached parse of `System Prompts/<Agent Name>/Memory.md`, or null if absent. */
-	getMemoryPromptFile(agentId: string): PromptFileSnapshot | null;
+	/** Cached parse of `<Agent Name>/AGENT.md`, or null if absent. */
+	getAgentPromptFile(agentId: string): PromptFileSnapshot | null;
 }
 
 /**
@@ -200,7 +198,7 @@ export interface StaleGuidance {
 	agentId?: string;
 	agentName?: string;
 	/** Which surface is stale. */
-	kind: "system-prompt" | "memory-prompt" | "skill";
+	kind: "system-prompt" | "skill";
 	/** Human-readable label for the notice, e.g. "system prompt". */
 	label: string;
 	/** For `kind: "skill"`, the bundled skill's name — used to open its note on Review. */
@@ -464,24 +462,13 @@ export interface AgentConfig {
 	 * own `subAgentIds` are ignored.
 	 */
 	subAgentIds?: string[];
-	/**
-	 * Whether this agent records and recalls long-lived facts in the shared memory folder.
-	 * Absent = disabled. When enabled (and `manage_notes` is on), the memory guidance is
-	 * interpolated into the assembled system prompt and note writes inside the global
-	 * `Agents/Memories/` folder auto-apply.
-	 *
-	 * The folder is global (remembered facts belong to the user, not to one agent); the
-	 * guidance injected here is per-agent, living in
-	 * `Agents/System Prompts/<Agent Name>/Memory.md` (see `PromptFilesService`), because how
-	 * eagerly to read/record is agent behavior.
-	 */
-	memoryEnabled?: boolean;
+	// NOTE: whether an agent uses memory is no longer config either. The memory machinery
+	// (auto-applied writes in `Agents/Memories/`, that folder's `list_directory` visibility) is
+	// always on; participation is decided by the `# Memory` section of the agent's own AGENT.md,
+	// which the user can simply delete. See `PromptFilesService`.
 	// NOTE: the prompt baseline version is no longer agent config — it lives in the prompt
 	// note's own frontmatter (see PromptFileSnapshot), so it travels with the file.
 }
-
-/** The two file-backed prompt surfaces, as stable ids ("base" / "memory"). */
-export type PromptKindId = "base" | "memory";
 
 /**
  * Record of agent configurations keyed by agent ID
@@ -522,11 +509,10 @@ export interface PluginData {
 	attachmentFolder: string;
 	/**
 	 * Configurable root vault folder for all agent context (default "Agents"). Holds three
-	 * fixed subdirectories: `Memories/` (shared memory notes), `Skills/` (skill
-	 * `<name>/SKILL.md` dirs, core skills included), and `System Prompts/` (one
-	 * `<Agent Name>/` subfolder per agent, holding that agent's `Base.md` and `Memory.md`).
-	 * The whole tree is plugin machinery, excluded from indexing/search/graph via
-	 * `isAgentFilePath`.
+	 * fixed subdirectories: `Memories/` (shared memory notes) and `Skills/` (skill
+	 * `<name>/SKILL.md` dirs, core skills included), plus one `<Agent Name>/` folder per agent
+	 * holding that agent's `AGENT.md` definition note. The whole tree is plugin machinery,
+	 * excluded from indexing/search/graph via `isAgentFilePath`.
 	 */
 	agentFolder: string;
 	/**
