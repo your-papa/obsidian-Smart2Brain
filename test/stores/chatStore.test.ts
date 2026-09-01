@@ -474,6 +474,136 @@ describe("deriveMessagePairsFromActiveCheckpoint", () => {
 });
 
 /* --------------------------------------------------------------------------
+ * Summarized history recovery (#434)
+ * ------------------------------------------------------------------------*/
+
+describe("summarized history recovery", () => {
+	function autoSummary(id: string) {
+		return new HumanMessage({
+			content: "Previous conversation summary\n\nUser is planning a thesis.",
+			id,
+			additional_kwargs: { lc_source: "summarization" },
+		});
+	}
+
+	/**
+	 * Simulates the middleware's effect: the summarization checkpoint's channel
+	 * is [summary, ...kept window], while earlier checkpoints keep the full
+	 * history. Summarization runs mid-turn, after h3 was asked but before a3.
+	 */
+	function summarizedGraph() {
+		const h1 = humanMsg("q1", "h-1");
+		const a1 = aiMsg("ans1", "a-1");
+		const h2 = humanMsg("q2", "h-2");
+		const a2 = aiMsg("ans2", "a-2");
+		const h3 = humanMsg("q3", "h-3");
+		const a3 = aiMsg("ans3", "a-3");
+		const summary = autoSummary("summary-1");
+
+		const graph = buildCheckpointGraph([
+			makeCheckpoint("cp-root", -1, []),
+			makeCheckpoint("cp-h1", 0, [h1], "cp-root", "2024-01-01T00:01:00Z"),
+			makeCheckpoint("cp-a1", 1, [h1, a1], "cp-h1", "2024-01-01T00:02:00Z"),
+			makeCheckpoint("cp-h2", 2, [h1, a1, h2], "cp-a1", "2024-01-01T00:03:00Z"),
+			makeCheckpoint("cp-a2", 3, [h1, a1, h2, a2], "cp-h2", "2024-01-01T00:04:00Z"),
+			makeCheckpoint("cp-h3", 4, [h1, a1, h2, a2, h3], "cp-a2", "2024-01-01T00:05:00Z"),
+			makeCheckpoint("cp-sum", 5, [summary, h2, a2, h3], "cp-h3", "2024-01-01T00:06:00Z"),
+			makeCheckpoint("cp-a3", 6, [summary, h2, a2, h3, a3], "cp-sum", "2024-01-01T00:07:00Z"),
+		]);
+		graph.activeCheckpointId = "cp-a3";
+		return graph;
+	}
+
+	it("restores turns trimmed by summarization from earlier checkpoints", () => {
+		const pairs = deriveMessagePairsFromActiveCheckpoint(summarizedGraph(), "cp-a3");
+
+		expect(pairs).toHaveLength(4);
+		expect(pairs[0].userMessage.content).toBe("q1");
+		expect(pairs[0].assistantMessage.content).toBe("ans1");
+		expect(pairs[1].userMessage.content).toBe("q2");
+		expect(pairs[1].assistantMessage.content).toBe("ans2");
+		// The marker sits before the turn that triggered summarization, not
+		// between its question and answer.
+		expect(pairs[2].transcriptEvent?.type).toBe("summarization_marker");
+		expect(pairs[3].userMessage.content).toBe("q3");
+		expect(pairs[3].assistantMessage.content).toBe("ans3");
+	});
+
+	it("keeps branching metadata on recovered turns", () => {
+		const pairs = deriveMessagePairsFromActiveCheckpoint(summarizedGraph(), "cp-a3");
+
+		// q1 exists only in pre-summarization checkpoints; edit/regenerate must
+		// still resolve to those checkpoints so forking from it works.
+		expect(pairs[0].regenerateFromCheckpointId).toBe("cp-h1");
+		expect(pairs[0].editFromCheckpointId).toBe("cp-root");
+		// h3 is also the last message of the summarization checkpoint, which
+		// wins as the later fork point — regenerating uses the summarized
+		// context, matching what the model actually sees.
+		expect(pairs[3].regenerateFromCheckpointId).toBe("cp-sum");
+	});
+
+	it("falls back to the tip's trimmed view when earlier checkpoints are missing", () => {
+		const h3 = humanMsg("q3", "h-3");
+		const a3 = aiMsg("ans3", "a-3");
+		const graph = buildCheckpointGraph([
+			makeCheckpoint("cp-a3", 6, [autoSummary("summary-1"), h3, a3], undefined, "2024-01-01T00:07:00Z"),
+		]);
+
+		const pairs = deriveMessagePairsFromActiveCheckpoint(graph, "cp-a3");
+		expect(pairs).toHaveLength(2);
+		expect(pairs[0].transcriptEvent?.type).toBe("summarization_marker");
+		expect(pairs[1].userMessage.content).toBe("q3");
+		expect(pairs[1].assistantMessage.content).toBe("ans3");
+	});
+
+	it("keeps a manual compaction marker at its chronological position and hides its ack", () => {
+		const h1 = humanMsg("Hello", "h-1");
+		const a1 = aiMsg("Hi", "a-1");
+		const compactPrompt = new HumanMessage({
+			content: "Summarize older conversation history now.",
+			id: "compact-1",
+			additional_kwargs: { lc_source: "manual_summarization" },
+		});
+		const ack = aiMsg("Context compacted.", "ack-1");
+		const h2 = humanMsg("Continue", "h-2");
+		const a2 = aiMsg("Done", "a-2");
+
+		const graph = buildCheckpointGraph([
+			makeCheckpoint("cp-root", -1, []),
+			makeCheckpoint("cp-h1", 0, [h1], "cp-root", "2024-01-01T00:01:00Z"),
+			makeCheckpoint("cp-a1", 1, [h1, a1], "cp-h1", "2024-01-01T00:02:00Z"),
+			makeCheckpoint("cp-compact", 2, [h1, a1, compactPrompt, ack], "cp-a1", "2024-01-01T00:03:00Z"),
+			makeCheckpoint("cp-trim", 3, [compactPrompt, ack], "cp-compact", "2024-01-01T00:04:00Z"),
+			makeCheckpoint("cp-h2", 4, [compactPrompt, ack, h2], "cp-trim", "2024-01-01T00:05:00Z"),
+			makeCheckpoint("cp-a2", 5, [compactPrompt, ack, h2, a2], "cp-h2", "2024-01-01T00:06:00Z"),
+		]);
+
+		const pairs = deriveMessagePairsFromActiveCheckpoint(graph, "cp-a2");
+		expect(pairs).toHaveLength(3);
+		expect(pairs[0].userMessage.content).toBe("Hello");
+		expect(pairs[0].assistantMessage.content).toBe("Hi");
+		expect(pairs[1].transcriptEvent?.type).toBe("summarization_marker");
+		expect(pairs[1].transcriptEvent?.source).toBe("manual_summarization");
+		expect(pairs[2].userMessage.content).toBe("Continue");
+		expect(pairs[2].assistantMessage.content).toBe("Done");
+	});
+
+	it("does not alter threads that were never summarized", () => {
+		const h = humanMsg("Hello", "h-1");
+		const a = aiMsg("Hi!", "a-1");
+		const graph = buildCheckpointGraph([
+			makeCheckpoint("cp-root", -1, []),
+			makeCheckpoint("cp-1", 0, [h], "cp-root", "2024-01-01T00:01:00Z"),
+			makeCheckpoint("cp-2", 1, [h, a], "cp-1", "2024-01-01T00:02:00Z"),
+		]);
+
+		const pairs = deriveMessagePairsFromActiveCheckpoint(graph, "cp-2");
+		expect(pairs).toHaveLength(1);
+		expect(pairs[0].userMessage.content).toBe("Hello");
+	});
+});
+
+/* --------------------------------------------------------------------------
  * Branch info derivation
  * ------------------------------------------------------------------------*/
 
