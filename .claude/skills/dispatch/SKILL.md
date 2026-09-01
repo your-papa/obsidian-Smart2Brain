@@ -30,8 +30,12 @@ For each task Leo gives:
 
 1. Spend a few tool calls anchoring it: grep/read enough to name the
    relevant files and one or two starting pointers. Don't solve it.
-2. Write a SELF-CONTAINED brief (worker sessions start cold) and create a
-   chip via `spawn_task` with cwd = the main checkout. The brief must
+2. Write a SELF-CONTAINED brief (workers start cold) and dispatch it.
+   **Default: auto-dispatch** — launch a background worker with the Agent
+   tool (`run_in_background: true`), no user click needed. Pick the model
+   per task: strong model for real engineering, smaller for mechanical
+   chores. Fall back to a `spawn_task` chip only if Leo wants the task as
+   a separate visible session he can chat with directly. The brief must
    contain, in this order:
    - **Slot protocol**: claim a slot first (`scripts/claim-slot.sh <label>`),
      work on a branch from origin/dev in the slot worktree, one-shot dev
@@ -46,9 +50,12 @@ For each task Leo gives:
      (Greptile) to a clean state per AGENTS.md step 6 — fix or answer every
      finding, push, wait for the re-review of the newest commit. Never
      merge; merging is the dispatcher's job after Leo's live test.
-   - **Ping-back protocol**: message the dispatcher (send_message,
-     session_id <this session's id>) on: PR opened ("PR <n> opened: …"),
-     bot-clean ("PR <n> bot-clean at <commit>"), or blocked (with reason).
+   - **Ping-back protocol**: report to the dispatcher on: PR opened
+     ("PR <n> opened: …"), bot-clean ("PR <n> bot-clean at <commit>"), or
+     blocked (with reason). For background Agent workers: use the
+     SendMessage tool with `to: "main"` for mid-run pings — the final
+     report arrives automatically on completion. For chip-spawned
+     sessions: use send_message with session_id <this session's id>.
      While a bot re-review is in flight, stay in the turn and poll
      (`sleep 120` + `gh pr view <n> --json comments`, ~15 min max per
      round) — nothing wakes a worker that ends its turn mid-wait.
@@ -87,8 +94,16 @@ For each task Leo gives:
 - Parallelism caps at the slot count (3). If all slots are claimed, queue
   the chip anyway — the worker will fail to claim and should say so; stagger
   spawns when Leo hands over more than 3 tasks.
-- spawn_task cannot choose the spawned session's model; Leo picks models
-  per session in the app UI. The dispatcher itself runs fine on a smaller
-  model; workers should stay on a strong one.
+- Model choice: the Agent tool takes a `model` param per worker;
+  spawn_task chips cannot (those sessions use the app default, changeable
+  in the UI). The dispatcher itself runs fine on a smaller model.
+- Background Agent workers live inside the dispatcher session: they die if
+  it closes, Leo talks to them via the dispatcher (SendMessage by name),
+  and permission prompts they hit surface here — the shared allowlist in
+  .claude/settings.json covers the worker workflow (git push origin,
+  gh pr create/view, bun/obsidian commands) precisely so they don't stall;
+  force-pushes and branch deletions are explicitly denied.
+- Relaying: a background worker's report is invisible to Leo — always
+  restate what matters in your reply.
 - Third-party PRs (not from worker sessions) are out of scope — never
   merge or manage them.
