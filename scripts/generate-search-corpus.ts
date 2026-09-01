@@ -1079,6 +1079,186 @@ const DISTRACTORS: readonly Distractor[] = [
 	},
 ];
 
+// ── phrase-sensitivity pairs ─────────────────────────────────────────────────
+
+/**
+ * Phrase pairs: does word *adjacency* carry any ranking weight at all?
+ *
+ * MiniSearch's inverted index stores term frequencies but no positions, so the
+ * lexical leg is bag-of-words by construction — a note containing "deep scattering
+ * layer" verbatim and a note containing "deep", "scattering" and "layer" in three
+ * unrelated sentences present identical lexical evidence. These pairs exist to turn
+ * that structural fact into a measured number *per retrieval leg*, before deciding
+ * whether a phrase-aware re-rank is worth building.
+ *
+ * Each pair is one target and one decoy in the same domain, shaped so the contest
+ * is decided by adjacency and nothing else:
+ *
+ *  - the TARGET contains the query's phrase verbatim; its other query-term
+ *    occurrences are kept minimal, so the phrase is its evidence;
+ *  - the DECOY uses every word of the phrase at **equal or higher frequency**,
+ *    scattered across sentences in honestly different senses, never adjacent —
+ *    to a bag-of-words scorer it is at least as good a match;
+ *  - **neither title contains any query term**, so `calculateTitleBoost` stays
+ *    silent and the contest happens in the content field;
+ *  - both bodies are comparable in length, so chunk-count and length
+ *    normalization do not decide it (the same reason the Zettel layer asserts
+ *    pair balance).
+ *
+ * Bodies are verbatim rather than generated: exact term frequencies are the whole
+ * point, and hand-written prose keeps them reviewable. Verbatim bodies also consume
+ * no draws from the shared `rng`, so adding a pair is genuinely additive — the rest
+ * of the corpus stays byte-identical (see `fillerSentenceFrom` for why that
+ * matters).
+ *
+ * Like the decoys in the Zettel layer — and unlike `DISTRACTORS` — no decoy here
+ * declares its own irrelevance. Each is honestly about its own subject (winter
+ * logistics, editorial process, sediment cores); it merely owns the phrase's words
+ * in other senses, which is what real vaults do.
+ *
+ * Graded in `PHRASE_JUDGMENTS` (held out of the ratcheted tiers) and scored per
+ * leg by the benchmark's phrase block. The shape is asserted at generation time —
+ * see the guard in `main()`.
+ */
+interface PhrasePairNote {
+	slug: string;
+	title: string;
+	/** Verbatim body — hand-written so term frequencies are exact and reviewable. */
+	body: string;
+}
+
+interface PhrasePair {
+	/**
+	 * The multi-word phrase under test. Must appear verbatim in `target.body`,
+	 * never in `decoy.body` (nor any adjacent two-word fragment of it).
+	 */
+	phrase: string;
+	domain: string;
+	/** Every significant term of the benchmark query, for the title-cleanliness guard. */
+	queryTerms: readonly string[];
+	target: PhrasePairNote;
+	decoy: PhrasePairNote;
+}
+
+const PHRASE_PAIRS: readonly PhrasePair[] = [
+	{
+		phrase: "cold chain",
+		domain: "Fermentation",
+		// Query: "where does the cold chain usually break"
+		queryTerms: ["cold", "chain", "usually", "break"],
+		target: {
+			slug: "phrase-target-cold-chain",
+			title: "Courier Logistics for Live Cultures",
+			body: `Shipping a live culture is mostly a question of keeping the cold chain intact from the packing bench to the recipient's fridge. The last courier leg is where the cold chain usually breaks: parcels ride unrefrigerated for the final stretch, and a summer afternoon is enough to push a kefir culture past recovery.
+
+## Packing
+
+Gel packs hold an insulated box below eight degrees for about thirty hours. That covers a next-day service with margin and a two-day service with none, so the day of dispatch matters more than the courier brand — a Friday parcel spends the weekend in a depot, and no packing survives that.
+
+## Handovers
+
+Depot transfers are the weak link. Every handover adds twenty to forty minutes at ambient temperature, and three in a row defeat the gel packs even in January. A shipment that arrives warm smells sharp rather than lactic; the balance has tipped toward the acetic side, and a week of refreshes is needed before the culture behaves again.
+
+## Receiving
+
+Ask the recipient to refrigerate immediately and feed within twelve hours. A cold chain that held all the way to the doorstep still ends there — an afternoon on a porch undoes everything upstream of it.`,
+		},
+		decoy: {
+			slug: "phrase-decoy-cold-chain",
+			title: "Basement Temperatures in January",
+			body: `The basement runs four degrees colder than the kitchen from November through March, and every ferment down there moves to a different clock. Cold slows the yeast well before it slows the bacteria, so flavour drifts sour long before the rise finishes; a batch that usually takes two days can sit for five.
+
+## Supply
+
+Deliveries are the other winter problem. The mill consolidated its distribution chain in the autumn, and the flour now passes through one more warehouse than before. Nothing in that chain is refrigerated, nor needs to be, but the extra day in transit means the rye arrives noticeably older.
+
+## Managing the room
+
+A cold room does not stop a culture, it stretches it. The practical answer is a chain of small adjustments rather than one big one: warmer water at each refresh, a smaller inoculation, jars moved to the top shelf where the air is least cold. When the weather finally breaks in March, everything speeds up at once and the schedule has to be rebuilt in the opposite direction.`,
+		},
+	},
+	{
+		phrase: "forward guidance",
+		domain: "Monetary Policy",
+		// Query: "does forward guidance actually move expectations"
+		queryTerms: ["forward", "guidance", "actually", "move", "expectations"],
+		target: {
+			slug: "phrase-target-forward-guidance",
+			title: "Promises About the Future Stance",
+			body: `When the instrument itself has no room left, the announcement becomes the instrument. Forward guidance works — when it works — by moving expectations of where the stance will sit two years out, which is the horizon most long contracts actually price against.
+
+## Evidence
+
+Event studies around guidance announcements show medium-term yields moving within minutes, well before any balance-sheet action follows. The effect is largest when the commitment is stated in calendar terms and smallest when it is hedged with outcome clauses that markets read as escape hatches.
+
+## Limits
+
+Forward guidance borrows credibility rather than creating it. A committee that has revised its stated path twice in a year finds that expectations stop moving on the third announcement; the statement is heard, parsed, and discounted. At that point the promise adds volatility instead of removing it, because every release is read as a test of whether the commitment still holds.
+
+## Working note
+
+The practical question for the next cycle is not whether forward guidance moves markets on the day — it demonstrably does — but whether the shift in expectations survives the first surprise that argues against the promised path.`,
+		},
+		decoy: {
+			slug: "phrase-decoy-forward-guidance",
+			title: "Preparing the Quarterly Bulletin",
+			body: `The bulletin goes to layout six weeks before publication, which means the editorial calendar runs permanently ahead of the material it describes. Sections that miss the cut are carried forward to the next issue, and about a third of what is carried forward gets cut again.
+
+## House style
+
+Authors get two pages of style guidance and ignore most of it. The guidance that actually sticks is structural: state the finding in the first sentence, keep charts to one message each, and never move a caveat into a footnote. Everything else — hyphenation, capitalisation, the ban on the word "significant" — has to be enforced in the edit.
+
+## Review
+
+Drafts move through three reviewers in sequence, and the schedule assumes each pass takes a week. Reviewer expectations differ enough that authors have learned to read the roster before writing: one wants the method up front, another sends anything back that leads with equations. The editor's guidance on this is to write for the slowest reader and let the fast ones skim.
+
+## Production
+
+Going forward, the print run drops again this year and the tables move to an online annex. Reader expectations have shifted with the format: the emails now ask for the underlying series, not the pdf. The style guidance for the annex is still a draft, and usually one section of it changes per issue.`,
+		},
+	},
+	{
+		phrase: "deep scattering layer",
+		domain: "Marine Biology",
+		// Query: "why does the deep scattering layer rise at night"
+		queryTerms: ["deep", "scattering", "layer", "rise", "night"],
+		target: {
+			slug: "phrase-target-deep-scattering-layer",
+			title: "Sonar Echoes That Migrate Daily",
+			body: `Early echo sounders reported a second seafloor at three to four hundred metres — one that moved. The false bottom is the deep scattering layer: lanternfish, siphonophores and krill packed densely enough to reflect sound, spread across whole ocean basins.
+
+## Why it moves
+
+The deep scattering layer rises toward the surface at night and sinks again before dawn, tracking its food while staying out of sight. Daylight makes shallow water lethal for a small silvery fish — visual predators hunt by silhouette — so the layer feeds in darkness and spends the day where the light cannot follow. The swim bladders that make lanternfish so acoustically loud are the same organs that let them make the trip twice a day.
+
+## Measuring it
+
+Ship transducers see the layer compress and thin as it ascends; the echo weakens near the surface because the fish spread out to feed. Moonlight matters — on bright nights the ascent stops metres short of the surface, and during a full lunar eclipse the layer has been recorded climbing in the middle of the night as if a switch had flipped.
+
+## Note
+
+The daily vertical commute of the deep scattering layer is plausibly the largest synchronized movement of animals on the planet, and it happens twice every day, unseen.`,
+		},
+		decoy: {
+			slug: "phrase-decoy-deep-scattering-layer",
+			title: "Shelf Sediment Core Notes",
+			body: `Cores from the shelf transect came up in good condition, and the lab work is mostly about reading the layer sequence in order. Each layer records a season of deposition, and the boundaries between one layer and the next are sharper in the deep basin cores than on the slope, where burrowing animals blur them.
+
+## Optics
+
+Turbidity profiles from the same stations show strong light scattering in the upper water column after storms, and the scattering falls off quickly with depth. We log the scattering coefficient alongside each cast so the optics can be matched to the surface sediment later.
+
+## Deep stations
+
+The deep cores took three times as long to recover, and two came up short. In the deepest one the bottom layer is laminated — no burrowers at all — which argues for low oxygen at the time the layer formed. Sea level rise complicates the shallow end of the transect instead: the top layer at the two inshore stations is reworked storm sand rather than quiet deposition.
+
+## Logistics
+
+Night sampling worked better than expected; the winch queue clears after dark and we got four extra casts a night. The remaining deep stations are scheduled for the next cruise, weather permitting, and the lamination question stays open until the geochemistry comes back.`,
+		},
+	},
+];
+
 // ── Zettelkasten layer ───────────────────────────────────────────────────────
 
 /**
@@ -1990,6 +2170,69 @@ function main(): void {
 		write(domain, titleToFilename(distractor.title), content);
 	}
 
+	// 3b. Phrase pairs — verbatim bodies, so this step consumes NO draws from the
+	//     shared `rng`; everything generated after it stays byte-identical.
+	for (const pair of PHRASE_PAIRS) {
+		const domain = domainByName(pair.domain);
+		const targetContent = `${frontmatter([domain.tag, "hard", "phrase"])}# ${pair.target.title}\n\n${pair.target.body}\n`;
+		write(domain, titleToFilename(pair.target.title), targetContent);
+		const decoyContent = `${frontmatter([domain.tag, "hard", "phrase", "distractor"])}# ${pair.decoy.title}\n\n${pair.decoy.body}\n`;
+		write(domain, titleToFilename(pair.decoy.title), decoyContent);
+	}
+
+	// Guard: a phrase pair only measures adjacency if its shape holds. Four things
+	// can silently rot under ordinary prose edits, and each one converts the case
+	// into a different (wrong) measurement:
+	//  - the target losing the verbatim phrase (nothing left to reward);
+	//  - the decoy acquiring an adjacent fragment of it (partial credit leaks in);
+	//  - the decoy's term frequency dropping below the target's (the case becomes
+	//    an ordinary TF contest that bag-of-words already wins correctly);
+	//  - a query term drifting into either title (calculateTitleBoost starts
+	//    deciding a contest that must happen in the content field).
+	const countWord = (text: string, word: string): number =>
+		(text.toLowerCase().match(new RegExp(`\\b${word}\\b`, "gu")) ?? []).length;
+	for (const pair of PHRASE_PAIRS) {
+		const tokens = pair.phrase.toLowerCase().split(/\s+/);
+		const targetBody = pair.target.body.toLowerCase();
+		const decoyBody = pair.decoy.body.toLowerCase();
+
+		if (!new RegExp(`\\b${tokens.join("\\s+")}\\b`, "u").test(targetBody)) {
+			throw new Error(`Phrase pair "${pair.phrase}": target body no longer contains the phrase verbatim.`);
+		}
+		for (let i = 0; i < tokens.length - 1; i++) {
+			const bigram = new RegExp(`\\b${tokens[i]}\\s+${tokens[i + 1]}\\b`, "u");
+			if (bigram.test(decoyBody)) {
+				throw new Error(
+					`Phrase pair "${pair.phrase}": decoy body contains the adjacent fragment "${tokens[i]} ${tokens[i + 1]}".\nThe decoy must hold the phrase's words scattered, never adjacent — that is the whole contest.`,
+				);
+			}
+		}
+		for (const token of tokens) {
+			const inTarget = countWord(targetBody, token);
+			const inDecoy = countWord(decoyBody, token);
+			if (inTarget < 1) {
+				throw new Error(`Phrase pair "${pair.phrase}": target body never uses "${token}".`);
+			}
+			if (inDecoy < inTarget) {
+				throw new Error(
+					`Phrase pair "${pair.phrase}": decoy uses "${token}" ${inDecoy}x vs the target's ${inTarget}x.\nThe decoy must match every phrase word at equal or higher frequency, so a bag-of-words scorer sees it as at least as good — otherwise the case is a TF contest, not an adjacency one.`,
+				);
+			}
+		}
+		for (const term of pair.queryTerms) {
+			for (const [role, title] of [
+				["target", pair.target.title],
+				["decoy", pair.decoy.title],
+			] as const) {
+				if (countWord(title.toLowerCase(), term) > 0) {
+					throw new Error(
+						`Phrase pair "${pair.phrase}": ${role} title "${title}" contains the query term "${term}".\nTitles must stay clean of query terms so the contest is decided in the content field, not by calculateTitleBoost.`,
+					);
+				}
+			}
+		}
+	}
+
 	// 4. Bulk filler — gives the corpus realistic scale so rank-sensitive behaviour
 	//    (cutoffs, normalization) is exercised rather than trivially satisfied.
 	//    Lengths follow a long-tailed spread instead of the old bimodal fixture.
@@ -2274,7 +2517,9 @@ function main(): void {
 	const lengths = written.map((w) => w.words).sort((a, b) => a - b);
 	const median = lengths[Math.floor(lengths.length / 2)];
 	console.log(`Wrote ${written.length} notes to ${corpusRoot}`);
-	console.log(`  probes: ${PROBES.length}, hard probes: ${HARD_PROBES.length}, distractors: ${DISTRACTORS.length}`);
+	console.log(
+		`  probes: ${PROBES.length}, hard probes: ${HARD_PROBES.length}, distractors: ${DISTRACTORS.length}, phrase pairs: ${PHRASE_PAIRS.length}`,
+	);
 	console.log(`Wrote ${ZETTEL_NOTES.length} flat Zettelkasten notes to ${join(vaultPath, ZETTEL_DIR)}`);
 	console.log(
 		`  words: total ${totalWords}, median ${median}, min ${lengths[0]}, max ${lengths[lengths.length - 1]}`,

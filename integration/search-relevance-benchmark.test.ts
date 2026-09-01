@@ -8,6 +8,7 @@ import {
 	waitForStandaloneMiniSearch,
 } from "./helpers/cli.ts";
 import {
+	PHRASE_JUDGMENTS,
 	REFORMULATION_JUDGMENTS,
 	RELEVANCE_JUDGMENTS,
 	ndcgAt,
@@ -507,6 +508,60 @@ describe("search relevance benchmark", () => {
 			// quantify the gap the semantic half is supposed to close, so it only
 			// asserts that the harness produced a score for every query.
 			expect(outcomes).toHaveLength(CORE_JUDGMENTS.length);
+		});
+	});
+
+	describe.skipIf(!corpusIndexed)("phrase sensitivity", () => {
+		/**
+		 * Does word adjacency carry any ranking weight? Measured per leg.
+		 *
+		 * **Reported, not gated** — these cases test a hypothesis (that phrase
+		 * blindness costs real ranking quality), and gating a hypothesis would be
+		 * asserting its answer. See the PHRASE TIER block in
+		 * `relevanceJudgments.ts` for the case construction and the expected
+		 * outcome, stated up front so this output can falsify it.
+		 *
+		 * The legs are scored separately because the diagnosis differs by leg:
+		 *  - lexical losing to the decoy confirms the structural gap (MiniSearch
+		 *    stores no positions, so it *cannot* see adjacency);
+		 *  - hybrid losing says the semantic leg does not cover for it, and a
+		 *    phrase-aware re-rank would pay for itself;
+		 *  - hybrid winning while lexical loses says the gap is already absorbed,
+		 *    and the re-rank would only help lexical-only users.
+		 *
+		 * Semantic/hybrid run only when an embedding provider is configured, so
+		 * the lexical half of the measurement stays available in CI.
+		 */
+		it("scores phrase-verbatim targets against scattered-word decoys, per leg", async () => {
+			const legs: Array<"lexical" | "semantic" | "hybrid"> =
+				providerAvailable && searchIndexAvailable ? ["lexical", "semantic", "hybrid"] : ["lexical"];
+
+			const byLeg = new Map<string, QueryOutcome[]>();
+			for (const algorithm of legs) {
+				const outcomes = await scoreQueries(`__s2bBenchPhrase${algorithm}`, algorithm, PHRASE_JUDGMENTS);
+				byLeg.set(algorithm, outcomes);
+				report(`PHRASE — ${algorithm.toUpperCase()}  (n=${outcomes.length})`, outcomes);
+			}
+
+			// One verdict line per query so the cross-leg comparison does not have to
+			// be reassembled from three blocks by eye.
+			const lines = ["", "──────── PHRASE verdict (target rank per leg; reported, not gated) ────────"];
+			for (const [index, judgment] of PHRASE_JUDGMENTS.entries()) {
+				const ranks = legs.map((leg) => `${leg} ${byLeg.get(leg)?.[index]?.targetRank ?? "—"}`).join("  ");
+				lines.push(`  ${ranks}   "${judgment.query}"`);
+			}
+			lines.push(
+				"  Rank 1 everywhere = adjacency already handled (or absorbed by the semantic leg).",
+				"  Lexical > 1 with hybrid = 1: gap is real but covered — a phrase re-rank only helps lexical-only search.",
+				"  Hybrid > 1: the gap survives fusion — a phrase-aware re-rank would pay for itself.",
+				"",
+			);
+			console.log(lines.join("\n"));
+
+			// Only that the harness produced a score for every query in every leg.
+			for (const algorithm of legs) {
+				expect(byLeg.get(algorithm)).toHaveLength(PHRASE_JUDGMENTS.length);
+			}
 		});
 	});
 

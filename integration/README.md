@@ -639,6 +639,67 @@ Queries whose target matched by title ("the nightly run keeps failing" → rank 
 discarded rather than banked as easy wins, since a case with no headroom cannot
 discriminate between models.
 
+#### The phrase tier — adjacency measured, and hybrid absorbs the gap (2026-09-01)
+
+The lexical leg is structurally phrase-blind: MiniSearch's inverted index stores term
+frequencies but no positions, so a note containing "deep scattering layer" verbatim and
+a note containing those three words in three unrelated sentences present identical
+lexical evidence. `PHRASE_JUDGMENTS` (held out of every ratcheted tier) measures what
+that costs, per retrieval leg, using three target/decoy pairs where the decoy holds
+every phrase word at **equal or higher frequency**, scattered, never adjacent, with
+both titles kept clean of query terms — the shape is asserted by the phrase-pair guard
+in `scripts/generate-search-corpus.ts`, so prose edits cannot silently convert a case
+into an ordinary TF contest.
+
+Measured on `omlx:harrier-oss-v1-0.6b-MLX-8bit` (incremental index, notes auto-embedded
+on creation):
+
+| query (phrase) | lexical | semantic | hybrid |
+|---|---|---|---|
+| "where does the cold chain usually break" | rank 2 (0.631) | rank 1 | rank 1 |
+| "does forward guidance actually move expectations" | rank 2 (0.631) | rank 3 (0.500) | rank 1 |
+| "why does the deep scattering layer rise at night" | rank 1 | rank 1 | rank 1 |
+| **mean nDCG@10** | **0.7540** | **0.8333** | **1.0000** |
+
+Reading:
+
+- **The structural gap is real.** In 2 of 3 cases lexical ranks the scattered-word
+  decoy above the phrase-verbatim target — the decoy simply is the better bag of
+  words, and no lexical tuning can change that without positional data.
+- **Hybrid fully absorbs it** on this corpus and model: 1.000 / 1.000 across all
+  three cases. The semantic leg understands that a note *about* the cold chain beats a
+  note that merely uses both words, and fusion carries that through.
+- **How lexical-2 + semantic-3 fuses to hybrid-1** (`forward guidance`, probed
+  per leg): fusion rewards *consensus*, not average rank. The target is the only note
+  near the top of both lists — semantic 0.983 (rank 3, just 1.7% behind the leader in
+  a tightly packed set) and lexical 0.94 (rank 2). Its competitors are one-legged: the
+  decoy is lexical rank 1 but **absent from the semantic top-25 entirely**
+  (normalized semantic 0, so its score part is capped at `0.7 × 0.14 = 0.098`), and
+  the two expectation-formation notes that beat the target semantically sit at
+  lexical 0.25/0.24 (ranks 15/18). Working the formula
+  (`0.7 × (0.86·sem + 0.14·lex) + 0.3 × RRF`): target ≈ 0.98, expectation notes
+  ≈ 0.89, decoy ≈ 0.25. Two strong legs beat one perfect leg — which is the designed
+  behaviour, and these cases turn out to demonstrate it cleanly.
+- **Consequence — and note hybrid is nobody's default.** The search modal never runs
+  hybrid at all (lexical by default; Tab switches to semantic-*only*, deliberately —
+  see `SearchModal.activeAlgorithm`), and `search_notes` defaults to lexical with
+  guidance to escalate, reaching hybrid only when the agent explicitly picks it for a
+  mixed specific+fuzzy query. So the perfect hybrid row covers the *least-used* path,
+  and the leg with the measured defect — lexical — is the default on both surfaces. A
+  phrase-aware re-rank would therefore improve the default experience, not a corner
+  case. Mitigating: the observed failure is the decoy at rank 1 with the target at
+  rank 2 — one position, still on screen in the modal and still inside any
+  `maxResults` the agent reads — so the decision stands as *deferred*: not built
+  until phrase queries misrank by more than one position, or real-vault reports
+  surface the pattern.
+- Caveats: n=3, one lexical case the target won anyway (BM25's within-corpus IDF makes
+  strict TF domination hard to engineer for common words), and Hole@10 is 8.3/10 — the
+  queries collide with existing filler (`Forward Guidance.md` exists as a bulk-filler
+  title and takes lexical rank 3 for its query) so the scores are lower bounds.
+
+If a phrase re-rank ever ships, promote `PHRASE_JUDGMENTS` into the graded tiers so the
+suite defends it; until then the block is reported, never gated.
+
 #### Recording results per model
 
 #### ⚠ Correction: some 2026-08-18 hard-tier figures were measured on the wrong vault

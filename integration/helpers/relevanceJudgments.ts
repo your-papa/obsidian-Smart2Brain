@@ -105,7 +105,8 @@ export type HardAxis =
 	| "size-bias"
 	| "polysemy"
 	| "intent-frame"
-	| "provenance";
+	| "provenance"
+	| "phrase";
 
 export interface RelevanceJudgment {
 	/** The query as a user would type it. */
@@ -937,6 +938,67 @@ export const RELEVANCE_JUDGMENTS: readonly RelevanceJudgment[] = [
 			"Zettel/Blocked on Legal Review.md": 2,
 			"Zettel/Vendor Call - Observability Tooling.md": 1,
 			"Zettel/PR Review Backlog.md": 0,
+		},
+	},
+];
+
+// ════════════════════════════════════════════════════════════════════════
+// PHRASE TIER — does word adjacency carry any ranking weight?
+//
+// The lexical leg is structurally phrase-blind: MiniSearch's inverted index
+// stores term frequencies but no positions, so "deep scattering layer" verbatim
+// and the same three words in three unrelated sentences present identical
+// lexical evidence. These cases measure what that costs *before* deciding
+// whether a phrase-aware re-rank is worth building — and, run per leg, whether
+// the semantic half already covers the gap (in which case the re-rank buys
+// nothing for hybrid users).
+//
+// Each case pairs a target holding the query's phrase verbatim against a decoy
+// that uses every phrase word at equal-or-higher frequency, scattered, never
+// adjacent, in honestly different senses. Titles are kept clean of query terms
+// so `calculateTitleBoost` cannot decide the contest — the generator asserts
+// all of that shape (see the phrase-pair guard in
+// `scripts/generate-search-corpus.ts`).
+//
+// **Held out of `RELEVANCE_JUDGMENTS` deliberately.** These are a measurement,
+// not (yet) a regression guard: folding them into the hard tier would move the
+// ratcheted means for a hypothesis that has not been confirmed. If a phrase
+// re-rank ships, promote them into the graded tiers so the suite defends it.
+//
+// Expected outcome, stated up front so the numbers can falsify it: the lexical
+// leg ranks the decoy at or above the target (it sees a better bag of words);
+// whether hybrid recovers depends entirely on the semantic leg.
+// ════════════════════════════════════════════════════════════════════════
+
+export const PHRASE_JUDGMENTS: readonly RelevanceJudgment[] = [
+	{
+		query: "where does the cold chain usually break",
+		tier: "hard",
+		axis: "phrase",
+		probes: "'cold chain' verbatim (3x) in a courier-logistics note vs a winter-fermentation note using 'cold' (3x), 'chain' (3x), 'break', 'usually' scattered in honest non-phrase senses. Same domain, comparable length, no query terms in either title.",
+		grades: {
+			[`${C}/Fermentation/Courier Logistics for Live Cultures.md`]: 2,
+			[`${C}/Fermentation/Basement Temperatures in January.md`]: 0,
+		},
+	},
+	{
+		query: "does forward guidance actually move expectations",
+		tier: "hard",
+		axis: "phrase",
+		probes: "'forward guidance' verbatim (3x) vs an editorial-process note where 'carried forward'/'going forward' and 'style guidance'/'editor's guidance' give the decoy equal-or-higher counts of both words without the words ever meeting.",
+		grades: {
+			[`${C}/Monetary Policy/Promises About the Future Stance.md`]: 2,
+			[`${C}/Monetary Policy/Preparing the Quarterly Bulletin.md`]: 0,
+		},
+	},
+	{
+		query: "why does the deep scattering layer rise at night",
+		tier: "hard",
+		axis: "phrase",
+		probes: "three-word phrase: 'deep scattering layer' verbatim (3x) vs a sediment-core note owning 'deep' (4x, basins/cores), 'scattering' (3x, optics), 'layer' (6x, strata) with no two of them adjacent. The hardest shape for a bag of words: the decoy's term profile strictly dominates the target's.",
+		grades: {
+			[`${C}/Marine Biology/Sonar Echoes That Migrate Daily.md`]: 2,
+			[`${C}/Marine Biology/Shelf Sediment Core Notes.md`]: 0,
 		},
 	},
 ];

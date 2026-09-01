@@ -426,9 +426,11 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 	 * in the lexical search they dismissed, while it actively misdirects cases
 	 * like `griechischer salat` (0.431 hybrid vs 1.000 without it).
 	 *
-	 * The agent's `search_notes` tool is unaffected and still defaults to hybrid:
-	 * it gets one shot with no prior view to reject, so the two legs genuinely
-	 * complement each other there.
+	 * The agent's `search_notes` tool is unaffected, but note it does NOT default
+	 * to hybrid either: it defaults to lexical and its description tells it to
+	 * escalate, reaching for hybrid only when a query mixes a specific term with a
+	 * fuzzy concept. So hybrid runs only when the agent explicitly selects it —
+	 * no surface uses it by default.
 	 */
 	private get activeAlgorithm(): SearchAlgorithm {
 		return this.semanticEnabled ? "semantic" : "lexical";
