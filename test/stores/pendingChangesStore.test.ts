@@ -1249,4 +1249,79 @@ describe("PendingChangesStore", () => {
 			expect(store.getActionableForThread("thread-1").map((e) => e.id)).toContain(id);
 		});
 	});
+
+	describe("withdrawForToolCalls (edit/regenerate fork)", () => {
+		it("rejects pending entries staged by the abandoned tool calls and marks them reported", () => {
+			const [id] = store.addChanges(
+				[{ type: "update", path: "a.md", originalContent: "x", newContent: "y" }],
+				"tc-abandoned",
+				"thread-1",
+			);
+
+			const result = store.withdrawForToolCalls("thread-1", new Set(["tc-abandoned"]));
+
+			expect(result).toEqual({ withdrawn: 1, keptPartiallyApplied: 0 });
+			const entry = store.getEntry(id)!;
+			expect(entry.status).toBe("rejected");
+			// The new branch's model never made this proposal, so it must NOT be
+			// told "rejected by the user" in the next review-outcome block.
+			expect(entry.reportedToModel).toBe(true);
+			expect(store.takeReviewOutcomesForThread("thread-1")).toEqual({ outcomes: [], pendingProposals: [] });
+		});
+
+		it("leaves other threads' and other tool calls' entries pending", () => {
+			const [keptSameThread] = store.addChanges(
+				[{ type: "create", path: "kept.md", content: "c" }],
+				"tc-kept",
+				"thread-1",
+			);
+			const [otherThread] = store.addChanges(
+				[{ type: "create", path: "other.md", content: "c" }],
+				"tc-abandoned",
+				"thread-2",
+			);
+			const [withdrawnId] = store.addChanges(
+				[{ type: "create", path: "gone.md", content: "c" }],
+				"tc-abandoned",
+				"thread-1",
+			);
+
+			const result = store.withdrawForToolCalls("thread-1", new Set(["tc-abandoned"]));
+
+			expect(result.withdrawn).toBe(1);
+			expect(store.getEntry(keptSameThread)!.status).toBe("pending");
+			expect(store.getEntry(otherThread)!.status).toBe("pending");
+			expect(store.getEntry(withdrawnId)!.status).toBe("rejected");
+		});
+
+		it("keeps entries holding unreverted partially-applied content untouched", async () => {
+			const original = "a\nkeep\nb\n";
+			const [id] = store.addChanges(
+				[{ type: "update", path: "note.md", originalContent: original, newContent: "A\nkeep\nB\n" }],
+				"tc-abandoned",
+				"thread-1",
+			);
+			vi.mocked(plugin.app.vault.getAbstractFileByPath).mockReturnValue(makeTFile("note.md"));
+			vi.mocked(plugin.app.vault.read).mockResolvedValue(original);
+			await store.acceptChangeGroup(id, 0);
+
+			const result = store.withdrawForToolCalls("thread-1", new Set(["tc-abandoned"]));
+
+			expect(result).toEqual({ withdrawn: 0, keptPartiallyApplied: 1 });
+			// Still pending: the user accepted part of it, so it stays theirs to
+			// resolve — withdrawing would discard the only undo record.
+			expect(store.getEntry(id)!.status).toBe("pending");
+			expect(store.hasUnrevertedApplication(store.getEntry(id)!)).toBe(true);
+		});
+
+		it("does not bump the revision when nothing matches", () => {
+			store.addChanges([{ type: "create", path: "kept.md", content: "c" }], "tc-kept", "thread-1");
+			const before = store.revision;
+
+			const result = store.withdrawForToolCalls("thread-1", new Set(["tc-unknown"]));
+
+			expect(result).toEqual({ withdrawn: 0, keptPartiallyApplied: 0 });
+			expect(store.revision).toBe(before);
+		});
+	});
 });

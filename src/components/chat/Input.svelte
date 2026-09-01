@@ -1,7 +1,7 @@
 <script lang="ts">
 import { Notice, Platform, TFile, normalizePath } from "obsidian";
 import { selectChatModelAction, showActionNotice } from "../../utils/actionNotice";
-import { onDestroy, onMount } from "svelte";
+import { onDestroy, onMount, untrack } from "svelte";
 import { useAvailableModels } from "../../hooks/useAvailableModels.svelte";
 import { EmbeddableMarkdownEditor } from "../../lib/editor";
 import { MessageState, type SessionRegistry } from "../../stores/chatStore.svelte";
@@ -267,14 +267,99 @@ $effect(() => {
 // component is the only thing that holds `inputValue`/the CodeMirror instance.
 let stashedDraft: string | null = null;
 
+/** Attachment paths the edit seeded into the tray (the edited message's own
+ * attachments, minus any the user already had attached). Tracked so a cancel
+ * can remove exactly these and leave the user's own attachments alone. */
+let seededEditPaths = new Set<string>();
+
+/** Invalidates an in-flight `seedEditAttachments` pass. Seeding awaits vault
+ * reads (image previews), so the edit can end — save, cancel, or a new edit —
+ * while the loop is suspended; without this the resumed loop would inject the
+ * abandoned edit's remaining attachments into a tray that was already cleared,
+ * and they'd ride along into a later, unrelated message. Bumped wherever the
+ * seeded state is reset, checked after every await. Same last-started-wins
+ * idiom as `assembledPromptRequestVersion` above. */
+let seedEditToken = 0;
+
+/** Seed the edited message's attachments into the composer tray so they are
+ * visible and removable during the edit — previously they rode along
+ * invisibly, and anything the user attached during the edit was silently
+ * dropped from the save. Seeded chips are not "managed" (removing one never
+ * deletes the underlying vault file). Image previews load best-effort. */
+async function seedEditAttachments(restored: ChatAttachment[]) {
+	const token = ++seedEditToken;
+	const plugin = getPlugin();
+	for (const att of restored) {
+		if (token !== seedEditToken) return; // the edit ended mid-seed — stop
+		if (attachments.some((a) => a.vaultPath === att.vaultPath)) continue;
+		const file = plugin.app.vault.getAbstractFileByPath(att.vaultPath);
+		if (!(file instanceof TFile)) {
+			new Notice(
+				`Attachment "${att.name}" no longer exists in the vault — it won't be part of the edited message.`,
+			);
+			continue;
+		}
+		attachments.push({ name: att.name, mimeType: att.mimeType, vaultPath: att.vaultPath });
+		attachmentSizes.set(att.vaultPath, file.stat.size);
+		attachmentSizes = new Map(attachmentSizes);
+		seededEditPaths.add(att.vaultPath);
+		if (att.mimeType.startsWith("image/")) {
+			try {
+				const buffer = await plugin.app.vault.readBinary(file);
+				// Re-check before publishing: the URL would leak (nothing left to
+				// revoke it) and the map write would resurrect a removed chip's
+				// preview if the edit ended during the read.
+				if (token !== seedEditToken) return;
+				previewUrls.set(att.vaultPath, URL.createObjectURL(new Blob([buffer], { type: att.mimeType })));
+				previewUrls = new Map(previewUrls);
+			} catch {
+				// preview only — the chip still renders without it
+			}
+		}
+	}
+}
+
 // Seed the composer with the target message's content when an edit starts.
 // Mirrors the `pendingInput` pattern above: write `inputValue` synchronously
 // so `canSendMessage` reflects it immediately, defer the CodeMirror write to
 // the next frame so its DOM is laid out before the transaction dispatches.
+//
+// The `editingPairId → null` transition is ALSO handled here (not only in
+// cancelActiveEdit): an edit can end from outside the composer — tapping the
+// highlighted bubble calls `session.cancelEdit()` directly, and a branch
+// switch can drop the edited pair. Restoring in the effect means every
+// cancel path puts the stashed draft back and clears the seeded attachment
+// chips; a successful saveEdit clears the stash first, so this no-ops there.
 let lastSeededEditId: string | null = null;
+
+/** Unwind one edit's seeding: stop any in-flight attachment seeding, put the
+ * pre-edit draft back, and remove the chips the edit seeded (the user's own
+ * attachments stay). Shared by the `editingPairId → null` cleanup and the
+ * direct A→B edit switch below — the two paths must stay identical, or
+ * whichever one drifts leaks the previous edit's text/attachments into
+ * whatever the composer does next. */
+function restorePreEditComposerState() {
+	seedEditToken++;
+	if (stashedDraft !== null) {
+		const draft = stashedDraft;
+		stashedDraft = null;
+		inputValue = draft;
+		markdownEditor?.setValue(draft);
+	}
+	for (const path of seededEditPaths) {
+		removeAttachmentByPath(path);
+	}
+	seededEditPaths = new Set();
+}
+
 $effect(() => {
 	if (editingPairId === null) {
-		lastSeededEditId = null;
+		if (lastSeededEditId !== null) {
+			lastSeededEditId = null;
+			// Untracked: the restore reads/writes composer state that must not
+			// become a dependency of this effect (it only reacts to the edit target).
+			untrack(() => restorePreEditComposerState());
+		}
 		return;
 	}
 	if (editingPairId === lastSeededEditId) return;
@@ -283,10 +368,21 @@ $effect(() => {
 		session?.cancelEdit();
 		return;
 	}
+	// Switching straight from editing one message to another never passes
+	// through null, so unwind the previous edit here first — otherwise its
+	// seeded attachments stay in the tray and get saved onto the new target,
+	// and its message text (stashed below as the "draft") would later be
+	// restored as if the user had typed it.
+	if (lastSeededEditId !== null) {
+		untrack(() => restorePreEditComposerState());
+	}
 	lastSeededEditId = editingPairId;
 	stashedDraft = inputValue;
 	const text = pair.userMessage.content;
 	inputValue = text;
+	// Untracked: seeding reads/writes the attachment state, which must not
+	// become a dependency of this effect (it only reacts to the edit target).
+	untrack(() => void seedEditAttachments(session?.getEditAttachments(pair.id) ?? []));
 	requestAnimationFrame(() => {
 		markdownEditor?.setValue(text);
 		markdownEditor?.focus();
@@ -370,6 +466,9 @@ $effect(() => {
 });
 
 onDestroy(() => {
+	// Stop any in-flight edit-attachment seeding; its writes would land on a
+	// dead component's state (and mint object URLs nothing revokes).
+	seedEditToken++;
 	editorContainer?.removeEventListener("touchend", handleMobileTapFocus);
 	markdownEditor?.destroy();
 	// Clean up object URLs
@@ -550,21 +649,23 @@ function attemptSend() {
 	}
 }
 
-/** Cancel the active edit, restoring whatever draft was in the composer
- * before the edit started. No-op when not editing. */
+/** Cancel the active edit. The seeding effect above reacts to the
+ * `editingPairId → null` transition and restores the stashed draft and
+ * pre-edit attachments — shared with the out-of-composer cancel paths.
+ * No-op when not editing. */
 function cancelActiveEdit() {
 	if (!isEditing) return;
 	session?.cancelEdit();
-	const draft = stashedDraft ?? "";
-	stashedDraft = null;
-	inputValue = draft;
-	markdownEditor?.setValue(draft);
 }
 
 function saveEdit() {
 	if (!session || editingPairId === null) return;
+	if (savingFiles) {
+		new Notice("Please wait for attachments to finish saving");
+		return;
+	}
 	if (!hasContentToSend) {
-		new Notice("Add text before saving");
+		new Notice("Add text or attach a file before saving");
 		return;
 	}
 	if (!hasChatModel) {
@@ -573,15 +674,30 @@ function saveEdit() {
 	}
 
 	const pairId = editingPairId;
-	const contentToSave = inputValue;
-	session.editMessage(pairId, contentToSave).catch((error) => {
+	// Same attachment-only fallback as sendMessage — the tray IS the edited
+	// message's attachment list, so text is optional exactly as it is on send.
+	const contentToSave = inputValue.trim().length > 0 ? inputValue : "Please analyze the attached files.";
+	session.editMessage(pairId, contentToSave, [...attachments]).catch((error) => {
 		new Notice(error instanceof Error ? error.message : "Failed to save edit");
 	});
 	// Not session.cancelEdit() — that's for an abandoned edit; this one succeeded.
 	// The draft that was stashed before the edit began is simply gone: the user
 	// asked to save the edit, not to restore what they'd been typing before it.
+	// Clearing the stash BEFORE editingPairId also keeps the seeding effect's
+	// cancel-restore from firing on this transition.
 	session.editingPairId = null;
 	stashedDraft = null;
+	seedEditToken++;
+	seededEditPaths = new Set();
+	// The tray's attachments were consumed into the edited message — clear them
+	// exactly as sendMessage does (files stay in the vault; they're now sent).
+	attachments = [];
+	attachmentSizes = new Map();
+	managedAttachmentPaths = new Set();
+	for (const url of previewUrls.values()) {
+		URL.revokeObjectURL(url);
+	}
+	previewUrls = new Map();
 	inputValue = "";
 	markdownEditor?.clear();
 	onMessageSent?.();
