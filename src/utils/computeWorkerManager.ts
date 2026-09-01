@@ -15,9 +15,13 @@ import { Graph as LeidenGraph, leiden } from "leiden-ts";
 
 let worker: Worker | null = null;
 let requestId = 0;
+// One map serves every generic caller, so the per-request `T` is erased on insert and
+// restored by the caller's own await. Storing the resolver as taking the full response
+// union (with one cast at the registration site) keeps that erasure explicit — the old
+// `any` hid it, and also hid that `reject` only ever receives an Error.
 const pending = new Map<
 	number,
-	{ resolve: (value: any) => void; reject: (reason: any) => void; request: ComputeWorkerRequest }
+	{ resolve: (value: ComputeWorkerResponse) => void; reject: (reason: Error) => void; request: ComputeWorkerRequest }
 >();
 
 function getWorker(): Worker | null {
@@ -85,7 +89,14 @@ function postRequest<T extends ComputeWorkerResponse>(request: ComputeWorkerRequ
 		// this thread; recomputing on the main thread from a detached buffer
 		// would throw. Cloning first keeps the recovery path intact while the
 		// worker still gets a zero-copy transfer of the original.
-		pending.set(request.id, { resolve, reject, request: cloneRequestForRecovery(request) });
+		// The cast is the erasure described on `pending`: this resolver accepts the
+		// caller's narrowed T, and the dispatcher only ever hands it the matching
+		// response for this request id.
+		pending.set(request.id, {
+			resolve: resolve as (value: ComputeWorkerResponse) => void,
+			reject,
+			request: cloneRequestForRecovery(request),
+		});
 		w.postMessage(request, getTransferList(request));
 	});
 }
@@ -154,7 +165,11 @@ function runOnMainThread(request: ComputeWorkerRequest): ComputeWorkerResponse |
 				const seen = new Set<string>();
 				const edges: [number, number, number][] = [];
 				for (let i = 0; i < request.sources.length; i++) {
+					// nodeIndex was just built by walking these same two arrays, so every
+					// endpoint is present by construction — the assertions cannot fail.
+					// biome-ignore lint/style/noNonNullAssertion: see above
 					const u = nodeIndex.get(request.sources[i])!;
+					// biome-ignore lint/style/noNonNullAssertion: see above
 					const v = nodeIndex.get(request.targets[i])!;
 					if (u === v) continue;
 					const key = u < v ? `${u}:${v}` : `${v}:${u}`;

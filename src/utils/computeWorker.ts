@@ -80,7 +80,11 @@ workerScope.onmessage = async (e: MessageEvent<ComputeWorkerRequest>) => {
 					const seen = new Set<string>();
 					const edges: [number, number, number][] = [];
 					for (let i = 0; i < msg.sources.length; i++) {
+						// nodeIndex was just built by walking these same two arrays, so every
+						// endpoint is present by construction — the assertions cannot fail.
+						// biome-ignore lint/style/noNonNullAssertion: see above
 						const u = nodeIndex.get(msg.sources[i])!;
+						// biome-ignore lint/style/noNonNullAssertion: see above
 						const v = nodeIndex.get(msg.targets[i])!;
 						if (u === v) continue;
 						const key = u < v ? `${u}:${v}` : `${v}:${u}`;

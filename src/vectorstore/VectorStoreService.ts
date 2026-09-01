@@ -1917,11 +1917,11 @@ export class VectorStoreService {
 	 * Get progress for a specific index.
 	 */
 	getProgress(indexId?: string): IndexingProgress {
-		if (!indexId) {
-			const data = getData();
-			indexId = data.searchEmbedIndex ?? undefined;
-		}
-		if (!indexId) {
+		// Resolved into a local rather than written back onto the parameter, which keeps
+		// the caller's argument meaningful ("no index requested") distinct from the
+		// default that was substituted for it.
+		const resolvedId = indexId ?? getData().searchEmbedIndex ?? undefined;
+		if (!resolvedId) {
 			return {
 				isIndexing: false,
 				total: 0,
@@ -1932,7 +1932,7 @@ export class VectorStoreService {
 				etaMs: null,
 			};
 		}
-		const inst = this.instances.get(indexId);
+		const inst = this.instances.get(resolvedId);
 		if (!inst) {
 			return {
 				isIndexing: false,
@@ -2014,11 +2014,11 @@ export class VectorStoreService {
 	 * Subscribe to progress updates for a specific index.
 	 */
 	onProgress(callback: (progress: IndexingProgress) => void, indexId?: string): () => void {
-		if (!indexId) {
-			const data = getData();
-			indexId = data.searchEmbedIndex ?? undefined;
-		}
-		if (!indexId) {
+		// Resolved into a local rather than written back onto the parameter, which keeps
+		// the caller's argument meaningful ("no index requested") distinct from the
+		// default that was substituted for it.
+		const resolvedId = indexId ?? getData().searchEmbedIndex ?? undefined;
+		if (!resolvedId) {
 			callback({
 				isIndexing: false,
 				total: 0,
@@ -2031,14 +2031,16 @@ export class VectorStoreService {
 			return () => {};
 		}
 
-		// Register at service level so subscriptions survive instance recreation
-		if (!this.progressListeners.has(indexId)) {
-			this.progressListeners.set(indexId, new Set());
+		// Register at service level so subscriptions survive instance recreation.
+		// Keyed by resolvedId, and the returned unsubscribe closes over the same value,
+		// so subscribe and unsubscribe cannot land on different keys.
+		if (!this.progressListeners.has(resolvedId)) {
+			this.progressListeners.set(resolvedId, new Set());
 		}
-		this.progressListeners.get(indexId)?.add(callback);
+		this.progressListeners.get(resolvedId)?.add(callback);
 
 		// Send initial progress from existing instance if available
-		const inst = this.instances.get(indexId);
+		const inst = this.instances.get(resolvedId);
 		callback(
 			inst
 				? { ...inst.progress }
@@ -2054,10 +2056,10 @@ export class VectorStoreService {
 		);
 
 		return () => {
-			const listeners = this.progressListeners.get(indexId);
+			const listeners = this.progressListeners.get(resolvedId);
 			if (listeners) {
 				listeners.delete(callback);
-				if (listeners.size === 0) this.progressListeners.delete(indexId);
+				if (listeners.size === 0) this.progressListeners.delete(resolvedId);
 			}
 		};
 	}

@@ -80,8 +80,10 @@ function formatNumber(value: number): string {
 }
 
 const maxContextLabel = $derived.by(() => {
-	if (!hasKnownLimit) return "Unknown";
-	return formatNumber(limit!);
+	// Tested directly rather than via `hasKnownLimit`: narrowing does not flow through a
+	// derived boolean, which is the only reason this needed an assertion. Same condition.
+	if (limit === undefined || limit <= 0) return "Unknown";
+	return formatNumber(limit);
 });
 </script>
 

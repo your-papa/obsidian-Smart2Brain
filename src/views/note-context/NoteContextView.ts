@@ -73,11 +73,12 @@ export class NoteContextView extends ItemView {
 		leafWithHeader.tabHeaderEl?.setAttribute("aria-label", title);
 
 		const workspaceLeaf = this.contentEl.closest(".workspace-leaf");
-		workspaceLeaf
-			?.querySelectorAll<HTMLElement>(".view-header-title, .workspace-tab-header-inner-title")
-			.forEach((el) => {
-				el.setText(title);
-			});
+		const titleEls = workspaceLeaf?.querySelectorAll<HTMLElement>(
+			".view-header-title, .workspace-tab-header-inner-title",
+		);
+		for (const el of titleEls ?? []) {
+			el.setText(title);
+		}
 	}
 
 	private registerWorkspaceListeners(): void {

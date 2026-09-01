@@ -1,6 +1,6 @@
 import type { BaseMessage } from "@langchain/core/messages";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
-import { Notice, normalizePath, Platform, TFile } from "obsidian";
+import { Notice, normalizePath, Platform, TFile, type WorkspaceLeaf } from "obsidian";
 import { installObsidianFetch } from "../lib/obsidianFetch";
 import { invalidateProviderState } from "../lib/query";
 import type SecondBrainPlugin from "../main";
@@ -1216,6 +1216,7 @@ export class AgentManager {
 		mcpServers: Record<string, unknown> | undefined,
 	): Promise<boolean> {
 		if (!mcpServers || Object.keys(mcpServers).length === 0) return true;
+		let servers = mcpServers;
 
 		// stdio transport spawns a local process (Node child_process/stdio), which
 		// Obsidian's mobile WebView lacks. HTTP MCP has no such dependency, so on
@@ -1230,7 +1231,7 @@ export class AgentManager {
 				Logger.log(`Skipping ${droppedStdio} stdio MCP server(s): stdio transport is desktop-only.`);
 			}
 			if (Object.keys(httpServers).length === 0) return true;
-			mcpServers = httpServers;
+			servers = httpServers;
 		}
 
 		try {
@@ -1238,7 +1239,7 @@ export class AgentManager {
 			// imports) is only evaluated when MCP is actually used on desktop —
 			// never at plugin load, which would crash the whole plugin.
 			const { MultiServerMCPClient } = await import("@langchain/mcp-adapters");
-			const mcpConfig = { mcpServers } as ConstructorParameters<typeof MultiServerMCPClient>[0];
+			const mcpConfig = { mcpServers: servers } as ConstructorParameters<typeof MultiServerMCPClient>[0];
 			Logger.log("Initializing MCP client...", mcpConfig);
 
 			// Patch global fetch once for the manager's lifetime — MCP tools read
@@ -1929,7 +1930,7 @@ export class AgentManager {
 	private async openInChatLeaf(file: TFile) {
 		const location = getData().chatOpenLocation;
 		const workspace = this.plugin.app.workspace;
-		let leaf;
+		let leaf: WorkspaceLeaf | null | undefined;
 		if (location === "left" || location === "right") {
 			const targetSplit = location === "left" ? workspace.leftSplit : workspace.rightSplit;
 			leaf = workspace.getLeavesOfType(VIEW_TYPE_CHAT).find((l) => l.getRoot() === targetSplit);

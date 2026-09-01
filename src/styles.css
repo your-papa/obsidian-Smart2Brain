@@ -107,15 +107,18 @@
 	align-items: center;
 	gap: 4px;
 	padding: 4px 10px;
-	font-size: 11px;
-	line-height: 1.15;
 	border-radius: 999px;
 	background: var(--s2b-pill-bg, color-mix(in srgb, var(--background-secondary) 92%, var(--background-primary)));
 	border: 1px solid var(--s2b-pill-border, var(--background-modifier-border));
 	color: var(--s2b-pill-color, var(--text-muted));
 	white-space: nowrap;
 	box-shadow: none;
-	font: inherit;
+	/* Pills are often <button>s, which do not inherit the app font. Inherit the family
+	   only — the `font` shorthand would also reset the size and line-height set below,
+	   which is what it silently did while it sat after them. */
+	font-family: inherit;
+	font-size: 11px;
+	line-height: 1.15;
 	text-align: left;
 }
 

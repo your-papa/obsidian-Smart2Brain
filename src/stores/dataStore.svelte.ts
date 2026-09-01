@@ -1274,7 +1274,8 @@ export class PluginDataStore {
 	setAgentPluginExecEnabled(agentId: string, toolId: string, enabled: boolean): void {
 		const agent = this.#data.agents[agentId];
 		if (!agent) return;
-		(agent.pluginExecTools ??= {})[toolId] = enabled;
+		agent.pluginExecTools ??= {};
+		agent.pluginExecTools[toolId] = enabled;
 		this.saveSettings();
 	}
 

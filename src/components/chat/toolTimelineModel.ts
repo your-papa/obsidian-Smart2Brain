@@ -83,8 +83,11 @@ export function buildStepsFromEvents(rawEvents: AssistantTimelineEvent[]): Timel
 
 			const groupId = event.aiMessageId ?? "unknown";
 
-			if (!stepByGroup.has(groupId)) {
-				const step: TimelineStep = {
+			// Reuse the value from the has/set branch rather than looking it up again,
+			// which is what previously needed a non-null assertion.
+			let step = stepByGroup.get(groupId);
+			if (!step) {
+				step = {
 					id: `step-${groupId}`,
 					aiMessageId: event.aiMessageId,
 					tools: [],
@@ -92,7 +95,6 @@ export function buildStepsFromEvents(rawEvents: AssistantTimelineEvent[]): Timel
 				stepByGroup.set(groupId, step);
 				steps.push(step);
 			}
-			const step = stepByGroup.get(groupId)!;
 
 			if (event.type === "preamble" && event.content?.trim() && event.toolCallId) {
 				pendingPreambles.set(event.toolCallId, event.content.trim());
@@ -188,7 +190,8 @@ export function foldSubAgentChildren(steps: TimelineStep[]): TimelineStep[] {
 			if (!tool.parentToolCallId) continue;
 			const parent = byId.get(tool.parentToolCallId);
 			if (!parent) continue; // orphan → leave flat
-			(parent.children ??= []).push(tool);
+			parent.children ??= [];
+			parent.children.push(tool);
 			nested.add(tool.id);
 		}
 	}

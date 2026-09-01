@@ -250,6 +250,12 @@ let leafVisible = true;
 let simPausedWhileHidden = false;
 
 // D3-compatible node/link types
+/**
+ * The graph container with the teardown hook we stash on it. Declared rather than reached
+ * for via `any` so both the write and the read agree on the shape.
+ */
+type GraphCleanupHost = HTMLElement & { __graphCleanup?: () => void };
+
 type SimNode = GraphNode & SimulationNodeDatum;
 type SimLink = SimulationLinkDatum<SimNode> & {
 	weight: number;
@@ -2275,15 +2281,23 @@ function buildInternalData(data: GraphData): {
 		if (!simNodeMap.has(id)) nodeSpawnTimes.delete(id);
 	}
 
-	simLinks = data.edges
-		.filter((e) => simNodeMap.has(e.source) && simNodeMap.has(e.target))
-		.map((e) => ({
-			source: simNodeMap.get(e.source)!,
-			target: simNodeMap.get(e.target)!,
-			weight: e.weight,
-			type: e.type,
-			isNew: !previousEdgeKeys.has(simLinkKey(e.source, e.target, e.type)),
-		}));
+	// flatMap rather than filter-then-map: doing the lookups once and dropping the edge
+	// when either end is missing gives the same result without asserting non-null on a
+	// second lookup the compiler cannot tie to the earlier `has` checks.
+	simLinks = data.edges.flatMap((e) => {
+		const source = simNodeMap.get(e.source);
+		const target = simNodeMap.get(e.target);
+		if (!source || !target) return [];
+		return [
+			{
+				source,
+				target,
+				weight: e.weight,
+				type: e.type,
+				isNew: !previousEdgeKeys.has(simLinkKey(e.source, e.target, e.type)),
+			},
+		];
+	});
 
 	// Pre-split by edge type to avoid filtering every render frame
 	renderableSimLinks = simLinks.filter((l) => l.type === "wiki" || l.type === "semantic");
@@ -2803,8 +2817,10 @@ onMount(() => {
 				attributeFilter: ["class"],
 			});
 
-			// Store cleanup references
-			(containerEl as any).__graphCleanup = () => {
+			// Store cleanup references. Stashed on the element (rather than a local) so the
+			// teardown below can find it even though it is created inside an async
+			// continuation that may not have run yet.
+			(containerEl as GraphCleanupHost).__graphCleanup = () => {
 				resizeObserver.disconnect();
 				document.body.removeEventListener("css-change", handleCssChange);
 				themeMutationObserver.disconnect();
@@ -2820,7 +2836,7 @@ onMount(() => {
 	return () => {
 		// Tell a still-pending `renderer.init()` continuation to bail — see above.
 		mountDisposed = true;
-		(containerEl as any).__graphCleanup?.();
+		(containerEl as GraphCleanupHost).__graphCleanup?.();
 		visibilityObserver.disconnect();
 		if (renderRafId != null) {
 			cancelAnimationFrame(renderRafId);

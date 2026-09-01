@@ -41,7 +41,9 @@ const VISIBLE_NOTES_POLL_MS = 1500;
 
 function isRootVisibleLeaf(workspace: Workspace, leaf: WorkspaceLeaf): boolean {
 	if (leaf.getRoot() !== workspace.rootSplit) return false;
-	return (leaf as any).containerEl?.style.display !== "none";
+	// `containerEl` is real but undeclared on WorkspaceLeaf in the public API types, so
+	// name the one property being read instead of widening the whole leaf to `any`.
+	return (leaf as WorkspaceLeaf & { containerEl?: HTMLElement }).containerEl?.style.display !== "none";
 }
 
 function shouldPollVisibleNotesContext(workspace: Workspace): boolean {

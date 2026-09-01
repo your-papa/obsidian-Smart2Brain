@@ -2762,6 +2762,19 @@ const MAX_PARKED_SESSIONS = 3;
  *    ChatSession the view resolved, so an action from one tab can never leak into
  *    another. Running state is read per-session (`ChatSession.isRunning`).
  * ---------------------------------------------------------------------------*/
+/**
+ * Narrows a generation to one that names both a provider and a model.
+ *
+ * Written as a type guard rather than an inline `gen?.provider && gen?.model` check because
+ * optional chaining on the properties does not narrow the object itself — the call that
+ * follows would still need a cast, which is exactly what this avoids.
+ */
+function hasProviderAndModel(
+	generation: MessageGeneration | undefined,
+): generation is MessageGeneration & { provider: string; model: string } {
+	return !!generation?.provider && !!generation.model;
+}
+
 export class SessionRegistry {
 	/** All live sessions keyed by thread path. A running session is parked here
 	 * (not destroyed) when the user navigates away, so it can be reattached. */
@@ -2825,8 +2838,10 @@ export class SessionRegistry {
 		return {
 			...base,
 			onThreadIdChange: (oldPath, newPath) => {
+				// `id` is deliberately not reassigned here. Nothing in this closure reads
+				// it after construction, so the old `id = newPath` was a dead write that
+				// only looked like it kept state in sync; rekeySession does the real work.
 				this.rekeySession(oldPath, newPath);
-				id = newPath; // keep closure in sync
 			},
 		};
 	}
@@ -2890,13 +2905,18 @@ export class SessionRegistry {
 		return agentChatModel?.modelConfig ?? { contextWindow: 128000 };
 	}
 
+	/**
+	 * The parameter type requires provider/model rather than asserting them non-null in the
+	 * body: the caller gates via {@link hasProviderAndModel}, so this states that
+	 * precondition where the compiler can enforce it for future callers.
+	 */
 	private resolveAgentFromGeneration(
-		generation: MessageGeneration,
+		generation: MessageGeneration & { provider: string; model: string },
 		fallbackAgent: AgentConfig,
 	): { agentId: string; model: ChatModel | null } {
 		const data = getData();
-		const provider = generation.provider!;
-		const model = generation.model!;
+		const provider = generation.provider;
+		const model = generation.model;
 
 		// Try to find the agent by ID first
 		let generatedAgent = generation.agentId ? data.getAgent(generation.agentId) : undefined;
@@ -2954,7 +2974,7 @@ export class SessionRegistry {
 		let nextAgentId = fallbackAgent.id;
 		let nextModel: ChatModel | null = fallbackAgent.chatModel ?? null;
 
-		if (generation?.provider && generation?.model) {
+		if (hasProviderAndModel(generation)) {
 			const resolved = this.resolveAgentFromGeneration(generation, fallbackAgent);
 			nextAgentId = resolved.agentId;
 			nextModel = resolved.model;

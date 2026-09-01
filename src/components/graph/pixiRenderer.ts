@@ -75,7 +75,12 @@ function resolveColor(raw: string, fallback: string): string {
 			const c = document.createElement("canvas");
 			c.width = 1;
 			c.height = 1;
-			_colorCtx = c.getContext("2d")!;
+			// getContext can genuinely return null (no 2D support, or a context already
+			// acquired under another type). The assertion here turned that into a
+			// TypeError on the next line; this takes the fallback the function already has.
+			const ctx = c.getContext("2d");
+			if (!ctx) return fallback;
+			_colorCtx = ctx;
 		}
 		_colorCtx.fillStyle = "#000000"; // reset
 		_colorCtx.fillStyle = raw;

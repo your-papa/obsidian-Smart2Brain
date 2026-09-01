@@ -281,8 +281,12 @@ $effect(() => {
 	const el = labelButtonEl;
 	if (!el) return;
 
-	const enter = () => (labelButtonHot = true);
-	const leave = () => (labelButtonHot = false);
+	const enter = () => {
+		labelButtonHot = true;
+	};
+	const leave = () => {
+		labelButtonHot = false;
+	};
 	el.addEventListener("mouseenter", enter);
 	el.addEventListener("mouseleave", leave);
 	el.addEventListener("focus", enter);
