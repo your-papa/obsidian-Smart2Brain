@@ -160,9 +160,20 @@ const RESULT_LIMIT = 25;
  * query path. `SEMANTIC_SOURCE_WEIGHT` was swept under bare queries and has not
  * been re-swept under the instruction — the semantic leg is now more trustworthy,
  * so that is the next knob to revisit, not this floor.
+ *
+ * **Raised 0.89 → 0.94 (2026-09-02, same day)** after that re-sweep:
+ * `SEMANTIC_SOURCE_WEIGHT` 0.86 → 0.94 in `finalSearchRanking.ts`. Measured with this
+ * suite on `harrier-oss-v1-0.6b-MLX-8bit`, one index build, instruction on: core
+ * 0.8942 → **0.9427** (MRR 0.8929 → **0.9643**), hard 0.7892 → **0.8204**, recency
+ * 0.9077 → **1.0000**, `size-bias` back to 1.0000 with `long-context` still 1.0000.
+ * The hybrid-core cost the previous paragraph accepted is gone: it was the fusion
+ * share, not the instruction, deciding that one size-bias flip. Floor sits just
+ * under the measured value as before; the plateau is only 0.93-0.94 wide (see the
+ * weight's docblock), so a build-order shift of the index could move core by more
+ * than on earlier constants — check the weight table before lowering this.
  */
-const BASELINE_MEAN_NDCG = 0.89;
-const BASELINE_MEAN_RR = 0.9;
+const BASELINE_MEAN_NDCG = 0.94;
+const BASELINE_MEAN_RR = 0.94;
 
 /**
  * Separate floor for the `recency` tier, which cannot share the core one.
@@ -184,8 +195,12 @@ const BASELINE_MEAN_RR = 0.9;
  * tier improved because two of its four cases restate `size-bias` queries, so
  * strengthening the semantic leg helped the real answer beat the padded distractor
  * here too.
+ *
+ * **Raised 0.88 → 0.98 (2026-09-02)** with `SEMANTIC_SOURCE_WEIGHT` 0.86 → 0.94 under
+ * the query instruction: `harrier` 0.9077 → **1.0000**. Same mechanism again — the
+ * two cases restating `size-bias` queries stop losing to the padded distractor.
  */
-const RECENCY_FLOOR_MEAN_NDCG = 0.88;
+const RECENCY_FLOOR_MEAN_NDCG = 0.98;
 
 /**
  * Floor for the `hard` tier — the model-discrimination cases.

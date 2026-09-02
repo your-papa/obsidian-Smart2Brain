@@ -750,10 +750,36 @@ it above `Legibility at Small Sizes`. `size-bias` therefore reads 1.00 on semant
 and 0.75 on hybrid at the same time. `SEMANTIC_SOURCE_WEIGHT` has not been re-swept
 under the instruction; with a stronger semantic leg the plateau may have moved.
 
-Measured via a runtime patch of `semanticSearch` on the live build (the slot vault had
-no oMLX key), not through the vitest suite; the hybrid-core floor was lowered
-0.92 → 0.89 to match. `sap-hai:text-embedding-3-small` is a symmetric model and gets no
-prefix, so its rows are unaffected.
+The instruction A/B above was measured via a runtime patch of `semanticSearch` on the
+live build, not through the vitest suite; the suite later reproduced it exactly
+(semantic-only core 0.9289 / hard 0.7983) once the slot vault had an oMLX key.
+`sap-hai:text-embedding-3-small` is a symmetric model and gets no prefix, so its rows
+are unaffected.
+
+##### `SEMANTIC_SOURCE_WEIGHT` re-swept under the instruction: 0.86 → 0.94
+
+The hybrid-core cost above was the fusion share, not the instruction. With the
+instruction on throughout, the full vitest suite on `harrier-oss-v1-0.6b-MLX-8bit`
+against one index build:
+
+| weight | core | hard | recency | size-bias | long-context | cross-lingual | polysemy | intent-frame |
+|---|---|---|---|---|---|---|---|---|
+| 0.80 | 0.8889 | 0.7725 | 0.9077 | 0.7540 | 1.0000 | 0.6577 | 0.7878 | 0.6439 |
+| 0.86 | 0.8942 | 0.7892 | 0.9077 | 0.7540 | 1.0000 | 0.7500 | 0.7951 | 0.6458 |
+| 0.90 | 0.8944 | 0.7897 | 0.9077 | 0.7540 | 1.0000 | 0.7500 | 0.7937 | 0.6504 |
+| 0.92 | 0.9174 | 0.8037 | 1.0000 | 0.8770 | 1.0000 | 0.7500 | 0.7916 | 0.6490 |
+| 0.93 | 0.9427 | 0.8177 | 1.0000 | 1.0000 | 1.0000 | 0.7500 | 0.7864 | 0.6499 |
+| **0.94** | **0.9427** | **0.8204** | **1.0000** | **1.0000** | **1.0000** | 0.7500 | 0.7879 | 0.6600 |
+| 0.95 | 0.9427 | 0.8117 | 1.0000 | 1.0000 | 0.8984 | 0.7500 | 0.7852 | 0.6600 |
+| 0.96 | 0.9427 | 0.8020 | 1.0000 | 1.0000 | 0.8443 | 0.7500 | 0.7749 | 0.6462 |
+
+`dilution` is 1.0000 and `multi-hop` 0.8155 at every weight. The old cliff at 0.88 is
+gone because the instructed semantic leg now carries `long-context` on its own until
+0.95; the padded size-bias distractor is outvoted from 0.93 up. The plateau is 0.93-0.94,
+so this constant is closer to an edge than 0.86 was — re-check the table before
+attributing a core move to something else. Core, hard and recency are all the highest
+values recorded for harrier; the floors were raised to 0.94 / 0.94 (MRR) / 0.98
+(recency). Only harrier was swept; qwen3 is unmeasured at this weight.
 
 #### ⚠ Correction: some 2026-08-18 hard-tier figures were measured on the wrong vault
 
