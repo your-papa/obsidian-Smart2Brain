@@ -30,7 +30,8 @@ agree on the approach first. It is much easier to steer a design than to reject 
 
 ## Development setup
 
-The project uses [Bun](https://bun.sh/). Svelte 5, TypeScript, Vite, Biome, Vitest.
+The project uses [Bun](https://bun.sh/) (version pinned in `.bun-version`; CI uses the same one).
+Svelte 5, TypeScript, Vite, Biome, Vitest.
 
 ```bash
 bun install
