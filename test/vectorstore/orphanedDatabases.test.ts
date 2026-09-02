@@ -75,6 +75,11 @@ describe("listOrphanedVectorDatabases", () => {
 		const [orphanMain, orphanSidecar] = databaseNamesForIndex(VAULT, ORPHAN);
 		await createSidecar(orphanSidecar);
 		await createSidecar(`${databaseNamesForIndex("vault-1-archive", "openai:x")[0]}-hnsw-index`);
+		// A sidecar whose main database is gone: it could be ours (a half-blocked
+		// deletion) or a neighbouring vault's — nothing inside it says which, so
+		// it must not be offered for deletion.
+		await createSidecar(`${databaseNamesForIndex("vault-1-archive", "openai:gone")[0]}-hnsw-index`);
+		await createSidecar(`${databaseNamesForIndex(VAULT, "ollama:gone")[0]}-hnsw-index`);
 		// A shell that was opened but never written: no metadata record, so it
 		// cannot be attributed and is left alone.
 		const shell = new HNSWVectorStore(VAULT, "custom:never-built");

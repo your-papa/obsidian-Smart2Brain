@@ -80,6 +80,35 @@ describe("HNSWVectorStore — resuming after an interrupted build", () => {
 		await second.close();
 	});
 
+	it("listNoteMeta omits a note whose chunk-0 row is missing (write interrupted mid-note)", async () => {
+		const store = await openForBuild();
+		// Bulk writers store chunk 0 last; a kill after chunk 1 leaves exactly this.
+		await store.upsert({
+			id: "big.md#1",
+			path: "big.md",
+			mtime: 5,
+			checksum: "c",
+			chunkIndex: 1,
+			vector: new Float32Array([0, 1]),
+		});
+		await store.upsert(doc("small.md", [1, 0]));
+
+		expect((await store.listNoteMeta()).map((n) => n.path)).toEqual(["small.md"]);
+		expect(await store.countNotes()).toBe(2);
+		expect(await store.count()).toBe(2);
+
+		await store.upsert({
+			id: "big.md#0",
+			path: "big.md",
+			mtime: 5,
+			checksum: "c",
+			chunkIndex: 0,
+			vector: new Float32Array([1, 1]),
+		});
+		expect((await store.listNoteMeta()).map((n) => n.path).sort()).toEqual(["big.md", "small.md"]);
+		await store.close();
+	});
+
 	it("flush() persists the pending graph immediately instead of on the debounce", async () => {
 		const first = await openForBuild();
 		await first.upsert(doc("a.md", [1, 0]));

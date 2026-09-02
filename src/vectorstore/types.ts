@@ -416,11 +416,13 @@ export interface VectorStore {
 	getDocumentMtime(path: string): Promise<number | undefined>;
 
 	/**
-	 * `{ path, mtime }` of every indexed note, one entry per note, read without
-	 * deserialising a single vector. This is the read to use for "what is
-	 * indexed, and is it stale" questions — there is deliberately no whole-set
-	 * `getAll()`: materialising every vector on the main thread is the memory
-	 * spike #432 removes.
+	 * `{ path, mtime }` of every *completely* indexed note, one entry per note,
+	 * read without deserialising a single vector. A note counts as indexed only
+	 * once its chunk-0 row exists; bulk writers store that row last, so a note
+	 * whose write was interrupted is reported as absent and gets re-indexed.
+	 * This is the read to use for "what is indexed, and is it stale" questions —
+	 * there is deliberately no whole-set `getAll()`: materialising every vector
+	 * on the main thread is the memory spike #432 removes.
 	 */
 	listNoteMeta(): Promise<NoteMeta[]>;
 

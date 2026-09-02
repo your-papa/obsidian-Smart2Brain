@@ -43,6 +43,8 @@ const ID_MAPPING_STORE = "id_mapping";
 const GRAPH_STORE = "hnsw_graph";
 /** Compound index over `documents` so per-note mtimes can be read without touching a vector. */
 const PATH_MTIME_INDEX = "path_mtime";
+/** Chunk id suffix of a note's first chunk (`makeChunkId(path, 0)`), the row that marks a note complete. */
+const FIRST_CHUNK_SUFFIX = "#0";
 
 /**
  * Schema version of the per-index database.
@@ -865,13 +867,23 @@ export class HNSWVectorStore implements VectorStore {
 		const db = this.requireDb();
 
 		const tx = db.transaction(DOCUMENTS_STORE, "readonly");
-		const request = tx.objectStore(DOCUMENTS_STORE).index(PATH_MTIME_INDEX).openKeyCursor(null, "nextunique");
+		const request = tx.objectStore(DOCUMENTS_STORE).index(PATH_MTIME_INDEX).openKeyCursor();
 
+		// A note is listed only through its chunk-0 row. Bulk writers store a
+		// note's chunk 0 *last* (`VectorStoreService.embedFilesInBatches`), so a
+		// process killed between the chunks of a multi-chunk note leaves rows
+		// that carry the note's current mtime but no `#0` — and this read then
+		// reports the note as absent, which makes the next validation re-index
+		// it. Without that, the surviving chunks made the note look complete and
+		// its missing sections never came back. Key cursor only: `primaryKey`
+		// is the chunk id, so no row value (no vector) is ever deserialised.
 		const notes: NoteMeta[] = [];
 		return awaitCursor(tx, request, (cursor) => {
 			if (!cursor) return { done: true, value: notes };
-			const [path, mtime] = cursor.key as [string, number];
-			notes.push({ path, mtime });
+			if (typeof cursor.primaryKey === "string" && cursor.primaryKey.endsWith(FIRST_CHUNK_SUFFIX)) {
+				const [path, mtime] = cursor.key as [string, number];
+				notes.push({ path, mtime });
+			}
 			cursor.continue();
 			return undefined;
 		});

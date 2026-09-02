@@ -153,8 +153,9 @@ async function probeDatabase(name: string): Promise<ProbeResult | null> {
  * Resolves `null` when the runtime cannot enumerate databases. Candidates are
  * every database under this vault's name prefix; each is attributed to this
  * vault by the provider/model stored inside it (see the module comment), and
- * legacy sidecars are attributed through their main database. Configured
- * indexes and unattributable databases are excluded.
+ * legacy sidecars are attributed through their main database (a sidecar with no
+ * main database cannot be attributed and stays). Configured indexes and
+ * unattributable databases are excluded.
  */
 export async function listOrphanedVectorDatabases(
 	vaultId: string,
@@ -192,12 +193,13 @@ export async function listOrphanedVectorDatabases(
 	const orphans: OrphanedDatabase[] = [];
 	for (const name of [...candidates].sort()) {
 		if (name.endsWith(LEGACY_SIDECAR_SUFFIX)) {
-			// Attributed through the main database when it still exists. A sidecar
-			// whose main database is gone is a deletion that was blocked mid-way;
-			// under this vault's prefix it is treated as ours.
+			// Attributed through the main database. A sidecar holds only the graph
+			// blob — nothing inside it says which vault it belongs to — so one whose
+			// main database is gone (a deletion that was blocked half-way) cannot
+			// be told apart from a neighbouring vault's and is left alone, like any
+			// other unattributable database.
 			const main = name.slice(0, -LEGACY_SIDECAR_SUFFIX.length);
-			const mainOwnership = ownership.get(main);
-			if (mainOwnership && !mainOwnership.owned) continue;
+			if (!ownership.get(main)?.owned) continue;
 			orphans.push({ name, label: main.slice(prefix.length), kind: "legacy-sidecar" });
 			continue;
 		}

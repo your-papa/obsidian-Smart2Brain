@@ -64,10 +64,11 @@ class FakeStore implements VectorStore {
 	async getDocumentMtime(path: string): Promise<number | undefined> {
 		return (await this.getByPath(path))?.mtime;
 	}
+	/** Mirrors the real store: a note is listed only through its chunk-0 row. */
 	async listNoteMeta(): Promise<NoteMeta[]> {
-		const byPath = new Map<string, number>();
-		for (const doc of this.docs.values()) byPath.set(doc.path, doc.mtime);
-		return [...byPath].map(([path, mtime]) => ({ path, mtime }));
+		return [...this.docs.values()]
+			.filter((doc) => doc.chunkIndex === 0)
+			.map(({ path, mtime }) => ({ path, mtime }));
 	}
 	async semanticPairs() {
 		return [];
@@ -245,8 +246,18 @@ describe("bulk embed run", () => {
 		const svc = await startService();
 		const store = stores.get(INDEX);
 		if (!store) throw new Error("store not opened");
-		// a.md is current, c.md is stale (indexed at an older mtime), b.md is missing.
+		// a.md is current, c.md is stale (indexed at an older mtime), b.md is missing,
+		// and d.md was killed mid-write: a chunk-1 row with the current mtime but no chunk 0.
+		vaultFiles.push(file("d.md", 1_000));
 		await store.setMetadata("fake", "embed-model", 2);
+		await store.upsert({
+			id: "d.md#1",
+			path: "d.md",
+			mtime: 1_000,
+			checksum: "x",
+			chunkIndex: 1,
+			vector: new Float32Array(3),
+		});
 		await store.upsert({
 			id: "a.md#0",
 			path: "a.md",
@@ -277,10 +288,13 @@ describe("bulk embed run", () => {
 
 		// Chunking prefixes each chunk with the note title; the body is what matters.
 		const embedded = embedDocuments.mock.calls.flatMap(([texts]) => texts).sort();
-		expect(embedded).toHaveLength(2);
+		expect(embedded).toHaveLength(3);
 		expect(embedded[0]).toContain("content of b.md");
 		expect(embedded[1]).toContain("content of c.md");
-		expect((await store.listNoteMeta()).map((n) => n.path).sort()).toEqual(["a.md", "b.md", "c.md"]);
+		expect(embedded[2]).toContain("content of d.md");
+		expect((await store.listNoteMeta()).map((n) => n.path).sort()).toEqual(["a.md", "b.md", "c.md", "d.md"]);
+		// The stale chunk-1 row of d.md was purged before the rewrite.
+		expect([...store.docs.keys()].filter((id) => id.startsWith("d.md"))).toEqual(["d.md#0"]);
 		expect(store.flush).toHaveBeenCalled();
 		expect(indexStats.dimensions).toBe(3);
 	});

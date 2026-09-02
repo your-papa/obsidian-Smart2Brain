@@ -332,11 +332,23 @@ export function summarizeValidationProgressCounts({
 	};
 }
 
+/**
+ * Write order for a note's chunks: everything after chunk 0 first, chunk 0
+ * last. `VectorStore.listNoteMeta` reports a note as indexed only through its
+ * chunk-0 row, so writing that row last turns "all chunks stored" into a single
+ * durable fact — a process killed part-way through a multi-chunk note leaves
+ * rows that validation treats as absent and re-indexes, instead of chunks that
+ * carry the current mtime and make the note look complete for good.
+ */
+export function orderChunksForWriting<T>(chunks: readonly T[]): T[] {
+	if (chunks.length <= 1) return [...chunks];
+	return [...chunks.slice(1), chunks[0]];
+}
+
 /** One chunk of a note queued for embedding. */
 interface ChunkEntry {
 	file: TFile;
 	chunkIndex: number;
-	chunkCount: number;
 	checksum: string;
 	embedText: string;
 }
@@ -1433,7 +1445,8 @@ export class VectorStoreService {
 			};
 			await inst.store.upsert(doc);
 			indexedChunks++;
-			if (entry.chunkIndex === entry.chunkCount - 1) noteIndexed(entry.file.path);
+			// Chunk 0 is written last (see `orderChunksForWriting`), so its write completes the note.
+			if (entry.chunkIndex === 0) noteIndexed(entry.file.path);
 		};
 
 		// Consecutive transport-level failures. Reset on any success, so a flaky
@@ -1544,11 +1557,10 @@ export class VectorStoreService {
 				const content = await readIndexableContent(vault, file);
 				const checksum = this.hashContent(content);
 				const chunks = chunkText(content, file.basename, maxContentLength);
-				for (const chunk of chunks) {
+				for (const chunk of orderChunksForWriting(chunks)) {
 					pending.push({
 						file,
 						chunkIndex: chunk.chunkIndex,
-						chunkCount: chunks.length,
 						checksum,
 						embedText: chunk.content,
 					});
@@ -1688,9 +1700,10 @@ export class VectorStoreService {
 				vectors.push(new Float32Array(vector));
 			}
 
-			// Replace any prior version's chunks, then write the new ones.
+			// Replace any prior version's chunks, then write the new ones — chunk 0
+			// last, so the note only reads as indexed once every chunk is stored.
 			await inst.store.remove(file.path);
-			for (let i = 0; i < chunks.length; i++) {
+			for (const i of orderChunksForWriting(chunks.map((_, index) => index))) {
 				const doc: DocumentVector = {
 					id: makeChunkId(file.path, chunks[i].chunkIndex),
 					path: file.path,
