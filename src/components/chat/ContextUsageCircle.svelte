@@ -19,17 +19,30 @@ interface Props {
 
 const { usagePercent, used, limit, breakdown, canSummarizeNow = false, onSummarizeNow }: Props = $props();
 
-const radius = 20; // Slightly larger radius for better visibility
+// Geometry in a 100-unit viewBox. The ring is sized so its outer edge (radius +
+// half the stroke) fills ~73% of the 36px trigger, close to the 28px send button
+// beside it: a ring that small next to a solid disc read as an ornament.
+const radius = 33;
+const strokeWidth = 8;
 const circumference = 2 * Math.PI * radius;
-const strokeDashoffset = $derived(circumference - (usagePercent / 100) * circumference);
+
+// The ring is always rendered on desktop, so its low-usage state has to read as
+// a gauge at rest rather than an idle spinner. Two things do that: the arc never
+// drops below this floor (a round-capped pip at 12 o'clock, clearly "a little"
+// rather than "nothing"), and the track behind it is fainter than the arc so the
+// arc, not the track, is the shape the eye lands on.
+const MIN_ARC_PERCENT = 4;
+const arcPercent = $derived(Math.max(usagePercent, MIN_ARC_PERCENT));
+const strokeDashoffset = $derived(circumference - (arcPercent / 100) * circumference);
 const hasKnownLimit = $derived(limit !== undefined && limit > 0);
 
-// Determine color based on usage level
-const colorClass = $derived.by(() => {
-	if (!hasKnownLimit) return "text-[--text-muted]";
-	if (usagePercent >= 95) return "text-red-500"; // Critical
-	if (usagePercent >= 80) return "text-yellow-500"; // Warning
-	return "text-green-500"; // Normal
+// Arc colour by usage level, via Obsidian's palette variables so themes can
+// restyle it. The unknown-limit state is monochrome: there is no level to encode.
+const arcClass = $derived.by(() => {
+	if (!hasKnownLimit) return "s2b-context-ring-arc-unknown";
+	if (usagePercent >= 95) return "s2b-context-ring-arc-critical";
+	if (usagePercent >= 80) return "s2b-context-ring-arc-warning";
+	return "s2b-context-ring-arc-normal";
 });
 
 const centerLabel = $derived.by(() => {
@@ -97,20 +110,14 @@ const maxContextLabel = $derived.by(() => {
 >
   {#snippet trigger()}
     <svg class="w-full h-full -rotate-90" viewBox="0 0 100 100" aria-label="Open context token distribution">
-      <!-- Background circle -->
+      <!-- Track -->
+      <circle class="s2b-context-ring-track" fill="none" stroke-width={strokeWidth} cx="50" cy="50" r={radius} />
+      <!-- Usage arc -->
       <circle
-        class="stroke-current text-[--background-modifier-border]"
+        class="s2b-context-ring-arc transition-all duration-300 {arcClass}"
         fill="none"
-        stroke-width="8"
-        cx="50"
-        cy="50"
-        r={radius}
-      />
-      <!-- Progress circle -->
-      <circle
-        class="stroke-current transition-all duration-300 {colorClass}"
-        fill="none"
-        stroke-width="8"
+        stroke-width={strokeWidth}
+        stroke-linecap="round"
         cx="50"
         cy="50"
         r={radius}
@@ -118,9 +125,12 @@ const maxContextLabel = $derived.by(() => {
         style="stroke-dashoffset: {strokeDashoffset};"
       />
     </svg>
-    <!-- Show value only on hover to keep the icon visually quiet by default -->
+    <!-- Live value in the centre: the number is what makes the ring a gauge
+         rather than a decoration, and at this size a quiet muted label costs
+         nothing visually. Brightens on hover with the rest of the control. -->
     <div
-      class="s2b-hover-reveal absolute text-[12px] font-semibold opacity-0 transition-opacity duration-150 group-hover:opacity-100"
+      class="s2b-context-ring-label absolute font-semibold tabular-nums transition-colors duration-150"
+      class:s2b-context-ring-label-wide={centerLabel.length > 3}
     >
       {centerLabel}
     </div>
@@ -177,6 +187,47 @@ const maxContextLabel = $derived.by(() => {
     background: transparent !important;
     box-shadow: none !important;
     border: none !important;
+  }
+
+  .s2b-context-ring-track {
+    /* Fainter than the arc: `--background-modifier-border` at full strength is
+       the same grey as a spinner's idle track. */
+    stroke: color-mix(in srgb, var(--background-modifier-border) 60%, transparent);
+  }
+
+  .s2b-context-ring-arc-normal {
+    stroke: var(--color-green);
+  }
+
+  .s2b-context-ring-arc-warning {
+    stroke: var(--color-yellow);
+  }
+
+  .s2b-context-ring-arc-critical {
+    stroke: var(--color-red);
+  }
+
+  .s2b-context-ring-arc-unknown {
+    stroke: var(--text-faint);
+  }
+
+  .s2b-context-ring-label {
+    font-size: 8px;
+    letter-spacing: -0.02em;
+    line-height: 1;
+    color: var(--text-muted);
+  }
+
+  /* "100%" is the one value that doesn't fit the hole at 8px; at that point the
+     arc is a full ring, so overrunning it would put dark text on red. */
+  .s2b-context-ring-label-wide {
+    font-size: 6.5px;
+    letter-spacing: -0.05em;
+  }
+
+  :global(.context-usage-trigger:hover) .s2b-context-ring-label,
+  :global(.context-usage-trigger[data-state="open"]) .s2b-context-ring-label {
+    color: var(--text-normal);
   }
 
   :global(.context-usage-popover) {
