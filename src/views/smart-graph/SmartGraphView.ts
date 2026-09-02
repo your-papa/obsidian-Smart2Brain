@@ -26,7 +26,7 @@ export class SmartGraphView extends ItemView {
 	}
 
 	getDisplayText(): string {
-		return "Graph";
+		return "Smart graph";
 	}
 
 	getIcon(): string {

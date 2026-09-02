@@ -470,7 +470,7 @@ export default class SecondBrainPlugin extends Plugin {
 
 		this.addRibbonIcon("message-square", "New chat", () => this.createNewChat());
 		this.addRibbonIcon("search", "Search notes", () => new SearchModal(this.app).open());
-		this.addRibbonIcon("git-fork", "Graph", () => this.activateSmartGraphView());
+		this.addRibbonIcon("git-fork", "Open smart graph", () => this.activateSmartGraphView());
 
 		// Create Agent Manager (v2) + session registry BEFORE mounting the status-bar
 		// indicator below. Both constructors are cheap (heavy init is deferred to
@@ -511,7 +511,7 @@ export default class SecondBrainPlugin extends Plugin {
 
 		this.addCommand({
 			id: "open-smart-graph",
-			name: "Open graph",
+			name: "Open smart graph",
 			icon: "git-fork",
 			callback: () => this.activateSmartGraphView(),
 		});
