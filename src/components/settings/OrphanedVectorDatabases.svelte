@@ -1,3 +1,14 @@
+<script module lang="ts">
+/*
+ * Scan results live at module level: the row is rendered once per settings
+ * tab that embeds `EmbeddingIndexSection` (search and graph), and a deletion
+ * from one tab must not leave the other showing databases that are gone.
+ */
+let orphans = $state<OrphanedDatabase[]>([]);
+let originUsage = $state<number | null>(null);
+let deleting = $state(false);
+</script>
+
 <script lang="ts">
 import { untrack } from "svelte";
 import { Notice } from "obsidian";
@@ -26,10 +37,6 @@ import {
 const pluginData = getData();
 const plugin = getPlugin();
 
-let orphans = $state<OrphanedDatabase[]>([]);
-let originUsage = $state<number | null>(null);
-let deleting = $state(false);
-
 const configuredIds = $derived(pluginData.embeddingIndexes.map((index) => index.id));
 // A value signature: `embeddingIndexes` is a fresh array on every store write,
 // and keying the effect on its identity would rescan on unrelated saves.
@@ -55,7 +62,7 @@ $effect(() => {
 const totalEstimatedBytes = $derived(orphans.reduce((sum, orphan) => sum + (orphan.estimatedBytes ?? 0), 0));
 
 function describe(orphan: OrphanedDatabase): string {
-	if (orphan.kind === "legacy-sidecar") return "legacy graph data";
+	if (orphan.kind === "legacy-sidecar") return `${orphan.label} (legacy graph data)`;
 	const chunks = orphan.chunkCount ?? 0;
 	return `${orphan.indexId} (${chunks} ${chunks === 1 ? "chunk" : "chunks"})`;
 }

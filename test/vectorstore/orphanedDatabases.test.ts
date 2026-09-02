@@ -85,7 +85,14 @@ describe("listOrphanedVectorDatabases", () => {
 		expect(orphans).not.toBeNull();
 		expect(orphans?.map((o) => o.name)).toEqual([orphanMain, orphanSidecar]);
 		const index = orphans?.find((o) => o.kind === "index");
-		expect(index).toMatchObject({ indexId: ORPHAN, chunkCount: 3, dimensions: 4, estimatedBytes: 3 * 4 * 4 });
+		expect(index).toMatchObject({
+			indexId: ORPHAN,
+			label: "ollama_nomic-embed-text",
+			chunkCount: 3,
+			dimensions: 4,
+			estimatedBytes: 3 * 4 * 4,
+		});
+		expect(orphans?.find((o) => o.kind === "legacy-sidecar")?.label).toBe("ollama_nomic-embed-text");
 	});
 
 	it("reports nothing when every database is configured", async () => {

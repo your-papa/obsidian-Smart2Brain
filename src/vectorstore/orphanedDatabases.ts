@@ -33,6 +33,8 @@ export const LEGACY_SIDECAR_SUFFIX = "-hnsw-index";
 
 export interface OrphanedDatabase {
 	name: string;
+	/** `name` without the vault prefix and sidecar suffix — the `provider_model` part, for display. */
+	label: string;
 	/** A whole index for a model no longer configured, or a legacy graph sidecar. */
 	kind: "index" | "legacy-sidecar";
 	/** `provider:model` recorded inside the database (indexes only). */
@@ -196,7 +198,7 @@ export async function listOrphanedVectorDatabases(
 			const main = name.slice(0, -LEGACY_SIDECAR_SUFFIX.length);
 			const mainOwnership = ownership.get(main);
 			if (mainOwnership && !mainOwnership.owned) continue;
-			orphans.push({ name, kind: "legacy-sidecar" });
+			orphans.push({ name, label: main.slice(prefix.length), kind: "legacy-sidecar" });
 			continue;
 		}
 		if (configured.has(name)) continue;
@@ -205,6 +207,7 @@ export async function listOrphanedVectorDatabases(
 		const { indexId, chunkCount, dimensions } = entry.probe;
 		orphans.push({
 			name,
+			label: name.slice(prefix.length),
 			kind: "index",
 			indexId,
 			chunkCount,
