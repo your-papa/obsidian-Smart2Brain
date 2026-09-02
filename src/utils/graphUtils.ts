@@ -17,17 +17,17 @@ export function splitEdgeKey(key: string): [string, string] {
 }
 
 /**
- * Ceiling (in world px, on top of the base size) that a collapsed topic's
- * radius approaches asymptotically as its member count grows.
+ * Radius (in world px, on top of the base size) of the vault's *largest*
+ * collapsed topic — the top of the bubble scale. Keeps the biggest topic sane
+ * at fit-to-view: ~5× a hub note, not a disc that swallows the layout.
  */
 const TOPIC_RADIUS_CEILING = 26;
 /**
- * √memberCount at which a topic reaches half the ceiling. Chosen so the
- * everyday range differentiates most: half size at ~36 notes — the typical
- * Leiden topic in a few-hundred-note vault — with real growth still visible
- * out past a thousand-note mega-topic.
+ * Radius (in world px, on top of the base size) of the *smallest* possible
+ * topic — the bottom of the bubble scale. Visibly larger than a plain note so
+ * a tiny topic still reads as a group and stays an easy hover/click target.
  */
-const TOPIC_RADIUS_HALF_POINT = 6;
+const TOPIC_RADIUS_FLOOR = 6;
 
 /**
  * Auto-tuned base node radius from how many notes the graph *represents* —
@@ -54,18 +54,40 @@ export function autoNodeSize(representedNoteCount: number): number {
  *   stands for, the natural "how big is this area of my vault" reading.
  *   Connectivity is deliberately NOT in the radius: rolled-up edge width
  *   already carries it, and encoding it twice left member count encoded
- *   nowhere. Member counts span 1..thousands, so a smooth saturating curve
- *   over √members keeps every doubling visible while approaching the ceiling
- *   asymptotically instead of hitting it.
+ *   nowhere.
+ *
+ * Topics follow the bubble-chart convention: circle **area** is proportional
+ * to member count, so radius grows with √members. The scale is normalized
+ * **per vault** — `√(members / largestTopicSize)` maps the biggest topic in
+ * the current segmentation to the ceiling and everything else to its true
+ * share of that, between the floor and the ceiling. The normalizer is stamped
+ * on the node at merge time from ALL topics, not just the collapsed ones, so a
+ * bubble never changes size because a *different* topic was expanded.
+ *
+ * Why not a fixed curve: an earlier version used a saturating
+ * `√n / (√n + halfPoint)` with the half-point tuned on a few-hundred-note test
+ * corpus (~36 notes). Real vaults have topics of 1000–2000 notes, where that
+ * curve was already flat: an 8-note topic drew at a third the size of a
+ * 1000-note one, and 1000 vs 2000 were indistinguishable. Any fixed constant
+ * fails the same way for *some* vault size — only the vault's own maximum can
+ * anchor the scale.
+ *
+ * The auto-tuned `nodeSize` (see {@link autoNodeSize}) is still the base for
+ * every kind: note radii sit on it directly, and the topic floor/ceiling are
+ * offsets from it, so folding a vault doesn't change the sizing regime.
  */
 export function nodeDrawRadius(
-	node: { degree?: number; kind?: string; memberPaths?: string[] },
+	node: { degree?: number; kind?: string; memberPaths?: string[]; largestTopicSize?: number },
 	nodeSize: number,
 ): number {
 	const base = Math.max(1, nodeSize);
 	if (node.kind === "topic") {
-		const spread = Math.sqrt(Math.max(0, node.memberPaths?.length ?? 0));
-		return base + TOPIC_RADIUS_CEILING * (spread / (spread + TOPIC_RADIUS_HALF_POINT));
+		const members = Math.max(0, node.memberPaths?.length ?? 0);
+		// A node carrying no normalizer (built outside the merge pass) is its own
+		// maximum, which puts it at the ceiling — the single-topic case.
+		const largest = Math.max(members, node.largestTopicSize ?? 0);
+		const share = largest > 0 ? Math.min(1, members / largest) : 0;
+		return base + TOPIC_RADIUS_FLOOR + (TOPIC_RADIUS_CEILING - TOPIC_RADIUS_FLOOR) * Math.sqrt(share);
 	}
 	const degree = Math.max(0, node.degree ?? 0);
 	return base + Math.min(Math.log1p(degree) * 2.5, base * 5);

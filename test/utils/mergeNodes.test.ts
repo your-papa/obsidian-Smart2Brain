@@ -78,6 +78,40 @@ describe("buildCollapsedGraph", () => {
 		expect(topicA?.degree).toBe(2);
 	});
 
+	it("stamps every topic node with the size of the largest topic in the segmentation", () => {
+		const graph: GraphData = {
+			nodes: [note("a1", 0), note("a2", 0), note("a3", 0), note("b1", 1), note("c1", 2), note("c2", 2)],
+			edges: [],
+		};
+
+		const all = buildCollapsedGraph(graph, { collapsedTopics: new Set([0, 1, 2]) });
+		for (const node of all.nodes) expect(node.largestTopicSize).toBe(3);
+
+		// Expanding the largest topic must not change the others' normalizer —
+		// otherwise every remaining bubble would resize when it is unfolded.
+		const withoutBiggest = buildCollapsedGraph(graph, { collapsedTopics: new Set([1, 2]) });
+		const topicB = withoutBiggest.nodes.find((n) => n.id === topicNodeId(1));
+		expect(topicB?.largestTopicSize).toBe(3);
+		expect(withoutBiggest.nodes.find((n) => n.kind !== "topic")?.largestTopicSize).toBeUndefined();
+	});
+
+	it("counts unsorted notes toward the largest topic only when they fold into a bubble", () => {
+		const graph: GraphData = {
+			nodes: [note("a1", 0), note("a2", 0), note("u1"), note("u2"), note("u3")],
+			edges: [],
+		};
+
+		const loose = buildCollapsedGraph(graph, { collapsedTopics: new Set([0]) });
+		expect(loose.nodes.find((n) => n.id === topicNodeId(0))?.largestTopicSize).toBe(2);
+
+		const folded = buildCollapsedGraph(graph, {
+			collapsedTopics: new Set([0, UNSORTED_CLUSTER]),
+			collapseUnsorted: true,
+		});
+		expect(folded.nodes.find((n) => n.id === topicNodeId(0))?.largestTopicSize).toBe(3);
+		expect(folded.nodes.find((n) => n.id === topicNodeId(UNSORTED_CLUSTER))?.largestTopicSize).toBe(3);
+	});
+
 	it("records every member path", () => {
 		const collapsed = buildCollapsedGraph(twoTopicGraph(), { collapsedTopics: new Set([0, 1]) });
 		const topicA = collapsed.nodes.find((n) => n.id === topicNodeId(0));

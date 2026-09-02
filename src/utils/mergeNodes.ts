@@ -98,6 +98,19 @@ export function buildCollapsedGraph(graph: GraphData, options: CollapseOptions =
 	// Nothing is collapsed — hand back the original graph untouched.
 	if (membersByTopic.size === 0) return graph;
 
+	// Normalizer for topic radii: the member count of the largest topic in the
+	// whole segmentation, folded or not. Counting only the collapsed set would
+	// make every remaining bubble jump in size the moment the biggest topic is
+	// expanded. Unsorted notes count only when they can be folded into a bubble
+	// of their own — otherwise they are loose notes, not a topic.
+	const sizeByTopic = new Map<number, number>();
+	for (const node of graph.nodes) {
+		const group = node.cluster ?? UNSORTED_CLUSTER;
+		if (group === UNSORTED_CLUSTER && !collapseUnsorted) continue;
+		sizeByTopic.set(group, (sizeByTopic.get(group) ?? 0) + 1);
+	}
+	const largestTopicSize = Math.max(0, ...sizeByTopic.values());
+
 	/** Resolve a node id to whatever represents it in the collapsed graph. */
 	const representativeOf = new Map<string, string>();
 	for (const [cluster, members] of membersByTopic) {
@@ -169,13 +182,14 @@ export function buildCollapsedGraph(graph: GraphData, options: CollapseOptions =
 			cluster,
 			color: isUnsorted ? (options.unsortedColor ?? members[0]?.color) : members[0]?.color,
 			// `degree` stays the crossing-link count — it feeds the tooltip's
-			// "N connections" line. Radius comes from `memberPaths` instead (see
+			// "N links" line. Radius comes from `memberPaths` instead (see
 			// nodeDrawRadius): size says how many notes the topic holds, while
 			// connectivity is carried by the rolled-up edge widths.
 			degree: crossingCount.get(id) ?? 0,
 			highlighted: false,
 			kind: "topic",
 			memberPaths: members.map((member) => member.path),
+			largestTopicSize,
 		});
 	}
 
