@@ -1,44 +1,44 @@
-
-name: UI Issue
-description: "Use this template if something looks weird or you would like some styles changed."
-title: "UI issue"
+name: UI issue
+description: Something looks wrong, is misaligned, or clashes with your theme.
+title: "[UI]: "
 labels: ["styles"]
-assignees: ["leo310", "nicobrauchtgit"]
 body:
   - type: markdown
     attributes:
       value: |
-        # Thanks for helping us improve our UI!🐙
+        Thanks for helping us polish the UI! 🐙
   - type: textarea
-    id: whats-wrong
+    id: what
     attributes:
-      label: What looks weird?
-      description: Also add a screenshot, if possible.
-      placeholder: Tell us what you see!
+      label: What looks wrong?
+      description: A screenshot is worth more than a paragraph here. Say what you expected it to look like.
     validations:
       required: true
-  - type: input 
-    id: version
-    attributes:
-      label: Smart Second Brain Version
-      description: What version of S2B are you running?
-      placeholder: 0.6.1
-    validations:
-      required: true
-  - type: input 
+  - type: input
     id: theme
     attributes:
-      label: Theme
-      description: Which theme are you using?
-      placeholder: "Minimal v7.5.3: Rose Pine" 
+      label: Theme and CSS snippets
+      description: Which Obsidian theme are you using, and do you have CSS snippets enabled? Does it also happen with the default theme?
+      placeholder: "Minimal 7.x; happens with default theme too"
     validations:
       required: true
-  - type: textarea 
-    id: improvement
+  - type: dropdown
+    id: platform
     attributes:
-      label: What should change?
-      description: Tell us what we should change and add screenshots if possible.
-      placeholder: S2B logo covers the chat text.
+      label: Platform
+      multiple: true
+      options:
+        - macOS
+        - Windows
+        - Linux
+        - iOS / iPadOS
+        - Android
     validations:
       required: true
-         
+  - type: input
+    id: plugin-version
+    attributes:
+      label: Plugin version
+      placeholder: "2.0.2"
+    validations:
+      required: true
