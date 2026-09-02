@@ -1,15 +1,17 @@
 /**
  * Compute Worker Manager
  *
- * Provides async versions of the graph's heavy computations (Leiden community
- * detection, the semantic edge scan) that run in a Web Worker, keeping the main
- * thread responsive.
+ * Provides an async version of the graph's Leiden community detection that
+ * runs in a Web Worker, keeping the main thread responsive.
  *
  * Falls back to synchronous main-thread execution if workers are unavailable.
+ *
+ * (The semantic edge scan is no longer routed through here: it runs inside the
+ * vector store's worker, where the vectors already live — see
+ * `VectorStore.semanticPairs`.)
  */
 
-import type { ComputeWorkerRequest, ComputeWorkerResponse, SerializedVectorBatch } from "./computeWorker";
-import { computeSemanticPairs, type SemanticPair } from "./semanticEdges";
+import type { ComputeWorkerRequest, ComputeWorkerResponse } from "./computeWorker";
 import ComputeWorkerConstructor from "./computeWorker?worker&inline";
 import { Graph as LeidenGraph, leiden } from "leiden-ts";
 
@@ -84,72 +86,23 @@ function postRequest<T extends ComputeWorkerResponse>(request: ComputeWorkerRequ
 	}
 
 	return new Promise<T>((resolve, reject) => {
-		// Store a recovery copy whose vector buffer is NOT the one we transfer.
-		// `getTransferList` hands the buffer to the worker, which detaches it on
-		// this thread; recomputing on the main thread from a detached buffer
-		// would throw. Cloning first keeps the recovery path intact while the
-		// worker still gets a zero-copy transfer of the original.
 		// The cast is the erasure described on `pending`: this resolver accepts the
 		// caller's narrowed T, and the dispatcher only ever hands it the matching
-		// response for this request id.
+		// response for this request id. Nothing is transferred, so the retained
+		// request is the same object and stays usable for the recovery path.
 		pending.set(request.id, {
 			resolve: resolve as (value: ComputeWorkerResponse) => void,
 			reject,
-			request: cloneRequestForRecovery(request),
+			request,
 		});
-		w.postMessage(request, getTransferList(request));
+		w.postMessage(request);
 	});
-}
-
-/**
- * Deep-copy the transferable vector buffer of a request so a retained copy
- * survives the `postMessage` transfer (which detaches the original's buffer on
- * this thread). Non-vector requests (e.g. `leiden`) transfer nothing and are
- * returned as-is.
- */
-function cloneRequestForRecovery(request: ComputeWorkerRequest): ComputeWorkerRequest {
-	if (request.type === "leiden") return request;
-	const { data, count, dim } = request.vectors;
-	// `data.slice()` allocates a fresh backing buffer, decoupled from the one
-	// about to be transferred. `chunkOwners` transfers separately and needs the
-	// same treatment.
-	return {
-		...request,
-		vectors: { data: data.slice(), count, dim },
-		chunkOwners: request.chunkOwners.slice(),
-	};
-}
-
-/**
- * Convert vectors to a flat Float32Array batch for worker transfer.
- */
-function toTransferable(vectors: (Float32Array | number[])[]): SerializedVectorBatch {
-	if (vectors.length === 0) {
-		return { data: new Float32Array(0), count: 0, dim: 0 };
-	}
-
-	const count = vectors.length;
-	const dim = vectors[0].length;
-	const data = new Float32Array(count * dim);
-	for (let i = 0; i < count; i++) {
-		data.set(vectors[i], i * dim);
-	}
-	return { data, count, dim };
-}
-
-function getTransferList(request: ComputeWorkerRequest): Transferable[] {
-	switch (request.type) {
-		case "semanticEdges":
-			return [request.vectors.data.buffer, request.chunkOwners.buffer];
-		case "leiden":
-			return [];
-	}
 }
 
 /**
  * Main-thread fallback for when the worker is unavailable.
  */
-function runOnMainThread(request: ComputeWorkerRequest): ComputeWorkerResponse | Promise<ComputeWorkerResponse> {
+function runOnMainThread(request: ComputeWorkerRequest): ComputeWorkerResponse {
 	switch (request.type) {
 		case "leiden": {
 			// Build an integer-indexed graph for leiden-ts (string node ids → indices)
@@ -187,20 +140,6 @@ function runOnMainThread(request: ComputeWorkerRequest): ComputeWorkerResponse |
 			}
 			return { id: request.id, type: "leiden" as const, result: { communities } };
 		}
-		case "semanticEdges": {
-			return computeSemanticPairs(
-				request.vectors.data,
-				request.vectors.count,
-				request.vectors.dim,
-				request.chunkOwners,
-				request.noteCount,
-				{
-					neighborCount: request.neighborCount,
-					threshold: request.threshold,
-					excludePairs: request.excludePairs ? new Set(request.excludePairs) : undefined,
-				},
-			).then((result) => ({ id: request.id, type: "semanticEdges" as const, result }));
-		}
 	}
 }
 
@@ -226,34 +165,6 @@ export async function leidenAsync(
 		resolution,
 	});
 	return resp.result.communities;
-}
-
-/**
- * Run the semantic pairwise scan off the main thread.
- *
- * Takes chunk-level vectors plus the note each chunk belongs to, and returns
- * scored note-index pairs. Indices refer to the caller's own note ordering.
- */
-export async function semanticEdgesAsync(
-	vectors: Float32Array[],
-	chunkOwners: Int32Array,
-	noteCount: number,
-	options: { neighborCount?: number; threshold?: number; excludePairs?: Set<string> } = {},
-): Promise<SemanticPair[]> {
-	if (vectors.length === 0 || noteCount < 2) return [];
-
-	const id = ++requestId;
-	const resp = await postRequest<Extract<ComputeWorkerResponse, { type: "semanticEdges" }>>({
-		id,
-		type: "semanticEdges",
-		vectors: toTransferable(vectors),
-		chunkOwners,
-		noteCount,
-		neighborCount: options.neighborCount,
-		threshold: options.threshold,
-		excludePairs: options.excludePairs ? [...options.excludePairs] : undefined,
-	});
-	return resp.result;
 }
 
 /**

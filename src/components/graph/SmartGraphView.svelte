@@ -204,10 +204,11 @@ onDestroy(() => {
  *
  * Neighbour search is HNSW-accelerated past ~2k chunks (see
  * `computeSemanticPairs`), so the old O(n²) time wall is gone. What remains is
- * memory: every chunk vector is copied into the compute worker, roughly
- * notes × chunks-per-note × dim × 4 bytes — on the order of 150 MB at this cap
- * with dim 1024. Past it the transfer itself becomes the problem and the graph
- * stays wiki-only.
+ * memory: the store's worker gathers every on-screen chunk vector into one flat
+ * batch for the scan, roughly notes × chunks-per-note × dim × 4 bytes — on the
+ * order of 150 MB at this cap with dim 1024, transiently, on top of the resident
+ * index. Past it that batch itself becomes the problem and the graph stays
+ * wiki-only.
  */
 const SEMANTIC_EDGE_MAX_NOTES = 20000;
 
@@ -442,14 +443,16 @@ async function loadSemanticEdges(wikiData: GraphData, localBuildVersion: number)
 	const indexReady = await waitForVectorStoreIndex(data.graphEmbedIndex);
 	if (!indexReady || localBuildVersion !== buildVersion) return [];
 
+	const inst = await getVectorStoreService()
+		.getOrCreateInstance(data.graphEmbedIndex)
+		.catch(() => null);
+	if (!inst || localBuildVersion !== buildVersion) return [];
+
 	// The search is pure over (wiki graph, semantic settings, embeddings). The
 	// index's lastUpdated stamp bumps on every vector write, so together these
-	// fully key the result — a reopen or no-change Refresh skips loading every
-	// vector and re-running the HNSW neighbour search.
-	const metadata = await getVectorStoreService()
-		.getOrCreateInstance(data.graphEmbedIndex)
-		.then((inst) => inst.store.getMetadata())
-		.catch(() => null);
+	// fully key the result — a reopen or no-change Refresh skips re-running the
+	// neighbour search inside the store.
+	const metadata = await inst.store.getMetadata().catch(() => null);
 	if (localBuildVersion !== buildVersion) return [];
 	const cacheKey = [
 		graphTopologySignature(wikiData),
@@ -463,15 +466,13 @@ async function loadSemanticEdges(wikiData: GraphData, localBuildVersion: number)
 	const cachedEdges = getCachedSemanticEdges(cacheKey);
 	if (cachedEdges) return cachedEdges;
 
-	const documents = await getVectorStoreService().getAllDocumentVectors();
-	if (localBuildVersion !== buildVersion || documents.length === 0) return [];
-
 	// Only connect notes that are actually on screen, and never duplicate a pair
-	// the user already linked by hand.
+	// the user already linked by hand. The store scans its own vectors and
+	// returns pairs; no embedding is copied to this thread.
 	const includePaths = new Set(wikiData.nodes.map((node) => node.path));
 	const wikiEdgeKeys = new Set(wikiData.edges.map((edge) => edgeKey(edge.source, edge.target)));
 
-	const edges = await buildSemanticEdges(documents, includePaths, {
+	const edges = await buildSemanticEdges(inst.store, includePaths, {
 		neighborCount: settings.semanticNeighborCount,
 		threshold: settings.semanticThreshold,
 		excludeEdgeKeys: wikiEdgeKeys,

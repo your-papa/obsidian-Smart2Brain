@@ -1,58 +1,33 @@
 /**
  * Compute Web Worker
  *
- * Runs Leiden community detection and the semantic edge scan off the main
- * thread. Messages follow a request/response pattern with a shared `id` for
- * correlation.
+ * Runs Leiden community detection off the main thread. Messages follow a
+ * request/response pattern with a shared `id` for correlation.
+ *
+ * (The semantic edge scan used to run here too, fed a copy of every chunk
+ * vector from the main thread. It now runs inside the vector store's own
+ * worker, next to the vectors — see `VectorStore.semanticPairs`.)
  */
 
-import { computeSemanticPairs, type SemanticPair } from "./semanticEdges";
 import { Graph as LeidenGraph, leiden } from "leiden-ts";
 
-export interface SerializedVectorBatch {
-	data: Float32Array;
-	count: number;
-	dim: number;
-}
-
-export type ComputeWorkerRequest =
-	| {
-			id: number;
-			type: "leiden";
-			sources: string[];
-			targets: string[];
-			weights: number[];
-			/** PRNG seed for reproducibility (default 42) */
-			seed?: number;
-			/** Resolution γ — lower = fewer larger communities (default 1.0) */
-			resolution?: number;
-	  }
-	| {
-			id: number;
-			type: "semanticEdges";
-			/** Flat chunk vectors — one note may own several chunks. */
-			vectors: SerializedVectorBatch;
-			/** `chunkOwners[i]` is the note index owning chunk `i`. */
-			chunkOwners: Int32Array;
-			/** Number of distinct notes (indices are 0..noteCount-1). */
-			noteCount: number;
-			neighborCount?: number;
-			threshold?: number;
-			/** Note-index pairs (`${min}:${max}`) to skip — already wiki-linked. */
-			excludePairs?: string[];
-	  };
+export type ComputeWorkerRequest = {
+	id: number;
+	type: "leiden";
+	sources: string[];
+	targets: string[];
+	weights: number[];
+	/** PRNG seed for reproducibility (default 42) */
+	seed?: number;
+	/** Resolution γ — lower = fewer larger communities (default 1.0) */
+	resolution?: number;
+};
 
 export type ComputeWorkerResponse =
 	| {
 			id: number;
 			type: "leiden";
 			result: { communities: Record<string, number> };
-	  }
-	| {
-			id: number;
-			type: "semanticEdges";
-			/** Scored note-index pairs; callers map indices back to paths. */
-			result: SemanticPair[];
 	  }
 	| { id: number; type: "error"; error: string };
 
@@ -105,26 +80,6 @@ workerScope.onmessage = async (e: MessageEvent<ComputeWorkerRequest>) => {
 					id: msg.id,
 					type: "leiden",
 					result: { communities },
-				} satisfies ComputeWorkerResponse);
-				break;
-			}
-			case "semanticEdges": {
-				const result = await computeSemanticPairs(
-					msg.vectors.data,
-					msg.vectors.count,
-					msg.vectors.dim,
-					msg.chunkOwners,
-					msg.noteCount,
-					{
-						neighborCount: msg.neighborCount,
-						threshold: msg.threshold,
-						excludePairs: msg.excludePairs ? new Set(msg.excludePairs) : undefined,
-					},
-				);
-				workerScope.postMessage({
-					id: msg.id,
-					type: "semanticEdges",
-					result,
 				} satisfies ComputeWorkerResponse);
 				break;
 			}

@@ -20,10 +20,14 @@
 import type { App, TFile } from "obsidian";
 import { getAllTags } from "obsidian";
 
-import type { DocumentVector } from "../../vectorstore/types";
+import type { SemanticPairOptions } from "../../vectorstore/types";
 import { getIndexableVaultFiles } from "../../utils/fileFiltering";
-import { semanticEdgesAsync } from "../../utils/computeWorkerManager";
-import { DEFAULT_SEMANTIC_NEIGHBOR_COUNT, DEFAULT_SEMANTIC_THRESHOLD, pairKey } from "../../utils/semanticEdges";
+import {
+	DEFAULT_SEMANTIC_NEIGHBOR_COUNT,
+	DEFAULT_SEMANTIC_THRESHOLD,
+	pairKey,
+	type SemanticPair,
+} from "../../utils/semanticEdges";
 import {
 	type GraphData,
 	type GraphEdge,
@@ -114,43 +118,12 @@ export interface SemanticEdgeOptions {
 }
 
 /**
- * Flatten per-chunk vectors into the worker's transfer shape.
- *
- * The vector store embeds large notes as several chunks (`path#chunkIndex`), so
- * a raw `getAll()` contains multiple rows per note. We keep every chunk (the
- * scan scores note pairs by their best-matching chunks) and carry a parallel
- * `chunkOwners` array mapping each chunk back to its note index.
- *
- * Chunks whose dimensionality doesn't match the first vector are dropped — a
- * stale index entry from a previous embedding model would otherwise corrupt the
- * flat batch, whose stride assumes a single dim.
+ * The slice of the vector store the semantic edge build needs: the store runs
+ * the neighbour search itself (see `VectorStore.semanticPairs`), so the vectors
+ * never leave the worker that owns them.
  */
-function flattenChunksByNote(
-	documents: DocumentVector[],
-	allowedPaths: Set<string>,
-): { paths: string[]; vectors: Float32Array[]; chunkOwners: Int32Array } {
-	const noteIndexByPath = new Map<string, number>();
-	const paths: string[] = [];
-	const vectors: Float32Array[] = [];
-	const owners: number[] = [];
-	let dim = -1;
-
-	for (const document of documents) {
-		if (!allowedPaths.has(document.path)) continue;
-		if (dim === -1) dim = document.vector.length;
-		if (document.vector.length !== dim) continue;
-
-		let noteIndex = noteIndexByPath.get(document.path);
-		if (noteIndex === undefined) {
-			noteIndex = paths.length;
-			noteIndexByPath.set(document.path, noteIndex);
-			paths.push(document.path);
-		}
-		vectors.push(document.vector);
-		owners.push(noteIndex);
-	}
-
-	return { paths, vectors, chunkOwners: Int32Array.from(owners) };
+export interface SemanticPairSource {
+	semanticPairs(paths: string[], options?: SemanticPairOptions): Promise<SemanticPair[]>;
 }
 
 /**
@@ -162,39 +135,42 @@ function flattenChunksByNote(
  * link is the stronger statement and rendering both would double-count the pair
  * in community detection.
  *
- * The search itself runs in the compute worker (falling back to the main
- * thread only when workers are unavailable), so a large vault doesn't stall the
- * UI while the graph builds. Small batches take an exact pairwise scan; large
- * ones an approximate HNSW index — see `computeSemanticPairs`.
+ * The search runs inside the vector store's worker, next to the vectors, so a
+ * large vault neither stalls the UI nor copies its whole embedding set to the
+ * main thread while the graph builds. Only the note list goes in and scored
+ * index pairs come out. Small batches take an exact pairwise scan; large ones
+ * an approximate HNSW index — see `computeSemanticPairs`.
  */
 export async function buildSemanticEdges(
-	documents: DocumentVector[],
+	source: SemanticPairSource,
 	includePaths: Set<string>,
 	options: SemanticEdgeOptions = {},
 ): Promise<GraphEdge[]> {
 	const neighborCount = options.neighborCount ?? DEFAULT_SEMANTIC_NEIGHBOR_COUNT;
 	if (neighborCount <= 0) return [];
 
-	const { paths, vectors, chunkOwners } = flattenChunksByNote(documents, includePaths);
+	// Note indices are positions in this list, on both sides of the call.
+	const paths = [...includePaths];
 	if (paths.length < 2) return [];
 
-	// The worker speaks note indices; translate the caller's path-keyed exclusions
+	// The store speaks note indices; translate the caller's path-keyed exclusions
 	// into that space by walking the exclusion set itself (not every pair), and
 	// drop any whose notes aren't both in this graph.
-	let excludePairs: Set<string> | undefined;
+	let excludePairs: string[] | undefined;
 	if (options.excludeEdgeKeys?.size) {
 		const indexByPath = new Map(paths.map((path, index) => [path, index]));
-		excludePairs = new Set<string>();
+		const excluded = new Set<string>();
 		for (const key of options.excludeEdgeKeys) {
 			const [left, right] = splitEdgeKey(key);
 			const a = indexByPath.get(left);
 			const b = indexByPath.get(right);
 			if (a === undefined || b === undefined || a === b) continue;
-			excludePairs.add(pairKey(a, b));
+			excluded.add(pairKey(a, b));
 		}
+		excludePairs = [...excluded];
 	}
 
-	const pairs = await semanticEdgesAsync(vectors, chunkOwners, paths.length, {
+	const pairs = await source.semanticPairs(paths, {
 		neighborCount,
 		threshold: options.threshold ?? DEFAULT_SEMANTIC_THRESHOLD,
 		excludePairs,

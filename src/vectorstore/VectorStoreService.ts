@@ -32,7 +32,6 @@ import { StartupProfiler } from "../utils/startupProfiler";
 import { getDefaultEmbeddingBatchSize, normalizeEmbeddingBatchSize } from "./batchSize";
 import { aggregateChunksToNotes } from "./chunkAggregation";
 import { createVectorStore } from "./index";
-import { toFloat32Array } from "./similarity";
 import {
 	type DefaultEmbedModel,
 	type DocumentVector,
@@ -697,13 +696,13 @@ export class VectorStoreService {
 		const allVaultFiles = getEmbeddableVaultFiles(vault);
 		const vaultFiles = allVaultFiles.filter((file) => this.shouldIndexFile(file, defaultModel.provider));
 
-		const indexedDocs = await inst.store.getAll();
-		// A note may be stored as multiple chunk rows; collapse them to one entry
-		// per path. All chunks of a note share the same mtime, so last-write-wins
-		// is correct for missing/stale detection.
+		// Per-note `{ path, mtime }` only — this never needs a vector, and reading
+		// them all here (a whole-set `getAll()`) was one of the #432 memory spikes.
+		// All chunks of a note share the same mtime, so last-write-wins is correct
+		// for missing/stale detection should a note ever yield two entries.
 		const indexedMap = new Map<string, { mtime: number }>();
-		for (const doc of indexedDocs) {
-			indexedMap.set(doc.path, { mtime: doc.mtime });
+		for (const note of await inst.store.listNoteMeta()) {
+			indexedMap.set(note.path, { mtime: note.mtime });
 		}
 
 		const missingFiles: TFile[] = [];
@@ -1866,18 +1865,6 @@ export class VectorStoreService {
 	}
 
 	/**
-	 * Get all document vectors for the graph index.
-	 */
-	async getAllDocumentVectors(indexId?: string): Promise<DocumentVector[]> {
-		const data = getData();
-		const resolvedId = indexId ?? data.graphEmbedIndex;
-		if (!resolvedId) return [];
-
-		const inst = await this.getOrCreateInstance(resolvedId);
-		return inst.store.getAll();
-	}
-
-	/**
 	 * Get the current index stats for a specific index or the search index.
 	 */
 	async getStats(indexId?: string): Promise<{
@@ -1977,8 +1964,8 @@ export class VectorStoreService {
 		const model = this.getModelForInstance(inst);
 		const provider = model?.provider;
 
-		const indexedDocs = await inst.store.getAll();
-		const indexedPaths = new Set(indexedDocs.map((d) => d.path));
+		// Paths only — read from the store's key index, never its vectors.
+		const indexedPaths = new Set((await inst.store.listNoteMeta()).map((note) => note.path));
 
 		const indexedFiles: string[] = [...indexedPaths];
 		const skippedFiles: SkippedFile[] = [];
@@ -2251,7 +2238,7 @@ export class VectorStoreService {
 				path: d.path,
 				mtime: d.mtime,
 				checksum: d.checksum,
-				vector: toFloat32Array(d.vector),
+				vector: new Float32Array(d.vector),
 				chunkIndex: d.chunkIndex,
 			}));
 
@@ -2311,17 +2298,21 @@ export class VectorStoreService {
 		// not stale data being read back — it is the queued-deletion hazard described below.
 		//
 		// A `"blocked"` result is treated as a failure, even though the deletion itself will
-		// eventually go through. Another connection holds the database (reachable for
-		// `-hnsw-index`, whose connection is owned by the `HNSWWithDB` wrapper and is not
-		// closed by `HNSWVectorStore.close()`, and for a second Obsidian window on the same
-		// vault). The request cannot be cancelled, so it stays queued and fires whenever that
-		// connection closes — and if the config record were removed now, the user could
-		// recreate the same "provider:model" index in the meantime and the queued request
-		// would delete the *replacement* database, destroying a freshly built HNSW graph.
+		// eventually go through. Another connection holds the database (a second Obsidian
+		// window on the same vault). The request cannot be cancelled, so it stays queued and
+		// fires whenever that connection closes — and if the config record were removed now,
+		// the user could recreate the same "provider:model" index in the meantime and the
+		// queued request would delete the *replacement* database, destroying a freshly built
+		// HNSW graph.
 		//
 		// Keeping the config record is what prevents that: the index stays addressable, the
 		// caller reports the failure, and a retry once the other connection is gone deletes
 		// it cleanly.
+		//
+		// `-hnsw-index` is the pre-v3 sidecar database the `hnsw` library used to own. Schema
+		// v3 stores the graph inside the main database and deletes the sidecar on upgrade,
+		// but an index that was never reopened since still has one; deleting a database that
+		// does not exist is a no-op, so it stays in the list.
 		const hnswDbName = getDbName("s2b-hnsw", this.vaultId, indexId);
 		const dbNames = [hnswDbName, `${hnswDbName}-hnsw-index`];
 		const results = await Promise.all(dbNames.map((dbName) => deleteDatabase(dbName)));

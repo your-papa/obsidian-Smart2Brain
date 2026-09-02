@@ -89,19 +89,3 @@ export function dotProduct(a: Float32Array | number[], b: Float32Array | number[
 	}
 	return sum;
 }
-
-/**
- * Convert a number[] to Float32Array.
- * Used when loading vectors from serialized storage.
- */
-export function toFloat32Array(arr: number[]): Float32Array {
-	return new Float32Array(arr);
-}
-
-/**
- * Convert a Float32Array to number[].
- * Used when serializing vectors to storage.
- */
-export function toNumberArray(arr: Float32Array): number[] {
-	return Array.from(arr);
-}

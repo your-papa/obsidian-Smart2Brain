@@ -2,11 +2,7 @@ import { TFile, type App } from "obsidian";
 import type { GraphData, GraphEdge, GraphNode } from "../../types/graph";
 import { isAgentFilePath } from "../../utils/fileFiltering";
 import { edgeKey } from "../../utils/graphUtils";
-import { cosineSimilarity, type DocumentVector } from "../../vectorstore";
-
-export interface NoteContextSemanticGraphOptions {
-	threshold?: number;
-}
+import type { NoteNeighbor } from "../../vectorstore";
 
 export const DEFAULT_NOTE_CONTEXT_SEMANTIC_THRESHOLD = 0.35;
 
@@ -106,48 +102,21 @@ export function buildNoteContextWikiGraph(app: App, activePath: string): GraphDa
 	return { nodes, edges };
 }
 
-export function buildNoteContextSemanticGraph(
-	app: App,
-	activePath: string,
-	documents: DocumentVector[],
-	options: NoteContextSemanticGraphOptions = {},
-): GraphData {
+/**
+ * The active note's semantic neighbourhood. `neighbors` is the store's
+ * `noteNeighbors(activePath, threshold)` result — already thresholded and
+ * sorted — so this only maps it onto the vault's current markdown files.
+ */
+export function buildNoteContextSemanticGraph(app: App, activePath: string, neighbors: NoteNeighbor[]): GraphData {
 	const fileMap = getMarkdownFileMap(app);
 	if (!fileMap.has(activePath)) {
 		return { nodes: [], edges: [] };
 	}
 
-	const activeVectors = documents.filter((document) => document.path === activePath);
-	if (activeVectors.length === 0) {
-		return {
-			nodes: createNodes(fileMap, [activePath], [], activePath),
-			edges: [],
-		};
-	}
-
-	const threshold = options.threshold ?? DEFAULT_NOTE_CONTEXT_SEMANTIC_THRESHOLD;
-	const bestScoresByPath = new Map<string, number>();
-
-	for (const candidate of documents) {
-		if (candidate.path === activePath || !fileMap.has(candidate.path)) continue;
-
-		let bestScore = Number.NEGATIVE_INFINITY;
-		for (const activeVector of activeVectors) {
-			bestScore = Math.max(bestScore, cosineSimilarity(activeVector.vector, candidate.vector));
-		}
-
-		if (bestScore < threshold) continue;
-		const previous = bestScoresByPath.get(candidate.path);
-		if (previous == null || bestScore > previous) {
-			bestScoresByPath.set(candidate.path, bestScore);
-		}
-	}
-
-	const rankedNeighbors = [...bestScoresByPath.entries()].sort((left, right) => right[1] - left[1]);
-
 	const neighborPaths = new Set<string>([activePath]);
 	const edges: GraphEdge[] = [];
-	for (const [path, score] of rankedNeighbors) {
+	for (const { path, score } of neighbors) {
+		if (path === activePath || !fileMap.has(path) || neighborPaths.has(path)) continue;
 		neighborPaths.add(path);
 		edges.push({
 			source: activePath,

@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+	ChunkBatchBuilder,
 	approximateSemanticPairs,
 	computeSemanticPairs,
 	pairKey,
 	scanSemanticPairs,
+	semanticPairsFromDocuments,
 } from "../../src/utils/semanticEdges";
 
 /** Flatten note vectors (one chunk each) into the scan's transfer shape. */
@@ -248,5 +250,75 @@ describe("computeSemanticPairs", () => {
 		const exact = scanSemanticPairs(data, count, dim, owners, notes.length, { threshold: 0.5 });
 
 		expect(dispatched).toEqual(exact);
+	});
+});
+
+describe("ChunkBatchBuilder", () => {
+	it("packs vectors back to back with their note owners", () => {
+		const builder = new ChunkBatchBuilder();
+		builder.add(0, new Float32Array([1, 2]));
+		builder.add(0, new Float32Array([3, 4]));
+		builder.add(2, new Float32Array([5, 6]));
+		const batch = builder.finish();
+
+		expect(batch.count).toBe(3);
+		expect(batch.dim).toBe(2);
+		expect(Array.from(batch.data)).toEqual([1, 2, 3, 4, 5, 6]);
+		expect(Array.from(batch.chunkOwners)).toEqual([0, 0, 2]);
+		// Trimmed to size: no growth slack survives into the batch.
+		expect(batch.data.length).toBe(batch.count * batch.dim);
+	});
+
+	it("drops chunks whose dimension differs from the first — a stale model's rows must not corrupt the stride", () => {
+		const builder = new ChunkBatchBuilder();
+		builder.add(0, new Float32Array([1, 0, 0]));
+		builder.add(1, new Float32Array([1, 0]));
+		builder.add(2, new Float32Array([0, 1, 0]));
+		const batch = builder.finish();
+
+		expect(batch.count).toBe(2);
+		expect(Array.from(batch.chunkOwners)).toEqual([0, 2]);
+	});
+
+	it("yields an empty batch when nothing was added", () => {
+		const batch = new ChunkBatchBuilder().finish();
+		expect(batch).toEqual({ data: new Float32Array(0), count: 0, dim: 0, chunkOwners: new Int32Array(0) });
+	});
+
+	it("grows past its initial capacity without losing earlier vectors", () => {
+		const builder = new ChunkBatchBuilder();
+		const dim = 7;
+		for (let i = 0; i < 100; i++) builder.add(i, new Float32Array(dim).fill(i));
+		const batch = builder.finish();
+
+		expect(batch.count).toBe(100);
+		for (let i = 0; i < 100; i++) expect(batch.data[i * dim + dim - 1]).toBe(i);
+	});
+});
+
+describe("semanticPairsFromDocuments", () => {
+	const docs = [
+		{ path: "a.md", vector: new Float32Array([1, 0, 0]) },
+		{ path: "b.md", vector: new Float32Array([0.99, 0.1, 0]) },
+		{ path: "c.md", vector: new Float32Array([0, 0, 1]) },
+		{ path: "off-screen.md", vector: new Float32Array([1, 0, 0]) },
+	];
+
+	it("indexes pairs by position in the given path list and ignores other notes", async () => {
+		const pairs = await semanticPairsFromDocuments(docs, ["c.md", "a.md", "b.md"], { threshold: 0.5 });
+		expect(pairs).toEqual([{ source: 1, target: 2, score: expect.any(Number) }]);
+	});
+
+	it("matches the flat-batch kernel it wraps", async () => {
+		const paths = ["a.md", "b.md", "c.md"];
+		const data = new Float32Array(9);
+		paths.forEach((path, i) => data.set(docs.find((d) => d.path === path)?.vector ?? [], i * 3));
+		const direct = await computeSemanticPairs(data, 3, 3, Int32Array.from([0, 1, 2]), 3, { threshold: 0.5 });
+		expect(await semanticPairsFromDocuments(docs, paths, { threshold: 0.5 })).toEqual(direct);
+	});
+
+	it("treats a listed note with no rows as having no chunks", async () => {
+		const pairs = await semanticPairsFromDocuments(docs, ["a.md", "missing.md", "b.md"], { threshold: 0.5 });
+		expect(pairs).toEqual([{ source: 0, target: 2, score: expect.any(Number) }]);
 	});
 });

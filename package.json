@@ -12,6 +12,7 @@
     "autoprefixer": "^10.4.27",
     "builtin-modules": "^5.0.0",
     "events": "^3.3.0",
+    "fake-indexeddb": "^6.2.5",
     "jsdom": "^27.4.0",
     "obsidian": "^1.12.3",
     "postcss": "^8.5.8",
@@ -40,6 +41,7 @@
     "setup-vault": "mkdir -p 'integration/S2B Test Vault/.obsidian/plugins/smart-second-brain' && cd 'integration/S2B Test Vault/.obsidian/plugins/smart-second-brain' && ln -sf ../../../../../build/smart-second-brain/main.js main.js && ln -sf ../../../../../build/smart-second-brain/styles.css styles.css && ln -sf ../../../../../build/smart-second-brain/manifest.json manifest.json",
     "corpus:generate": "bun run scripts/generate-search-corpus.ts",
     "bench:layout": "bun run scripts/graph-layout-bench.ts",
+    "bench:vector-memory": "bun run scripts/vector-memory-bench.ts",
     "test:benchmark": "vitest run --config vitest.integration.config.ts integration/search-relevance-benchmark.test.ts"
   },
   "type": "module",

@@ -8,10 +8,12 @@
 // Re-export DefaultEmbedModel and EmbeddingIndexConfig from canonical location
 export type { DefaultEmbedModel, EmbeddingIndexConfig } from "../types/plugin";
 import type { LexicalRankingFeatures } from "../search/lexicalScoring";
+import type { SemanticPair } from "../utils/semanticEdges";
 
 /**
  * A document with its embedding vector stored in IndexedDB.
- * Uses Float32Array for memory efficiency during runtime.
+ * The vector is a `Float32Array` everywhere — in memory, across the worker
+ * boundary, and in the IndexedDB row (structured clone keeps typed arrays).
  */
 export interface DocumentVector {
 	/** Unique identifier - uses file path as ID */
@@ -323,6 +325,29 @@ export interface ScoredDocument {
 	score: number;
 }
 
+/** An indexed note's identity and change stamp — the projection reads that never load a vector return. */
+export interface NoteMeta {
+	path: string;
+	mtime: number;
+}
+
+/** Another note scored against one note's chunks (see `VectorStore.noteNeighbors`). */
+export interface NoteNeighbor {
+	path: string;
+	score: number;
+}
+
+/**
+ * Options for `VectorStore.semanticPairs`. Mirrors `SemanticScanOptions`, with the
+ * exclusion set as an array because it crosses the worker boundary.
+ */
+export interface SemanticPairOptions {
+	neighborCount?: number;
+	threshold?: number;
+	/** Note-index pairs (`${min}:${max}`, indices into the `paths` argument) to skip. */
+	excludePairs?: string[];
+}
+
 /**
  * Abstract interface for vector store backends.
  * HNSW implementation conforms to this interface.
@@ -360,6 +385,10 @@ export interface VectorStore {
 
 	/**
 	 * Add or update a document in the store.
+	 *
+	 * The store takes ownership of `doc.vector`: the worker-backed implementation
+	 * transfers its buffer rather than copying it, so the caller's array is
+	 * detached (length 0) once this resolves. Build a fresh `Float32Array` per call.
 	 */
 	upsert(doc: DocumentVector): Promise<void>;
 
@@ -385,17 +414,36 @@ export interface VectorStore {
 	getDocumentMtime(path: string): Promise<number | undefined>;
 
 	/**
-	 * Get all documents.
+	 * `{ path, mtime }` of every indexed note, one entry per note, read without
+	 * deserialising a single vector. This is the read to use for "what is
+	 * indexed, and is it stale" questions — there is deliberately no whole-set
+	 * `getAll()`: materialising every vector on the main thread is the memory
+	 * spike #432 removes.
 	 */
-	getAll(): Promise<DocumentVector[]>;
+	listNoteMeta(): Promise<NoteMeta[]>;
 
 	/**
-	 * Get all documents as serialized format (for MessagePack).
+	 * Semantic neighbour pairs among the given notes, computed inside the store
+	 * (where the vectors already live) and returned as scored index pairs into
+	 * `paths`. Notes with no indexed chunks simply contribute nothing.
+	 */
+	semanticPairs(paths: string[], options?: SemanticPairOptions): Promise<SemanticPair[]>;
+
+	/**
+	 * Every other note whose best chunk scores at least `threshold` against any
+	 * chunk of `path`, sorted by score descending. Exhaustive, not approximate.
+	 */
+	noteNeighbors(path: string, threshold: number): Promise<NoteNeighbor[]>;
+
+	/**
+	 * Get all documents as serialized format (for MessagePack). Whole-set read;
+	 * only the explicit export action may call it.
 	 */
 	getAllSerialized(): Promise<SerializedDocument[]>;
 
 	/**
-	 * Bulk insert documents (for loading from file).
+	 * Bulk insert documents (for loading from file). Takes ownership of every
+	 * `doc.vector` the same way `upsert` does.
 	 */
 	bulkPut(docs: DocumentVector[]): Promise<void>;
 
