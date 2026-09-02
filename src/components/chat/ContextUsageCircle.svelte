@@ -51,12 +51,18 @@ const centerLabel = $derived.by(() => {
 	return `${usagePercent.toFixed(0)}%`;
 });
 
-// Composition of what is in the window, in a fixed order so a category keeps its
-// colour whether or not its neighbours are present (an empty category is dropped,
-// never recoloured). Draft & pending is part of the total, so it is a row like the
-// others rather than a footnote; its neutral swatch says "not sent yet".
-const compositionRows = $derived.by(() => {
-	const total = Math.max(breakdown.totalTokens, 1);
+// Every percentage in the panel shares one denominator: the context limit when it
+// is known, so the header, the bar and the rows all agree on what 100% means and
+// the bar reads like a storage gauge (how full, and who is using it). Without a
+// limit the denominator is what is in the window now, and the bar degrades to a
+// composition view.
+const scaleTokens = $derived(limit !== undefined && limit > 0 ? limit : Math.max(breakdown.totalTokens, 1));
+
+// Rows in a fixed order so a category keeps its colour whether or not its
+// neighbours are present (an empty category is dropped, never recoloured).
+// Draft & pending is part of the total, so it is a row like the others rather
+// than a footnote; its neutral swatch says "not sent yet".
+const usageRows = $derived.by(() => {
 	return [
 		{ id: "system", label: "System prompt", tokens: breakdown.systemPromptTokens },
 		{ id: "human", label: "Your messages", tokens: breakdown.humanTokens },
@@ -65,8 +71,23 @@ const compositionRows = $derived.by(() => {
 		{ id: "draft", label: "Draft & pending", tokens: breakdown.draftAndPendingTokens },
 	]
 		.filter((row) => row.tokens > 0)
-		.map((row) => ({ ...row, share: (row.tokens / total) * 100 }));
+		.map((row) => ({ ...row, share: (row.tokens / scaleTokens) * 100 }));
 });
+
+// Where automatic compaction kicks in, as a position on the bar. Omitted when the
+// trigger is not inside the bar (unknown limit, or a window so small that the 12k
+// floor exceeds it).
+const compactionTickPercent = $derived.by(() => {
+	const trigger = getSummarizationTriggerTokens(limit);
+	if (trigger === null || limit === undefined || trigger >= limit) return null;
+	return (trigger / limit) * 100;
+});
+
+// A category can be real but tiny against a 200k window; "<1%" says so without
+// rounding it away to "0%".
+function formatShare(share: number): string {
+	return share >= 1 ? `${share.toFixed(0)}%` : "<1%";
+}
 
 // Format tooltip text
 const tooltipText = $derived.by(() => {
@@ -159,23 +180,26 @@ function formatCompact(value: number): string {
     </div>
     <div class="context-usage-line">{usageLine}</div>
 
-    <!-- Composition bar: 100% = what is in the window now. Usage against the
-         limit is what the ring and the header already show; the bar answers
-         the other question, "what is it made of". Segments keep a 2px surface
-         gap and a minimum width so a small category still registers. -->
+    <!-- The bar is the context window: segments are each category's share of the
+         limit, on a faint track, with a tick where automatic compaction starts.
+         A non-empty category keeps a minimum width so it still registers against
+         a large window. -->
     <div class="context-usage-bar" aria-hidden="true">
-      {#each compositionRows as row (row.id)}
-        <span class="context-usage-segment context-usage-swatch-{row.id}" style="flex-grow: {row.tokens};"></span>
+      {#each usageRows as row (row.id)}
+        <span class="context-usage-segment context-usage-swatch-{row.id}" style="width: {row.share}%;"></span>
       {/each}
+      {#if compactionTickPercent !== null}
+        <span class="context-usage-tick" style="left: {compactionTickPercent}%;"></span>
+      {/if}
     </div>
 
     <div class="context-usage-rows">
-      {#each compositionRows as row (row.id)}
+      {#each usageRows as row (row.id)}
         <div class="context-usage-row">
           <span class="context-usage-swatch context-usage-swatch-{row.id}"></span>
           <span class="context-usage-row-label">{row.label}</span>
           <span class="context-usage-row-tokens">{formatNumber(row.tokens)}</span>
-          <span class="context-usage-row-percent">{row.share.toFixed(0)}%</span>
+          <span class="context-usage-row-percent">{formatShare(row.share)}</span>
         </div>
       {/each}
     </div>
@@ -283,18 +307,28 @@ function formatCompact(value: number): string {
   }
 
   .context-usage-bar {
+    position: relative;
     display: flex;
     gap: 2px;
     height: 6px;
     margin: var(--size-4-2) 0 var(--size-4-2);
     border-radius: 3px;
     overflow: hidden;
+    background: color-mix(in srgb, var(--background-modifier-border) 60%, transparent);
   }
 
   .context-usage-segment {
-    flex: 0 1 auto;
+    flex: 0 0 auto;
     min-width: 3px;
     border-radius: 1px;
+  }
+
+  .context-usage-tick {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background: var(--text-faint);
   }
 
   .context-usage-rows {
