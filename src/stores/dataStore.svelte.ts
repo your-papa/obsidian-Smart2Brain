@@ -1716,11 +1716,15 @@ export class PluginDataStore {
 	/**
 	 * Update cached stats for an embedding index.
 	 */
-	updateEmbeddingIndexStats(indexId: string, stats: { lastBuiltAt?: number; documentCount?: number }): void {
+	updateEmbeddingIndexStats(
+		indexId: string,
+		stats: { lastBuiltAt?: number; documentCount?: number; dimensions?: number },
+	): void {
 		const config = this.#data.embeddingIndexes.find((i) => i.id === indexId);
 		if (!config) return;
 		if (stats.lastBuiltAt !== undefined) config.lastBuiltAt = stats.lastBuiltAt;
 		if (stats.documentCount !== undefined) config.documentCount = stats.documentCount;
+		if (stats.dimensions !== undefined) config.dimensions = stats.dimensions;
 		this.saveSettings();
 	}
 

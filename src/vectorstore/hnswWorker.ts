@@ -110,6 +110,10 @@ globalThis.onmessage = async (e: MessageEvent<HNSWWorkerRequest>) => {
 				result = await requireStore().bulkPut(args[0] as DocumentVector[]);
 				break;
 			}
+			case "flush": {
+				result = await requireStore().flush();
+				break;
+			}
 			case "clear": {
 				result = await requireStore().clear();
 				break;

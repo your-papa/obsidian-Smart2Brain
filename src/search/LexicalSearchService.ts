@@ -1,5 +1,14 @@
-import { Notice, Platform, TFile, getAllTags, type CachedMetadata } from "obsidian";
+import { Notice, TFile, getAllTags, type CachedMetadata } from "obsidian";
 import type SecondBrainPlugin from "../main";
+import {
+	BULK_CHECKPOINT_INTERVAL,
+	BulkAttemptMarker,
+	bulkBatchPauseMs,
+	bulkCheckpointPauseMs,
+	bulkPause,
+	orderForBulkIndexing,
+	scheduleBulkRun,
+} from "./bulkPacing";
 import { compileFilter, matchesPathFilter, matchesSearchFilter } from "../search/searchFilters";
 import { extractSearchTerms } from "../search/searchTermUtils";
 import { createQueryPlan, type QueryPlan } from "../search/queryPlan";
@@ -12,12 +21,7 @@ import {
 } from "../search/lexicalScoring";
 import { Logger } from "../utils/logging";
 import { StartupProfiler } from "../utils/startupProfiler";
-import {
-	getIndexableVaultFiles,
-	isBinaryTextFile,
-	isIndexableFile,
-	readIndexableContent,
-} from "../utils/fileFiltering";
+import { getIndexableVaultFiles, isIndexableFile, readIndexableContent } from "../utils/fileFiltering";
 import {
 	MiniSearchService,
 	type AutocompleteCacheSnapshot,
@@ -61,11 +65,14 @@ export class LexicalSearchService {
 	private readonly plugin: SecondBrainPlugin;
 	private readonly miniSearch: MiniSearchService;
 	private readonly vaultId: string;
+	/** Crash-backoff marker for scheduled bulk runs (`s2b-lexical-bulk-attempts:<vaultId>`). */
+	private readonly bulkAttempts: BulkAttemptMarker;
 
 	private constructor(plugin: SecondBrainPlugin) {
 		this.plugin = plugin;
 		this.vaultId = getData().vaultSlug;
 		this.miniSearch = new MiniSearchService(this.vaultId);
+		this.bulkAttempts = new BulkAttemptMarker("lexical", this.vaultId);
 	}
 
 	static async initialize(plugin: SecondBrainPlugin): Promise<LexicalSearchService> {
@@ -148,11 +155,11 @@ export class LexicalSearchService {
 			}
 			if (loaded) {
 				this.plugin.app.workspace.onLayoutReady(() => {
-					this.scheduleBulkRun(() => this.validateIndex());
+					scheduleBulkRun("LexicalSearch", this.bulkAttempts, () => this.validateIndex());
 				});
 			} else {
 				this.plugin.app.workspace.onLayoutReady(() => {
-					this.scheduleBulkRun(() => this.buildIndex());
+					scheduleBulkRun("LexicalSearch", this.bulkAttempts, () => this.buildIndex());
 				});
 			}
 
@@ -209,113 +216,26 @@ export class LexicalSearchService {
 	}
 
 	/**
-	 * How many documents a bulk run indexes between IndexedDB checkpoints.
-	 *
-	 * Each checkpoint serializes the whole index, so the interval trades save cost
-	 * against how much progress a crash can lose. On mobile the process can be
-	 * killed by the OS mid-build; a checkpoint every few hundred documents lets the
-	 * next boot's validateIndex resume roughly where this run died instead of
-	 * starting over.
+	 * Files indexed between pacing pauses during a bulk run. The pause lengths,
+	 * the checkpoint interval and the crash backoff are shared with the embedding
+	 * indexer — see `bulkPacing.ts` for the measurements behind them.
 	 */
-	private static readonly BULK_CHECKPOINT_INTERVAL = 250;
-
-	/** Files indexed between pacing pauses during a bulk run. */
 	private static readonly BULK_BATCH_SIZE = 25;
 
-	/**
-	 * Pause between bulk batches, and after each checkpoint.
-	 *
-	 * Tokenizing text files back-to-back allocates garbage faster than the mobile
-	 * WebView's GC reclaims it, so an unthrottled loop balloons the footprint until
-	 * the OS kills the process — measured as a reload every ~10 s on a large vault.
-	 * (PDF extraction used to throttle the loop by accident; ordering PDFs last
-	 * removed that brake.) Real pauses give the collector room to keep up. Desktop
-	 * has no memory ceiling and only yields the event loop.
-	 */
-	private static readonly BULK_BATCH_PAUSE_MS = Platform.isMobile ? 100 : 0;
-
-	/** Extra pause after a checkpoint's full-index serialization, for the same reason. */
-	private static readonly BULK_CHECKPOINT_PAUSE_MS = Platform.isMobile ? 250 : 0;
-
-	/**
-	 * How long after layout-ready a bulk run may start on mobile, before backoff.
-	 *
-	 * Boot is the highest-pressure window — the vault, the metadata cache, and
-	 * every plugin allocate at once, and the OS kill ceiling is effectively lower
-	 * because of it. Starting the indexer into that spike is what turned one kill
-	 * into a kill loop: each reload restarted indexing at second zero and died
-	 * again. Waiting lets the boot spike drain first; steady state idles at ~2% CPU.
-	 */
-	private static readonly MOBILE_BULK_BASE_DELAY_MS = 15_000;
-
-	/** Upper bound for the crash-backoff delay. */
-	private static readonly MOBILE_BULK_MAX_DELAY_MS = 300_000;
-
-	private static bulkPause(ms: number): Promise<void> {
-		return new Promise((resolve) => setTimeout(resolve, ms));
-	}
-
-	/**
-	 * How boot pressure varies is unknowable from inside the WebView (there is no
-	 * JS memory-pressure API), so no fixed delay can be right on every device: 15 s
-	 * was measured to land inside the boot spike on a phone already under system
-	 * pressure, where the OS killed the process seconds into the run. Instead the
-	 * delay adapts to observed deaths: every bulk attempt writes this marker and a
-	 * completed run clears it, so a marker still present at boot means the last
-	 * attempt died mid-run — and the next one waits twice as long. localStorage,
-	 * not plugin data: it survives the kill (the plugin's data debounce may not)
-	 * and stays out of sync.
-	 */
-	private bulkAttemptKey(): string {
-		return `s2b-lexical-bulk-attempts:${this.vaultId}`;
-	}
-
-	private readCrashedBulkAttempts(): number {
-		const raw = Number(window.localStorage.getItem(this.bulkAttemptKey()));
-		return Number.isFinite(raw) && raw > 0 ? raw : 0;
-	}
-
-	/** Run `work` after the platform-appropriate bulk start delay. */
-	private scheduleBulkRun(work: () => Promise<void>): void {
-		const attempts = this.readCrashedBulkAttempts();
-		const delay = Platform.isMobile
-			? Math.min(
-					LexicalSearchService.MOBILE_BULK_BASE_DELAY_MS * 2 ** attempts,
-					LexicalSearchService.MOBILE_BULK_MAX_DELAY_MS,
-				)
-			: 0;
-		if (attempts > 0) {
-			Logger.warn(
-				`[LexicalSearch] Last bulk index attempt did not complete (${attempts} in a row) — delaying the next by ${Math.round(delay / 1000)}s`,
-			);
-		}
-		window.setTimeout(() => void work(), delay);
-	}
-
-	/**
-	 * Bulk-indexing file order: cheap text files first, binary-extraction files
-	 * (PDFs) last. PDF text extraction is minutes of work on a large vault, and
-	 * putting it first held the whole searchable corpus hostage to it — this way
-	 * every note is searchable early even if the PDF tail never finishes.
-	 */
-	private static orderForBulkIndexing(files: TFile[]): TFile[] {
-		return [...files].sort((a, b) => Number(isBinaryTextFile(a)) - Number(isBinaryTextFile(b)));
-	}
-
-	/** Index `files`, paced in batches and checkpointing every {@link BULK_CHECKPOINT_INTERVAL} additions. */
 	/**
 	 * Runs below this size stay silent: routine validateIndex catch-ups (a few
 	 * changed notes) shouldn't flash a progress notice on every boot.
 	 */
 	private static readonly PROGRESS_NOTICE_MIN_FILES = 100;
 
+	/** Index `files`, paced in batches and checkpointing every {@link BULK_CHECKPOINT_INTERVAL} additions. */
 	private async bulkIndexFiles(files: TFile[]): Promise<number> {
 		const { vault } = this.plugin.app;
 		let added = 0;
 		let processed = 0;
 		// Mark the attempt before the first read; cleared below only when the whole
-		// run survives. See bulkAttemptKey for why this drives the start backoff.
-		window.localStorage.setItem(this.bulkAttemptKey(), String(this.readCrashedBulkAttempts() + 1));
+		// run survives. See BulkAttemptMarker for why this drives the start backoff.
+		this.bulkAttempts.markAttempt();
 		const notice = files.length >= LexicalSearchService.PROGRESS_NOTICE_MIN_FILES ? new Notice("", 0) : null;
 		if (notice) this.updateProgressNotice(notice, 0, files.length);
 		this.miniSearch.suspendScheduledSaves();
@@ -330,18 +250,18 @@ export class LexicalSearchService {
 				}
 				processed++;
 
-				if (added > 0 && added % LexicalSearchService.BULK_CHECKPOINT_INTERVAL === 0) {
+				if (added > 0 && added % BULK_CHECKPOINT_INTERVAL === 0) {
 					await this.miniSearch.flush();
-					await LexicalSearchService.bulkPause(LexicalSearchService.BULK_CHECKPOINT_PAUSE_MS);
+					await bulkPause(bulkCheckpointPauseMs());
 				} else if (processed % LexicalSearchService.BULK_BATCH_SIZE === 0) {
-					await LexicalSearchService.bulkPause(LexicalSearchService.BULK_BATCH_PAUSE_MS);
+					await bulkPause(bulkBatchPauseMs());
 				}
 				if (notice && processed % LexicalSearchService.BULK_BATCH_SIZE === 0) {
 					this.updateProgressNotice(notice, processed, files.length);
 				}
 			}
 			await this.miniSearch.flush();
-			window.localStorage.removeItem(this.bulkAttemptKey());
+			this.bulkAttempts.clear();
 			if (notice) {
 				notice.setMessage(`✓ Search index updated: ${added} notes`);
 				setTimeout(() => notice.hide(), 3000);
@@ -384,7 +304,7 @@ export class LexicalSearchService {
 
 	private async buildIndex(): Promise<void> {
 		await StartupProfiler.logDuration("lexical:buildIndex", async () => {
-			const files = LexicalSearchService.orderForBulkIndexing(getIndexableVaultFiles(this.plugin.app.vault));
+			const files = orderForBulkIndexing(getIndexableVaultFiles(this.plugin.app.vault));
 			await this.bulkIndexFiles(files);
 			Logger.log(`[LexicalSearch] Built lexical index: ${this.miniSearch.documentCount} documents`);
 		});
@@ -402,9 +322,7 @@ export class LexicalSearchService {
 			}
 		}
 
-		const missing = LexicalSearchService.orderForBulkIndexing(
-			files.filter((file) => !this.miniSearch.hasDocument(file.path)),
-		);
+		const missing = orderForBulkIndexing(files.filter((file) => !this.miniSearch.hasDocument(file.path)));
 		const added = await this.bulkIndexFiles(missing);
 
 		if (added > 0 || removed > 0) {

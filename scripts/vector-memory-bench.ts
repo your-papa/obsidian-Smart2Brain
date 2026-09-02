@@ -18,6 +18,12 @@
  *                             the `Float32Array` nodes `fromJSON` builds from it.
  *   after                   — v3: one `Float32Array` per node, the same array that
  *                             came out of IndexedDB, and nothing else.
+ *   after (open only)       — what `HNSWVectorStore.open()` alone keeps resident:
+ *                             the two id maps (chunk id ↔ numeric id), no graph
+ *                             and no vectors. This is the cost of an index that is
+ *                             open but has not been searched or written yet — the
+ *                             state the mobile lazy-open (#432 part 2) leaves an
+ *                             index in after the boot catch-up finds nothing to do.
  *
  * Each shape is measured in its own child process (resident-set delta over the
  * process's baseline, after a forced GC), because an allocator hands freed
@@ -27,7 +33,12 @@
  * index alone.
  */
 
-const SHAPES = ["before (build session)", "before (load peak)", "after (v3, Float32Array)"] as const;
+const SHAPES = [
+	"before (build session)",
+	"before (load peak)",
+	"after (v3, Float32Array)",
+	"after (v3, open only: id maps)",
+] as const;
 type Shape = (typeof SHAPES)[number];
 
 const chunkCount = Number(process.argv[2] ?? 20_000);
@@ -121,6 +132,18 @@ function buildLegacyLoadPeak(): { blob: unknown; nodes: Map<number, NodeShape> }
 	return { blob, nodes };
 }
 
+/** The `idToNumeric` / `numericToId` maps `open()` loads, with realistic chunk ids. */
+function buildIdMaps(): { idToNumeric: Map<string, number>; numericToId: Map<number, string> } {
+	const idToNumeric = new Map<string, number>();
+	const numericToId = new Map<number, string>();
+	for (let id = 0; id < chunkCount; id++) {
+		const stringId = `Notes/Area ${id % 97}/Project ${id % 613}/Meeting notes ${id}.md#${id % 8}`;
+		idToNumeric.set(stringId, id);
+		numericToId.set(id, stringId);
+	}
+	return { idToNumeric, numericToId };
+}
+
 function mb(bytes: number): string {
 	return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
@@ -133,6 +156,8 @@ function buildShape(shape: Shape): unknown {
 			return buildLegacyLoadPeak();
 		case "after (v3, Float32Array)":
 			return buildNodes("float32");
+		case "after (v3, open only: id maps)":
+			return buildIdMaps();
 	}
 }
 
@@ -166,13 +191,13 @@ if (shapeArg) {
 			throw new Error(`Measuring "${shape}" failed: ${child.stderr.toString() || output}`);
 		}
 		results.set(shape, bytes);
-		console.log(`${shape.padEnd(28)} ${mb(bytes).padStart(10)}`);
+		console.log(`${shape.padEnd(32)} ${mb(bytes).padStart(10)}`);
 	}
 
 	const after = results.get("after (v3, Float32Array)") ?? 0;
 	console.log("");
 	for (const shape of SHAPES.slice(0, 2)) {
 		const before = results.get(shape) ?? 0;
-		console.log(`${shape.padEnd(28)} → after: ${((100 * after) / before).toFixed(0)}% of before`);
+		console.log(`${shape.padEnd(32)} → after: ${((100 * after) / before).toFixed(0)}% of before`);
 	}
 }

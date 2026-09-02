@@ -5,6 +5,8 @@ import { EmbeddingIndexSetupModal } from "../modal/EmbeddingIndexSetupModal";
 import { IndexingReportModal } from "../modal/IndexingReportModal";
 import ManagedEntityItem from "./ManagedEntityItem.svelte";
 import ManagedEntitySection from "./ManagedEntitySection.svelte";
+import OrphanedVectorDatabases from "./OrphanedVectorDatabases.svelte";
+import SettingContainer from "./SettingContainer.svelte";
 import Button from "../ui/Button.svelte";
 import ProgressBar from "../ui/ProgressBar.svelte";
 import GenericAIIcon from "../ui/logos/GenericAIIcon.svelte";
@@ -14,6 +16,7 @@ import { getProviderDefinition } from "../../providers/index";
 import { getData } from "../../stores/dataStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
 import { isVectorStoreInitialized, getVectorStoreService, formatEta, type IndexingProgress } from "../../vectorstore";
+import { largeDimensionHint } from "../../vectorstore/embeddingMemoryHint";
 
 interface Props {
 	/** Which feature this embedding index is for */
@@ -41,6 +44,12 @@ let indexProgress = $state<IndexingProgress>({
 // Document count derived from reactive pluginData
 const documentCount = $derived(indexConfig?.documentCount ?? 0);
 const indexes = $derived(pluginData.embeddingIndexes);
+// Mobile only: a wide-vector model costs memory in proportion once its index is
+// loaded (#432). The width is recorded from the first stored vector, so the hint
+// appears once the index has been built or opened at least once.
+const memoryHint = $derived(
+	Platform.isMobile && indexConfig ? largeDimensionHint(indexConfig.model, indexConfig.dimensions) : null,
+);
 
 let unsubscribeProgress: (() => void) | null = null;
 
@@ -296,7 +305,13 @@ function getSelectionGroupLabel(): string {
       {/each}
     </div>
   {/if}
+
+  {#if memoryHint}
+    <SettingContainer name="Memory on mobile" desc={memoryHint} />
+  {/if}
 </ManagedEntitySection>
+
+<OrphanedVectorDatabases />
 
 <style>
   .embedding-index-list {
