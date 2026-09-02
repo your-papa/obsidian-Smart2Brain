@@ -92,16 +92,28 @@ const usageLine = $derived.by(() => {
 });
 
 // The real trigger, not a rounded "about 80%": it is max(80% of the window, 12k),
-// so on a small window the number is the only honest thing to show.
-const compactionNote = $derived.by(() => {
+// so on a small window the number is the only honest thing to show. The footer
+// carries the short form beside the Summarize button (the note and the button are
+// the same concern: automatic vs manual); the full sentence is its tooltip.
+const compaction = $derived.by(() => {
 	const trigger = getSummarizationTriggerTokens(limit);
 	if (trigger === null || limit === undefined) {
-		return "Automatic summarization needs a model with a known context limit.";
+		return {
+			short: "Auto-compaction needs a known limit",
+			long: "Automatic summarization needs a model with a known context limit.",
+		};
 	}
 	const percent = Math.round((trigger / limit) * 100);
-	const at = percent <= 100 ? `${formatNumber(trigger)} tokens (${percent}%)` : `${formatNumber(trigger)} tokens`;
-	return `Older messages are summarized automatically at ${at}.`;
+	const withPercent = percent <= 100 ? ` (${percent}%)` : "";
+	return {
+		short: `Auto-compacts at ${formatCompact(trigger)}${withPercent}`,
+		long: `Older messages are summarized automatically at ${formatNumber(trigger)} tokens${withPercent}.`,
+	};
 });
+
+function formatCompact(value: number): string {
+	return value >= 1000 ? `${Math.round(value / 1000)}k` : formatNumber(value);
+}
 </script>
 
 <PickerPopover
@@ -168,9 +180,8 @@ const compactionNote = $derived.by(() => {
       {/each}
     </div>
 
-    <div class="context-usage-note">{compactionNote}</div>
-
-    <div class="context-usage-actions">
+    <div class="context-usage-footer">
+      <span class="context-usage-note" aria-label={compaction.long}>{compaction.short}</span>
       <Button
         buttonText="Summarize now"
         disabled={!canSummarizeNow}
@@ -343,14 +354,21 @@ const compactionNote = $derived.by(() => {
     min-width: 3ch;
   }
 
-  .context-usage-note {
+  /* Note left, action right. The note is short enough to stay on one line at
+     the panel's width; `flex-wrap` is the safety net for a narrow panel, where
+     it drops under the button rather than being truncated. */
+  .context-usage-footer {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--size-4-2);
     margin-top: var(--size-4-3);
-    color: var(--text-faint);
   }
 
-  .context-usage-actions {
-    display: flex;
-    justify-content: flex-end;
-    margin-top: var(--size-4-2);
+  .context-usage-note {
+    flex: 1 1 auto;
+    min-width: 0;
+    color: var(--text-faint);
   }
 </style>
