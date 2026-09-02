@@ -53,7 +53,7 @@ describe("grep_notes tool", () => {
 		mockGetData.mockReturnValue({
 			getSelectedAgent: () => ({
 				chatModel: { provider: "test-provider" },
-				toolsConfig: { grep_notes: { name: "grep_notes", description: "grep", settings: { contextLines: 1 } } },
+				toolsConfig: { grep_notes: { name: "grep_notes", description: "grep" } },
 			}),
 		});
 	});

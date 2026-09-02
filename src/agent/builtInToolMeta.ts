@@ -124,7 +124,9 @@ const TOOLS_WITH_SETTINGS = new Set<BuiltInToolId>([
 	// staged-review flow in pendingChangesStore is the user's control point, so a tool-level
 	// permission matrix only duplicated it), and the diff-view-mode preference moved onto the
 	// pending-changes review bars where diffs are actually seen.
-	"grep_notes",
+	// `grep_notes` is absent for the same reason: its only setting was the number of context
+	// lines around a match, which is a detail of how the result is formatted for the model,
+	// not something a user has any basis to tune.
 	"read_content",
 	"web_search",
 ]);

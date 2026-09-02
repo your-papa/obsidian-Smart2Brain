@@ -16,7 +16,6 @@ import SettingContainer from "../settings/SettingContainer.svelte";
 import SettingGroup from "../settings/SettingGroup.svelte";
 import Button from "../ui/Button.svelte";
 import Dropdown from "../ui/Dropdown.svelte";
-import Text from "../ui/Text.svelte";
 import { getToolDisplayName } from "../../agent/builtInToolMeta";
 import type { ToolConfigAccessors } from "./ToolConfigModal";
 
@@ -69,11 +68,6 @@ let maxResults = $state(
 	(initialToolConfig?.settings as { maxResults?: number })?.maxResults ??
 		(defaultConfig.settings as { maxResults?: number })?.maxResults ??
 		10,
-);
-let contextLines = $state(
-	(initialToolConfig?.settings as { contextLines?: number })?.contextLines ??
-		(defaultConfig.settings as { contextLines?: number })?.contextLines ??
-		2,
 );
 const webSearchProviderOptions = [
 	{ display: "Firecrawl (keyless)", value: "firecrawl" },
@@ -254,8 +248,6 @@ function buildConfigPatch(): Partial<ToolConfig> {
 		if (imageProcessor !== undefined) settings.imageProcessor = imageProcessor;
 		if (pdfProcessor !== undefined) settings.pdfProcessor = pdfProcessor;
 		updatedConfig.settings = settings as ToolConfig["settings"];
-	} else if (capturedToolId === "grep_notes") {
-		updatedConfig.settings = { contextLines };
 	} else if (capturedToolId === "web_search") {
 		updatedConfig.settings = { maxResults };
 	}
@@ -291,9 +283,6 @@ function handleResetToDefault() {
 		pdfProcessor = undefined;
 		imageProcessorMode = "auto";
 		pdfProcessorMode = "auto";
-	} else if (capturedToolId === "grep_notes" && defaultConfig.settings) {
-		const settings = defaultConfig.settings as { contextLines: number };
-		contextLines = settings.contextLines;
 	} else if (capturedToolId === "web_search" && defaultConfig.settings) {
 		const settings = defaultConfig.settings as { maxResults: number };
 		maxResults = settings.maxResults;
@@ -339,20 +328,6 @@ function openProcessorSelectionModal(currentProcessor: ChatModel | null, onSelec
 
       So this tool has no user-facing settings at all — nothing to render.
     -->
-  {:else if capturedToolId === "grep_notes"}
-    <SettingGroup heading="Grep">
-      <SettingContainer name="Context lines" desc="Number of surrounding lines to show on each side of a match.">
-        <Text
-          inputType="number"
-          value={contextLines}
-          placeholder="2"
-          onblur={(v) => {
-            contextLines = Math.max(Number.parseInt(String(v)) || 2, 0);
-            commit();
-          }}
-        />
-      </SettingContainer>
-    </SettingGroup>
   {:else if capturedToolId === "read_content"}
     <SettingGroup
       heading="Vision processors"

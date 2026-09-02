@@ -23,7 +23,6 @@ import type {
 	ChatOpenLocation,
 	DiffViewMode,
 	EmbeddingIndexConfig,
-	GrepNotesSettings,
 	MCPServerConfig,
 	MCPServersConfig,
 	PluginData,
@@ -310,9 +309,6 @@ export const DEFAULT_TOOLS_CONFIG: ToolsConfig = {
 		name: "grep_notes",
 		description:
 			"Find an exact text substring or regex pattern across your notes, returning matching lines with line numbers and surrounding context. Unlike search_notes (which ranks notes by relevance and cannot match literal strings), this does exact/regex line-level matching. Provide 'path' to scope the search to a single note. Use it to find literal strings (e.g. 'TODO(fix)', '#deprecated', a wiki link), or to locate exact positions before editing.",
-		settings: {
-			contextLines: 2,
-		} satisfies GrepNotesSettings,
 	},
 	get_all_tags: {
 		enabled: true,
@@ -416,7 +412,7 @@ function createDefaultAgent(): AgentConfig {
 // ---------------------------------------------------------------------------
 
 /** Increment this when making any breaking change to PluginData. Add a corresponding entry to MIGRATIONS. */
-const CURRENT_SCHEMA_VERSION = 11;
+const CURRENT_SCHEMA_VERSION = 12;
 
 type Migration = (data: PluginData) => void;
 
@@ -573,6 +569,20 @@ const MIGRATIONS: Migration[] = [
 			const manageNotes = agent.toolsConfig?.manage_notes as unknown as Record<string, unknown> | undefined;
 			if (manageNotes) {
 				manageNotes.settings = undefined;
+			}
+		}
+	},
+	// v11 → v12: grep_notes' only setting (`contextLines`) was removed. How many lines of
+	//            context surround a match is a detail of how the result is formatted for the
+	//            model, not something a user has any basis to tune, so it is now a constant in
+	//            the tool. Drop the stale settings object — with the tool's gear icon gone from
+	//            ToolsModal, the config form never opens for it again and would otherwise never
+	//            get the chance to clear it.
+	(data) => {
+		for (const agent of Object.values(data.agents ?? {})) {
+			const grepNotes = agent.toolsConfig?.grep_notes as unknown as Record<string, unknown> | undefined;
+			if (grepNotes) {
+				grepNotes.settings = undefined;
 			}
 		}
 	},

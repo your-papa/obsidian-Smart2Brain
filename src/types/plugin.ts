@@ -240,14 +240,6 @@ export interface ReadContentSettings {
 }
 
 /**
- * Tool-specific settings for grep_notes tool
- */
-export interface GrepNotesSettings {
-	/** Lines of surrounding context to show on each side of a match */
-	contextLines: number;
-}
-
-/**
  * Tool-specific settings for fetch_url tool
  */
 export interface FetchUrlSettings {
@@ -266,12 +258,7 @@ export interface WebSearchSettings {
 /**
  * Union type of all tool-specific settings
  */
-export type ToolSpecificSettings =
-	| ReadContentSettings
-	| GrepNotesSettings
-	| FetchUrlSettings
-	| WebSearchSettings
-	| Record<string, never>;
+export type ToolSpecificSettings = ReadContentSettings | FetchUrlSettings | WebSearchSettings | Record<string, never>;
 
 /**
  * Configuration for an individual tool

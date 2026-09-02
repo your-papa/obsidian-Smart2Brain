@@ -3,7 +3,6 @@ import type { App, TFile } from "obsidian";
 import { z } from "zod";
 import { DEFAULT_TOOLS_CONFIG } from "../../stores/dataStore.svelte";
 import { getPendingChangesStore } from "../../stores/pendingChangesStore.svelte";
-import type { GrepNotesSettings } from "../../types/plugin";
 import { getIndexableVaultFiles, isTextIndexableFile, shouldProcessVaultPath } from "../../utils/fileFiltering";
 import { Logger } from "../../utils/logging";
 import { normalizeVaultPath } from "../../utils/pathUtils";
@@ -12,6 +11,9 @@ import { buildGrepMatcher, MAX_SCANNED_LINE_LENGTH } from "./grepMatcher";
 import { resolveToolAgent, resolveToolProvider } from "./toolAgentContext";
 
 const DEFAULT_LIMIT = 50;
+
+/** Lines of surrounding context shown on each side of a match. */
+const CONTEXT_LINES = 2;
 
 interface FlatMatch {
 	path: string;
@@ -42,12 +44,12 @@ interface GrepNotesPayload {
 }
 
 /**
- * Build a context block for a single matched line: `contextLines` lines before
+ * Build a context block for a single matched line: `CONTEXT_LINES` lines before
  * and after, with the hit line marked by `>` and context lines by two spaces.
  */
-function buildContextBlock(lines: string[], hitIndex: number, contextLines: number): string {
-	const start = Math.max(0, hitIndex - contextLines);
-	const end = Math.min(lines.length - 1, hitIndex + contextLines);
+function buildContextBlock(lines: string[], hitIndex: number): string {
+	const start = Math.max(0, hitIndex - CONTEXT_LINES);
+	const end = Math.min(lines.length - 1, hitIndex + CONTEXT_LINES);
 	const out: string[] = [];
 	for (let i = start; i <= end; i++) {
 		const marker = i === hitIndex ? ">" : " ";
@@ -64,8 +66,7 @@ function buildContextBlock(lines: string[], hitIndex: number, contextLines: numb
  * (path-sorted) match list so nothing is silently dropped.
  */
 export function createGrepNotesTool(app: App, agentId = "") {
-	const getConfig = () => resolveToolAgent(agentId).toolsConfig.grep_notes;
-	const toolConfig = getConfig();
+	const toolConfig = resolveToolAgent(agentId).toolsConfig.grep_notes;
 
 	const grepFn = async ({
 		pattern,
@@ -93,10 +94,6 @@ export function createGrepNotesTool(app: App, agentId = "") {
 			return built.error;
 		}
 		const matcher = built.matcher;
-
-		// Fresh settings each call to pick up any changes.
-		const settings = getConfig()?.settings as GrepNotesSettings | undefined;
-		const contextLines = settings?.contextLines ?? 2;
 
 		// Resolve the file set.
 		let files: TFile[];
@@ -162,7 +159,7 @@ export function createGrepNotesTool(app: App, agentId = "") {
 					flat.push({
 						path: file.path,
 						line_number: i + 1,
-						context: buildContextBlock(lines, i, contextLines),
+						context: buildContextBlock(lines, i),
 					});
 				}
 			}
