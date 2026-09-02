@@ -1451,7 +1451,16 @@ export class PixiRenderer {
 	// ── Node tooltip (screen-space) ────────────────────────
 
 	showNodeTooltip(
-		node: { label: string; cluster?: number; degree?: number; id: string; x: number; y: number },
+		node: {
+			label: string;
+			cluster?: number;
+			degree?: number;
+			id: string;
+			x: number;
+			y: number;
+			kind?: string;
+			memberPaths?: string[];
+		},
 		clusterLabels: Record<number, string>,
 		isPinned: boolean,
 		isForceMode: boolean,
@@ -1460,7 +1469,16 @@ export class PixiRenderer {
 		const screen = this.viewport.toScreen(node.x, node.y);
 
 		const lines: string[] = [node.label];
-		if (node.cluster != null) {
+		if (node.kind === "topic") {
+			// A collapsed topic's size says how many notes it holds; its `degree`
+			// is the number of note-level links crossing its boundary (set by
+			// buildCollapsedGraph). Report both — the bubble encodes only the first.
+			const notes = node.memberPaths?.length ?? 0;
+			const links = node.degree ?? 0;
+			lines.push(
+				`${notes.toLocaleString()} ${notes === 1 ? "note" : "notes"}  ·  ${links.toLocaleString()} ${links === 1 ? "link" : "links"}`,
+			);
+		} else if (node.cluster != null) {
 			const clusterLabel = clusterLabels[node.cluster] ?? `Cluster ${node.cluster}`;
 			lines.push(`${clusterLabel}  ·  ${node.degree ?? 0} connections`);
 		} else {

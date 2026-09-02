@@ -223,8 +223,10 @@ function generateCollapsedVault(seed: number, shape: VaultShape): Pick<Scenario,
 		// Crossing-link count scales with topic size, heavy-tailed like reality.
 		degree: Math.round(size * shape.wikiLinksPerNote * shape.interTopicFraction * (2 + rng() * 3)),
 		// Member count drives the topic radius (and thus collide spacing) — the
-		// paths themselves are never dereferenced, only counted.
+		// paths themselves are never dereferenced, only counted. The radius is
+		// normalized to the largest topic, exactly as buildCollapsedGraph stamps it.
 		memberPaths: Array.from({ length: size }, (_, i) => `topic${topic}/note${i}`),
+		largestTopicSize: Math.max(...sizes),
 		x: 0,
 		y: 0,
 	}));

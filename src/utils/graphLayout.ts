@@ -37,6 +37,8 @@ export interface LayoutNode extends SimulationNodeDatum {
 	cluster?: number;
 	/** For topic nodes — drives their draw (and thus collide) radius. */
 	memberPaths?: string[];
+	/** For topic nodes — the vault's largest topic, which the radius is normalized to. */
+	largestTopicSize?: number;
 }
 
 /** The link shape the physics needs — a structural subset of the canvas's SimLink. */

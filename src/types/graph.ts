@@ -86,6 +86,14 @@ export interface GraphNode {
 	kind?: "note" | "topic";
 	/** For `kind: "topic"` — the vault paths this node stands for. */
 	memberPaths?: string[];
+	/**
+	 * For `kind: "topic"` — member count of the *largest* topic in the current
+	 * segmentation, collapsed or not. The normalizer for the topic's draw radius
+	 * (see `nodeDrawRadius`): bubble area is `memberPaths.length` as a share of
+	 * this, so sizes are relative to the vault rather than to a fixed constant,
+	 * and a topic keeps its size whether or not the biggest one is folded.
+	 */
+	largestTopicSize?: number;
 }
 
 /**

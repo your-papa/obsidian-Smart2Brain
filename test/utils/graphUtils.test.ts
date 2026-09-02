@@ -77,54 +77,98 @@ describe("graphTopologySignature", () => {
 
 describe("nodeDrawRadius", () => {
 	const NODE_SIZE = 2;
+	/** The floor/ceiling offsets from graphUtils, restated so the tests pin the contract. */
+	const FLOOR = NODE_SIZE + 6;
+	const CEILING = NODE_SIZE + 26;
 
 	const memberPaths = (count: number) => Array.from({ length: count }, (_, i) => `note${i}.md`);
-	const topic = (members: number) => nodeDrawRadius({ kind: "topic", memberPaths: memberPaths(members) }, NODE_SIZE);
+	const topic = (members: number, largestTopicSize: number) =>
+		nodeDrawRadius({ kind: "topic", memberPaths: memberPaths(members), largestTopicSize }, NODE_SIZE);
 
-	it("caps note radius but never a topic's (smooth saturation)", () => {
-		// Note formula saturates hard: past the cap, more degree changes nothing.
+	it("caps note radius: past the cap, more degree changes nothing", () => {
 		const note = (degree: number) => nodeDrawRadius({ degree }, NODE_SIZE);
 		expect(note(200)).toBe(note(2000));
-
-		// Topic curve keeps growing: every doubling of members stays visible.
-		let previous = topic(0);
-		for (const members of [5, 10, 25, 50, 100, 200, 400, 800, 1600]) {
-			const radius = topic(members);
-			expect(radius).toBeGreaterThan(previous);
-			previous = radius;
-		}
 	});
 
-	it("differentiates topics across the realistic member-count range", () => {
-		// The everyday spread in a few-hundred-note vault: a dozen-note topic vs
-		// a fifty-note one must read as visibly different bubbles.
-		expect(topic(50) - topic(12)).toBeGreaterThan(3);
-		// And a mega-topic still clearly outranks an everyday one.
-		expect(topic(1000) - topic(50)).toBeGreaterThan(5);
+	it("scales topic area with member count, normalized to the vault's largest topic", () => {
+		// Leo's vault: topics of 1000–2000 notes next to 8-note ones. The old
+		// fixed-half-point curve drew 1000 and 2000 identically and 8 at a third
+		// of them; area-proportional sizing keeps the whole range spread out.
+		const N_MAX = 2000;
+		const small = topic(8, N_MAX);
+		const big = topic(1000, N_MAX);
+		const biggest = topic(2000, N_MAX);
+
+		expect(small).toBeLessThan(big);
+		expect(big).toBeLessThan(biggest);
+		// 1000 vs 2000 must be visibly different — √2 apart on the scale, ≈6px.
+		expect(biggest - big).toBeGreaterThan(4);
+		// The largest topic sits exactly at the ceiling, the smallest near the floor.
+		expect(biggest).toBe(CEILING);
+		expect(small - FLOOR).toBeLessThan(2);
+		// Area ∝ members: radius offset above the floor grows with √members.
+		const offset = (members: number) => topic(members, N_MAX) - FLOOR;
+		expect(offset(2000) / offset(500)).toBeCloseTo(2, 5);
+	});
+
+	it("is invariant to which topics are collapsed", () => {
+		// The normalizer is the largest topic in the *segmentation*, stamped on
+		// every topic node — so a 300-note bubble draws the same whether the
+		// 2000-note topic beside it is folded or expanded (it stays in nMax).
+		const withBiggestCollapsed = topic(300, 2000);
+		const withBiggestExpanded = nodeDrawRadius(
+			{ kind: "topic", memberPaths: memberPaths(300), largestTopicSize: 2000 },
+			NODE_SIZE,
+		);
+		expect(withBiggestExpanded).toBe(withBiggestCollapsed);
+		// And the radius depends on nothing but members and the normalizer.
+		expect(topic(300, 2000)).not.toBe(topic(300, 400));
+	});
+
+	it("spreads the everyday range of a few-hundred-note vault too", () => {
+		// Normalization is what makes this vault-size-agnostic: with a 60-note
+		// largest topic, a dozen-note topic vs a fifty-note one still read apart.
+		expect(topic(50, 60) - topic(12, 60)).toBeGreaterThan(3);
 	});
 
 	it("sizes topics by member count, not connectivity", () => {
 		// Same members, wildly different crossing-link counts — identical radius.
 		// Connectivity is edge width's job; encoding it here would double-encode.
-		const linkHeavy = nodeDrawRadius({ kind: "topic", degree: 2000, memberPaths: memberPaths(30) }, NODE_SIZE);
-		const linkLight = nodeDrawRadius({ kind: "topic", degree: 3, memberPaths: memberPaths(30) }, NODE_SIZE);
+		const linkHeavy = nodeDrawRadius(
+			{ kind: "topic", degree: 2000, memberPaths: memberPaths(30), largestTopicSize: 100 },
+			NODE_SIZE,
+		);
+		const linkLight = nodeDrawRadius(
+			{ kind: "topic", degree: 3, memberPaths: memberPaths(30), largestTopicSize: 100 },
+			NODE_SIZE,
+		);
 		expect(linkHeavy).toBe(linkLight);
 	});
 
-	it("stays bounded for a degenerate mega-topic", () => {
-		const huge = topic(1_000_000);
-		expect(huge).toBeLessThan(NODE_SIZE + 26);
+	it("never exceeds the ceiling, even for a degenerate normalizer", () => {
+		// A stale/undersized normalizer must not push the radius past the ceiling.
+		expect(topic(1_000_000, 10)).toBe(CEILING);
+		expect(topic(1_000_000, 1_000_000)).toBe(CEILING);
 	});
 
-	it("keeps a small topic near note size", () => {
-		const smallTopic = topic(4);
-		const hubNote = nodeDrawRadius({ degree: 20 }, NODE_SIZE);
-		expect(smallTopic).toBeLessThan(hubNote);
+	it("puts a topic with no normalizer at the ceiling (single-topic case)", () => {
+		const alone = nodeDrawRadius({ kind: "topic", memberPaths: memberPaths(7) }, NODE_SIZE);
+		expect(alone).toBe(CEILING);
+		expect(topic(7, 7)).toBe(CEILING);
+		expect(topic(7, 0)).toBe(CEILING);
+	});
+
+	it("keeps even the smallest topic visibly larger than a plain note", () => {
+		const tiny = topic(1, 2000);
+		const plainNote = nodeDrawRadius({ degree: 0 }, NODE_SIZE);
+		expect(tiny).toBeGreaterThanOrEqual(FLOOR);
+		expect(tiny - plainNote).toBeGreaterThan(4);
 	});
 
 	it("treats missing degree/members as zero and enforces the minimum base", () => {
 		expect(nodeDrawRadius({}, 0)).toBe(1);
-		expect(nodeDrawRadius({ kind: "topic" }, 0)).toBe(1);
+		// An empty topic has no members and no maximum: it sits on the floor.
+		expect(nodeDrawRadius({ kind: "topic" }, 0)).toBe(1 + 6);
 	});
 });
 
