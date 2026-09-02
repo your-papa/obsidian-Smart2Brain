@@ -76,6 +76,8 @@ export interface IndexMetadata {
 	modelId: string;
 	documentCount: number;
 	lastUpdated: number;
+	/** Vector width of the stored embeddings; 0 until the first vector is written. */
+	dimensions: number;
 }
 
 /**
@@ -414,11 +416,13 @@ export interface VectorStore {
 	getDocumentMtime(path: string): Promise<number | undefined>;
 
 	/**
-	 * `{ path, mtime }` of every indexed note, one entry per note, read without
-	 * deserialising a single vector. This is the read to use for "what is
-	 * indexed, and is it stale" questions — there is deliberately no whole-set
-	 * `getAll()`: materialising every vector on the main thread is the memory
-	 * spike #432 removes.
+	 * `{ path, mtime }` of every *completely* indexed note, one entry per note,
+	 * read without deserialising a single vector. A note counts as indexed only
+	 * once its chunk-0 row exists; bulk writers store that row last, so a note
+	 * whose write was interrupted is reported as absent and gets re-indexed.
+	 * This is the read to use for "what is indexed, and is it stale" questions —
+	 * there is deliberately no whole-set `getAll()`: materialising every vector
+	 * on the main thread is the memory spike #432 removes.
 	 */
 	listNoteMeta(): Promise<NoteMeta[]>;
 
@@ -446,6 +450,14 @@ export interface VectorStore {
 	 * `doc.vector` the same way `upsert` does.
 	 */
 	bulkPut(docs: DocumentVector[]): Promise<void>;
+
+	/**
+	 * Persist any in-memory index state that is still pending (the HNSW graph
+	 * topology, which `upsert` saves on a debounce). A bulk run calls this as
+	 * its checkpoint so a process kill loses at most one interval's worth of
+	 * graph links; no-op when nothing is pending.
+	 */
+	flush(): Promise<void>;
 
 	/**
 	 * Clear all documents from the store.

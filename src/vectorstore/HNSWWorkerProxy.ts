@@ -139,6 +139,10 @@ export class HNSWWorkerProxy implements VectorStore {
 		await this.call("bulkPut", [docs], vectorBuffers(docs));
 	}
 
+	async flush(): Promise<void> {
+		await this.call("flush", []);
+	}
+
 	async clear(): Promise<void> {
 		await this.call("clear", []);
 	}

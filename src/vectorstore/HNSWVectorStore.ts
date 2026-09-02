@@ -43,6 +43,8 @@ const ID_MAPPING_STORE = "id_mapping";
 const GRAPH_STORE = "hnsw_graph";
 /** Compound index over `documents` so per-note mtimes can be read without touching a vector. */
 const PATH_MTIME_INDEX = "path_mtime";
+/** Chunk id suffix of a note's first chunk (`makeChunkId(path, 0)`), the row that marks a note complete. */
+const FIRST_CHUNK_SUFFIX = "#0";
 
 /**
  * Schema version of the per-index database.
@@ -478,15 +480,24 @@ export class HNSWVectorStore implements VectorStore {
 	 * A node whose document row is gone (removed after the last graph save) is
 	 * dropped, and every neighbour list is pruned of such ids so the library never
 	 * dereferences a missing node mid-search.
+	 *
+	 * The mirror case matters just as much: a document row with no topology node.
+	 * Rows are written durably on every `upsert`, but the graph is saved on a
+	 * debounce and at bulk checkpoints, so a process kill mid-build (the mobile
+	 * failure mode of #432) leaves the rows written since the last save with no
+	 * links. Before, such rows were silently unsearchable while still counting as
+	 * indexed — the completeness validation saw their `mtime` and skipped them, so
+	 * nothing ever repaired them. Now they are re-inserted into the graph here,
+	 * which makes the row the unit of durability; the checkpoint interval only
+	 * bounds how much re-linking a reopen has to do.
 	 */
 	private async loadGraph(index: HNSW): Promise<void> {
 		const db = this.requireDb();
 
 		const header = await this.getGraphHeader();
-		if (!header) return;
 
 		const topology = new Map<number, StoredGraphNode>();
-		{
+		if (header) {
 			const tx = db.transaction(GRAPH_STORE, "readonly");
 			const request = tx.objectStore(GRAPH_STORE).openCursor();
 			await awaitCursor<void>(tx, request, (cursor) => {
@@ -497,9 +508,10 @@ export class HNSWVectorStore implements VectorStore {
 				return undefined;
 			});
 		}
-		if (topology.size === 0) return;
 
 		const nodes = new Map<number, HnswNode>();
+		/** Rows the persisted graph does not know about — see the doc comment. */
+		const unlinked: Array<{ id: number; vector: Float32Array }> = [];
 		let dim: number | null = null;
 		{
 			const tx = db.transaction(DOCUMENTS_STORE, "readonly");
@@ -516,12 +528,17 @@ export class HNSWVectorStore implements VectorStore {
 						level: node.level,
 						neighbors: node.neighbors,
 					} as HnswNode);
+				} else if (this.numericToId.has(stored.hnswId)) {
+					// Only rows that still have an id mapping are live; a row whose
+					// mapping is gone is mid-removal and must not come back.
+					unlinked.push({ id: stored.hnswId, vector: stored.vector });
 				}
 				cursor.continue();
 				return undefined;
 			});
 		}
 		topology.clear();
+		if (nodes.size === 0 && unlinked.length === 0) return;
 
 		let pruned = 0;
 		let levelMax = -1;
@@ -535,7 +552,7 @@ export class HNSWVectorStore implements VectorStore {
 			}
 		}
 
-		let entryPointId = header.entryPointId;
+		let entryPointId = header?.entryPointId ?? -1;
 		if (!nodes.has(entryPointId)) {
 			// Any node on the top level is a valid entry point; take the smallest id
 			// so the choice is stable across loads.
@@ -546,12 +563,23 @@ export class HNSWVectorStore implements VectorStore {
 		}
 
 		index.nodes = nodes;
-		index.d = dim;
+		index.d = dim ?? (unlinked.length > 0 ? unlinked[0].vector.length : null);
 		index.levelMax = nodes.size > 0 ? levelMax : -1;
 		index.entryPointId = entryPointId;
 
 		if (pruned > 0) {
 			Logger.debug(`${LOG_PREFIX} Loaded graph (${nodes.size} nodes); pruned ${pruned} stale neighbour lists.`);
+		}
+
+		if (unlinked.length > 0) {
+			for (const row of unlinked) await index.addPoint(row.id, row.vector);
+			// The re-linked graph is only in memory; schedule the save so the next
+			// open does not have to redo this.
+			this.hasPendingIndexSave = true;
+			this.scheduleIndexSave();
+			Logger.log(
+				`${LOG_PREFIX} Re-linked ${unlinked.length} vectors that were written after the last graph save (interrupted build).`,
+			);
 		}
 	}
 
@@ -673,6 +701,7 @@ export class HNSWVectorStore implements VectorStore {
 			modelId: meta.modelId,
 			documentCount: count,
 			lastUpdated: meta.lastUpdated,
+			dimensions: meta.dimensions ?? 0,
 		};
 	}
 
@@ -728,6 +757,15 @@ export class HNSWVectorStore implements VectorStore {
 		// into one save; a clean close() flushes anything still pending.
 		this.hasPendingIndexSave = true;
 		this.scheduleIndexSave();
+	}
+
+	/** Checkpoint for bulk runs: persist the graph now rather than on the debounce. */
+	async flush(): Promise<void> {
+		if (this.saveIndexTimer !== null) {
+			clearTimeout(this.saveIndexTimer);
+			this.saveIndexTimer = null;
+		}
+		await this.flushIndex();
 	}
 
 	/**
@@ -829,13 +867,23 @@ export class HNSWVectorStore implements VectorStore {
 		const db = this.requireDb();
 
 		const tx = db.transaction(DOCUMENTS_STORE, "readonly");
-		const request = tx.objectStore(DOCUMENTS_STORE).index(PATH_MTIME_INDEX).openKeyCursor(null, "nextunique");
+		const request = tx.objectStore(DOCUMENTS_STORE).index(PATH_MTIME_INDEX).openKeyCursor();
 
+		// A note is listed only through its chunk-0 row. Bulk writers store a
+		// note's chunk 0 *last* (`VectorStoreService.embedFilesInBatches`), so a
+		// process killed between the chunks of a multi-chunk note leaves rows
+		// that carry the note's current mtime but no `#0` — and this read then
+		// reports the note as absent, which makes the next validation re-index
+		// it. Without that, the surviving chunks made the note look complete and
+		// its missing sections never came back. Key cursor only: `primaryKey`
+		// is the chunk id, so no row value (no vector) is ever deserialised.
 		const notes: NoteMeta[] = [];
 		return awaitCursor(tx, request, (cursor) => {
 			if (!cursor) return { done: true, value: notes };
-			const [path, mtime] = cursor.key as [string, number];
-			notes.push({ path, mtime });
+			if (typeof cursor.primaryKey === "string" && cursor.primaryKey.endsWith(FIRST_CHUNK_SUFFIX)) {
+				const [path, mtime] = cursor.key as [string, number];
+				notes.push({ path, mtime });
+			}
 			cursor.continue();
 			return undefined;
 		});

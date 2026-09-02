@@ -147,6 +147,10 @@ export class Notice {
 	}
 
 	hide = vi.fn();
+	setMessage = vi.fn((message: string) => {
+		this.message = message;
+		return this;
+	});
 }
 
 export class PluginSettingTab {

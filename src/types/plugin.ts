@@ -71,6 +71,8 @@ export interface EmbeddingIndexConfig {
 	documentCount: number;
 	/** Documents per embedding request when indexing this model */
 	batchSize?: number;
+	/** Vector width the model produced, recorded from the first stored vector */
+	dimensions?: number;
 }
 
 // ============================================================================
