@@ -3,6 +3,8 @@ import { buildSemanticEdges, buildWikiGraph } from "../../src/views/smart-graph/
 import { edgeKey } from "../../src/utils/graphUtils";
 import type { App, CachedMetadata, TFile } from "obsidian";
 import type { DocumentVector } from "../../src/vectorstore/types";
+import { semanticPairsFromDocuments } from "../../src/utils/semanticEdges";
+import type { SemanticPairSource } from "../../src/views/smart-graph/graphDataBuilder";
 
 // Mock App with resolvedLinks
 function createMockApp(
@@ -45,6 +47,21 @@ function createMockApp(
 	} as unknown as App;
 }
 
+/**
+ * Stand-in for the vector store's worker-side scan: the same kernel the store
+ * runs over its IndexedDB rows, fed these in-memory documents instead.
+ */
+function sourceOf(docs: DocumentVector[]): SemanticPairSource {
+	return {
+		semanticPairs: (paths, options) =>
+			semanticPairsFromDocuments(docs, paths, {
+				neighborCount: options?.neighborCount,
+				threshold: options?.threshold,
+				excludePairs: options?.excludePairs ? new Set(options.excludePairs) : undefined,
+			}),
+	};
+}
+
 function createMockDocumentVector(path: string, vector: number[]): DocumentVector {
 	return {
 		id: path,
@@ -71,7 +88,7 @@ describe("buildSemanticEdges", () => {
 
 	it("connects notes within a topic and not across topics", async () => {
 		const docs = createTwoTopicDocs();
-		const edges = await buildSemanticEdges(docs, allPaths(docs), { threshold: 0.5 });
+		const edges = await buildSemanticEdges(sourceOf(docs), allPaths(docs), { threshold: 0.5 });
 
 		expect(edges.length).toBeGreaterThan(0);
 		for (const edge of edges) {
@@ -83,7 +100,7 @@ describe("buildSemanticEdges", () => {
 
 	it("emits each pair only once", async () => {
 		const docs = createTwoTopicDocs();
-		const edges = await buildSemanticEdges(docs, allPaths(docs), { threshold: 0.5 });
+		const edges = await buildSemanticEdges(sourceOf(docs), allPaths(docs), { threshold: 0.5 });
 
 		const keys = edges.map((e) => edgeKey(e.source, e.target));
 		expect(new Set(keys).size).toBe(keys.length);
@@ -92,7 +109,7 @@ describe("buildSemanticEdges", () => {
 	it("skips pairs that already have a wiki link", async () => {
 		const docs = createTwoTopicDocs();
 		const excluded = edgeKey("bio1.md", "bio2.md");
-		const edges = await buildSemanticEdges(docs, allPaths(docs), {
+		const edges = await buildSemanticEdges(sourceOf(docs), allPaths(docs), {
 			threshold: 0.5,
 			excludeEdgeKeys: new Set([excluded]),
 		});
@@ -111,8 +128,8 @@ describe("buildSemanticEdges", () => {
 		];
 		const paths = allPaths(docs);
 
-		const permissive = await buildSemanticEdges(docs, paths, { threshold: 0.5 });
-		const strict = await buildSemanticEdges(docs, paths, { threshold: 0.95 });
+		const permissive = await buildSemanticEdges(sourceOf(docs), paths, { threshold: 0.5 });
+		const strict = await buildSemanticEdges(sourceOf(docs), paths, { threshold: 0.95 });
 
 		expect(strict.length).toBeLessThan(permissive.length);
 		// Every surviving edge must clear the bar it was given.
@@ -125,7 +142,7 @@ describe("buildSemanticEdges", () => {
 
 	it("caps how many neighbours each note contributes", async () => {
 		const docs = createTwoTopicDocs();
-		const edges = await buildSemanticEdges(docs, allPaths(docs), { threshold: 0.0, neighborCount: 1 });
+		const edges = await buildSemanticEdges(sourceOf(docs), allPaths(docs), { threshold: 0.0, neighborCount: 1 });
 
 		// With k=1 each of the 6 notes proposes one partner; dedup collapses mutual picks.
 		expect(edges.length).toBeLessThanOrEqual(6);
@@ -134,12 +151,12 @@ describe("buildSemanticEdges", () => {
 
 	it("returns nothing when neighbourCount is zero", async () => {
 		const docs = createTwoTopicDocs();
-		expect(await buildSemanticEdges(docs, allPaths(docs), { neighborCount: 0 })).toHaveLength(0);
+		expect(await buildSemanticEdges(sourceOf(docs), allPaths(docs), { neighborCount: 0 })).toHaveLength(0);
 	});
 
 	it("only connects notes in the include set", async () => {
 		const docs = createTwoTopicDocs();
-		const edges = await buildSemanticEdges(docs, new Set(["bio1.md", "bio2.md"]), { threshold: 0.5 });
+		const edges = await buildSemanticEdges(sourceOf(docs), new Set(["bio1.md", "bio2.md"]), { threshold: 0.5 });
 
 		for (const edge of edges) {
 			expect(["bio1.md", "bio2.md"]).toContain(edge.source);
@@ -155,7 +172,7 @@ describe("buildSemanticEdges", () => {
 			{ ...createMockDocumentVector("multi.md", [0, 0, 1, 0]), id: "multi.md#1", chunkIndex: 1 },
 			createMockDocumentVector("target.md", [0, 0, 1, 0]),
 		];
-		const edges = await buildSemanticEdges(docs, allPaths(docs), { threshold: 0.9 });
+		const edges = await buildSemanticEdges(sourceOf(docs), allPaths(docs), { threshold: 0.9 });
 
 		expect(edges).toHaveLength(1);
 		expect(edgeKey(edges[0].source, edges[0].target)).toBe(edgeKey("multi.md", "target.md"));
@@ -164,13 +181,13 @@ describe("buildSemanticEdges", () => {
 
 	it("returns nothing for fewer than two notes", async () => {
 		const docs = [createMockDocumentVector("only.md", [1, 0, 0, 0])];
-		expect(await buildSemanticEdges(docs, allPaths(docs), { threshold: 0 })).toHaveLength(0);
+		expect(await buildSemanticEdges(sourceOf(docs), allPaths(docs), { threshold: 0 })).toHaveLength(0);
 	});
 
 	it("connects an unlinked note to its topic — the link-sparse vault case", async () => {
 		const docs = createTwoTopicDocs();
 		// bio3 has no wiki links at all; it must still reach its topic semantically.
-		const edges = await buildSemanticEdges(docs, allPaths(docs), { threshold: 0.5 });
+		const edges = await buildSemanticEdges(sourceOf(docs), allPaths(docs), { threshold: 0.5 });
 		const touchingBio3 = edges.filter((e) => e.source === "bio3.md" || e.target === "bio3.md");
 
 		expect(touchingBio3.length).toBeGreaterThan(0);

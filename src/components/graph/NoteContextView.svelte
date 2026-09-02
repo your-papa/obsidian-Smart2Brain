@@ -202,12 +202,16 @@ async function rebuildGraph(): Promise<void> {
 		const indexReady = await waitForVectorStoreIndex(data.graphEmbedIndex);
 		if (!indexReady || localBuildVersion !== buildVersion) return;
 
-		const documents = await getVectorStoreService().getAllDocumentVectors();
+		// The store scores every note against the active one in its own worker and
+		// returns only the neighbours; no vector reaches this thread.
+		const indexId = data.graphEmbedIndex;
+		if (!indexId) return;
+		const inst = await getVectorStoreService().getOrCreateInstance(indexId);
+		if (localBuildVersion !== buildVersion) return;
+		const neighbors = await inst.store.noteNeighbors(nextActivePath, DEFAULT_NOTE_CONTEXT_SEMANTIC_THRESHOLD);
 		if (localBuildVersion !== buildVersion) return;
 
-		const semanticGraph = buildNoteContextSemanticGraph(plugin.app, nextActivePath, documents, {
-			threshold: DEFAULT_NOTE_CONTEXT_SEMANTIC_THRESHOLD,
-		});
+		const semanticGraph = buildNoteContextSemanticGraph(plugin.app, nextActivePath, neighbors);
 
 		if (localBuildVersion !== buildVersion) return;
 		graphData = mergeNoteContextGraph(wikiGraph, semanticGraph, nextActivePath);

@@ -6,11 +6,15 @@
  *
  * Communication uses a generic request/response protocol: each message is
  * { id, method, args } and the response is { id, result? , error? }.
+ *
+ * Vectors cross this boundary as `Float32Array` in both directions (structured
+ * clone preserves typed arrays; the proxy transfers buffers on the write path).
+ * There is no whole-set read in the protocol: the analytics that need every
+ * vector (`semanticPairs`, `noteNeighbors`) run here and return their results.
  */
 
 import { HNSWVectorStore } from "./HNSWVectorStore";
-import type { DocumentVector } from "./types";
-import { toFloat32Array } from "./similarity";
+import type { DocumentVector, SemanticPairOptions } from "./types";
 
 export interface HNSWWorkerRequest {
 	id: number;
@@ -25,29 +29,6 @@ export interface HNSWWorkerResponse {
 }
 
 let store: HNSWVectorStore | null = null;
-
-/**
- * Convert a DocumentVector that crossed the postMessage boundary back.
- * Float32Array survives structured clone, but we defensively convert.
- */
-function toDocVec(raw: unknown): DocumentVector {
-	const d = raw as {
-		id: string;
-		path: string;
-		mtime: number;
-		checksum: string;
-		vector: Float32Array | number[];
-		chunkIndex?: number;
-	};
-	return {
-		id: d.id,
-		path: d.path,
-		mtime: d.mtime,
-		checksum: d.checksum,
-		vector: d.vector instanceof Float32Array ? d.vector : toFloat32Array(d.vector),
-		chunkIndex: d.chunkIndex,
-	};
-}
 
 globalThis.onmessage = async (e: MessageEvent<HNSWWorkerRequest>) => {
 	const { id, method, args } = e.data;
@@ -87,8 +68,7 @@ globalThis.onmessage = async (e: MessageEvent<HNSWWorkerRequest>) => {
 				break;
 			}
 			case "upsert": {
-				const doc = toDocVec(args[0]);
-				result = await requireStore().upsert(doc);
+				result = await requireStore().upsert(args[0] as DocumentVector);
 				break;
 			}
 			case "remove": {
@@ -108,8 +88,18 @@ globalThis.onmessage = async (e: MessageEvent<HNSWWorkerRequest>) => {
 				result = (await requireStore().getDocumentMtime(args[0] as string)) ?? null;
 				break;
 			}
-			case "getAll": {
-				result = await requireStore().getAll();
+			case "listNoteMeta": {
+				result = await requireStore().listNoteMeta();
+				break;
+			}
+			case "semanticPairs": {
+				const [paths, options] = args as [string[], SemanticPairOptions | undefined];
+				result = await requireStore().semanticPairs(paths, options);
+				break;
+			}
+			case "noteNeighbors": {
+				const [path, threshold] = args as [string, number];
+				result = await requireStore().noteNeighbors(path, threshold);
 				break;
 			}
 			case "getAllSerialized": {
@@ -117,9 +107,7 @@ globalThis.onmessage = async (e: MessageEvent<HNSWWorkerRequest>) => {
 				break;
 			}
 			case "bulkPut": {
-				const rawDocs = args[0] as unknown[];
-				const docs = rawDocs.map(toDocVec);
-				result = await requireStore().bulkPut(docs);
+				result = await requireStore().bulkPut(args[0] as DocumentVector[]);
 				break;
 			}
 			case "clear": {
@@ -135,9 +123,8 @@ globalThis.onmessage = async (e: MessageEvent<HNSWWorkerRequest>) => {
 				break;
 			}
 			case "search": {
-				const [queryVector, topK, threshold] = args as [Float32Array | number[], number, number | undefined];
-				const qv = queryVector instanceof Float32Array ? queryVector : toFloat32Array(queryVector);
-				result = await requireStore().search(qv, topK, threshold);
+				const [queryVector, topK, threshold] = args as [Float32Array, number, number | undefined];
+				result = await requireStore().search(queryVector, topK, threshold);
 				break;
 			}
 			case "getGraphStats": {

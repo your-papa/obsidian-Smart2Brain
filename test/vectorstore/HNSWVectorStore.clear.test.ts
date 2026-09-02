@@ -1,7 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { IDBFactory, IDBKeyRange } from "fake-indexeddb";
 
 /*
- * Regression: `clear()` used to recreate the in-memory HNSWWithDB wrapper without
+ * Regression: `clear()` used to recreate the in-memory graph wrapper without
  * deleting the *persisted* graph. Because clear() also resets `nextHnswId` to 0,
  * the next indexing run reassigned numeric ids that were already present in the
  * resurrected graph. `search()` resolves each hit through `numericToId` and
@@ -10,121 +11,135 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  *
  * Measured in the test vault before the fix: 337 indexed chunks but 10,161 nodes
  * in the persisted graph, with only 377 surviving id mappings.
+ *
+ * Since schema v3 the graph topology lives in the store's own database, so these
+ * run against a real (in-memory) IndexedDB rather than mocking the old sidecar.
  */
-
-const deleteIndex = vi.fn().mockResolvedValue(undefined);
-const saveIndex = vi.fn().mockResolvedValue(undefined);
-const loadIndex = vi.fn().mockResolvedValue(undefined);
-const create = vi.fn();
-
-vi.mock("hnsw", () => ({
-	HNSWWithDB: {
-		create: (...args: unknown[]) => create(...args),
-	},
-}));
-
-vi.mock("obsidian", () => import("../__mocks__/obsidian"));
 
 import { HNSWVectorStore } from "../../src/vectorstore/HNSWVectorStore";
+import type { DocumentVector } from "../../src/vectorstore/types";
 
-/**
- * Minimal IndexedDB stand-in. `clearStore` resolves on the *transaction's*
- * `oncomplete` (not the request's `onsuccess`), and clear() clears three stores in
- * sequence — so each transaction needs its own object with `oncomplete` fired
- * asynchronously, after the caller has had a chance to attach the handler.
- */
-function fakeDb() {
-	const store = {
-		clear: () => ({ onerror: null as null | (() => void) }),
-	};
-	return {
-		transaction: () => {
-			const tx = {
-				objectStore: () => store,
-				oncomplete: null as null | (() => void),
-				onerror: null as null | (() => void),
-			};
-			queueMicrotask(() => tx.oncomplete?.());
-			return tx;
-		},
-		close: vi.fn(),
-	};
+type Internals = {
+	hnswIndex: { nodes: Map<number, unknown> } | null;
+	nextHnswId: number;
+	hasPendingIndexSave: boolean;
+	dimensions: number | null;
+};
+const internals = (store: HNSWVectorStore) => store as unknown as Internals;
+
+function doc(path: string, vector: number[]): DocumentVector {
+	return { id: `${path}#0`, path, mtime: 1, checksum: "c", chunkIndex: 0, vector: new Float32Array(vector) };
 }
 
-function makeStore(): HNSWVectorStore {
+async function openStore(): Promise<HNSWVectorStore> {
 	const store = new HNSWVectorStore("vault-1", "index-1");
-	// Reach past the IndexedDB bootstrap; clear() only needs `db` and `dimensions`.
-	Object.assign(store as unknown as Record<string, unknown>, {
-		db: fakeDb(),
-		dimensions: 4096,
-	});
+	await store.open();
 	return store;
 }
 
+beforeEach(() => {
+	vi.stubGlobal("indexedDB", new IDBFactory());
+	vi.stubGlobal("IDBKeyRange", IDBKeyRange);
+});
+
+afterEach(() => {
+	vi.unstubAllGlobals();
+});
+
 describe("HNSWVectorStore.clear", () => {
-	beforeEach(() => {
-		vi.clearAllMocks();
-		create.mockResolvedValue({ deleteIndex, saveIndex, loadIndex });
-	});
-
 	it("deletes the persisted graph rather than only dropping the in-memory handle", async () => {
-		const store = makeStore();
-		const index = { deleteIndex, saveIndex, loadIndex };
-		Object.assign(store as unknown as Record<string, unknown>, { hnswIndex: index });
+		const first = await openStore();
+		await first.upsert(doc("a.md", [1, 0]));
+		await first.upsert(doc("b.md", [0, 1]));
+		await first.setMetadata("p", "m", 2);
+		await first.close();
 
-		await store.clear();
+		const second = await openStore();
+		await second.clear();
+		// Re-index with ids starting at 0 again, then reopen: only the new graph may exist.
+		await second.upsert(doc("c.md", [1, 1]));
+		await second.setMetadata("p", "m", 2);
+		await second.close();
 
-		// The whole point: without this the graph survives in its own IndexedDB
-		// database and is reloaded on the next open().
-		expect(deleteIndex).toHaveBeenCalledTimes(1);
+		const third = await openStore();
+		const hits = await third.search(new Float32Array([1, 1]), 10);
+		expect(hits.map((h) => h.doc.path)).toEqual(["c.md"]);
+		// The whole point: stale nodes from the first run must not be resurrected.
+		expect(internals(third).hnswIndex?.nodes.size).toBe(1);
+		await third.close();
 	});
 
-	it("leaves a usable empty graph behind so later upserts can insert", async () => {
-		const store = makeStore();
-		Object.assign(store as unknown as Record<string, unknown>, {
-			hnswIndex: { deleteIndex, saveIndex, loadIndex },
-		});
-
+	it("leaves a store that later upserts can insert into and search", async () => {
+		const store = await openStore();
+		await store.upsert(doc("a.md", [1, 0, 0]));
 		await store.clear();
 
-		// Recreated after deletion, so indexing does not have to re-open it lazily.
-		expect(create).toHaveBeenCalledTimes(1);
-		expect((store as unknown as { hnswIndex: unknown }).hnswIndex).not.toBeNull();
+		await store.upsert(doc("b.md", [0, 1, 0]));
+		const hits = await store.search(new Float32Array([0, 1, 0]), 5);
+		expect(hits.map((h) => h.doc.path)).toEqual(["b.md"]);
+		await store.close();
 	});
 
 	it("resets the numeric id counter that the deleted graph was keyed on", async () => {
-		const store = makeStore();
-		Object.assign(store as unknown as Record<string, unknown>, {
-			hnswIndex: { deleteIndex, saveIndex, loadIndex },
-			nextHnswId: 10_161,
-		});
+		const store = await openStore();
+		for (let i = 0; i < 5; i++) await store.upsert(doc(`n${i}.md`, [i, 1]));
+		expect(internals(store).nextHnswId).toBe(5);
 
 		await store.clear();
 
-		expect((store as unknown as { nextHnswId: number }).nextHnswId).toBe(0);
+		expect(internals(store).nextHnswId).toBe(0);
+		await store.close();
 	});
 
-	it("still clears when the persisted graph cannot be deleted", async () => {
-		const store = makeStore();
-		deleteIndex.mockRejectedValueOnce(new Error("db locked"));
-		Object.assign(store as unknown as Record<string, unknown>, {
-			hnswIndex: { deleteIndex, saveIndex, loadIndex },
-		});
+	it("forgets the dimensions so a differently sized model can take over", async () => {
+		const store = await openStore();
+		await store.upsert(doc("a.md", [1, 0, 0]));
+		await store.clear();
+		expect(internals(store).dimensions).toBeNull();
 
-		// A failed delete must not abort clear() and strand the store mid-reset.
-		await expect(store.clear()).resolves.toBeUndefined();
-		expect((store as unknown as { nextHnswId: number }).nextHnswId).toBe(0);
+		await store.upsert(doc("b.md", [1, 0]));
+		const hits = await store.search(new Float32Array([1, 0]), 1);
+		expect(hits.map((h) => h.doc.path)).toEqual(["b.md"]);
+		await store.close();
 	});
 
 	it("drops any pending graph save so it cannot rewrite the cleared graph", async () => {
-		const store = makeStore();
-		Object.assign(store as unknown as Record<string, unknown>, {
-			hnswIndex: { deleteIndex, saveIndex, loadIndex },
-			hasPendingIndexSave: true,
-		});
+		// Only the debounce timer is faked: fake-indexeddb schedules its own work
+		// on setImmediate, which must keep running for the store to respond.
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+		try {
+			const store = await openStore();
+			await store.upsert(doc("a.md", [1, 0]));
+			expect(internals(store).hasPendingIndexSave).toBe(true);
+
+			await store.clear();
+			expect(internals(store).hasPendingIndexSave).toBe(false);
+
+			// Let the debounced save fire; it must be a no-op now.
+			await vi.advanceTimersByTimeAsync(5_000);
+			await store.close();
+
+			const reopened = await openStore();
+			expect(await reopened.count()).toBe(0);
+			expect(await reopened.getMetadata()).toBeNull();
+			await reopened.close();
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("clears metadata, mappings and rows together", async () => {
+		const store = await openStore();
+		await store.upsert(doc("a.md", [1, 0]));
+		await store.setMetadata("p", "m", 2);
 
 		await store.clear();
 
-		expect((store as unknown as { hasPendingIndexSave: boolean }).hasPendingIndexSave).toBe(false);
+		expect(await store.count()).toBe(0);
+		expect(await store.getMetadata()).toBeNull();
+		expect(await store.listNoteMeta()).toEqual([]);
+		expect(store.providerId).toBeNull();
+		expect(store.modelId).toBeNull();
+		await store.close();
 	});
 });

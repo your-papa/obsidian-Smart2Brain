@@ -54,6 +54,75 @@ export function pairKey(a: number, b: number): string {
 	return a < b ? `${a}:${b}` : `${b}:${a}`;
 }
 
+/** The flat shape both scan kernels consume: `count` vectors of `dim` floats, back to back. */
+export interface ChunkBatch {
+	data: Float32Array;
+	count: number;
+	dim: number;
+	/** `chunkOwners[i]` is the note index owning chunk `i`. */
+	chunkOwners: Int32Array;
+}
+
+/**
+ * Accumulates chunk vectors straight into the flat batch, growing the buffer
+ * geometrically, so a whole-set read never has to exist alongside the batch —
+ * the caller streams rows in and only the batch survives.
+ *
+ * Chunks whose dimensionality doesn't match the first vector are dropped: a
+ * stale index entry from a previous embedding model would otherwise corrupt the
+ * flat batch, whose stride assumes a single dim.
+ */
+export class ChunkBatchBuilder {
+	private data = new Float32Array(0);
+	private owners: number[] = [];
+	private count = 0;
+	private dim = -1;
+
+	add(noteIndex: number, vector: Float32Array): void {
+		if (this.dim === -1) this.dim = vector.length;
+		if (vector.length !== this.dim || this.dim === 0) return;
+
+		const needed = (this.count + 1) * this.dim;
+		if (needed > this.data.length) {
+			const grown = new Float32Array(Math.max(needed, this.data.length * 2));
+			grown.set(this.data);
+			this.data = grown;
+		}
+		this.data.set(vector, this.count * this.dim);
+		this.owners.push(noteIndex);
+		this.count++;
+	}
+
+	/** The batch, trimmed to its exact size. The builder must not be reused afterwards. */
+	finish(): ChunkBatch {
+		const dim = this.dim === -1 ? 0 : this.dim;
+		const data = this.data.length === this.count * dim ? this.data : this.data.slice(0, this.count * dim);
+		this.data = new Float32Array(0);
+		return { data, count: this.count, dim, chunkOwners: Int32Array.from(this.owners) };
+	}
+}
+
+/**
+ * Semantic pairs among `paths` from an in-memory set of chunk vectors — the
+ * same computation the vector store runs in its worker over IndexedDB rows,
+ * for callers (and tests) that already hold the vectors. Note indices in the
+ * result are positions in `paths`; chunks of notes outside `paths` are ignored.
+ */
+export function semanticPairsFromDocuments(
+	documents: Iterable<{ path: string; vector: Float32Array }>,
+	paths: string[],
+	options: SemanticScanOptions = {},
+): Promise<SemanticPair[]> {
+	const noteIndexByPath = new Map(paths.map((path, index) => [path, index]));
+	const batch = new ChunkBatchBuilder();
+	for (const document of documents) {
+		const noteIndex = noteIndexByPath.get(document.path);
+		if (noteIndex !== undefined) batch.add(noteIndex, document.vector);
+	}
+	const { data, count, dim, chunkOwners } = batch.finish();
+	return computeSemanticPairs(data, count, dim, chunkOwners, paths.length, options);
+}
+
 /**
  * Pre-normalize every chunk vector so similarity is a plain dot product.
  *

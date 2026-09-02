@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
  */
 
 vi.mock("hnsw", () => ({
-	HNSWWithDB: { create: vi.fn() },
+	HNSW: class {},
 }));
 
 vi.mock("obsidian", () => import("../__mocks__/obsidian"));

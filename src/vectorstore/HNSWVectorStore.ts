@@ -4,24 +4,34 @@
  * IndexedDB-backed vector storage with HNSW (Hierarchical Navigable Small World) index.
  * Provides O(log n) approximate nearest neighbor search instead of O(n) brute-force.
  *
- * Uses the `hnsw` npm package which is pure TypeScript (no native bindings).
- * Stores both the HNSW index and document metadata in IndexedDB.
+ * Uses the `hnsw` npm package which is pure TypeScript (no native bindings) for the
+ * in-memory graph. Persistence is ours: the document rows (with their vectors) and the
+ * graph *topology* live in one IndexedDB database per index (see {@link DB_VERSION}).
  *
  * Note: The HNSW library uses numeric IDs internally, so we maintain a mapping
  * between string document IDs and numeric HNSW IDs.
+ *
+ * Memory model (#432): vectors are `Float32Array` end-to-end. Each vector is resident
+ * exactly once, inside its graph node in this worker; the IndexedDB rows are the only
+ * other copy and they are never materialised as a whole. Nothing in this file builds a
+ * `number[]` from a vector.
  */
 
-import { HNSWWithDB } from "hnsw";
+import { HNSW } from "hnsw";
 import {
 	type DocumentVector,
 	type IndexMetadata,
+	type NoteMeta,
+	type NoteNeighbor,
 	type ScoredDocument,
+	type SemanticPairOptions,
 	type SerializedDocument,
 	type VectorStore,
 } from "./types";
-import { cosineSimilarity, toFloat32Array, toNumberArray } from "./similarity";
+import { cosineSimilarity } from "./similarity";
+import { ChunkBatchBuilder, computeSemanticPairs, type SemanticPair } from "../utils/semanticEdges";
 
-import { getDbName } from "./types";
+import { deleteDatabase, getDbName } from "./types";
 import { Logger } from "../utils/logging";
 
 const LOG_PREFIX = "[VectorStore] [HNSW]";
@@ -30,7 +40,22 @@ const DB_NAME_PREFIX = "s2b-hnsw";
 const DOCUMENTS_STORE = "documents";
 const METADATA_STORE = "metadata";
 const ID_MAPPING_STORE = "id_mapping";
-const DB_VERSION = 2; // Bumped for ID mapping store
+const GRAPH_STORE = "hnsw_graph";
+/** Compound index over `documents` so per-note mtimes can be read without touching a vector. */
+const PATH_MTIME_INDEX = "path_mtime";
+
+/**
+ * Schema version of the per-index database.
+ *
+ * v3: vectors are stored as `Float32Array` (they were `number[]`), and the HNSW graph
+ * topology moved from the `hnsw` library's own sidecar database (`<name>-hnsw-index`,
+ * a single JSON blob that duplicated every vector as doubles) into {@link GRAPH_STORE}
+ * here. There is no in-place migration: an upgrade from an older version drops every
+ * store and the index is rebuilt from the vault on next use. That is deliberate —
+ * rewriting a multi-GB vector database inside a phone's WebContent process is the
+ * memory spike this version exists to remove.
+ */
+const DB_VERSION = 3;
 
 /**
  * How long to wait on a blocked `indexedDB.open` before failing with a real error.
@@ -41,15 +66,15 @@ const DB_VERSION = 2; // Bumped for ID mapping store
 const OPEN_BLOCKED_TIMEOUT_MS = 10_000;
 
 /**
- * Internal representation stored in IndexedDB.
- * Uses number[] since IndexedDB doesn't efficiently store Float32Array.
+ * Document row as stored in IndexedDB. Structured clone preserves typed arrays, so
+ * the vector round-trips as a `Float32Array` with no conversion on either side.
  */
 interface StoredDocument {
 	id: string;
 	path: string;
 	mtime: number;
 	checksum: string;
-	vector: number[];
+	vector: Float32Array;
 	chunkIndex?: number;
 	/** Numeric ID for HNSW index */
 	hnswId: number;
@@ -69,12 +94,33 @@ interface StoredMetadata {
 }
 
 /**
+ * The graph's scalar state, stored next to {@link StoredMetadata} in the metadata store.
+ * Everything else about a node is derivable: its vector is the document row that
+ * carries the same `hnswId`, so the graph store holds topology only.
+ */
+interface StoredGraphHeader {
+	key: "hnsw-graph";
+	levelMax: number;
+	entryPointId: number;
+}
+
+/** One HNSW node's topology — its level and per-level neighbour lists, no vector. */
+interface StoredGraphNode {
+	id: number;
+	level: number;
+	neighbors: number[][];
+}
+
+/**
  * ID mapping entry for HNSW numeric IDs.
  */
 interface IdMapping {
 	numericId: number;
 	stringId: string;
 }
+
+/** The library's node shape, without reaching into its internal module path. */
+type HnswNode = HNSW["nodes"] extends Map<number, infer N> ? N : never;
 
 /**
  * Runs a single read request inside `tx` and settles a promise on it, covering the
@@ -152,12 +198,29 @@ function awaitCursor<T>(
 }
 
 /**
+ * Settles on a write transaction's completion. The caller issues its requests on
+ * `tx` synchronously (inside `run`) so they all belong to this one transaction.
+ */
+function awaitTransaction(tx: IDBTransaction, run: () => void): Promise<void> {
+	return new Promise<void>((resolve, reject) => {
+		tx.oncomplete = () => resolve();
+		tx.onerror = () => reject(tx.error);
+		tx.onabort = () => reject(tx.error ?? new Error("IndexedDB transaction aborted."));
+		try {
+			run();
+		} catch (error) {
+			reject(error);
+		}
+	});
+}
+
+/**
  * HNSW-backed vector store with O(log n) search complexity.
  * Uses pure TypeScript HNSW implementation with IndexedDB persistence.
  */
 export class HNSWVectorStore implements VectorStore {
 	private db: IDBDatabase | null = null;
-	private hnswIndex: HNSWWithDB | null = null;
+	private hnswIndex: HNSW | null = null;
 	private _providerId: string | null = null;
 	private _modelId: string | null = null;
 	private dimensions: number | null = null;
@@ -205,7 +268,8 @@ export class HNSWVectorStore implements VectorStore {
 	 * Open the database connection and initialize HNSW index.
 	 */
 	async open(): Promise<void> {
-		await this.openIndexedDB();
+		const upgradedFrom = await this.openIndexedDB();
+		if (upgradedFrom !== null) await this.discardLegacySidecar(upgradedFrom);
 
 		// Load ID mappings
 		await this.loadIdMappings();
@@ -220,11 +284,17 @@ export class HNSWVectorStore implements VectorStore {
 		}
 	}
 
-	private async openIndexedDB(): Promise<void> {
+	/**
+	 * Opens the database, creating or upgrading its schema. Resolves with the
+	 * previous schema version when an existing database was upgraded (its stores
+	 * were dropped, see {@link DB_VERSION}), or `null` for a fresh or current one.
+	 */
+	private async openIndexedDB(): Promise<number | null> {
 		return new Promise((resolve, reject) => {
 			const request = indexedDB.open(this.dbName, DB_VERSION);
 			let settled = false;
 			let blockedTimer: ReturnType<typeof setTimeout> | null = null;
+			let upgradedFrom: number | null = null;
 
 			const finish = (fn: () => void) => {
 				if (settled) return;
@@ -265,24 +335,26 @@ export class HNSWVectorStore implements VectorStore {
 			request.onupgradeneeded = (event) => {
 				const db = (event.target as IDBOpenDBRequest).result;
 
-				// Create documents store with indexes
-				if (!db.objectStoreNames.contains(DOCUMENTS_STORE)) {
-					const docStore = db.createObjectStore(DOCUMENTS_STORE, {
-						keyPath: "id",
-					});
-					docStore.createIndex("path", "path", { unique: false });
-					docStore.createIndex("mtime", "mtime", { unique: false });
+				// An older schema is not migrated, it is discarded (see DB_VERSION).
+				// Drop every store so the index reads as empty and gets rebuilt.
+				if (event.oldVersion > 0 && event.oldVersion < DB_VERSION) {
+					upgradedFrom = event.oldVersion;
+					const names: string[] = [];
+					for (let i = 0; i < db.objectStoreNames.length; i++) {
+						const name = db.objectStoreNames[i];
+						if (name) names.push(name);
+					}
+					for (const name of names) db.deleteObjectStore(name);
 				}
 
-				// Create metadata store
-				if (!db.objectStoreNames.contains(METADATA_STORE)) {
-					db.createObjectStore(METADATA_STORE, { keyPath: "key" });
-				}
+				const docStore = db.createObjectStore(DOCUMENTS_STORE, { keyPath: "id" });
+				docStore.createIndex("path", "path", { unique: false });
+				docStore.createIndex("mtime", "mtime", { unique: false });
+				docStore.createIndex(PATH_MTIME_INDEX, ["path", "mtime"], { unique: false });
 
-				// Create ID mapping store
-				if (!db.objectStoreNames.contains(ID_MAPPING_STORE)) {
-					db.createObjectStore(ID_MAPPING_STORE, { keyPath: "numericId" });
-				}
+				db.createObjectStore(METADATA_STORE, { keyPath: "key" });
+				db.createObjectStore(ID_MAPPING_STORE, { keyPath: "numericId" });
+				db.createObjectStore(GRAPH_STORE, { keyPath: "id" });
 			};
 
 			request.onsuccess = (event) => {
@@ -301,10 +373,31 @@ export class HNSWVectorStore implements VectorStore {
 				};
 				finish(() => {
 					this.db = db;
-					resolve();
+					resolve(upgradedFrom);
 				});
 			};
 		});
+	}
+
+	/**
+	 * Schema versions before 3 kept the HNSW graph in a separate database owned by
+	 * the `hnsw` library (`<dbName>-hnsw-index`). Nothing reads it any more, and it
+	 * is the largest single object on disk (every vector, as doubles), so it goes
+	 * the moment the main database has been upgraded past it.
+	 */
+	private async discardLegacySidecar(fromVersion: number): Promise<void> {
+		Logger.log(
+			`${LOG_PREFIX} "${this.dbName}" upgraded from schema v${fromVersion} to v${DB_VERSION}: stored vectors discarded, the index will be rebuilt from the vault.`,
+		);
+		const sidecar = `${this.dbName}-hnsw-index`;
+		const result = await deleteDatabase(sidecar);
+		if (result.status === "error") {
+			Logger.error(`${LOG_PREFIX} Failed to delete legacy graph database "${sidecar}":`, result.error);
+		} else if (result.status === "blocked") {
+			Logger.warn(
+				`${LOG_PREFIX} Legacy graph database "${sidecar}" is held open elsewhere; it will be deleted once that connection closes.`,
+			);
+		}
 	}
 
 	private async loadIdMappings(): Promise<void> {
@@ -339,43 +432,172 @@ export class HNSWVectorStore implements VectorStore {
 		const numericId = this.idToNumeric.get(stringId);
 		if (numericId === undefined) return;
 
-		return new Promise((resolve, reject) => {
-			const tx = db.transaction(ID_MAPPING_STORE, "readwrite");
-			const store = tx.objectStore(ID_MAPPING_STORE);
-			const request = store.delete(numericId);
-
-			request.onerror = () => reject(request.error);
-			tx.oncomplete = () => {
-				this.idToNumeric.delete(stringId);
-				this.numericToId.delete(numericId);
-				resolve();
-			};
-			tx.onerror = () => reject(tx.error);
+		const tx = db.transaction(ID_MAPPING_STORE, "readwrite");
+		await awaitTransaction(tx, () => {
+			tx.objectStore(ID_MAPPING_STORE).delete(numericId);
 		});
+		this.idToNumeric.delete(stringId);
+		this.numericToId.delete(numericId);
+	}
+
+	private createEmptyGraph(): HNSW {
+		return new HNSW(this.M, this.efConstruction, null, "cosine", this.efSearch);
 	}
 
 	private async initHNSWIndex(): Promise<void> {
 		if (!this.dimensions || this.hnswIndex) return;
 
-		// Create HNSW index with IndexedDB persistence
-		this.hnswIndex = await HNSWWithDB.create(
-			this.M,
-			this.efConstruction,
-			`${this.dbName}-hnsw-index`,
-			this.efSearch,
-		);
-
-		// Load existing index if available
+		const index = this.createEmptyGraph();
 		try {
-			await this.hnswIndex.loadIndex();
-		} catch {
-			// Index doesn't exist yet, will be built on first insert
+			await this.loadGraph(index);
+		} catch (error) {
+			// A graph that fails to load is not fatal: the rows are intact, and the
+			// next full rebuild (or incremental upserts) repopulate it.
+			Logger.error(`${LOG_PREFIX} Failed to load persisted HNSW graph; starting from an empty one:`, error);
 		}
+		this.hnswIndex = index;
 	}
 
 	private async ensureHNSWIndex(): Promise<void> {
 		if (!this.dimensions) return;
 		await this.initHNSWIndex();
+	}
+
+	// =========================================================================
+	// Graph persistence
+	// =========================================================================
+
+	/**
+	 * Rehydrate the in-memory graph: topology rows from {@link GRAPH_STORE}, vectors
+	 * from the document rows that share each node's `hnswId`.
+	 *
+	 * Both reads are cursor walks, so at no point does a second copy of the whole
+	 * vector set exist. Each document row is deserialised once, and the
+	 * `Float32Array` structured-clone hands us becomes the node's vector as-is.
+	 *
+	 * A node whose document row is gone (removed after the last graph save) is
+	 * dropped, and every neighbour list is pruned of such ids so the library never
+	 * dereferences a missing node mid-search.
+	 */
+	private async loadGraph(index: HNSW): Promise<void> {
+		const db = this.requireDb();
+
+		const header = await this.getGraphHeader();
+		if (!header) return;
+
+		const topology = new Map<number, StoredGraphNode>();
+		{
+			const tx = db.transaction(GRAPH_STORE, "readonly");
+			const request = tx.objectStore(GRAPH_STORE).openCursor();
+			await awaitCursor<void>(tx, request, (cursor) => {
+				if (!cursor) return { done: true, value: undefined };
+				const node = (cursor as IDBCursorWithValue).value as StoredGraphNode;
+				topology.set(node.id, node);
+				cursor.continue();
+				return undefined;
+			});
+		}
+		if (topology.size === 0) return;
+
+		const nodes = new Map<number, HnswNode>();
+		let dim: number | null = null;
+		{
+			const tx = db.transaction(DOCUMENTS_STORE, "readonly");
+			const request = tx.objectStore(DOCUMENTS_STORE).openCursor();
+			await awaitCursor<void>(tx, request, (cursor) => {
+				if (!cursor) return { done: true, value: undefined };
+				const stored = (cursor as IDBCursorWithValue).value as StoredDocument;
+				const node = topology.get(stored.hnswId);
+				if (node) {
+					dim ??= stored.vector.length;
+					nodes.set(node.id, {
+						id: node.id,
+						vector: stored.vector,
+						level: node.level,
+						neighbors: node.neighbors,
+					} as HnswNode);
+				}
+				cursor.continue();
+				return undefined;
+			});
+		}
+		topology.clear();
+
+		let pruned = 0;
+		let levelMax = -1;
+		for (const node of nodes.values()) {
+			if (node.level > levelMax) levelMax = node.level;
+			for (let level = 0; level < node.neighbors.length; level++) {
+				const ids = node.neighbors[level];
+				if (ids.every((id) => nodes.has(id))) continue;
+				node.neighbors[level] = ids.filter((id) => nodes.has(id));
+				pruned++;
+			}
+		}
+
+		let entryPointId = header.entryPointId;
+		if (!nodes.has(entryPointId)) {
+			// Any node on the top level is a valid entry point; take the smallest id
+			// so the choice is stable across loads.
+			entryPointId = -1;
+			for (const node of nodes.values()) {
+				if (node.level === levelMax && (entryPointId === -1 || node.id < entryPointId)) entryPointId = node.id;
+			}
+		}
+
+		index.nodes = nodes;
+		index.d = dim;
+		index.levelMax = nodes.size > 0 ? levelMax : -1;
+		index.entryPointId = entryPointId;
+
+		if (pruned > 0) {
+			Logger.debug(`${LOG_PREFIX} Loaded graph (${nodes.size} nodes); pruned ${pruned} stale neighbour lists.`);
+		}
+	}
+
+	/**
+	 * Persist the in-memory graph's topology (levels, neighbour lists, entry point).
+	 * Vectors are deliberately not written here — the document rows already hold
+	 * them. One transaction replaces the whole store: the library rewires other
+	 * nodes' neighbour lists on every insert, so there is no cheap dirty set.
+	 */
+	private async saveGraph(): Promise<void> {
+		const db = this.requireDb();
+		const index = this.hnswIndex;
+		if (!index) return;
+
+		const tx = db.transaction([GRAPH_STORE, METADATA_STORE], "readwrite");
+		await awaitTransaction(tx, () => {
+			const graphStore = tx.objectStore(GRAPH_STORE);
+			graphStore.clear();
+			for (const node of index.nodes.values()) {
+				const stored: StoredGraphNode = { id: node.id, level: node.level, neighbors: node.neighbors };
+				graphStore.put(stored);
+			}
+			const header: StoredGraphHeader = {
+				key: "hnsw-graph",
+				levelMax: index.levelMax,
+				entryPointId: index.entryPointId,
+			};
+			tx.objectStore(METADATA_STORE).put(header);
+		});
+	}
+
+	private async getGraphHeader(): Promise<StoredGraphHeader | null> {
+		const db = this.requireDb();
+		const tx = db.transaction(METADATA_STORE, "readonly");
+		const request = tx.objectStore(METADATA_STORE).get("hnsw-graph");
+		return awaitRequest(tx, request, (header: StoredGraphHeader | undefined) => header ?? null);
+	}
+
+	/** Drop the persisted graph (topology + header) without touching document rows. */
+	private async deleteGraph(): Promise<void> {
+		const db = this.requireDb();
+		const tx = db.transaction([GRAPH_STORE, METADATA_STORE], "readwrite");
+		await awaitTransaction(tx, () => {
+			tx.objectStore(GRAPH_STORE).clear();
+			tx.objectStore(METADATA_STORE).delete("hnsw-graph");
+		});
 	}
 
 	/**
@@ -388,9 +610,9 @@ export class HNSWVectorStore implements VectorStore {
 			clearTimeout(this.saveIndexTimer);
 			this.saveIndexTimer = null;
 		}
-		if (this.hnswIndex) {
+		if (this.hnswIndex && this.db && this.hasPendingIndexSave) {
 			try {
-				await this.hnswIndex.saveIndex();
+				await this.saveGraph();
 				this.hasPendingIndexSave = false;
 			} catch {
 				// Ignore save errors on close
@@ -474,10 +696,8 @@ export class HNSWVectorStore implements VectorStore {
 		// truncating results. (Observed after section-aware chunking turned
 		// single-chunk notes into multi-chunk ones: 2611 graph nodes vs 2281
 		// mappings, and a 50-result query returning 4.)
-		const existing = await this.getById(doc.id);
-		if (existing) {
-			await this.removeFromHNSW(existing.id);
-			await this.removeIdMapping(existing.id);
+		if (this.idToNumeric.has(doc.id)) {
+			await this.removeIdMapping(doc.id);
 		}
 
 		// Assign numeric ID for HNSW
@@ -490,15 +710,16 @@ export class HNSWVectorStore implements VectorStore {
 			path: doc.path,
 			mtime: doc.mtime,
 			checksum: doc.checksum,
-			vector: toNumberArray(doc.vector),
+			vector: doc.vector,
 			chunkIndex: doc.chunkIndex,
 			hnswId,
 		};
 		await this.putInStore(DOCUMENTS_STORE, stored);
 
-		// Add to HNSW index with numeric ID
+		// Add to HNSW index with numeric ID. The library keeps a reference to the
+		// array it is given, so this Float32Array becomes the resident copy.
 		if (this.hnswIndex) {
-			await this.hnswIndex.addPoint(hnswId, Array.from(doc.vector));
+			await this.hnswIndex.addPoint(hnswId, doc.vector);
 		}
 
 		await this.updateLastUpdated();
@@ -517,7 +738,7 @@ export class HNSWVectorStore implements VectorStore {
 		if (!this.hasPendingIndexSave || !this.hnswIndex || !this.db) return;
 		this.hasPendingIndexSave = false;
 		try {
-			await this.hnswIndex.saveIndex();
+			await this.saveGraph();
 		} catch (e) {
 			// Re-arm so a later flush (or close) retries the save.
 			this.hasPendingIndexSave = true;
@@ -525,49 +746,37 @@ export class HNSWVectorStore implements VectorStore {
 		}
 	}
 
-	private async removeFromHNSW(_id: string): Promise<void> {
-		// Note: The hnsw package doesn't support deletion directly.
-		// Deleted entries remain in the HNSW graph until the index is rebuilt
-		// (bulkPut). Search tolerates them: numeric ids with no string mapping
-		// are skipped. Chunking increases the orphan count per note edit, but
-		// introduces no new failure mode — the graph is rebuilt on full reindex.
-	}
-
 	/**
 	 * Remove a document by path.
 	 * A note may be stored as multiple chunk rows sharing the same `path`; this
 	 * deletes every one of them and drops each chunk's id-mapping.
+	 *
+	 * The hnsw package doesn't support deletion, so the graph nodes stay until
+	 * the next full rebuild (`bulkPut`) or reload (`loadGraph` drops nodes whose
+	 * row is gone). Search tolerates them: numeric ids with no string mapping
+	 * are skipped.
 	 */
 	async remove(path: string): Promise<void> {
 		const db = this.requireDb();
 
 		// Drop id-mappings for ALL chunks of this note (getByPath returns only one).
-		const stored = await this.getAllStoredForPath(path);
-		for (const doc of stored) {
-			await this.removeFromHNSW(doc.id);
-			await this.removeIdMapping(doc.id);
+		const ids = await this.getIdsForPath(path);
+		for (const id of ids) {
+			await this.removeIdMapping(id);
 		}
 
-		return new Promise((resolve, reject) => {
-			const tx = db.transaction(DOCUMENTS_STORE, "readwrite");
-			const store = tx.objectStore(DOCUMENTS_STORE);
-			const index = store.index("path");
-			const request = index.openCursor(IDBKeyRange.only(path));
-
-			request.onerror = () => reject(request.error);
-			request.onsuccess = (event) => {
-				const cursor = (event.target as IDBRequest<IDBCursorWithValue>).result;
+		const tx = db.transaction(DOCUMENTS_STORE, "readwrite");
+		await awaitTransaction(tx, () => {
+			const request = tx.objectStore(DOCUMENTS_STORE).index("path").openCursor(IDBKeyRange.only(path));
+			request.onsuccess = () => {
+				const cursor = request.result;
 				if (cursor) {
 					cursor.delete();
 					cursor.continue();
 				}
 			};
-
-			tx.oncomplete = () => {
-				this.updateLastUpdated().then(resolve).catch(reject);
-			};
-			tx.onerror = () => reject(tx.error);
 		});
+		await this.updateLastUpdated();
 	}
 
 	/**
@@ -594,34 +803,129 @@ export class HNSWVectorStore implements VectorStore {
 	}
 
 	/**
-	 * Check if a document exists and get its mtime.
+	 * Check if a document exists and get its mtime. Reads the `[path, mtime]`
+	 * index key only, so no vector is deserialised.
 	 */
 	async getDocumentMtime(path: string): Promise<number | undefined> {
-		const doc = await this.getByPath(path);
-		return doc?.mtime;
+		const db = this.requireDb();
+
+		const tx = db.transaction(DOCUMENTS_STORE, "readonly");
+		const range = IDBKeyRange.bound([path, Number.NEGATIVE_INFINITY], [path, Number.POSITIVE_INFINITY]);
+		const request = tx.objectStore(DOCUMENTS_STORE).index(PATH_MTIME_INDEX).openKeyCursor(range);
+		return awaitCursor<number | undefined>(tx, request, (cursor) => {
+			if (!cursor) return { done: true, value: undefined };
+			const [, mtime] = cursor.key as [string, number];
+			return { done: true, value: mtime };
+		});
 	}
 
 	/**
-	 * Get all documents.
+	 * Per-note `{ path, mtime }` for every indexed note, read from the
+	 * `[path, mtime]` index with a unique *key* cursor: the walk never touches a
+	 * row value, so the vectors stay on disk. All chunks of a note share one
+	 * mtime, so this yields one entry per note.
 	 */
-	async getAll(): Promise<DocumentVector[]> {
-		const stored = await this.getAllStored();
-		return stored.map((s) => this.toDocumentVector(s));
+	async listNoteMeta(): Promise<NoteMeta[]> {
+		const db = this.requireDb();
+
+		const tx = db.transaction(DOCUMENTS_STORE, "readonly");
+		const request = tx.objectStore(DOCUMENTS_STORE).index(PATH_MTIME_INDEX).openKeyCursor(null, "nextunique");
+
+		const notes: NoteMeta[] = [];
+		return awaitCursor(tx, request, (cursor) => {
+			if (!cursor) return { done: true, value: notes };
+			const [path, mtime] = cursor.key as [string, number];
+			notes.push({ path, mtime });
+			cursor.continue();
+			return undefined;
+		});
 	}
 
 	/**
 	 * Get all documents as serialized format (for MessagePack).
+	 *
+	 * The only whole-set read left. It backs the explicit "export index" action,
+	 * which is a desktop file dialog; nothing on the startup or graph path calls it.
 	 */
 	async getAllSerialized(): Promise<SerializedDocument[]> {
-		const stored = await this.getAllStored();
-		return stored.map((s) => ({
-			id: s.id,
-			path: s.path,
-			mtime: s.mtime,
-			checksum: s.checksum,
-			vector: s.vector,
-			chunkIndex: s.chunkIndex,
-		}));
+		const docs: SerializedDocument[] = [];
+		await this.forEachStored((s) => {
+			docs.push({
+				id: s.id,
+				path: s.path,
+				mtime: s.mtime,
+				checksum: s.checksum,
+				vector: Array.from(s.vector),
+				chunkIndex: s.chunkIndex,
+			});
+		});
+		return docs;
+	}
+
+	/**
+	 * Semantic neighbour pairs among `paths`, computed here where the vectors live.
+	 *
+	 * The graph view used to pull every vector to the main thread and ship it to
+	 * a second worker; now only the note list crosses in and only scored index
+	 * pairs cross out. The chunk rows of the requested notes are read once (one
+	 * transaction, one `getAll` per path) straight into the flat batch the scan
+	 * kernels consume, so the transient footprint is the included subset, not the
+	 * whole index. Note indices in the result refer to positions in `paths`.
+	 */
+	async semanticPairs(paths: string[], options: SemanticPairOptions = {}): Promise<SemanticPair[]> {
+		const db = this.requireDb();
+		if (paths.length < 2) return [];
+
+		const batch = new ChunkBatchBuilder();
+		const tx = db.transaction(DOCUMENTS_STORE, "readonly");
+		await new Promise<void>((resolve, reject) => {
+			const index = tx.objectStore(DOCUMENTS_STORE).index("path");
+			tx.oncomplete = () => resolve();
+			tx.onerror = () => reject(tx.error);
+			tx.onabort = () => reject(tx.error ?? new Error("IndexedDB transaction aborted."));
+			paths.forEach((path, noteIndex) => {
+				const request = index.getAll(IDBKeyRange.only(path));
+				request.onsuccess = () => {
+					for (const stored of request.result as StoredDocument[]) batch.add(noteIndex, stored.vector);
+				};
+			});
+		});
+
+		const { data, count, dim, chunkOwners } = batch.finish();
+		return computeSemanticPairs(data, count, dim, chunkOwners, paths.length, {
+			neighborCount: options.neighborCount,
+			threshold: options.threshold,
+			excludePairs: options.excludePairs ? new Set(options.excludePairs) : undefined,
+		});
+	}
+
+	/**
+	 * Every other note scoring at least `threshold` against any chunk of `path`,
+	 * best chunk pair per note, sorted by score descending. An exhaustive cursor
+	 * walk (not the HNSW graph), so the result is exact and needs no index to be
+	 * loaded; each row is scored as it streams past and never retained.
+	 */
+	async noteNeighbors(path: string, threshold: number): Promise<NoteNeighbor[]> {
+		const active = await this.getAllStoredForPath(path);
+		if (active.length === 0) return [];
+		const activeVectors = active.map((s) => s.vector);
+
+		const bestByPath = new Map<string, number>();
+		await this.forEachStored((stored) => {
+			if (stored.path === path || stored.vector.length !== activeVectors[0].length) return;
+			let best = Number.NEGATIVE_INFINITY;
+			for (const activeVector of activeVectors) {
+				const score = cosineSimilarity(activeVector, stored.vector);
+				if (score > best) best = score;
+			}
+			if (best < threshold) return;
+			const previous = bestByPath.get(stored.path);
+			if (previous === undefined || best > previous) bestByPath.set(stored.path, best);
+		});
+
+		return [...bestByPath.entries()]
+			.map(([neighborPath, score]) => ({ path: neighborPath, score }))
+			.sort((left, right) => right.score - left.score || (left.path < right.path ? -1 : 1));
 	}
 
 	/**
@@ -644,12 +948,13 @@ export class HNSWVectorStore implements VectorStore {
 		this.numericToId.clear();
 		this.nextHnswId = 0;
 
-		// Prepare vectors with numeric IDs for HNSW
-		const hnswVectors: Array<{ id: number; vector: number[] }> = [];
+		// Prepare vectors with numeric IDs for HNSW. These are the callers' own
+		// Float32Arrays — the graph adopts them, no copy is made.
+		const hnswVectors: Array<{ id: number; vector: Float32Array }> = [];
 
 		// Store all documents in IndexedDB in a single transaction
-		await new Promise<void>((resolve, reject) => {
-			const tx = db.transaction([DOCUMENTS_STORE, ID_MAPPING_STORE], "readwrite");
+		const tx = db.transaction([DOCUMENTS_STORE, ID_MAPPING_STORE], "readwrite");
+		await awaitTransaction(tx, () => {
 			const docStore = tx.objectStore(DOCUMENTS_STORE);
 			const mappingStore = tx.objectStore(ID_MAPPING_STORE);
 
@@ -668,24 +973,21 @@ export class HNSWVectorStore implements VectorStore {
 					path: doc.path,
 					mtime: doc.mtime,
 					checksum: doc.checksum,
-					vector: toNumberArray(doc.vector),
+					vector: doc.vector,
 					chunkIndex: doc.chunkIndex,
 					hnswId,
 				};
 				docStore.put(stored);
 
-				// Prepare for HNSW index
-				hnswVectors.push({ id: hnswId, vector: Array.from(doc.vector) });
+				hnswVectors.push({ id: hnswId, vector: doc.vector });
 			}
-
-			tx.oncomplete = () => resolve();
-			tx.onerror = () => reject(tx.error);
 		});
 
 		// Rebuild HNSW index from all documents with numeric IDs
 		if (this.hnswIndex && hnswVectors.length > 0) {
 			await this.hnswIndex.buildIndex(hnswVectors);
-			await this.hnswIndex.saveIndex();
+			await this.saveGraph();
+			this.hasPendingIndexSave = false;
 		}
 		Logger.debug(`${LOG_PREFIX} bulkPut (${docs.length} docs): ${(performance.now() - totalStart).toFixed(1)}ms`);
 	}
@@ -705,33 +1007,24 @@ export class HNSWVectorStore implements VectorStore {
 		this.numericToId.clear();
 		this.nextHnswId = 0;
 
-		// Drop the *persisted* graph, not just the in-memory handle. Recreating the
-		// HNSWWithDB wrapper leaves the serialized graph in its own IndexedDB
-		// database, so the next open() → loadIndex() resurrects every node from
-		// previous indexing runs. Because clear() also resets `nextHnswId` to 0,
-		// those stale nodes then collide with freshly assigned numeric ids: search
-		// resolves a hit through `numericToId`, misses, and silently drops the
-		// result — which manifests as semantic search returning too few results,
-		// or none at all, for perfectly valid queries.
-		if (this.hnswIndex) {
-			try {
-				await this.hnswIndex.deleteIndex();
-			} catch (e) {
-				Logger.error(`${LOG_PREFIX} Failed to delete persisted HNSW graph:`, e);
-			}
-			this.hnswIndex = null;
+		// Drop the *persisted* graph, not just the in-memory handle. Otherwise the
+		// next open() → loadGraph() resurrects every node from previous indexing
+		// runs. Because clear() also resets `nextHnswId` to 0, those stale nodes
+		// then collide with freshly assigned numeric ids: search resolves a hit
+		// through `numericToId`, misses, and silently drops the result — which
+		// manifests as semantic search returning too few results, or none at all,
+		// for perfectly valid queries.
+		try {
+			await this.deleteGraph();
+		} catch (e) {
+			Logger.error(`${LOG_PREFIX} Failed to delete persisted HNSW graph:`, e);
 		}
 		this.hasPendingIndexSave = false;
 
-		// Recreate an empty graph so subsequent upserts have somewhere to insert.
-		if (this.dimensions) {
-			this.hnswIndex = await HNSWWithDB.create(
-				this.M,
-				this.efConstruction,
-				`${this.dbName}-hnsw-index`,
-				this.efSearch,
-			);
-		}
+		// A fresh graph; `upsert`/`bulkPut` re-derive the dimensions from the
+		// first vector they see, which is what lets a model change land cleanly.
+		this.hnswIndex = null;
+		this.dimensions = null;
 
 		this._providerId = null;
 		this._modelId = null;
@@ -780,7 +1073,7 @@ export class HNSWVectorStore implements VectorStore {
 
 		try {
 			// Use HNSW to get nearest neighbors (returns numeric IDs)
-			const hnswResults = this.hnswIndex.searchKNN(Array.from(queryVector), topK);
+			const hnswResults = this.hnswIndex.searchKNN(queryVector, topK);
 
 			// Fetch full documents using numeric -> string ID mapping
 			const results: ScoredDocument[] = [];
@@ -807,25 +1100,31 @@ export class HNSWVectorStore implements VectorStore {
 	}
 
 	/**
-	 * Fallback brute-force search if HNSW is not available.
+	 * Fallback brute-force search if HNSW is not available. Streams the rows
+	 * past a bounded top-K list rather than materialising the whole store.
 	 */
 	private async bruteForceSearch(
 		queryVector: Float32Array,
 		topK: number,
 		threshold?: number,
 	): Promise<ScoredDocument[]> {
-		const docs = await this.getAll();
-		const results: ScoredDocument[] = [];
-
-		for (const doc of docs) {
-			const score = cosineSimilarity(queryVector, doc.vector);
-			results.push({ doc, score });
-		}
-
-		results.sort((a, b) => b.score - a.score);
 		const effectiveThreshold = threshold ?? 0;
-		const filtered = results.filter((r) => r.score >= effectiveThreshold);
-		return filtered.slice(0, topK);
+		const results: ScoredDocument[] = [];
+		const trim = () => {
+			results.sort((a, b) => b.score - a.score);
+			results.length = Math.min(results.length, topK);
+		};
+
+		await this.forEachStored((stored) => {
+			if (stored.vector.length !== queryVector.length) return;
+			const score = cosineSimilarity(queryVector, stored.vector);
+			if (score < effectiveThreshold) return;
+			results.push({ doc: this.toDocumentVector(stored), score });
+			if (results.length >= topK * 2) trim();
+		});
+
+		trim();
+		return results;
 	}
 
 	// =========================================================================
@@ -856,24 +1155,28 @@ export class HNSWVectorStore implements VectorStore {
 
 	private async putInStore<T>(storeName: string, value: T): Promise<void> {
 		const db = this.requireDb();
-
-		return new Promise((resolve, reject) => {
-			const tx = db.transaction(storeName, "readwrite");
-			const store = tx.objectStore(storeName);
-			const request = store.put(value);
-
-			request.onerror = () => reject(request.error);
-			tx.oncomplete = () => resolve();
-			tx.onerror = () => reject(tx.error);
+		const tx = db.transaction(storeName, "readwrite");
+		await awaitTransaction(tx, () => {
+			tx.objectStore(storeName).put(value);
 		});
 	}
 
-	private async getAllStored(): Promise<StoredDocument[]> {
+	/**
+	 * Visit every document row once, in primary-key order. Rows are handed to
+	 * `visit` as the cursor streams them and are not retained, so this is the
+	 * building block for whole-store reads that must not hold the vector set.
+	 */
+	private async forEachStored(visit: (stored: StoredDocument) => void): Promise<void> {
 		const db = this.requireDb();
 
 		const tx = db.transaction(DOCUMENTS_STORE, "readonly");
-		const request = tx.objectStore(DOCUMENTS_STORE).getAll();
-		return awaitRequest(tx, request, (docs: StoredDocument[]) => docs);
+		const request = tx.objectStore(DOCUMENTS_STORE).openCursor();
+		return awaitCursor<void>(tx, request, (cursor) => {
+			if (!cursor) return { done: true, value: undefined };
+			visit((cursor as IDBCursorWithValue).value as StoredDocument);
+			cursor.continue();
+			return undefined;
+		});
 	}
 
 	/** Get every stored chunk row for a given note path. */
@@ -885,17 +1188,26 @@ export class HNSWVectorStore implements VectorStore {
 		return awaitRequest(tx, request, (docs: StoredDocument[]) => docs);
 	}
 
-	private async clearStore(storeName: string): Promise<void> {
+	/** Chunk ids of a note, from the `path` index keys alone (no row values). */
+	private async getIdsForPath(path: string): Promise<string[]> {
 		const db = this.requireDb();
 
-		return new Promise((resolve, reject) => {
-			const tx = db.transaction(storeName, "readwrite");
-			const store = tx.objectStore(storeName);
-			const request = store.clear();
+		const tx = db.transaction(DOCUMENTS_STORE, "readonly");
+		const request = tx.objectStore(DOCUMENTS_STORE).index("path").openKeyCursor(IDBKeyRange.only(path));
+		const ids: string[] = [];
+		return awaitCursor(tx, request, (cursor) => {
+			if (!cursor) return { done: true, value: ids };
+			ids.push(cursor.primaryKey as string);
+			cursor.continue();
+			return undefined;
+		});
+	}
 
-			request.onerror = () => reject(request.error);
-			tx.oncomplete = () => resolve();
-			tx.onerror = () => reject(tx.error);
+	private async clearStore(storeName: string): Promise<void> {
+		const db = this.requireDb();
+		const tx = db.transaction(storeName, "readwrite");
+		await awaitTransaction(tx, () => {
+			tx.objectStore(storeName).clear();
 		});
 	}
 
@@ -916,7 +1228,8 @@ export class HNSWVectorStore implements VectorStore {
 	}
 
 	/**
-	 * Convert stored format to runtime DocumentVector.
+	 * Convert stored format to runtime DocumentVector. The vector is passed
+	 * through: structured clone already produced a fresh Float32Array.
 	 */
 	private toDocumentVector(stored: StoredDocument): DocumentVector {
 		return {
@@ -924,7 +1237,7 @@ export class HNSWVectorStore implements VectorStore {
 			path: stored.path,
 			mtime: stored.mtime,
 			checksum: stored.checksum,
-			vector: toFloat32Array(stored.vector),
+			vector: stored.vector,
 			chunkIndex: stored.chunkIndex,
 		};
 	}
