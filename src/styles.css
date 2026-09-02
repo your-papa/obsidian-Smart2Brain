@@ -1103,8 +1103,7 @@ button.s2b-pill--interactive:hover {
 	}
 
 	/* Generic hover-reveal hook: any element that fades in on group-hover
-	   (context-usage %, collapse chevron, …) tagged with this class shows on
-	   touch. */
+	   (collapse chevron, …) tagged with this class shows on touch. */
 	.s2b-hover-reveal {
 		opacity: 1 !important;
 	}

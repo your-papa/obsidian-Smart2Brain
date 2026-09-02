@@ -46,8 +46,6 @@ const acceptedFileTypes =
 const MAX_FILE_SIZE_BYTES = 15 * 1024 * 1024; // 15 MB per file
 const MAX_TOTAL_ATTACHMENTS_BYTES = 25 * 1024 * 1024; // 25 MB per message
 const FULLSCREEN_TRANSITION_MS = 220;
-/** Usage % below which the context circle stays hidden (see the action row). */
-const CONTEXT_USAGE_VISIBLE_THRESHOLD = 50;
 
 const {
 	registry,
@@ -1356,12 +1354,17 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
       <AgentPopover {threadPath} />
       <ModelSelectButton {threadPath} />
       <div class="ml-auto flex items-center gap-2">
-        <!-- Threshold-gated: at low usage the ring is an empty grey track that
-             reads as a loading spinner next to the send button, and the number
-             it encodes isn't actionable. Appearing at 50% is itself the signal
-             ("context is filling up"), and puts the popover's Summarize action
-             in reach exactly when a user starts wanting it. -->
-        {#if !isMobileUI() && contextUsage.usagePercent >= CONTEXT_USAGE_VISIBLE_THRESHOLD}
+        <!-- Always on for desktop: the ring is the only place the running
+             context estimate (and the Summarize action in its popover) lives,
+             so it stays in view at every usage level. It used to appear only
+             from 50% because an empty grey track next to the send button read
+             as a loading spinner; ContextUsageCircle now draws a minimum arc,
+             a faint track and the live percentage, so low usage reads as a
+             gauge at rest. Hidden on mobile: it is the only thing in the row
+             that isn't a control, and the phone action row has no width to
+             spare for it (the same reason the narrowest container query below
+             sheds it first on desktop). -->
+        {#if !isMobileUI()}
           <ContextUsageCircle
             usagePercent={contextUsage.usagePercent}
             used={contextUsage.estimatedUsedTokens}
