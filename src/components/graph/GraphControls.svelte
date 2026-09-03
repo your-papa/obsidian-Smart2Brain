@@ -64,6 +64,13 @@ interface Props {
 	isImmersed?: boolean;
 	/** Leave immerse and return to the full graph. */
 	onExitImmerse?: () => void;
+	/**
+	 * Live width of the toolbar row, so siblings sharing the top strip (the
+	 * mobile immerse banner) can reserve exactly the space it takes. Measured
+	 * rather than assumed: the button count changes with mode (immerse adds an
+	 * exit button) and the row wraps on narrow phones.
+	 */
+	onToolbarWidth?: (width: number) => void;
 }
 
 let {
@@ -96,7 +103,16 @@ let {
 	isCollapsed = $bindable(true),
 	isImmersed = false,
 	onExitImmerse,
+	onToolbarWidth,
 }: Props = $props();
+
+/** Measured width of the toolbar row; reported up so the immerse banner can
+ *  cap itself against it instead of hardcoding a button-count guess. */
+let toolbarWidth = $state(0);
+
+$effect(() => {
+	onToolbarWidth?.(toolbarWidth);
+});
 
 let isDevCollapsed = $state(true);
 
@@ -309,7 +325,7 @@ $effect(() => {
   view-header actions instead, which is a different, denser pattern, and at this
   size the rail read as undersized against the canvas.
 -->
-<div class="graph-toolbar">
+<div class="graph-toolbar" bind:clientWidth={toolbarWidth}>
   <!-- Mobile only. Immersion is a mode rather than a transient result — it
        persists while you pan, select and immerse further — so its exit has to
        persist too without covering the canvas, which a bottom sheet would.
@@ -567,6 +583,27 @@ $effect(() => {
       <Toggle
         checked={settings.directedWikiEdges}
         onchange={(value) => onSettingsChange({ directedWikiEdges: value })}
+      />
+    </SettingContainer>
+    <!-- Inferred edges are already dashed, but at overview zoom the dashes sit a
+         few pixels apart and read as solid, so the two kinds of connection blur
+         together exactly where the question "what did inference add?" is being
+         asked. Colour survives that zoom-out where the dash pattern doesn't.
+
+         Disabled rather than hidden when inferred links are off: a row that
+         vanishes leaves the user hunting for a control they saw a moment ago,
+         and the hint says which switch to flip to get it back. -->
+    <SettingContainer
+      name="Highlight inferred links"
+      desc={inferredLinksOn
+        ? "Draw inferred links in the accent color so they stand apart from the links you wrote"
+        : "Draw inferred links in the accent color. Needs Inferred links (under Topics) turned on."}
+      compact
+    >
+      <Toggle
+        checked={settings.highlightSemanticLinks ?? false}
+        disabled={!inferredLinksOn}
+        onchange={(value) => onSettingsChange({ highlightSemanticLinks: value })}
       />
     </SettingContainer>
     <SettingContainer

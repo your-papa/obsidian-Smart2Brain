@@ -154,6 +154,15 @@ let lassoMode = $state(false);
 let selectedPaths: string[] = $state([]);
 let immersePaths: Set<string> | null = $state(null);
 let isImmersed: boolean = $derived(immersePaths !== null);
+
+/**
+ * Live width of the graph toolbar, reported by GraphControls. The mobile
+ * immerse banner shares the top strip with that toolbar and has to stop short
+ * of it: the toolbar is right-aligned and its width varies with the button
+ * count (immersing adds an exit button) and with wrapping on narrow phones, so
+ * a hardcoded reservation goes stale the moment either changes.
+ */
+let toolbarWidth = $state(0);
 /**
  * What the user immersed *into*, when that was topics rather than a raw lasso.
  *
@@ -2233,7 +2242,11 @@ function handleHoverPreview(event: MouseEvent, path: string, targetEl: HTMLEleme
      so this widens the shortcuts to the graph leaf without claiming keys
      globally. `GraphCanvas.handleKeyDown` already ignores text inputs. -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="smart-graph-view" onkeydown={(e) => canvasComponent?.handleKeyDown(e)}>
+<div
+  class="smart-graph-view"
+  style="--s2b-graph-toolbar-width: {toolbarWidth}px"
+  onkeydown={(e) => canvasComponent?.handleKeyDown(e)}
+>
   {#if isLoading && graphData.nodes.length === 0}
     <div class="graph-loading">
       <LoadingAnimation />
@@ -2250,6 +2263,7 @@ function handleHoverPreview(event: MouseEvent, path: string, targetEl: HTMLEleme
       linkStrength={settings.linkStrength}
       showWikiLinks={settings.showWikiLinks}
       showSemanticLinks={settings.showSemanticLinks ?? true}
+      highlightSemanticLinks={settings.highlightSemanticLinks ?? false}
       showTopicHulls={settings.showTopicHulls ?? true}
       {focusedClusters}
       clusterLabels={effectiveClusterLabels}
@@ -2504,6 +2518,7 @@ function handleHoverPreview(event: MouseEvent, path: string, targetEl: HTMLEleme
     bind:isCollapsed={isControlsCollapsed}
     {isImmersed}
     onExitImmerse={handleExitImmerse}
+    onToolbarWidth={(width) => (toolbarWidth = width)}
   />
 </div>
 
@@ -2599,11 +2614,18 @@ function handleHoverPreview(event: MouseEvent, path: string, targetEl: HTMLEleme
     /* Below the toolbar rail (13) and the sheet (14): this is a passive label,
        so nothing it could cover should lose its tap. Above the canvas. */
     z-index: 11;
-    /* The toolbar row is right-aligned at the same top offset and wraps to a
-       second row on narrow phones. Leave it the corner: 3 buttons at 44px plus
-       the 8px gutters is ~148px, and the banner truncates rather than pushing
-       into them. */
-    max-width: calc(100% - 160px);
+    /* The toolbar row is right-aligned at the same top offset. Leave it the
+       corner: reserve its MEASURED width (published as a custom property by the
+       view root) plus an 8px gutter, and truncate rather than push into it.
+
+       This was a hardcoded `calc(100% - 160px)` justified as "3 buttons at
+       44px". Both numbers were wrong: the buttons are 30px, and immersing —
+       precisely when this banner exists — adds a sixth (exit) button, so the
+       row is ~210px and painted straight over the banner, which sits below it
+       at z-index 11. Measuring removes the class of bug rather than re-guessing
+       the constant: the count also changes with the DEV-only wrench button, and
+       the row wraps on narrow phones. */
+    max-width: calc(100% - var(--s2b-graph-toolbar-width, 0px) - 16px);
     animation: s2b-immerse-banner-in 120ms ease-out;
   }
 

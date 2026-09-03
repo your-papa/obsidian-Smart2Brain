@@ -137,6 +137,18 @@ export interface SmartGraphSettings {
 	/** Whether to draw inferred semantic similarity edges (they always inform topics) */
 	showSemanticLinks: boolean;
 	/**
+	 * Whether inferred edges are drawn in the accent colour instead of sharing
+	 * the authored links' `--graph-line`.
+	 *
+	 * The dash pattern alone answers "is this edge inferred?" for one edge under
+	 * the cursor, but not "where did the inference add structure?" across the
+	 * whole graph — at overview zoom the dashes are a few pixels apart and read
+	 * as solid. Off by default: colouring the inferred layer permanently would
+	 * make it the loudest thing on screen, and it is usually the larger half of
+	 * the edges.
+	 */
+	highlightSemanticLinks: boolean;
+	/**
 	 * When true, topics are detected from authored wiki links alone, ignoring
 	 * semantic edges. Shows how much structure the user's own linking provides —
 	 * notes left without a topic are ones they never linked.
@@ -197,6 +209,7 @@ export const DEFAULT_SMART_GRAPH_SETTINGS: SmartGraphSettings = {
 	clusterCohesionStrength: 0.45,
 	showWikiLinks: true,
 	showSemanticLinks: true,
+	highlightSemanticLinks: false,
 	linkOnlyTopics: false,
 	semanticNeighborCount: 5,
 	semanticThreshold: 0.55,

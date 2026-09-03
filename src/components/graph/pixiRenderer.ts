@@ -977,6 +977,13 @@ export class PixiRenderer {
 		opts: {
 			showWikiLinks: boolean;
 			showSemanticLinks?: boolean;
+			/**
+			 * Draw inferred edges in the accent colour rather than `graphLine`, so
+			 * the inferred layer can be told from the authored one at overview zoom
+			 * (where the dash pattern is too fine to read). Width and alpha are
+			 * unchanged — this is a hue swap, not extra emphasis.
+			 */
+			highlightSemanticLinks?: boolean;
 			directedWikiEdges?: boolean;
 			hoveredNodeId: string | null;
 			adjacency: Map<string, Set<string>>;
@@ -1013,6 +1020,10 @@ export class PixiRenderer {
 		// made them hard to see at all; the inferred structure is worth reading,
 		// not just hinting at.
 		const semanticWidth = normalWidth;
+		// Opt-in (Display → "Highlight inferred links"). Only the colour changes:
+		// the inferred layer is often the larger half of the edges, so widening or
+		// brightening it as well would bury the authored links it is drawn against.
+		const semanticColor = opts.highlightSemanticLinks ? c.accent : c.graphLine;
 		const dash = 5 / scale;
 		const dashGap = 4 / scale;
 
@@ -1105,7 +1116,7 @@ export class PixiRenderer {
 			const alpha = clampUnitInterval(Math.round(rawAlpha * 20) / 20, 0);
 			if (alpha <= 0) continue;
 
-			const color = isHighlighted ? c.accent : c.graphLine;
+			const color = isHighlighted ? c.accent : isSemantic ? semanticColor : c.graphLine;
 			const baseWidth = isHighlighted ? highlightWidth : isSemantic ? semanticWidth : normalWidth;
 			// A collapsed topic edge's weight counts how many note-level links cross
 			// between the two topics, so thickness is the at-a-glance read of which
