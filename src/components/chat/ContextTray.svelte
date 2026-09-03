@@ -20,6 +20,9 @@ const BASENAME_RE = /(?:.*\/)?([^/]+?)(?:\.\w+)?$/;
 interface Props {
 	/** Graph note paths set externally (e.g. from Messenger.pendingGraphNotes). */
 	graphPaths?: string[];
+	/** Name of the topic(s) `graphPaths` exactly matches, or null/undefined if
+	 * the selection isn't a whole topic (e.g. Messenger.graphSelectionTopicLabel). */
+	topicLabel?: string | null;
 	/** Content attachments (files whose bytes/content are inlined into the message). */
 	attachments?: ChatAttachment[];
 	/** Remove a content attachment. */
@@ -32,6 +35,7 @@ interface Props {
 
 let {
 	graphPaths = [],
+	topicLabel = null,
 	attachments = [],
 	onRemoveAttachment,
 	onPromoteToAttachment,
@@ -87,6 +91,10 @@ const activeGraphPaths = $derived(graphPaths.filter((p) => !graphDismissed.has(p
 $effect(() => {
 	if (activeGraphPaths.length === 0 && graphExpanded) graphExpanded = false;
 });
+// The topic name only describes the full, untouched selection — once the user
+// dismisses any member from this chat's tray, the remaining notes no longer
+// are that topic, so fall back to the count-based label.
+const effectiveTopicLabel = $derived(graphDismissed.size === 0 ? topicLabel : null);
 
 // --- One-way outputs. Derived, not synced through effects, per the repo's
 // Svelte guidance. Exposed as getter functions (Svelte disallows exporting
@@ -288,12 +296,16 @@ onDestroy(() => {
           class="chip-body s2b-pill s2b-pill--interactive"
           title={graphExpanded
             ? "Graph selection — click to collapse"
-            : `${activeGraphPaths.length} note${activeGraphPaths.length === 1 ? "" : "s"} from graph — click to expand`}
+            : effectiveTopicLabel
+              ? `${effectiveTopicLabel} — click to expand`
+              : `${activeGraphPaths.length} note${activeGraphPaths.length === 1 ? "" : "s"} from graph — click to expand`}
           aria-expanded={graphExpanded}
           onclick={() => (graphExpanded = !graphExpanded)}
         >
           <div class="chip-icon" use:icon={"git-fork"} style="--icon-size: 12px"></div>
-          <span>{activeGraphPaths.length} Graph Note{activeGraphPaths.length === 1 ? "" : "s"}</span>
+          <span>
+            {effectiveTopicLabel ?? `${activeGraphPaths.length} Graph Note${activeGraphPaths.length === 1 ? "" : "s"}`}
+          </span>
           <div class="chip-icon chip-chevron" use:icon={graphExpanded ? "chevron-up" : "chevron-down"} style="--icon-size: 12px"></div>
         </button>
         <button

@@ -1217,6 +1217,9 @@ function handleSelectionChange(paths: string[]) {
 	if (messenger) {
 		// Ambient: mirror the live graph selection into every open chat's tray.
 		messenger.graphSelection = [...paths];
+		// Callers set focusedClusters/selectedPaths before calling in, so this
+		// derivation is already current for the selection just adopted above.
+		messenger.graphSelectionTopicLabel = selectedTopicLabels?.join(", ") ?? null;
 	}
 }
 
@@ -1303,6 +1306,8 @@ function handleOpenAllSelected() {
 async function handleSendToChat() {
 	const paths = selectedPaths;
 	if (paths.length === 0) return;
+	// Read before the awaits below give the user a chance to change the selection.
+	const topicLabel = selectedTopicLabels?.join(", ") ?? null;
 
 	// Reveal an existing chat (uncollapsing its sidebar) or create one.
 	const { workspace } = plugin.app;
@@ -1317,6 +1322,7 @@ async function handleSendToChat() {
 	if (messenger) {
 		// Ambient selection (shown in every chat) …
 		messenger.graphSelection = [...paths];
+		messenger.graphSelectionTopicLabel = topicLabel;
 		// … plus a one-shot signal so the just-opened/focused chat grabs focus.
 		messenger.pendingGraphNotes = [...paths];
 	} else {

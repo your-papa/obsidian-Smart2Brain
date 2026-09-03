@@ -1317,6 +1317,7 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
       <ContextTray
         bind:this={contextTrayRef}
         graphPaths={registry.graphSelection}
+        topicLabel={registry.graphSelectionTopicLabel}
         {attachments}
         onRemoveAttachment={removeAttachment}
         onPromoteToAttachment={promoteVisibleNoteToAttachment}

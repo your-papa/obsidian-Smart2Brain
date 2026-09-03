@@ -1357,6 +1357,11 @@ export class SessionRegistry {
 	 * shows up in whichever chat the user switches to while it stays selected.
 	 * Per-chat exclusions are tracked locally in each ContextTray. */
 	graphSelection: string[] = $state([]);
+	/** Name of the topic(s) `graphSelection` exactly matches, or null if the
+	 * selection isn't a whole topic (lasso, panel row, or a topic selection
+	 * the user has since edited by hand). Mirrors `graphSelection`'s ambient
+	 * scope — set alongside it everywhere it's assigned. */
+	graphSelectionTopicLabel: string | null = $state(null);
 	pendingAttachmentPaths: string[] | null = $state(null);
 	pendingAutoSubmit: boolean = $state(false);
 	/** When set, only the Input bound to this thread path consumes the pending
