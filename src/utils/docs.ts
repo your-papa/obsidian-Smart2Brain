@@ -51,12 +51,14 @@ export const DOCS = Object.freeze({
 export type DocKey = keyof typeof DOCS;
 
 /**
- * Open a documentation page in the user's browser.
+ * There is deliberately no `openDocs(key)` helper here.
  *
- * For button-style callers. Anything that can be an anchor should render one instead
- * (see `DocsLink.svelte`): Obsidian hands external `_blank` anchors to the system
- * browser on both desktop and mobile, so a real link needs no platform branching.
+ * A `window.open` wrapper would look like the obvious convenience, but Obsidian's
+ * iOS WKWebView never implements window creation — `window.open` returns null
+ * unconditionally there (confirmed on-device; see the note on
+ * `navigateToAuthorizeUrl` in `providers/openrouterOAuth.ts`), so a button calling
+ * it would silently do nothing on iPhone and iPad. Render a real anchor instead,
+ * via `components/ui/DocsLink.svelte` — its `button` variant covers the case where
+ * a setting row wants something that *looks* like a button. Obsidian hands external
+ * `_blank` anchors to the system browser on every platform, no branching needed.
  */
-export function openDocs(doc: DocKey): void {
-	window.open(DOCS[doc], "_blank", "noopener,noreferrer");
-}
