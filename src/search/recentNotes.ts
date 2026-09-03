@@ -106,6 +106,10 @@ function getRecentlyOpenedNotes(app: App, filter?: SearchFilter): SearchResult[]
 		// rather than record time so already-persisted entries are covered too.
 		if (isAgentFilePath(file.path)) continue;
 
+		// Cast, not `instanceof TFile`: `isRecentNoteFile` narrows structurally to the
+		// three fields actually used, which is what lets the tests hand this a plain
+		// object through the injected `getAbstractFileByPath`. A real instanceof check
+		// would tie this path to Obsidian's class and break that seam.
 		const cache = app.metadataCache.getFileCache(file as TFile);
 		const docTags = getCachedTags(cache);
 		if (!matchesSearchFilter(file.path, docTags, compiled ?? filter)) continue;

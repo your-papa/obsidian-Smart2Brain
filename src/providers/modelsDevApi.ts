@@ -7,6 +7,7 @@
  * @see https://models.dev
  */
 
+import { Logger } from "../utils/logging";
 import { createObsidianFetch } from "../lib/obsidianFetch";
 
 const MODELS_DEV_API_URL = "https://models.dev/api.json";
@@ -86,7 +87,7 @@ export async function fetchModelsDevData(): Promise<ModelsDevApiResponse | null>
 		});
 
 		if (!response.ok) {
-			console.warn(`Failed to fetch models.dev data: ${response.status}`);
+			Logger.warn(`Failed to fetch models.dev data: ${response.status}`);
 			return cachedResponse?.data ?? null;
 		}
 
@@ -100,7 +101,7 @@ export async function fetchModelsDevData(): Promise<ModelsDevApiResponse | null>
 
 		return data;
 	} catch (error) {
-		console.warn("Error fetching models.dev data:", error);
+		Logger.warn("Error fetching models.dev data:", error);
 		return cachedResponse?.data ?? null;
 	}
 }

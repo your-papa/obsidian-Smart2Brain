@@ -509,7 +509,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		}
 
 		const preview = trimmedQuery.length > 36 ? `${trimmedQuery.slice(0, 33)}...` : trimmedQuery;
-		return `Create \"${preview}\"`;
+		return `Create "${preview}"`;
 	}
 
 	private updateInstructions(): void {
