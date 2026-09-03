@@ -86,18 +86,25 @@ let graphDismissed = $state(new Set<string>());
 // Graph selections can be large (lasso-select of many nodes). Collapse them into
 // a single summary chip by default; expand on demand to review/remove individuals.
 let graphExpanded = $state(false);
+// `graphPaths` is a fresh array every time the registry adopts a new selection
+// (SmartGraphView always assigns `[...paths]`), so identity distinguishes "the same
+// selection, edited by dismissal" from "a new selection that happens to share paths
+// with the old one". Reset dismissals on that boundary: without it, dismissing a note
+// then re-selecting the same or an overlapping topic would filter fresh paths through
+// stale exclusions, silently shrinking (or emptying) a selection the user never
+// touched — and, since the topic label requires an exact match, permanently hide the
+// name for a selection gesture that has nothing to do with the earlier dismissal.
+$effect(() => {
+	void graphPaths; // establish the dependency; the reset itself is unconditional
+	graphDismissed = new Set();
+});
 const activeGraphPaths = $derived(graphPaths.filter((p) => !graphDismissed.has(p)));
 // Once every graph note is dismissed there's nothing to expand.
 $effect(() => {
 	if (activeGraphPaths.length === 0 && graphExpanded) graphExpanded = false;
 });
 // The topic name only describes the full, untouched selection — once the user
-// dismisses any member of THIS selection from the tray, the remaining notes no
-// longer are that topic, so fall back to the count-based label. Compare against
-// `graphPaths.length` rather than `graphDismissed.size`: dismissals accumulate
-// across selections in the same mounted chat, so a stale dismissal from an
-// earlier (now-replaced) selection must not suppress the label for a later,
-// still-untouched one.
+// dismisses any member of it, the remaining notes no longer are that topic.
 const effectiveTopicLabel = $derived(activeGraphPaths.length === graphPaths.length ? topicLabel : null);
 
 // --- One-way outputs. Derived, not synced through effects, per the repo's
