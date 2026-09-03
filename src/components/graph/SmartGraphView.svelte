@@ -861,7 +861,35 @@ function flushLiveUpdate() {
 				drift++;
 			}
 		}
+		// `focusedClusters`/`focusedSegmentIds` hold indices into `segments` — but
+		// `applyLivePatch` below rebuilds `segments` from scratch (sorted by size,
+		// undersized ones dropped), so an index that pointed at "Marine Ecology"
+		// can point at a different topic, or nothing, once it returns. Capture what
+		// community each focused index actually meant *before* that happens, so it
+		// can be re-resolved to wherever that same community landed afterward —
+		// otherwise the focus silently follows the wrong topic (or none) post-patch,
+		// which breaks topic highlighting/panel rows generally, not just the label.
+		const focusedCommunityIdsBeforePatch = new Set(
+			[...focusedClusters].flatMap((cluster) => {
+				const id = segments[cluster]?.communityId;
+				return id === undefined ? [] : [id];
+			}),
+		);
+
 		applyLivePatch(patch.data, communities, drift);
+
+		// Re-resolve focus to the rebuilt `segments` array by community identity.
+		if (focusedClusters.size > 0) {
+			const nextFocusedClusters = new Set(
+				segments.flatMap((segment, index) =>
+					segment.communityId !== undefined && focusedCommunityIdsBeforePatch.has(segment.communityId)
+						? [index]
+						: [],
+				),
+			);
+			focusedClusters = nextFocusedClusters;
+			focusedSegmentIds = new Set([...nextFocusedClusters].flatMap((c) => (segments[c] ? [segments[c].id] : [])));
+		}
 
 		// A removed note can't stay selected — mirror the pruned selection out so
 		// chat trays don't keep offering a note that no longer exists.
