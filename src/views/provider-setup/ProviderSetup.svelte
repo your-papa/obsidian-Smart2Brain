@@ -214,18 +214,6 @@ const headerStatusProps = $state<{ provider: string }>({
 });
 let displayName = $state("");
 let displayNameError = $state<string | null>(null);
-// Whether the name field currently has focus.
-let isEditingDisplayName = $state(false);
-// Whether a blurred name is still on its way to storage. Blur clears the focus flag
-// immediately, but a write deferred behind an in-flight commit hasn't landed yet — without
-// this, the sync effect would overwrite the pending value with the stored one during the
-// commit's rename, and the resumed handler would read its own clobbering as a newer edit
-// and drop the name entirely.
-let unsavedDisplayName = $state<string | null>(null);
-// The field is the user's while either holds: don't sync stored state over it.
-function hasUnsavedDisplayName() {
-	return isEditingDisplayName || unsavedDisplayName !== null;
-}
 // Number of display-name saves currently in flight. `displayNameError` still holds its
 // previous value until an await settles, so without this Done could enable mid-save on a
 // name whose validity isn't known yet — and the commit's slug is derived from that same
@@ -252,14 +240,8 @@ function getTemplateLogo(id: ProviderTemplateId): Component<LogoProps> {
 	return TEMPLATE_LOGOS[id] ?? GenericAIIcon;
 }
 
-// Mirror the stored name into the input — but never on top of a value the user owns. With
-// `bind:value` the input reads this back, and this effect re-runs on any providerMeta
-// change (notably the commit's own rename), so an unguarded sync would clobber both an
-// in-progress edit and a blurred edit still waiting to be written.
 $effect(() => {
-	const stored = providerMeta?.displayName ?? "";
-	if (untrack(() => hasUnsavedDisplayName())) return;
-	displayName = stored;
+	displayName = providerMeta?.displayName ?? "";
 });
 
 async function handleSelectTemplate(id: ProviderTemplateId) {
@@ -278,15 +260,6 @@ async function handleSelectTemplate(id: ProviderTemplateId) {
 // the Done button can stay disabled across the commit's awaits — closing mid-rename would
 // race the ID change, and `markSubmitted` only lands after it.
 let isCommitting = $state(false);
-// Resolves when the in-flight commit finishes, so a blur that lands mid-commit can wait for
-// `providerId` to become authoritative instead of writing against an ID being renamed away.
-let commitDone: Promise<void> | null = null;
-// A waiting blur only needs to know the commit has *finished* — whether it succeeded is
-// commitProvider's business, and letting a rejection through here would escape the blur
-// handler's try/catch as an unhandled rejection.
-async function commitSettled() {
-	await commitDone?.catch(() => {});
-}
 
 // Promotes a draft to a fully configured provider the moment its connection validates.
 // This replaces the old "Add Provider" button: display name / auth / trusted all
@@ -295,101 +268,48 @@ async function commitSettled() {
 async function commitProvider() {
 	if (isConfigured || isCommitting) return;
 	isCommitting = true;
-	// Publish the in-flight commit so a concurrent blur can await it (see commitSettled).
-	// Assigned before the first await so a blur in the same tick already sees it.
-	commitDone = runCommit();
 	try {
-		await commitDone;
+		// Rename the draft to a slug derived from the final display name — this is the
+		// only point where the ID changes. Doing it once (not on every name edit) keeps
+		// downstream references stable while producing a human-readable, recoverable ID.
+		const name = displayName.trim() || (providerMeta?.displayName ?? "");
+		const base = slugifyProviderName(name);
+		if (base && base !== providerId) {
+			// Collide only against configured providers (minus this draft). Unconfigured
+			// providers are stale drafts, not real conflicts — counting them would push a
+			// legitimately-named provider to "openai-2".
+			const otherIds = new Set(data.getConfiguredProviders().filter((id) => id !== providerId));
+			let finalId = base;
+			let n = 2;
+			while (otherIds.has(finalId)) finalId = `${base}-${n++}`;
+			try {
+				await data.renameProvider(providerId, finalId);
+				modal.selectedProvider = finalId;
+				providerId = finalId;
+			} catch {
+				// keep draft ID if rename somehow fails
+			}
+		}
+		data.setProviderConfigured(providerId, true);
+		// Mark submitted BEFORE any await — the provider is now committed. Otherwise closing
+		// the modal during the fetchQuery below (e.g. right after seeing "Connected") would
+		// hit onClose with isSubmitted still false and delete the just-configured provider.
+		modal.markSubmitted();
+		// The auth query re-keys on providerId, so it re-fires under the new ID after a
+		// rename — refetch so the inline status stays "Connected" rather than flashing.
+		await modal.plugin.queryClient.fetchQuery(getProviderStateQueryOptions(providerId));
+		invalidateProviderState(providerId);
 	} finally {
 		isCommitting = false;
-		commitDone = null;
 	}
 }
-
-async function runCommit() {
-	// Rename the draft to a slug derived from the final display name — this is the
-	// only point where the ID changes. Doing it once (not on every name edit) keeps
-	// downstream references stable while producing a human-readable, recoverable ID.
-	const name = displayName.trim() || (providerMeta?.displayName ?? "");
-	const base = slugifyProviderName(name);
-	if (base && base !== providerId) {
-		// Collide only against configured providers (minus this draft). Unconfigured
-		// providers are stale drafts, not real conflicts — counting them would push a
-		// legitimately-named provider to "openai-2".
-		const otherIds = new Set(data.getConfiguredProviders().filter((id) => id !== providerId));
-		let finalId = base;
-		let n = 2;
-		while (otherIds.has(finalId)) finalId = `${base}-${n++}`;
-		try {
-			await data.renameProvider(providerId, finalId);
-			modal.selectedProvider = finalId;
-			providerId = finalId;
-		} catch {
-			// keep draft ID if rename somehow fails
-		}
-	}
-	data.setProviderConfigured(providerId, true);
-	// Mark submitted BEFORE any await — the provider is now committed. Otherwise closing
-	// the modal during the fetchQuery below (e.g. right after seeing "Connected") would
-	// hit onClose with isSubmitted still false and delete the just-configured provider.
-	modal.markSubmitted();
-	// The auth query re-keys on providerId, so it re-fires under the new ID after a
-	// rename — refetch so the inline status stays "Connected" rather than flashing.
-	await modal.plugin.queryClient.fetchQuery(getProviderStateQueryOptions(providerId));
-	invalidateProviderState(providerId);
-}
-
-// Monotonic id per blur, so a handler that had to wait out a commit can tell whether a
-// newer blur has superseded it before it writes.
-let blurSeq = 0;
 
 async function handleDisplayNameBlur(nextName: string) {
-	const seq = ++blurSeq;
-	isEditingDisplayName = false;
 	const trimmedName = nextName.trim();
 	if (!trimmedName || trimmedName === providerMeta?.displayName) {
-		unsavedDisplayName = null;
 		displayName = providerMeta?.displayName ?? "";
 		displayNameError = null;
 		return;
-	}
-	// Claim the field until this value reaches storage (or is superseded), so the sync
-	// effect can't overwrite it while we wait out a commit.
-	unsavedDisplayName = trimmedName;
-	try {
-		await saveDisplayName(trimmedName, seq);
-	} finally {
-		// Only release the claim if it's still ours — a newer blur may have taken it.
-		if (blurSeq === seq) unsavedDisplayName = null;
-	}
-}
-
-async function saveDisplayName(trimmedName: string, seq: number) {
-	// A commit in flight is mid-rename: `renameProvider` re-keys providerMeta synchronously
-	// but then awaits its save, and `providerId` is only reassigned after that await — so a
-	// blur landing in that window would write against an ID that no longer exists, throw
-	// "Provider not found", and strand Done disabled on a provider that connected fine.
-	// Don't drop the name, though: the commit captured whatever `displayName` held when it
-	// started, which may differ from what the user has since typed. Defer the write until
-	// the commit settles and `providerId` is authoritative again, so the stored name can't
-	// disagree with the ID derived from it.
-	if (isCommitting) {
-		await commitSettled();
-		// The user may have edited the field while we waited, which makes this invocation's
-		// value stale: writing it would clobber the newer edit in storage, and the
-		// `displayName = trimmedName` below would yank it out of the input. Two ways to be
-		// superseded, and both need checking — a newer blur (the counter), or typing with no
-		// second blur, which never re-enters this handler and shows up only in the bound
-		// value. The claim above is what makes that second comparison trustworthy: nothing
-		// else can write `displayName` while this save is pending, so a difference here is
-		// the user's typing rather than the sync effect.
-		if (blurSeq !== seq || displayName.trim() !== trimmedName) return;
-		// Re-check against the post-commit meta: if the commit stored this very name, the
-		// write is redundant. `providerMeta` is now keyed by the settled `providerId`.
-		if (trimmedName === providerMeta?.displayName) {
-			displayNameError = null;
-			return;
-		}
 	}
 	pendingDisplayNameSaves += 1;
 	try {
@@ -577,16 +497,16 @@ const canFinish = $derived(
       name="Provider name"
       desc="Name this provider instance so you can distinguish it later."
     >
-      <!-- bind:, not a one-way value=: a blur deferred behind an in-flight commit needs to
-           know whether the user has since typed something newer, and only a live binding
-           tracks that (a blur counter misses typing without a second blur). -->
+      <!-- Disabled while the commit runs. The commit renames the draft to a slug derived
+           from this name, and `providerId` only catches up after `renameProvider` awaits
+           its save — an edit landing in that window would write against an ID that no
+           longer exists. The window is a rename plus one settings write, and disabling
+           makes it unreachable rather than something to reconcile afterwards. -->
       <Text
         inputType="text"
-        bind:value={displayName}
+        value={displayName}
+        disabled={isCommitting}
         placeholder={providerDefinition?.displayName ?? "New Provider"}
-        onfocus={() => {
-          isEditingDisplayName = true;
-        }}
         onblur={(value: string) => void handleDisplayNameBlur(value)}
       />
     </SettingItem>
