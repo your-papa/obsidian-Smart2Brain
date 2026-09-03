@@ -4,7 +4,7 @@ import { Notice, normalizePath, Platform, TFile, type WorkspaceLeaf } from "obsi
 import { installObsidianFetch } from "../lib/obsidianFetch";
 import { invalidateProviderState } from "../lib/query";
 import type SecondBrainPlugin from "../main";
-import type { ChatModel } from "../stores/chatStore.svelte";
+import type { ChatModel } from "../stores/chatTimeline";
 import { getData } from "../stores/dataStore.svelte";
 import { getPendingChangesStore } from "../stores/pendingChangesStore.svelte";
 import { BUILT_IN_TOOL_IDS, type BuiltInToolId, type AgentConfig, type SkillMetadata } from "../types/plugin";
@@ -18,13 +18,13 @@ import {
 } from "../providers/openrouterModels";
 import type { VisibleNoteRef } from "../hooks/useVisibleNotes.svelte";
 import type { SelectionRef } from "../hooks/useSelection.svelte";
-import type { GraphNoteRef } from "../stores/chatStore.svelte";
+import type { GraphNoteRef } from "../stores/chatTimeline";
 
+import { ProviderRegistry } from "../providers/registry";
 import {
 	ProviderAuthError,
 	ProviderEndpointError,
 	ProviderNotFoundError,
-	ProviderRegistry,
 	ProviderRegistryError,
 	type AuthObject,
 	getProviderDefinition,

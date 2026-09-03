@@ -1,7 +1,7 @@
 import { tool } from "@langchain/core/tools";
 import type { App, TFile } from "obsidian";
 import { z } from "zod";
-import { DEFAULT_TOOLS_CONFIG } from "../../stores/dataStore.svelte";
+import { DEFAULT_TOOLS_CONFIG } from "./builtInToolDefaults";
 import { getPendingChangesStore } from "../../stores/pendingChangesStore.svelte";
 import { getIndexableVaultFiles, isTextIndexableFile, shouldProcessVaultPath } from "../../utils/fileFiltering";
 import { Logger } from "../../utils/logging";

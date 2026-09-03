@@ -15,7 +15,7 @@ import type { ProviderRegistry } from "../providers/registry";
 import { getPlugin } from "../stores/state.svelte";
 import type { VisibleNoteRef } from "../hooks/useVisibleNotes.svelte";
 import type { SelectionRef } from "../hooks/useSelection.svelte";
-import type { GraphNoteRef } from "../stores/chatStore.svelte";
+import type { GraphNoteRef } from "../stores/chatTimeline";
 import type { ChatAttachment, ReviewStatusRef, ThreadError } from "../types/shared";
 import {
 	AiTransportDowngradeRequiredError,

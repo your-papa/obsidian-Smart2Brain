@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { SessionRegistry, ChatSession } from "../../src/stores/chatStore.svelte";
+import { SessionRegistry } from "../../src/stores/chatStore.svelte";
+import { ChatSession } from "../../src/stores/chatStore.svelte";
 import type { AgentManager } from "../../src/agent/AgentManager";
 
 /* --------------------------------------------------------------------------

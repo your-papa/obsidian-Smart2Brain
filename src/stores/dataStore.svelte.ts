@@ -1,5 +1,4 @@
 import { normalizePath } from "obsidian";
-import { SHIPPED_AGENT_PROMPTS } from "../agent/prompts";
 import {
 	createEmptyPrivacyFilter,
 	matchesPrivacyMembershipDraftPath,
@@ -10,10 +9,11 @@ import {
 import { getSecret, listSecrets, removeSecret, setSecret } from "../lib/secretStorage";
 import { isAgentFilePath } from "../utils/fileFiltering";
 import { sanitizeAgentFileName } from "../utils/agentPaths";
-import { type ShippedHistory, currentShippedVersion, shippedVersion } from "../utils/shippedDefaults";
-import { currentSkillVersion } from "../skills/shippedSkills";
+import { installAgentPathSource } from "../utils/agentPathSource";
+import { DEFAULT_AGENT_ID, createDefaultAgent, createDefaultAgentConfig, normalizeAgents } from "./agentDefaults";
+import { CURRENT_SCHEMA_VERSION, runMigrations } from "./dataMigrations";
+import { computeStaleGuidance } from "./staleGuidance";
 import type SecondBrainPlugin from "../main";
-import { DEFAULT_AGENT_ICON } from "../types/plugin";
 import type {
 	AgentConfig,
 	AgentSkillState,
@@ -28,15 +28,13 @@ import type {
 	PluginData,
 	PrivacyMode,
 	PromptFileReader,
-	PromptFileSnapshot,
 	RecentNoteEntry,
 	StaleGuidance,
 	ToolConfig,
-	ToolsConfig,
 } from "../types/plugin";
 import { RECENT_NOTE_WINDOW_MS } from "../types/plugin";
 import { getDefaultEmbeddingBatchSize, normalizeEmbeddingBatchSize } from "../vectorstore/batchSize";
-import { genUUIDv7, type UUIDv7 } from "../utils/uuid7Validator";
+import { type UUIDv7, genUUIDv7 } from "../utils/uuid7Validator";
 
 import { type SmartGraphSettings, DEFAULT_SMART_GRAPH_SETTINGS } from "../types/graph";
 import { applyVerboseLogging } from "../utils/logging";
@@ -187,133 +185,6 @@ function createProviderState(templateId: ProviderTemplateId): StoredProviderStat
 // ============================================================================
 
 /**
- * ID for the default agent that is always present.
- * This agent cannot be deleted.
- */
-export const DEFAULT_AGENT_ID = "default-agent";
-
-const READ_CONTENT_DESC_SHARED = "Read content of vault files by path or wiki link.";
-
-/** No processors: images can't be read */
-const READ_CONTENT_DESC_NONE = `${READ_CONTENT_DESC_SHARED} Supports text, PDFs, and Excalidraw. Images must be attached directly in chat.`;
-
-/** Image processor only */
-const READ_CONTENT_DESC_IMAGE = `${READ_CONTENT_DESC_SHARED} Supports text, PDFs, images, and Excalidraw.`;
-
-/** PDF processor only */
-const READ_CONTENT_DESC_PDF = `${READ_CONTENT_DESC_SHARED} Supports text, PDFs (analyzed via vision model), and Excalidraw. Images must be attached directly in chat.`;
-
-/** Both processors */
-const READ_CONTENT_DESC_BOTH = `${READ_CONTENT_DESC_SHARED} Supports text, PDFs (analyzed via vision model), images, and Excalidraw.`;
-
-/**
- * Returns the appropriate read_content description based on processor configuration.
- */
-export function getReadContentDescription(hasImageProcessor: boolean, hasPdfProcessor: boolean): string {
-	if (hasImageProcessor && hasPdfProcessor) return READ_CONTENT_DESC_BOTH;
-	if (hasImageProcessor) return READ_CONTENT_DESC_IMAGE;
-	if (hasPdfProcessor) return READ_CONTENT_DESC_PDF;
-	return READ_CONTENT_DESC_NONE;
-}
-
-const SEARCH_NOTES_DESC_SHARED =
-	"Search through your Obsidian notes, or return recently opened notes. Returns structured JSON with matching file names, paths, tags, match reasons, short match snippets or headings, and metadata (properties/frontmatter), plus a count of results hidden by privacy rules. Use this to identify relevant notes before using other tools.";
-
-/** An embedding index exists, so all three retrieval strategies are usable. */
-const SEARCH_NOTES_DESC_EMBEDDINGS = `${SEARCH_NOTES_DESC_SHARED} Pick the retrieval strategy with \`algorithm\`: \`lexical\` (default, fast, exact keyword matching) is usually the right first attempt — escalate to \`semantic\` or \`hybrid\` when wording rather than content is the obstacle.`;
-
-/** No embedding index — semantic and hybrid will fall back to lexical. */
-const SEARCH_NOTES_DESC_LEXICAL_ONLY = `${SEARCH_NOTES_DESC_SHARED} This vault has no embedding index configured, so only \`algorithm: "lexical"\` is available; \`semantic\` and \`hybrid\` fall back to it and say so. Vary your search *terms* rather than the algorithm.`;
-
-/** Returns the search_notes description matching the vault's embedding-index state. */
-export function getSearchNotesDescription(hasEmbeddingIndex: boolean): string {
-	return hasEmbeddingIndex ? SEARCH_NOTES_DESC_EMBEDDINGS : SEARCH_NOTES_DESC_LEXICAL_ONLY;
-}
-
-/**
- * Default configuration for all built-in tools.
- * All tools are enabled by default with standard names and descriptions.
- */
-export const DEFAULT_TOOLS_CONFIG: ToolsConfig = {
-	search_notes: {
-		enabled: true,
-		name: "search_notes",
-		// Seeded with the embeddings variant; `createSearchNotesTool` derives the live text
-		// (embeddings vs lexical-only) at build time, so this is only a placeholder for the
-		// stored config, never what the model actually sees.
-		description: SEARCH_NOTES_DESC_EMBEDDINGS,
-		// No settings: retrieval algorithm and result count are per-call tool parameters
-		// the model picks, and the result-detail flags are hardcoded on for the agent.
-		settings: {},
-	},
-	list_directory: {
-		enabled: true,
-		name: "list_directory",
-		description:
-			"List directories and files in the vault. Use this to understand folder structure before searching or editing notes. The 'path' parameter must be an actual vault folder path (e.g. 'Projects/research').",
-	},
-	read_content: {
-		enabled: true,
-		name: "read_content",
-		description: READ_CONTENT_DESC_NONE,
-	},
-	grep_notes: {
-		enabled: true,
-		name: "grep_notes",
-		description:
-			"Find an exact text substring or regex pattern across your notes, returning matching lines with line numbers and surrounding context. Unlike search_notes (which ranks notes by relevance and cannot match literal strings), this does exact/regex line-level matching. Provide 'path' to scope the search to a single note. Use it to find literal strings (e.g. 'TODO(fix)', '#deprecated', a wiki link), or to locate exact positions before editing.",
-	},
-	get_all_tags: {
-		enabled: true,
-		name: "get_all_tags",
-		description: "Retrieve a list of all tags used in the Obsidian vault. Returns a sorted list of unique tags.",
-	},
-	get_properties: {
-		enabled: true,
-		name: "get_properties",
-		description:
-			"Retrieve properties (frontmatter) from Obsidian. Omit 'note_name' to list all available property keys in the vault.",
-	},
-	execute_javascript: {
-		enabled: true,
-		name: "execute_javascript",
-		description:
-			"Execute isolated JavaScript for calculations and data transformation. Pass structured data via the input field, use return for the final value, and use console.log for intermediate output.",
-	},
-	manage_notes: {
-		enabled: true,
-		name: "manage_notes",
-		description:
-			"Create, update, delete, move, or find-and-replace across markdown notes in one staged batch. For a single note, use 'update' with targeted search-and-replace edits (add is_regex/replace_all to match by regex or replace every occurrence). For vault-wide or folder-scoped find-and-replace, use the 'replace' operation (find/replace, optional is_regex/case_sensitive/path_prefix) — preview its blast radius first with grep_notes. Batch related note operations together. Staged changes can still be revised: editing a note you already have a pending proposal for ADDS to that proposal, so set replace_pending on the update to replace it instead, or use the 'discard' operation with the proposal's id (reported when it was staged) to withdraw it entirely.",
-	},
-	fetch_url: {
-		// Enabled by default, matching web_search: the web core skill ships enabled and
-		// its instructions direct the model to follow up promising search results with
-		// fetch_url — a default-off tool there means the model calls a tool that doesn't
-		// exist. Users who want an offline agent disable the web skill, which unbinds both.
-		enabled: true,
-		name: "fetch_url",
-		description:
-			"Fetch a public web page or text resource over HTTP(S) and return its main content. HTML is converted to markdown with scripts, styles, and navigation chrome removed while headings, lists, tables, code blocks, and links are preserved. JSON, plain text, and other text-based responses are returned as-is. Use this when the user asks about a specific URL or when external information is needed that the vault does not contain.",
-	},
-	web_search: {
-		enabled: true,
-		name: "web_search",
-		description:
-			"Search the web and return a list of relevant results (title, URL, snippet). Use this when the user asks about current events, external topics, or anything that cannot be in the vault. Always prefer searching the vault first with search_notes.",
-		settings: {
-			maxResults: 10,
-		},
-	},
-	manage_skills: {
-		enabled: false,
-		name: "manage_skills",
-		description:
-			"Create new skills, revise your own attached skills, or delete skills you created. Changes apply immediately. A skill's name and plugin link are locked once created; only the body and description can change.",
-	},
-};
-
-/**
  * Safety cap only — it bounds the size of the plugin data file. What actually
  * decides whether a note counts as recent is its age (`RECENT_NOTE_WINDOW_MS`),
  * applied at read time in `search/recentNotes.ts`. The cap is deliberately far
@@ -321,236 +192,6 @@ export const DEFAULT_TOOLS_CONFIG: ToolsConfig = {
  * that are still inside the window.
  */
 const MAX_RECENT_NOTES = 200;
-
-/**
- * Creates a new agent configuration with default values.
- * @param id - The unique ID for the agent (defaults to a new UUID)
- * @param name - The display name for the agent (defaults to "New Agent")
- */
-export function createDefaultAgentConfig(id?: string, name?: string): AgentConfig {
-	return {
-		id: id ?? genUUIDv7(),
-		name: name ?? "New Agent",
-		icon: DEFAULT_AGENT_ICON,
-		chatModel: null,
-		summarizationModel: null,
-		titleModel: null,
-		skills: {},
-		toolsConfig: structuredClone(DEFAULT_TOOLS_CONFIG),
-		mcpServers: {},
-		subAgentIds: [],
-	};
-}
-
-/**
- * Creates the default agent that is always present.
- */
-function createDefaultAgent(): AgentConfig {
-	return {
-		id: DEFAULT_AGENT_ID,
-		name: "S2B Agent",
-		icon: DEFAULT_AGENT_ICON,
-		chatModel: null,
-		summarizationModel: null,
-		titleModel: null,
-		skills: {},
-		toolsConfig: structuredClone(DEFAULT_TOOLS_CONFIG),
-		mcpServers: {},
-		subAgentIds: [],
-	};
-}
-
-// ---------------------------------------------------------------------------
-// Settings schema versioning
-// ---------------------------------------------------------------------------
-
-/** Increment this when making any breaking change to PluginData. Add a corresponding entry to MIGRATIONS. */
-const CURRENT_SCHEMA_VERSION = 12;
-
-type Migration = (data: PluginData) => void;
-
-/**
- * One entry per version step. MIGRATIONS[v] upgrades data from version v → v+1.
- * Keep entries in order; never remove them.
- */
-const MIGRATIONS: Migration[] = [
-	// v0 → v1: first versioned release — no structural changes needed
-	(_data) => {},
-	// v1 → v2: prompt auto-migration added — logic lives in normalizeAgent() which
-	//           runs on every load; the version bump marks that the tracking fields exist
-	(_data) => {},
-	// v2 → v3: per-capability / per-tool guidance version stamps were added here (issue #356) on
-	//          loosely-typed old data. Those fields (capabilityPrompts/promptGuidance and their
-	//          version stamps) were all later removed — capability guidance and per-tool how-to now
-	//          live in skill bodies (v6, "everything is a skill"). This step is now a historical
-	//          no-op; the removed fields are stripped in later migrations / normalizeAgent.
-	(_data) => {},
-	// v3 → v4: skills relocated from `<configDir>/skills` into a vault folder ("Skills").
-	//          Existing installs have skills under the config dir, so mark the async move as
-	//          pending (SkillsService.migrateSkillsLocation runs it on next init). The actual
-	//          file I/O cannot happen here — migrations are synchronous and data-only.
-	(data) => {
-		(data as unknown as { skillsRelocated: boolean }).skillsRelocated = false;
-	},
-	// v4 → v5: all agent context consolidated under one configurable vault root `Agent/`
-	//          (Memories/ + Skills/{GUIDANCE.md,skills} + Base Prompts/<id>.md). Guidance
-	//          and the base system prompt become files (global guidance; per-agent base prompt),
-	//          so the per-agent config fields that used to hold them are dropped, along with the
-	//          per-agent memory folder (memory is now the global Agent/Memories/). The async file
-	//          move (Skills/ or legacy <configDir>/skills → Agent/Skills/) is marked pending
-	//          for SkillsService.migrateAgentFolder to run on next init.
-	(data) => {
-		data.agentFolder ??= "Agents";
-		data.agentFolderMigrated = false;
-		// Drop removed top-level fields (superseded by agentFolder).
-		const loose = data as unknown as Record<string, unknown>;
-		loose.skillsFolder = undefined;
-		loose.skillsRelocated = undefined;
-		// Drop removed per-agent fields — their content is now file-backed or global.
-		for (const agent of Object.values(data.agents ?? {})) {
-			const a = agent as unknown as Record<string, unknown>;
-			// The base system prompt moved from this config field to a file. A customization used
-			// to be stashed in a transient for the async seed to write out, but the seeding path
-			// that consumed it went away with the AGENT.md consolidation (v10) — the field is now
-			// simply dropped.
-			a.systemPrompt = undefined;
-			a.systemPromptVersion = undefined;
-			a.capabilityPrompts = undefined;
-			a.capabilityPromptsVersion = undefined;
-			a.memoryFolder = undefined;
-		}
-	},
-	// v5 → v6: "everything is a skill". The 4 former capabilities (vault/notes/web/update) become
-	//          bundled core skills (`Skills/<id>/SKILL.md`, tools attached via `allowed-tools`); the
-	//          eager capability-guidance sections and per-capability GUIDANCE.md files are gone.
-	//          Mark the async seed/cleanup pending — SkillsService.migrateCoreSkills runs it on next
-	//          init (delete orphan GUIDANCE.md, then bootstrap seeds the new SKILL.md). Also strip the
-	//          removed per-tool guidance fields (promptGuidance/promptGuidanceVersion) — per-tool
-	//          how-to now lives in the core skill body, not a config field.
-	(data) => {
-		data.coreSkillsSeeded = false;
-		for (const agent of Object.values(data.agents ?? {})) {
-			for (const toolCfg of Object.values(agent.toolsConfig ?? {})) {
-				const t = toolCfg as unknown as Record<string, unknown>;
-				t.promptGuidance = undefined;
-				t.promptGuidanceVersion = undefined;
-			}
-		}
-	},
-	// v6 → v7: the memory prompt moved from this config field to a file, same treatment as the
-	//          v4→v5 base-prompt move — and, like it, the seeding path that consumed the stashed
-	//          customization went away with the AGENT.md consolidation (v10), so the field is now
-	//          simply dropped.
-	(data) => {
-		for (const agent of Object.values(data.agents ?? {})) {
-			(agent as unknown as Record<string, unknown>).memoryPrompt = undefined;
-		}
-	},
-	// v7 → v8: `update_skill` renamed to `manage_skills` (tool now also creates/deletes skills,
-	//          not just edits them) and its bundled skill folder renamed `update-skills` →
-	//          `manage-skills`. Two independent keyspaces reference the old names and must both
-	//          move, preserving any `enabled: false` veto — otherwise a disabled tool/skill would
-	//          silently read as enabled again under the new key (toolsConfig via its own default,
-	//          agent.skills via the `?? true` fallback in AgentManager.collectEnabledSkills /
-	//          attachedToolIds). The on-disk skill folder itself is renamed by
-	//          SkillsService.migrateCoreSkills, not here — migrations are synchronous and data-only.
-	(data) => {
-		for (const agent of Object.values(data.agents ?? {})) {
-			const toolsConfig = agent.toolsConfig as unknown as Record<string, unknown>;
-			if (toolsConfig && "update_skill" in toolsConfig) {
-				toolsConfig.manage_skills = toolsConfig.update_skill;
-				toolsConfig.update_skill = undefined;
-			}
-			const skills = agent.skills as unknown as Record<string, unknown>;
-			if (skills && "update-skills" in skills) {
-				skills["manage-skills"] = skills["update-skills"];
-				skills["update-skills"] = undefined;
-			}
-		}
-	},
-	// v8 → v9: clear `authMode: "codex"` from non-OpenAI providers. ProviderSetup's API-key
-	//          toggle writes the literal "codex" to mean "not the API-key path" for ANY
-	//          OAuth-capable provider, so simply signing in to OpenRouter persisted an OpenAI
-	//          ChatGPT-auth flag onto it. isProviderUsingCodexAuth then read that as real codex
-	//          auth and suppressed every embedding model the provider offers. The predicate is
-	//          now template-scoped, but stored data keeps the bogus flag — and it would still
-	//          reopen ProviderSetup with the API-key field hidden — so strip it here.
-	(data) => {
-		for (const [providerId, config] of Object.entries(data.providerConfig ?? {})) {
-			const templateId = data.providerMeta?.[providerId]?.templateId;
-			if (templateId === "openai" || templateId === "openai-codex") continue;
-			const auth = config?.auth as unknown as Record<string, unknown> | undefined;
-			if (auth && auth.authMode === "codex") {
-				auth.authMode = "apiKey";
-			}
-		}
-	},
-	// v9 → v10: the per-agent `System Prompts/<Agent Name>/{Base,Memory}.md` pair consolidated
-	//           into one `<Agent Name>/AGENT.md`, and `memoryEnabled` was removed — the memory
-	//           machinery is always on, and an agent participates iff its AGENT.md body has a
-	//           `# Memory` section (which the user can just delete). The file half ran as a
-	//           one-shot service that has since been deleted along with the pre-AGENT.md
-	//           defaults it needed; only the stale config key is stripped here.
-	(data) => {
-		for (const agent of Object.values(data.agents ?? {})) {
-			(agent as unknown as Record<string, unknown>).memoryEnabled = undefined;
-		}
-	},
-	// v10 → v11: the `edit-notes` core skill renamed `manage-notes` (matching its attached
-	//            tool, `manage_notes`), and the manage_notes per-operation settings
-	//            (allowCreate/allowUpdate/allowDelete/allowMove) plus its diff-view-mode
-	//            dropdown were removed — the staged-review flow is the user's control point,
-	//            and `diffViewMode` is now toggled from the pending-changes review bars.
-	//            The skills key moves preserving an `enabled: false` veto (same reasoning as
-	//            v7 → v8); the stale settings object is dropped so it stops being carried
-	//            forward. The on-disk skill folder is renamed/cleaned by
-	//            SkillsService.migrateManageNotesFolder — migrations are synchronous and
-	//            data-only.
-	(data) => {
-		for (const agent of Object.values(data.agents ?? {})) {
-			const skills = agent.skills as unknown as Record<string, unknown>;
-			// Move only into a vacant destination: a pre-v11 vault can already hold a
-			// "manage-notes" entry (a user-created skill of that name — the same collision
-			// the folder migration refuses to guess about), and that preference must win
-			// over the legacy key. In that case the edit-notes key is also KEPT, because
-			// the folder migration leaves the legacy folder on disk when both exist, so an
-			// "edit-notes" skill remains discoverable and its veto stays meaningful.
-			if (skills && "edit-notes" in skills && !("manage-notes" in skills)) {
-				skills["manage-notes"] = skills["edit-notes"];
-				skills["edit-notes"] = undefined;
-			}
-			const manageNotes = agent.toolsConfig?.manage_notes as unknown as Record<string, unknown> | undefined;
-			if (manageNotes) {
-				manageNotes.settings = undefined;
-			}
-		}
-	},
-	// v11 → v12: grep_notes' only setting (`contextLines`) was removed. How many lines of
-	//            context surround a match is a detail of how the result is formatted for the
-	//            model, not something a user has any basis to tune, so it is now a constant in
-	//            the tool. Drop the stale settings object — with the tool's gear icon gone from
-	//            ToolsModal, the config form never opens for it again and would otherwise never
-	//            get the chance to clear it.
-	(data) => {
-		for (const agent of Object.values(data.agents ?? {})) {
-			const grepNotes = agent.toolsConfig?.grep_notes as unknown as Record<string, unknown> | undefined;
-			if (grepNotes) {
-				grepNotes.settings = undefined;
-			}
-		}
-	},
-];
-
-function runMigrations(data: PluginData): void {
-	const from = data.schemaVersion ?? 0;
-	// If data was written by a newer plugin, leave schemaVersion untouched so the
-	// correct migrations run again when the user upgrades back to the newer version.
-	if (from > CURRENT_SCHEMA_VERSION) return;
-	for (let v = from; v < CURRENT_SCHEMA_VERSION; v++) {
-		MIGRATIONS[v]?.(data);
-	}
-	data.schemaVersion = CURRENT_SCHEMA_VERSION;
-}
 
 // ---------------------------------------------------------------------------
 
@@ -658,6 +299,10 @@ export class PluginDataStore {
 	}
 
 	constructor(plugin: SecondBrainPlugin, initialData: PluginData) {
+		installAgentPathSource({
+			agentFolder: () => this.agentFolder,
+			agentName: (agentId) => this.agents[agentId]?.name,
+		});
 		this._plugin = plugin;
 		this.#data = $state(initialData);
 
@@ -2417,193 +2062,6 @@ export class PluginDataStore {
 }
 
 let _pluginDataStore: PluginDataStore | null = null;
-
-/**
- * The file-backed prompt surface (`<Agent Name>/AGENT.md`), paired with the history it is
- * checked against and how its notice reads. A list of one: the memory instructions are now a
- * section of this same body rather than a second file, but the shape is kept so a future
- * surface is an entry rather than a refactor.
- */
-const PROMPT_SURFACES = [
-	{
-		kind: "system-prompt",
-		label: "system prompt",
-		history: SHIPPED_AGENT_PROMPTS,
-		read: (reader: PromptFileReader, agentId: string) => reader.getAgentPromptFile(agentId),
-	},
-] as const satisfies readonly {
-	kind: StaleGuidance["kind"];
-	label: string;
-	history: ShippedHistory;
-	read: (reader: PromptFileReader, agentId: string) => PromptFileSnapshot | null;
-}[];
-
-/**
- * Per-agent staleness for the file-backed prompt (`<Agent Name>/AGENT.md`): stale when the file
- * holds an OLD shipped default — i.e. the shipped default moved since the user's copy was
- * written, but the user never touched it, so we could not silently update it either (the file is
- * theirs to edit).
- *
- * A customization we don't recognize is deliberately NOT flagged: the user wrote it on
- * purpose, and nagging about it would be noise. Absence ⇒ the live default is used.
- *
- * Skill staleness is collected separately (skills are files under `Skills/`, not per-agent)
- * and folded in by {@link computeStaleGuidance}.
- */
-function detectStaleGuidance(agent: AgentConfig, reader: PromptFileReader | null): StaleGuidance[] {
-	if (!reader) return [];
-	const stale: StaleGuidance[] = [];
-
-	for (const surface of PROMPT_SURFACES) {
-		const file = surface.read(reader, agent.id);
-		if (file === null) continue;
-		const current = currentShippedVersion(surface.history);
-		const version = shippedVersion(file.body, surface.history);
-
-		if (version === null) {
-			// The user's own text. It matches no shipped fingerprint, so the body alone
-			// can't say whether the default has moved since they wrote it — that's what the
-			// note's `version` frontmatter records. Only flag when we have a baseline AND it
-			// has been superseded; an absent baseline (e.g. the user removed the frontmatter)
-			// stays silent rather than asserting drift we can't substantiate.
-			const stamp = file.version;
-			if (stamp === undefined || stamp === current) continue;
-			stale.push({
-				agentId: agent.id,
-				agentName: agent.name,
-				kind: surface.kind,
-				label: surface.label,
-				currentVersion: current,
-				// Their edit is intact — we never touch a customized file.
-				customized: true,
-			});
-			continue;
-		}
-
-		// An OLD shipped default, verbatim: PromptFilesService.seedDefaults rewrites these
-		// silently at startup, so reaching here means that rewrite failed (or hasn't run
-		// against this file yet). Surface it — but not as a "customization".
-		if (version === current) continue;
-		stale.push({
-			agentId: agent.id,
-			agentName: agent.name,
-			kind: surface.kind,
-			label: surface.label,
-			currentVersion: current,
-			customized: false,
-		});
-	}
-
-	return stale;
-}
-
-/**
- * Aggregates staleness across all surfaces (pure, no mutation): the per-agent file-backed
- * prompts, plus the bundled skills whose shipped body moved while the user held an edited
- * copy. `reader` is null before the prompt-file layer is ready; `staleSkills` is empty until
- * skill bootstrap has run.
- *
- * Skill records carry no agentId — a skill is a single vault file shared by every agent, not
- * per-agent state — so their notice keys off `global` (see `updateNoticeId`).
- */
-function computeStaleGuidance(
-	agents: AgentsConfig,
-	reader: PromptFileReader | null,
-	staleSkills: readonly string[],
-): StaleGuidance[] {
-	const stale: StaleGuidance[] = [];
-	for (const agent of Object.values(agents)) stale.push(...detectStaleGuidance(agent, reader));
-	for (const skillName of staleSkills) {
-		stale.push({
-			kind: "skill",
-			label: `${skillName} skill`,
-			skillName,
-			currentVersion: currentSkillVersion(skillName),
-			// A skill is only reported when its body matches NO shipped version — the user
-			// edited it, and the edit was preserved.
-			customized: true,
-		});
-	}
-	return stale;
-}
-
-/**
- * Normalizes an agent in place: fills defaults. The base system prompt is file-backed now
- * (not agent config), so its auto-migration/staleness lives in the prompt-file layer; per-tool
- * and per-skill guidance moved into skill bodies, so there is no per-agent guidance to
- * migrate here anymore.
- */
-function normalizeAgent(agent: AgentConfig): void {
-	// Ensure toolsConfig exists and has all tools
-	if (agent.toolsConfig) {
-		agent.toolsConfig = { ...structuredClone(DEFAULT_TOOLS_CONFIG), ...agent.toolsConfig };
-	} else {
-		agent.toolsConfig = structuredClone(DEFAULT_TOOLS_CONFIG);
-	}
-
-	// Ensure read_content settings have processor fields
-	const readSettings = agent.toolsConfig.read_content?.settings as
-		| { imageProcessor?: unknown; pdfProcessor?: unknown }
-		| undefined;
-	if (readSettings) {
-		// Do NOT default imageProcessor/pdfProcessor — undefined means "auto-derive
-		// from chat model", null means "explicitly disabled by user".
-	}
-
-	agent.skills ??= {};
-	agent.mcpServers ??= {};
-	agent.pluginExecTools ??= {};
-
-	agent.summarizationModel ??= null;
-	agent.titleModel ??= null;
-}
-
-function normalizeAgents(mergedData: PluginData): void {
-	if (!mergedData.agents[DEFAULT_AGENT_ID]) {
-		mergedData.agents[DEFAULT_AGENT_ID] = createDefaultAgent();
-	}
-	for (const agentId of Object.keys(mergedData.agents)) {
-		normalizeAgent(mergedData.agents[agentId]);
-	}
-	// Repair any persisted name clashes: two agents whose names sanitize to the same
-	// base-prompt filename would share/overwrite one note. Uniqueness is normally enforced
-	// on write (uniqueAgentName), but a vault could predate that or be hand-edited — so
-	// de-duplicate on load too. The built-in default agent is processed first so it keeps
-	// its name; later clashers get a numeric suffix (matching uniqueAgentName's scheme).
-	dedupeAgentNames(mergedData.agents);
-	// Ensure defaultAgentId points at a real agent; fall back to the built-in default
-	if (!mergedData.defaultAgentId || !mergedData.agents[mergedData.defaultAgentId]) {
-		mergedData.defaultAgentId = DEFAULT_AGENT_ID;
-	}
-	if (!mergedData.selectedAgentId || !mergedData.agents[mergedData.selectedAgentId]) {
-		mergedData.selectedAgentId = mergedData.defaultAgentId;
-	}
-}
-
-/**
- * Force every agent's name to yield a unique sanitized base-prompt filename, mutating
- * clashing names in place. Deterministic: the built-in default agent is claimed first,
- * then the rest in insertion order; each later clash is suffixed " 2", " 3", … until its
- * sanitized filename is free. Mirrors {@link PluginDataStore.uniqueAgentName} for load time.
- */
-function dedupeAgentNames(agents: AgentsConfig): void {
-	const taken = new Set<string>();
-	const order = Object.keys(agents).sort((a, b) => {
-		if (a === DEFAULT_AGENT_ID) return -1;
-		if (b === DEFAULT_AGENT_ID) return 1;
-		return 0;
-	});
-	for (const id of order) {
-		const agent = agents[id];
-		const base = agent.name?.trim() || "Agent";
-		let candidate = base;
-		for (let n = 2; taken.has(sanitizeAgentFileName(candidate)); n++) {
-			candidate = `${base} ${n}`;
-		}
-		if (candidate !== agent.name) agent.name = candidate;
-		taken.add(sanitizeAgentFileName(candidate));
-	}
-}
 
 export async function createData(plugin: SecondBrainPlugin): Promise<PluginDataStore> {
 	if (_pluginDataStore) return _pluginDataStore;

@@ -1,7 +1,7 @@
 import { tool } from "@langchain/core/tools";
 import { type App, normalizePath } from "obsidian";
 import { z } from "zod";
-import { DEFAULT_TOOLS_CONFIG } from "../../stores/dataStore.svelte";
+import { DEFAULT_TOOLS_CONFIG } from "./builtInToolDefaults";
 import { getPendingChangesStore } from "../../stores/pendingChangesStore.svelte";
 import { isPathInFolder, normalizeFolderPrefix, normalizeVaultPath } from "../../utils/pathUtils";
 import { isAgentFilePath } from "../../utils/fileFiltering";

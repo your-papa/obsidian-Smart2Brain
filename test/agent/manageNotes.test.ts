@@ -25,8 +25,8 @@ vi.mock("../../src/stores/pendingChangesStore.svelte", () => ({
 }));
 
 const mockGetData = vi.fn();
-vi.mock("../../src/stores/dataStore.svelte", () => ({
-	getData: () => mockGetData(),
+vi.mock("../../src/agent/tools/builtInToolDefaults", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../../src/agent/tools/builtInToolDefaults")>()),
 	DEFAULT_TOOLS_CONFIG: {
 		manage_notes: {
 			name: "manage_notes",
@@ -34,6 +34,9 @@ vi.mock("../../src/stores/dataStore.svelte", () => ({
 				"Create, update, delete, or move markdown notes in one staged batch. Use targeted search-and-replace edits for updates and batch related note operations together.",
 		},
 	},
+}));
+vi.mock("../../src/stores/dataStore.svelte", () => ({
+	getData: () => mockGetData(),
 }));
 
 const mockResolveVaultFileDetailed = vi.fn();

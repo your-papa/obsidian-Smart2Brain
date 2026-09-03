@@ -3,7 +3,7 @@ import { tool } from "@langchain/core/tools";
 import { HumanMessage } from "@langchain/core/messages";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { z } from "zod";
-import { DEFAULT_TOOLS_CONFIG, getReadContentDescription } from "../../stores/dataStore.svelte";
+import { DEFAULT_TOOLS_CONFIG, getReadContentDescription } from "./builtInToolDefaults";
 import { getPendingChangesStore } from "../../stores/pendingChangesStore.svelte";
 import {
 	isImageExtension,

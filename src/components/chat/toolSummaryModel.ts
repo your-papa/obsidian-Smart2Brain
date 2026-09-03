@@ -1,4 +1,4 @@
-import type { ToolCallStatus } from "../../stores/chatStore.svelte";
+import type { ToolCallStatus } from "../../stores/chatTimeline";
 import type { ToolOutputRenderModel } from "./toolOutputRenderModel";
 
 /**

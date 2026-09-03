@@ -6,7 +6,7 @@ import {
 	buildCheckpointGraph,
 	deriveMessagePairsFromActiveCheckpoint,
 	resolveActiveCheckpointId,
-} from "../../stores/chatStore.svelte";
+} from "../../stores/chatTimeline";
 import { Logger } from "../../utils/logging";
 
 /** Yield to the browser so it can paint/handle input before continuing. */

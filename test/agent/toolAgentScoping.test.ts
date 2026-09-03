@@ -27,7 +27,6 @@ vi.mock("../../src/stores/dataStore.svelte", () => ({
 		getAgent: (id: string) => AGENTS[id],
 		getSelectedAgent: () => AGENTS["trusted-agent"],
 	}),
-	DEFAULT_TOOLS_CONFIG: {},
 }));
 
 vi.mock("../../src/utils/fileFiltering", () => ({

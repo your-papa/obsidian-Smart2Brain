@@ -1,5 +1,5 @@
 <script lang="ts">
-import type { MessagePair } from "../../stores/chatStore.svelte";
+import type { MessagePair } from "../../stores/chatTimeline";
 import { icon } from "../../utils/utils";
 import CollapsibleUserBubble from "./CollapsibleUserBubble.svelte";
 import MarkdownRenderer from "../ui/MarkdownRenderer.svelte";

@@ -234,9 +234,9 @@ interface ReadContentSettings {
 	/** Maximum content length to return (0 = unlimited) */
 	maxContentLength: number;
 	/** Vision model for images: undefined = auto-derive from chat model, null = disabled, ChatModel = explicit */
-	imageProcessor?: import("../stores/chatStore.svelte").ChatModel | null;
+	imageProcessor?: import("../stores/chatTimeline").ChatModel | null;
 	/** Vision model for PDFs: undefined = auto-derive from chat model, null = disabled, ChatModel = explicit */
-	pdfProcessor?: import("../stores/chatStore.svelte").ChatModel | null;
+	pdfProcessor?: import("../stores/chatTimeline").ChatModel | null;
 }
 
 /**
@@ -412,11 +412,11 @@ export interface AgentConfig {
 	/** Optional Obsidian icon ID or emoji/pictogram for visual identification */
 	icon?: string;
 	/** Selected chat model for this agent */
-	chatModel: import("../stores/chatStore.svelte").ChatModel | null;
+	chatModel: import("../stores/chatTimeline").ChatModel | null;
 	/** Optional summarization model; null means auto-use the chat model */
-	summarizationModel: import("../stores/chatStore.svelte").ChatModel | null;
+	summarizationModel: import("../stores/chatTimeline").ChatModel | null;
 	/** Optional title generation model; null means auto-use the chat model */
-	titleModel: import("../stores/chatStore.svelte").ChatModel | null;
+	titleModel: import("../stores/chatTimeline").ChatModel | null;
 	/** Skill enable states for this agent (skill name -> state) */
 	skills: Record<string, AgentSkillState>;
 	/** Configuration for built-in tools */

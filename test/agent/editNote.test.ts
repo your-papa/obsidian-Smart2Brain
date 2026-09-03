@@ -22,6 +22,15 @@ vi.mock("../../src/stores/pendingChangesStore.svelte", () => ({
 }));
 
 // Mock dataStore
+vi.mock("../../src/agent/tools/builtInToolDefaults", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../../src/agent/tools/builtInToolDefaults")>()),
+	DEFAULT_TOOLS_CONFIG: {
+		manage_notes: {
+			name: "manage_notes",
+			description: "Manage notes",
+		},
+	},
+}));
 vi.mock("../../src/stores/dataStore.svelte", () => ({
 	getData: () => ({
 		getAgent: () => undefined,
@@ -35,12 +44,6 @@ vi.mock("../../src/stores/dataStore.svelte", () => ({
 			},
 		}),
 	}),
-	DEFAULT_TOOLS_CONFIG: {
-		manage_notes: {
-			name: "manage_notes",
-			description: "Manage notes",
-		},
-	},
 }));
 
 // Mock uuid

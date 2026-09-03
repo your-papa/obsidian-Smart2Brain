@@ -7,7 +7,7 @@ import { fetchOpenRouterModels, type OpenRouterModelInfo } from "../providers/op
 import { getProviderDefinition, isEmbeddingProvider } from "../providers/index";
 import { onProvidersChanged } from "../providers/registrySync";
 import type { EmbedModelConfig } from "../providers/index";
-import type { ChatModel } from "../stores/chatStore.svelte";
+import type { ChatModel } from "../stores/chatTimeline";
 import { getData } from "../stores/dataStore.svelte";
 import { getPlugin, requestSettingsTab } from "../stores/state.svelte";
 import { ProviderSetupModal } from "../views/provider-setup/ProviderSetup";

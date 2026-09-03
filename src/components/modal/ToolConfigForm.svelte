@@ -1,12 +1,12 @@
 <script lang="ts">
+import { getData } from "../../stores/dataStore.svelte";
 import {
 	DEFAULT_TOOLS_CONFIG,
-	getData,
 	getReadContentDescription,
 	getSearchNotesDescription,
-} from "../../stores/dataStore.svelte";
+} from "../../agent/tools/builtInToolDefaults";
 import type { BuiltInToolId, SearchAlgorithm, ToolConfig } from "../../types/plugin";
-import type { ChatModel } from "../../stores/chatStore.svelte";
+import type { ChatModel } from "../../stores/chatTimeline";
 import type SecondBrainPlugin from "../../main";
 import { ModelSelectionModal, type SelectedModel } from "./ModelSelectionModal";
 import { NATIVE_PDF_PROVIDERS } from "../../agent/Agent";
@@ -16,7 +16,7 @@ import SettingContainer from "../settings/SettingContainer.svelte";
 import SettingGroup from "../settings/SettingGroup.svelte";
 import Button from "../ui/Button.svelte";
 import Dropdown from "../ui/Dropdown.svelte";
-import { getToolDisplayName } from "../../agent/builtInToolMeta";
+import { getToolDisplayName } from "../../agent/tools/builtInToolDefaults";
 import type { ToolConfigAccessors } from "./ToolConfigModal";
 
 interface Props {

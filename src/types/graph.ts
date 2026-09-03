@@ -149,7 +149,7 @@ export interface SmartGraphSettings {
 	/** Whether to render arrows for directed wiki links */
 	directedWikiEdges: boolean;
 	/** Chat model used for LLM-powered graph features (e.g., cluster labeling) */
-	graphChatModel: import("../stores/chatStore.svelte").ChatModel | null;
+	graphChatModel: import("../stores/chatTimeline").ChatModel | null;
 	/** Whether to automatically generate cluster labels after clustering */
 	autoLabelClusters: boolean;
 	/** When true, only include markdown files in the graph; otherwise all indexable files */
