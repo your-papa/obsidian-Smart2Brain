@@ -248,8 +248,10 @@ async function handleSelectTemplate(id: ProviderTemplateId) {
 }
 
 // Guards the one-time live commit so it never re-runs once the provider is configured
-// or while a commit is already in flight (the effect can re-fire mid-await).
-let isCommitting = false;
+// or while a commit is already in flight (the effect can re-fire mid-await). Reactive so
+// the Done button can stay disabled across the commit's awaits — closing mid-rename would
+// race the ID change, and `markSubmitted` only lands after it.
+let isCommitting = $state(false);
 
 // Promotes a draft to a fully configured provider the moment its connection validates.
 // This replaces the old "Add Provider" button: display name / auth / trusted all
@@ -434,6 +436,14 @@ const connectionStatus = $derived.by<ConnectionStatus>(() => {
 const connectionError = $derived(
 	query.data && !query.data.success ? (query.data.message ?? "Authentication failed") : "Authentication failed",
 );
+
+// Done must track the *commit*, not just the connection. A valid connection alone isn't
+// enough to leave safely: the commit effect skips while `displayNameError` is set, so
+// closing then would hit onClose with an uncommitted draft and delete it along with the
+// credentials the user just entered; and closing mid-commit races `renameProvider`, whose
+// ID change lands before `markSubmitted`. Editing an already-configured provider has
+// nothing to commit, so it's ready as soon as it validates.
+const canFinish = $derived(connectionStatus === "connected" && isConfigured && !isCommitting && !displayNameError);
 </script>
 
 {#if step === "pick"}
@@ -545,6 +555,11 @@ const connectionError = $derived(
       {:else if connectionStatus === "connected"}
         <span class="provider-connection-icon is-success" use:icon={"check-circle"}></span>
         <span class="provider-connection-text is-success">Connected</span>
+        {#if displayNameError}
+          <!-- Connected, but the commit is blocked: say why, so a disabled Done isn't a
+               dead end the user has to guess at. -->
+          <span class="provider-connection-text is-muted">— fix the provider name to finish</span>
+        {/if}
       {:else if connectionStatus === "failed"}
         <span class="provider-connection-icon is-error" use:icon={"x-circle"}></span>
         <span class="provider-connection-text is-error">{connectionError}</span>
@@ -555,12 +570,7 @@ const connectionError = $derived(
       {/if}
     </div>
 
-    <Button
-      buttonText="Done"
-      cta={connectionStatus === "connected"}
-      disabled={connectionStatus !== "connected"}
-      onClick={() => modal.close()}
-    />
+    <Button buttonText="Done" cta={canFinish} disabled={!canFinish} onClick={() => modal.close()} />
   </div>
 {/snippet}
 
