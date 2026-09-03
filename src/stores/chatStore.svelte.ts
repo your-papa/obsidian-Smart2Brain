@@ -1357,6 +1357,18 @@ export class SessionRegistry {
 	 * shows up in whichever chat the user switches to while it stays selected.
 	 * Per-chat exclusions are tracked locally in each ContextTray. */
 	graphSelection: string[] = $state([]);
+	/** Name of the topic(s) `graphSelection` exactly matches, or null if the
+	 * selection isn't a whole topic (lasso, panel row, or a topic selection
+	 * the user has since edited by hand). Mirrors `graphSelection`'s ambient
+	 * scope — set alongside it everywhere it's assigned. */
+	graphSelectionTopicLabel: string | null = $state(null);
+	/** True when the current `graphSelection` value was republished by background
+	 * vault maintenance (a live patch pruning deleted notes out of the existing
+	 * selection) rather than a new user gesture. A chat tray's per-note dismissals
+	 * must survive maintenance pruning but reset on every real selection change —
+	 * and that distinction can't be inferred from the paths alone, since a user
+	 * picking a smaller selection also shrinks the path set. */
+	graphSelectionIsMaintenance: boolean = $state(false);
 	pendingAttachmentPaths: string[] | null = $state(null);
 	pendingAutoSubmit: boolean = $state(false);
 	/** When set, only the Input bound to this thread path consumes the pending

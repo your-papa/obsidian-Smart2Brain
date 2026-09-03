@@ -861,7 +861,35 @@ function flushLiveUpdate() {
 				drift++;
 			}
 		}
+		// `focusedClusters`/`focusedSegmentIds` hold indices into `segments` — but
+		// `applyLivePatch` below rebuilds `segments` from scratch (sorted by size,
+		// undersized ones dropped), so an index that pointed at "Marine Ecology"
+		// can point at a different topic, or nothing, once it returns. Capture what
+		// community each focused index actually meant *before* that happens, so it
+		// can be re-resolved to wherever that same community landed afterward —
+		// otherwise the focus silently follows the wrong topic (or none) post-patch,
+		// which breaks topic highlighting/panel rows generally, not just the label.
+		const focusedCommunityIdsBeforePatch = new Set(
+			[...focusedClusters].flatMap((cluster) => {
+				const id = segments[cluster]?.communityId;
+				return id === undefined ? [] : [id];
+			}),
+		);
+
 		applyLivePatch(patch.data, communities, drift);
+
+		// Re-resolve focus to the rebuilt `segments` array by community identity.
+		if (focusedClusters.size > 0) {
+			const nextFocusedClusters = new Set(
+				segments.flatMap((segment, index) =>
+					segment.communityId !== undefined && focusedCommunityIdsBeforePatch.has(segment.communityId)
+						? [index]
+						: [],
+				),
+			);
+			focusedClusters = nextFocusedClusters;
+			focusedSegmentIds = new Set([...nextFocusedClusters].flatMap((c) => (segments[c] ? [segments[c].id] : [])));
+		}
 
 		// A removed note can't stay selected — mirror the pruned selection out so
 		// chat trays don't keep offering a note that no longer exists.
@@ -870,7 +898,7 @@ function flushLiveUpdate() {
 			const surviving = selectedPaths.filter((path) => !removed.has(path));
 			if (surviving.length !== selectedPaths.length) {
 				canvasComponent?.selectNodesByPaths(surviving);
-				handleSelectionChange(surviving);
+				handleSelectionChange(surviving, true, topicLabelForCommunities(communities, surviving));
 			}
 		}
 
@@ -1210,13 +1238,38 @@ function handleFocusCluster(cluster: number, pan = false, multi = true) {
  * Every path that changes the selection routes through here — canvas lasso,
  * topic label, panel row — so the graph and each open chat's context tray can
  * never disagree about what is selected.
+ *
+ * `isMaintenance` marks the one caller (the live-patch handler below) that
+ * republishes a *shrunk* version of the existing selection because notes were
+ * deleted out from under it — not a new user gesture. A chat tray needs this
+ * distinction verbatim, not inferred from path-set shape: a user picking a
+ * smaller selection (Shift-click, deselecting a topic, drilling into one
+ * cluster) also produces a subset of the prior selection, so shape alone
+ * can't tell the two apart. Per-chat dismissals should survive maintenance
+ * pruning but reset on every real selection change, however it was made.
+ *
+ * `topicLabelOverride` lets the same maintenance caller supply a label it
+ * already computed synchronously against the just-updated `communities`,
+ * instead of falling through to `selectedTopicLabels`. That derivation reads
+ * `canvasComponent`'s `simNodes`, which the canvas only rebuilds from
+ * `graphData` on its own next reactive flush — still stale in the same
+ * synchronous block that just reassigned `graphData` via `applyLivePatch`.
+ * Every other caller sets `focusedClusters`/`selectedPaths` and calls in
+ * synchronously too, but through *this* component's own reactive graph
+ * (`segments`, `effectiveClusterLabels`), which is current already.
  */
-function handleSelectionChange(paths: string[]) {
+function handleSelectionChange(paths: string[], isMaintenance = false, topicLabelOverride?: string[] | null) {
 	selectedPaths = paths;
 	const messenger = getSessionRegistry();
 	if (messenger) {
 		// Ambient: mirror the live graph selection into every open chat's tray.
 		messenger.graphSelection = [...paths];
+		messenger.graphSelectionIsMaintenance = isMaintenance;
+		// Callers set focusedClusters/selectedPaths before calling in, so this
+		// derivation is already current for the selection just adopted above —
+		// except the maintenance caller, which passes its own override (see above).
+		const labels = topicLabelOverride !== undefined ? topicLabelOverride : selectedTopicLabels;
+		messenger.graphSelectionTopicLabel = labels?.join(", ") ?? null;
 	}
 }
 
@@ -1303,6 +1356,8 @@ function handleOpenAllSelected() {
 async function handleSendToChat() {
 	const paths = selectedPaths;
 	if (paths.length === 0) return;
+	// Read before the awaits below give the user a chance to change the selection.
+	const topicLabel = selectedTopicLabels?.join(", ") ?? null;
 
 	// Reveal an existing chat (uncollapsing its sidebar) or create one.
 	const { workspace } = plugin.app;
@@ -1317,6 +1372,8 @@ async function handleSendToChat() {
 	if (messenger) {
 		// Ambient selection (shown in every chat) …
 		messenger.graphSelection = [...paths];
+		messenger.graphSelectionIsMaintenance = false;
+		messenger.graphSelectionTopicLabel = topicLabel;
 		// … plus a one-shot signal so the just-opened/focused chat grabs focus.
 		messenger.pendingGraphNotes = [...paths];
 	} else {
@@ -1333,6 +1390,57 @@ function handleClearSelection() {
 	focusedSegmentIds = new Set();
 	canvasComponent?.clearSelection();
 	handleSelectionChange([]);
+}
+
+/** Same naming ladder (and same fallbacks) the canvas uses for a topic node, so
+ * every surface calls a topic exactly what its pill did. */
+function clusterLabel(cluster: number): string {
+	return cluster === UNSORTED_CLUSTER
+		? "Unsorted"
+		: (effectiveClusterLabels[cluster] ?? segments[cluster]?.label ?? `Topic ${cluster}`);
+}
+
+/**
+ * Name the topics `paths` exactly matches under `communities` (path → raw
+ * Leiden community id), or null if it isn't an exact match — used only by the
+ * live-patch handler, whose `communities` is current but whose canvas isn't
+ * yet (see `handleSelectionChange`'s `topicLabelOverride` doc).
+ *
+ * `focusedClusters` holds *segment indices* (`segments[i]`, assigned `i` by
+ * `resolveAndApplySegments`/`resolveSegmentsByLeiden` after sorting and
+ * dropping undersized communities) — not raw community ids. The two numeric
+ * spaces aren't interchangeable: sorting and drops mean a segment's index can
+ * differ from its `communityId`. Map through `segments[i].communityId` (set
+ * by `resolveAndApplySegments`, already current — it runs synchronously
+ * inside `applyLivePatch`, before this is called) rather than comparing
+ * `communities` values against `focusedClusters` directly.
+ *
+ * Mirrors `getNodePathsForClusters`'s exclusion of unsorted notes (`cluster
+ * == null` never matches, even if `UNSORTED_CLUSTER` is itself focused) —
+ * but unlike the canvas method, doesn't resolve collapsed topic nodes back
+ * to their members, so a selection touching a currently-collapsed topic
+ * conservatively falls back to null (count-based label) rather than risk a
+ * wrong match.
+ */
+function topicLabelForCommunities(communities: Record<string, number>, paths: string[]): string[] | null {
+	if (focusedClusters.size === 0 || paths.length === 0) return null;
+	const focusedCommunityIds = new Set(
+		[...focusedClusters].flatMap((cluster) => {
+			const id = segments[cluster]?.communityId;
+			return id === undefined ? [] : [id];
+		}),
+	);
+	// Every focused segment must have resolved to a real community id — if
+	// segments haven't caught up either (shouldn't happen, but this is exactly
+	// the kind of ordering assumption that bit the canvas-based check), bail
+	// out to the safe count-based fallback rather than risk a wrong match.
+	if (focusedCommunityIds.size !== focusedClusters.size) return null;
+	const topicPaths = Object.entries(communities)
+		.filter(([, communityId]) => focusedCommunityIds.has(communityId))
+		.map(([path]) => path);
+	const selected = new Set(paths);
+	if (topicPaths.length !== selected.size || !topicPaths.every((path) => selected.has(path))) return null;
+	return [...focusedClusters].map(clusterLabel);
 }
 
 /**
@@ -1352,14 +1460,7 @@ let selectedTopicLabels: string[] | null = $derived.by(() => {
 	const topicPaths = new Set(canvasComponent?.getNodePathsForClusters(focusedClusters) ?? []);
 	const selected = new Set(selectedPaths);
 	if (topicPaths.size !== selected.size || ![...topicPaths].every((path) => selected.has(path))) return null;
-	// Same naming ladder (and same fallbacks) the canvas uses for a topic node,
-	// so the bar calls a topic exactly what its pill did — including the
-	// `UNSORTED_CLUSTER` sentinel, which is negative and so indexes no segment.
-	return [...focusedClusters].map((cluster) =>
-		cluster === UNSORTED_CLUSTER
-			? "Unsorted"
-			: (effectiveClusterLabels[cluster] ?? segments[cluster]?.label ?? `Topic ${cluster}`),
-	);
+	return [...focusedClusters].map(clusterLabel);
 });
 
 async function handleImmerse() {
