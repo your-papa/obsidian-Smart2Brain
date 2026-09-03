@@ -189,7 +189,7 @@ s2b-dev/
    and prints its worktree dir and vault name. If none is free, ask the user
    rather than working in the main checkout. `--status` lists holders.
 2. `cd` into the slot worktree. It sits on a detached HEAD; create your task
-   branch there (`git fetch && git switch -c <branch> origin/dev`). Run
+   branch there (`git fetch && git switch -c <branch> origin/main`). Run
    `bun install --frozen-lockfile` if deps changed.
 3. Build with a **one-shot** `bunx vite build --mode development` (never a
    `--watch` — lingering watchers were the historical source of corrupt
