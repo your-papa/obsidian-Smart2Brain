@@ -214,6 +214,9 @@ const headerStatusProps = $state<{ provider: string }>({
 });
 let displayName = $state("");
 let displayNameError = $state<string | null>(null);
+// Whether the name field currently has focus. Gates the stored-name sync effect below so
+// it can't overwrite what the user is typing (the input binds `displayName` two-way).
+let isEditingDisplayName = $state(false);
 // Number of display-name saves currently in flight. `displayNameError` still holds its
 // previous value until an await settles, so without this Done could enable mid-save on a
 // name whose validity isn't known yet — and the commit's slug is derived from that same
@@ -240,8 +243,13 @@ function getTemplateLogo(id: ProviderTemplateId): Component<LogoProps> {
 	return TEMPLATE_LOGOS[id] ?? GenericAIIcon;
 }
 
+// Mirror the stored name into the input — but not while the user is typing in it. With
+// `bind:value` the input reads this back, so an unguarded sync (this effect re-runs on any
+// providerMeta change, e.g. the commit's rename) would overwrite an in-progress edit.
 $effect(() => {
-	displayName = providerMeta?.displayName ?? "";
+	const stored = providerMeta?.displayName ?? "";
+	if (untrack(() => isEditingDisplayName)) return;
+	displayName = stored;
 });
 
 async function handleSelectTemplate(id: ProviderTemplateId) {
@@ -327,6 +335,7 @@ let blurSeq = 0;
 
 async function handleDisplayNameBlur(nextName: string) {
 	const seq = ++blurSeq;
+	isEditingDisplayName = false;
 	const trimmedName = nextName.trim();
 	if (!trimmedName || trimmedName === providerMeta?.displayName) {
 		displayName = providerMeta?.displayName ?? "";
@@ -343,13 +352,13 @@ async function handleDisplayNameBlur(nextName: string) {
 	// disagree with the ID derived from it.
 	if (isCommitting) {
 		await commitSettled();
-		// The user may have refocused and blurred again while we waited. This invocation's
-		// value is then stale: writing it would clobber the newer edit in storage, and the
-		// `displayName = trimmedName` below would yank it out of the input. The newer blur
-		// persists what is current, so drop this one. (`displayName` can't be used as the
-		// staleness signal — the input is passed `value={displayName}`, not `bind:`, so it
-		// doesn't track typing.)
-		if (blurSeq !== seq) return;
+		// The user may have edited the field while we waited. This invocation's value is then
+		// stale: writing it would clobber the newer edit in storage, and the
+		// `displayName = trimmedName` below would yank it out of the input. Two ways to be
+		// superseded, and both need checking — a newer blur (the counter), or typing with no
+		// second blur, which never re-enters this handler and is only visible through the
+		// live binding on the input.
+		if (blurSeq !== seq || displayName.trim() !== trimmedName) return;
 		// Re-check against the post-commit meta: if the commit stored this very name, the
 		// write is redundant. `providerMeta` is now keyed by the settled `providerId`.
 		if (trimmedName === providerMeta?.displayName) {
@@ -543,10 +552,16 @@ const canFinish = $derived(
       name="Provider name"
       desc="Name this provider instance so you can distinguish it later."
     >
+      <!-- bind:, not a one-way value=: a blur deferred behind an in-flight commit needs to
+           know whether the user has since typed something newer, and only a live binding
+           tracks that (a blur counter misses typing without a second blur). -->
       <Text
         inputType="text"
-        value={displayName}
+        bind:value={displayName}
         placeholder={providerDefinition?.displayName ?? "New Provider"}
+        onfocus={() => {
+          isEditingDisplayName = true;
+        }}
         onblur={(value: string) => void handleDisplayNameBlur(value)}
       />
     </SettingItem>
