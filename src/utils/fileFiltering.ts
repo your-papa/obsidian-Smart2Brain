@@ -1,5 +1,6 @@
 import { Platform, type TFile, type Vault } from "obsidian";
-import { getData } from "../stores/dataStore.svelte";
+import { getAgentPathSource } from "./agentPathSource";
+import { agentRootDir } from "./agentPaths";
 import { THREAD_DATA_DEDUP_VERSION, inflateThreadData, sniffThreadDataVersion } from "../agent/threadDataCodec";
 import { gunzipPrefixToString, gunzipToString } from "./gzip";
 import { extractTextFromPdf } from "./pdfExtractor";
@@ -190,13 +191,8 @@ export function isAgentPath(path: string, agentFolder: string): boolean {
  * treats the file as a normal note, preserving pre-relocation behavior rather than throwing.
  */
 export function isAgentFilePath(path: string): boolean {
-	let agentFolder: string;
-	try {
-		agentFolder = getData().agentFolder;
-	} catch {
-		return false;
-	}
-	return isAgentPath(path, agentFolder);
+	if (!getAgentPathSource()) return false;
+	return isAgentPath(path, agentRootDir());
 }
 
 /**

@@ -26,6 +26,8 @@ import { createSessionRegistry, getSessionRegistry, type SessionRegistry } from 
 import { type PluginDataStore, createData, getData } from "./stores/dataStore.svelte";
 import { PendingChangesStore, initPendingChangesStore } from "./stores/pendingChangesStore.svelte";
 import { setPlugin } from "./stores/state.svelte";
+import { onCodexSessionChange } from "./stores/providerRuntime.svelte";
+import { invalidateAuthState, invalidateProviderState } from "./lib/query";
 import { LexicalSearchService } from "./search/LexicalSearchService";
 import { ChatView, VIEW_TYPE_CHAT } from "./views/chat/Chat";
 import { navigateToPendingChange } from "./lib/pendingChangeNavigation";
@@ -375,6 +377,17 @@ export default class SecondBrainPlugin extends Plugin {
 		StartupProfiler.setMeta("rendererToOnloadMs", Math.round(performance.now()));
 		setPlugin(this);
 		this.pluginData = await StartupProfiler.measure("data:load", () => createData(this), true);
+		// A Codex sign-in/sign-out changes the auth state of every provider instance on that
+		// template; refresh their queries. Wired here (not inside providerRuntime) so the
+		// runtime store stays free of dataStore/query imports.
+		this.register(
+			onCodexSessionChange(() => {
+				for (const providerId of this.pluginData.getProviderIdsByTemplate("openai-codex")) {
+					invalidateAuthState(providerId);
+					invalidateProviderState(providerId);
+				}
+			}),
+		);
 		// Sync the Logger's level to the persisted "Developer Console logging" preference.
 		applyVerboseLogging(this.pluginData.isVerbose);
 

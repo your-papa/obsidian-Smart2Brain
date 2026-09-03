@@ -11,7 +11,7 @@
 
 import { ChatOpenAI } from "@langchain/openai";
 import { fetchModelsDevData, isEmbeddingModel } from "./modelsDevApi";
-import { getData } from "../stores/dataStore.svelte";
+import { getPlugin } from "../stores/state.svelte";
 import OpenAILogo from "../components/ui/logos/OpenAILogo.svelte";
 import type {
 	AuthObject,
@@ -350,7 +350,10 @@ export const openaiProvider: EmbeddingProviderDefinition = {
 			}
 
 			return Array.from(
-				new Set([...FALLBACK_OPENAI_CHAT_MODELS, ...Object.keys(getData().getChatModels("openai"))]),
+				new Set([
+					...FALLBACK_OPENAI_CHAT_MODELS,
+					...Object.keys(getPlugin().pluginData.getChatModels("openai")),
+				]),
 			).sort((a, b) => a.localeCompare(b));
 		}
 

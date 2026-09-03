@@ -1,11 +1,7 @@
 import type { EditorView } from "@codemirror/view";
 import { diffLines } from "diff";
 import { MarkdownView, Notice, TFile } from "obsidian";
-import {
-	computeOriginalAffectedLines,
-	countOriginalLines,
-	insertionAnchorLine,
-} from "../editor/readingViewDiffProcessor";
+import { computeOriginalAffectedLines, countOriginalLines, insertionAnchorLine } from "../editor/diffLineMath";
 import type SecondBrainPlugin from "../main";
 import { getPendingChangesStore } from "../stores/pendingChangesStore.svelte";
 import type { PendingChange, PendingChangeEntry } from "../types/shared";

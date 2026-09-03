@@ -135,8 +135,6 @@ export {
 	ProviderNotFoundError,
 } from "./errors";
 
-export { ProviderRegistry } from "./registry";
-
 export { createOpenAICompatibleProvider } from "./openai-compatible";
 
 export type {

@@ -1,6 +1,4 @@
-import type { CodexSession, ProviderTemplateId } from "../types/provider";
-import { invalidateAuthState, invalidateProviderState } from "../lib/query";
-import { getData } from "./dataStore.svelte";
+import type { CodexSession } from "../types/provider";
 import { getPlugin } from "./state.svelte";
 
 const CODEX_SESSION_STORAGE_KEY = "openai-codex-session";
@@ -37,12 +35,22 @@ function readStoredCodexSession(): CodexSession | null {
 	};
 }
 
-function invalidateTemplateProviders(templateId: ProviderTemplateId) {
-	const data = getData();
-	for (const providerId of data.getProviderIdsByTemplate(templateId)) {
-		invalidateAuthState(providerId);
-		invalidateProviderState(providerId);
-	}
+type CodexSessionListener = () => void;
+const codexSessionListeners = new Set<CodexSessionListener>();
+
+/**
+ * Subscribe to the Codex session being saved or cleared. The listener that
+ * invalidates the affected providers' auth/state queries is installed by
+ * `main.ts`: doing it here would pull `dataStore` and `lib/query` into this
+ * module and close an import cycle back through the provider definitions.
+ */
+export function onCodexSessionChange(listener: CodexSessionListener): () => void {
+	codexSessionListeners.add(listener);
+	return () => codexSessionListeners.delete(listener);
+}
+
+function notifyCodexSessionChanged(): void {
+	for (const listener of codexSessionListeners) listener();
 }
 
 export function getCodexSessionStorageKey(): string {
@@ -63,7 +71,7 @@ export function saveCodexSession(session: CodexSession): void {
 	plugin.app.saveLocalStorage(CODEX_SESSION_STORAGE_KEY, session);
 	codexSession = session;
 	codexSessionLoaded = true;
-	invalidateTemplateProviders("openai-codex");
+	notifyCodexSessionChanged();
 }
 
 export function clearCodexSession(): void {
@@ -71,5 +79,5 @@ export function clearCodexSession(): void {
 	plugin.app.saveLocalStorage(CODEX_SESSION_STORAGE_KEY, null);
 	codexSession = null;
 	codexSessionLoaded = true;
-	invalidateTemplateProviders("openai-codex");
+	notifyCodexSessionChanged();
 }

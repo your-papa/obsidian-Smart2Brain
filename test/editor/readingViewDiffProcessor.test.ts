@@ -8,7 +8,7 @@ vi.mock("../../src/stores/state.svelte", () => ({ getPlugin: vi.fn() }));
 vi.mock("../../src/stores/dataStore.svelte", () => ({ getData: vi.fn() }));
 vi.mock("../../src/stores/pendingChangesStore.svelte", () => ({ getPendingChangesStore: vi.fn() }));
 
-import { computeOriginalAffectedLines, insertionAnchorLine } from "../../src/editor/readingViewDiffProcessor";
+import { computeOriginalAffectedLines, insertionAnchorLine } from "../../src/editor/diffLineMath";
 
 describe("insertionAnchorLine", () => {
 	it("anchors to the following line, and to the previous line at EOF", () => {

@@ -1,4 +1,4 @@
-import { getData } from "../stores/dataStore.svelte";
+import { getAgentPathSource } from "./agentPathSource";
 
 /**
  * Fixed subdirectory names under the configurable agent root folder. The root itself
@@ -29,9 +29,9 @@ const AGENT_DEFINITION_FILENAME = "AGENT.md";
 /** Default agent root folder when unset. */
 const DEFAULT_AGENT_FOLDER = "Agents";
 
-/** The configured agent root folder, resolved from plugin data (falls back to the default). */
+/** The configured agent root folder (falls back to the default before the store exists). */
 export function agentRootDir(): string {
-	return getData().agentFolder || DEFAULT_AGENT_FOLDER;
+	return getAgentPathSource()?.agentFolder() || DEFAULT_AGENT_FOLDER;
 }
 
 /** `<agentFolder>/Memories` — shared memory notes folder. */
@@ -113,8 +113,6 @@ export function agentDefinitionPath(agentId: string): string {
  * and unique rather than throwing.
  */
 function agentFileStem(agentId: string): string {
-	const agents = getData()?.agents;
-	const agent = agents?.[agentId];
-	if (!agents || !agent) return agentId;
-	return sanitizeAgentFileName(agent.name);
+	const name = getAgentPathSource()?.agentName(agentId);
+	return name === undefined ? agentId : sanitizeAgentFileName(name);
 }
