@@ -14,9 +14,12 @@ Your Smart Second Brain is a **free** and **open-source** Obsidian plugin that m
 
 Search surfaces your notes, the graph reveals how they connect, and the assistant can draw on both when answering. **Search and the graph work right away with no AI provider.** Connecting one unlocks the full agent. Runs on desktop and mobile.
 
-**[smartsecondbrain.dev](https://smartsecondbrain.dev)** has the features, setup guides, and documentation.
+**[smartsecondbrain.dev](https://smartsecondbrain.dev)** has a demo video, the features, setup guides, and documentation.
 
-https://github.com/user-attachments/assets/48d2144e-7f29-4771-befc-512559864166
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/hero-desktop-dark.png">
+  <img alt="Smart Second Brain: the smart graph beside a chat that reads your notes and proposes an edit" src="assets/hero-desktop-light.png">
+</picture>
 
 ## Install
 
@@ -34,7 +37,10 @@ Out of the box, nothing leaves your machine. The only network requests are to th
 
 All of it runs on your phone too:
 
-https://github.com/user-attachments/assets/4a5739a0-f8e7-4df3-a259-765e34818774
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/hero-mobile-dark.png">
+  <img alt="Smart Second Brain on mobile: chat answering from notes, with search results below" src="assets/hero-mobile-light.png" width="320">
+</picture>
 
 ## Contributing
 
