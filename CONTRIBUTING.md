@@ -10,12 +10,14 @@ You do not have to write TypeScript to make a real difference.
 
 - **Report bugs and problems.** Use the [issue templates](https://github.com/s2b-dev/smart-second-brain/issues/new/choose).
   Setup and "how do I" questions go to [Q&A](https://github.com/s2b-dev/smart-second-brain/discussions/categories/q-a) instead.
-- **Share skills, agents, and integrations.** Skills are plain `SKILL.md` notes in your vault's
-  `Agents/Skills/` folder; agents are `AGENT.md` notes. If you have written one that works well
-  (a skill for another plugin's API, a research workflow, a writing persona), post it in
-  [Show and tell](https://github.com/s2b-dev/smart-second-brain/discussions/categories/show-and-tell).
-  Skills that integrate widely used plugins can be promoted into the bundled set under
-  `src/skills/integrations/`.
+- **Share skills and agents.** Skills are plain `SKILL.md` notes in your vault's
+  `Agents/Skills/` folder; agents are `AGENT.md` notes. Post one you're happy with in
+  [Show and tell](https://github.com/s2b-dev/smart-second-brain/discussions/categories/show-and-tell) —
+  they're markdown, so anyone can copy one straight into their vault.
+- **Contribute a bundled skill.** A skill that ships with the plugin is installed and kept up
+  to date automatically, which a copied file is not. If you maintain an Obsidian plugin and
+  want the agent to use it properly, this is the contribution that matters — see
+  [Writing a skill](#writing-a-skill).
 - **Improve the documentation.** The user docs live in the separate
   [`s2b-dev/site`](https://github.com/s2b-dev/site) repository and are published at
   [smartsecondbrain.dev](https://smartsecondbrain.dev). The README in this repo is deliberately minimal.
@@ -136,15 +138,36 @@ discovery quirks, no branding worth showing), it may already work via the generi
 ### Writing a skill
 
 A skill is a folder containing `SKILL.md` with YAML frontmatter (`name`, `description`,
-optional `allowed-tools`, `metadata`) followed by markdown guidance. The `description` is what
-the model sees when deciding whether to load the skill, so make it specific. Bundled examples
-are under `src/skills/defaults/` (core skills) and `src/skills/integrations/` (skills for
-other plugins, which additionally declare `metadata.linkedPlugin`).
+optional `allowed-tools`, `metadata`) followed by markdown guidance. The guidance loads **on
+demand**: the agent sees only the `description` until it decides the skill is relevant, so that
+one line does most of the work — say what the skill does *and* when to use it.
 
 To develop one, write it directly into `Agents/Skills/<name>/SKILL.md` in your vault and
-iterate; the plugin rediscovers skills on change. To propose it as a bundled integration
-skill, open a PR that adds the folder under `src/skills/integrations/` and explain what plugin
-it targets and how you tested it. `allowed-tools` may only name existing built-in tools.
+iterate; the plugin rediscovers skills on change. Test that it fires when it should *and* stays
+quiet when it shouldn't — an over-eager `description` is the most common flaw in a new skill.
+`allowed-tools` may only name existing built-in tools, and should name as few as possible.
+
+Bundled examples live under `src/skills/defaults/` (core skills) and `src/skills/integrations/`
+(skills for other plugins, which additionally declare `metadata.linkedPlugin`).
+
+#### Integration skills, for plugin maintainers
+
+When a user enables an integration for your plugin, the agent gets a skill describing your
+API. If the plugin ships one for you, that skill is seeded automatically and **reconciled on
+later releases**, so improvements reach vaults that already have it. If it doesn't, S2B falls
+back to a generated template that asks the agent to introspect your API at runtime — workable,
+but a hand-written guide is far better, and you are the person best placed to write it.
+
+To contribute one, open a PR adding `src/skills/integrations/<name>/SKILL.md` with
+`metadata.linkedPlugin: "<your-plugin-id>"`, and say in the PR what the plugin does and how you
+tested the skill against it. Widely used plugins can also get an entry in
+`CURATED_PLUGIN_INTEGRATIONS` (`src/agent/integrations/pluginIntegrations.ts`) for a proper
+display name. Note that any enabled plugin exposing a public `api` object is auto-discovered
+even without a bundled skill — the skill is what makes the agent *good* at using it.
+
+Changing a bundled skill later means bumping `metadata.version` and recording the previous body
+in `src/skills/shippedSkills.ts`; that history is what lets existing vaults tell an old default
+from the user's own edits. The file documents the procedure, and a test enforces it.
 
 ## Documentation
 
