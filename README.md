@@ -10,11 +10,11 @@
 
 <br>
 
-Your Smart Second Brain is a **free** and **open-source** Obsidian plugin that makes your vault smarter — better search, an interactive knowledge graph, and an AI assistant that actually knows your notes.
+Your Smart Second Brain is a **free** and **open-source** Obsidian plugin that makes your vault smarter: better search, an interactive knowledge graph, and an AI assistant that actually knows your notes.
 
-Search surfaces your notes, the graph reveals how they connect, and the assistant can draw on both when answering. **Search and the graph work right away with no AI provider** — connecting one unlocks the full agent. Runs on desktop and mobile.
+Search surfaces your notes, the graph reveals how they connect, and the assistant can draw on both when answering. **Search and the graph work right away with no AI provider.** Connecting one unlocks the full agent. Runs on desktop and mobile.
 
-**[smartsecondbrain.dev](https://smartsecondbrain.dev)** — features, setup guides, and documentation.
+**[smartsecondbrain.dev](https://smartsecondbrain.dev)** has the features, setup guides, and documentation.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://github.com/s2b-dev/smart-second-brain/assets/48623649/3e9cb3bc-ea57-4afc-b616-9c9360e39232">
@@ -24,24 +24,24 @@ Search surfaces your notes, the graph reveals how they connect, and the assistan
 
 ## Install
 
-Install **Smart Second Brain** from Obsidian's community plugins and enable it — search and the Smart Graph work immediately, with no configuration.
+Install **Smart Second Brain** from Obsidian's community plugins and enable it. Search and the Smart Graph work immediately, with no configuration.
 
 Add an embedding model to unlock semantic search and graph clustering; add an AI provider to enable the agent. See the [getting started guide](https://smartsecondbrain.dev/start/installation/).
 
 ## Network use
 
-The plugin only makes network requests to the AI providers **you** configure — a local one like Ollama, or cloud APIs such as OpenAI, Anthropic, or OpenRouter — to generate embeddings and chat responses, plus web requests on your agent's behalf when you enable the web skill. Out of the box, nothing leaves your machine, and notes on your privacy list are never sent to untrusted providers. There is no telemetry. See the [privacy documentation](https://smartsecondbrain.dev/privacy/model/) for details.
+The plugin only makes network requests to the AI providers **you** configure (a local one like Ollama, or cloud APIs such as OpenAI, Anthropic, or OpenRouter) to generate embeddings and chat responses, plus web requests on your agent's behalf when you enable the web skill. Out of the box, nothing leaves your machine, and notes on your privacy list are never sent to untrusted providers. There is no telemetry. See the [privacy documentation](https://smartsecondbrain.dev/privacy/model/) for details.
 
 ## Documentation
 
 Everything lives at **[smartsecondbrain.dev](https://smartsecondbrain.dev)**:
 
-- [Getting started](https://smartsecondbrain.dev/start/installation/) — install, first run, connecting a provider
-- [Search](https://smartsecondbrain.dev/search/) — hybrid lexical + semantic search
-- [Graph](https://smartsecondbrain.dev/graph/) — the smart graph view
-- [Agents](https://smartsecondbrain.dev/agents/) — skills, integrations, memory, MCP
-- [Privacy](https://smartsecondbrain.dev/privacy/model/) — what leaves your machine, and what never does
-- How it works — [search](https://smartsecondbrain.dev/search/how-it-works/) and [graph](https://smartsecondbrain.dev/graph/how-it-works/) internals
+- [Getting started](https://smartsecondbrain.dev/start/installation/): install, first run, connecting a provider
+- [Search](https://smartsecondbrain.dev/search/): hybrid lexical + semantic search
+- [Graph](https://smartsecondbrain.dev/graph/): the smart graph view
+- [Agents](https://smartsecondbrain.dev/agents/): skills, integrations, memory, MCP
+- [Privacy](https://smartsecondbrain.dev/privacy/model/): what leaves your machine, and what never does
+- How it works: [search](https://smartsecondbrain.dev/search/how-it-works/) and [graph](https://smartsecondbrain.dev/graph/how-it-works/) internals
 
 ## Development
 
@@ -66,9 +66,9 @@ To try a dev build in a real vault, run `bun run setup-vault` once to symlink `b
 - Report a bug or request a feature [here](https://github.com/s2b-dev/smart-second-brain/issues/new/choose)
 - Ask a question in the [Q&A](https://github.com/s2b-dev/smart-second-brain/discussions/categories/q-a)
 - Share a skill, agent, or workflow in [Show and tell](https://github.com/s2b-dev/smart-second-brain/discussions/categories/show-and-tell)
-- Pull requests welcome — read [CONTRIBUTING.md](CONTRIBUTING.md) first, including how we handle AI-assisted contributions
+- Pull requests welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) first, including how we handle AI-assisted contributions
 
-We initially built this as a university project. That's long finished — we keep developing it in our spare time, as an experimental playground for state-of-the-art AI and as a tool for the Obsidian workflow we're passionate about.
+We initially built this as a university project. That's long finished, but we keep developing it in our spare time, as an experimental playground for state-of-the-art AI and as a tool for the Obsidian workflow we're passionate about.
 
 ## License
 
