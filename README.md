@@ -28,45 +28,20 @@ Install **Smart Second Brain** from Obsidian's community plugins and enable it. 
 
 Add an embedding model to unlock semantic search and graph clustering; add an AI provider to enable the agent. See the [getting started guide](https://smartsecondbrain.dev/start/installation/).
 
-## Network use
+Out of the box, nothing leaves your machine. The only network requests are to the providers you configure, and there is no telemetry — see [privacy](https://smartsecondbrain.dev/privacy/model/).
 
-The plugin only makes network requests to the AI providers **you** configure (a local one like Ollama, or cloud APIs such as OpenAI, Anthropic, or OpenRouter) to generate embeddings and chat responses, plus web requests on your agent's behalf when you enable the web skill. Out of the box, nothing leaves your machine, and notes on your privacy list are never sent to untrusted providers. There is no telemetry. See the [privacy documentation](https://smartsecondbrain.dev/privacy/model/) for details.
+## Features
 
-## Documentation
-
-Everything lives at **[smartsecondbrain.dev](https://smartsecondbrain.dev)**:
-
-- [Getting started](https://smartsecondbrain.dev/start/installation/): install, first run, connecting a provider
-- [Search](https://smartsecondbrain.dev/search/): hybrid lexical + semantic search
-- [Graph](https://smartsecondbrain.dev/graph/): the smart graph view
-- [Agents](https://smartsecondbrain.dev/agents/): skills, integrations, memory, MCP
-- [Privacy](https://smartsecondbrain.dev/privacy/model/): what leaves your machine, and what never does
-- How it works: [search](https://smartsecondbrain.dev/search/how-it-works/) and [graph](https://smartsecondbrain.dev/graph/how-it-works/) internals
-
-## Development
-
-This project uses [Bun](https://bun.sh/) as its package manager.
-
-```bash
-bun install         # install dependencies
-bun run dev         # watch build into build/smart-second-brain/
-bun run build       # production build into build/prod
-bun run check       # svelte-check type checking
-bun run format      # Biome formatter
-bun run lint        # Biome linter
-bun run test        # Vitest unit tests
-```
-
-To try a dev build in a real vault, run `bun run setup-vault` once to symlink `build/smart-second-brain/` into the bundled test vault's plugins folder, then open `integration/S2B Test Vault` in Obsidian and enable the plugin. See [`AGENTS.md`](AGENTS.md) for the full command reference and integration-test setup.
-
-[`AGENTS.md`](AGENTS.md) describes the module structure and conventions.
+- **[Search](https://smartsecondbrain.dev/search/)** that combines keyword matching with meaning, so you find the note you were thinking of rather than the one you typed ([how it works](https://smartsecondbrain.dev/search/how-it-works/))
+- **[Smart Graph](https://smartsecondbrain.dev/graph/)** that groups your vault by topic and draws the connections you never linked by hand ([how it works](https://smartsecondbrain.dev/graph/how-it-works/))
+- **[Agents](https://smartsecondbrain.dev/agents/)** that read and write your notes, with skills, memory, MCP, and integrations with your other plugins
 
 ## Contributing
 
 - Report a bug or request a feature [here](https://github.com/s2b-dev/smart-second-brain/issues/new/choose)
 - Ask a question in the [Q&A](https://github.com/s2b-dev/smart-second-brain/discussions/categories/q-a)
 - Share a skill, agent, or workflow in [Show and tell](https://github.com/s2b-dev/smart-second-brain/discussions/categories/show-and-tell)
-- Pull requests welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) first, including how we handle AI-assisted contributions
+- Pull requests welcome. [CONTRIBUTING.md](CONTRIBUTING.md) has the development setup and how we handle AI-assisted contributions; [AGENTS.md](AGENTS.md) has the architecture, commands, and conventions
 
 We initially built this as a university project. That's long finished, but we keep developing it in our spare time, as an experimental playground for state-of-the-art AI and as a tool for the Obsidian workflow we're passionate about.
 
