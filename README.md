@@ -35,13 +35,6 @@ Out of the box, nothing leaves your machine. The only network requests are to th
 - **[Smart Graph](https://smartsecondbrain.dev/graph/)** that groups your vault by topic and draws the connections you never linked by hand ([how it works](https://smartsecondbrain.dev/graph/how-it-works/))
 - **[Agents](https://smartsecondbrain.dev/agents/)** that read and write your notes, with skills, memory, MCP, and integrations with your other plugins
 
-All of it runs on your phone too:
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/hero-mobile-dark.png">
-  <img alt="Smart Second Brain on mobile: chat answering from notes, with search results below" src="assets/hero-mobile-light.png" width="320">
-</picture>
-
 ## Contributing
 
 - Report a bug or request a feature [here](https://github.com/s2b-dev/smart-second-brain/issues/new/choose)
