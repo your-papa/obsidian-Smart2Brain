@@ -342,8 +342,12 @@ export class PluginDataStore {
 	 * reload silently reverted it.
 	 *
 	 * Failures are caught, logged, and surfaced once so the user learns their settings
-	 * did not persist. Callers that genuinely need to know a write landed should await
-	 * `saveSettingsOrThrow` instead.
+	 * did not persist.
+	 *
+	 * This is for the fire-and-forget setters only. Anything that *awaits* a save is by
+	 * definition persistence-dependent (provider create/rename/delete, `deleteData`) and
+	 * must not be told a write succeeded when it did not — those call
+	 * `saveSettingsOrThrow` and let the failure reach their own caller.
 	 */
 	private async saveSettings(): Promise<void> {
 		try {
@@ -384,7 +388,7 @@ export class PluginDataStore {
 
 	async deleteData(): Promise<void> {
 		this.#data = structuredClone(DEFAULT_SETTINGS);
-		await this.saveSettings();
+		await this.saveSettingsOrThrow();
 	}
 
 	/**
@@ -1256,7 +1260,7 @@ export class PluginDataStore {
 
 	async clearRecentNotes(): Promise<void> {
 		this.#data.recentNotes = [];
-		await this.saveSettings();
+		await this.saveSettingsOrThrow();
 	}
 
 	recordRecentlyOpenedNote(path: string): void {
@@ -1918,7 +1922,7 @@ export class PluginDataStore {
 			isConfigured: configured,
 		};
 
-		await this.saveSettings();
+		await this.saveSettingsOrThrow();
 	}
 
 	async updateProviderMeta(providerId: string, updates: Partial<ProviderInstanceMeta>): Promise<void> {
@@ -1948,7 +1952,7 @@ export class PluginDataStore {
 			};
 		}
 
-		await this.saveSettings();
+		await this.saveSettingsOrThrow();
 	}
 
 	/**
@@ -2011,7 +2015,7 @@ export class PluginDataStore {
 		// registry rather than syncing a single ID.
 		syncAllProviders(this);
 
-		await this.saveSettings();
+		await this.saveSettingsOrThrow();
 	}
 
 	/**
@@ -2095,7 +2099,7 @@ export class PluginDataStore {
 		// SecretStorage — until the next Obsidian reload.
 		unsyncProvider(providerId);
 
-		await this.saveSettings();
+		await this.saveSettingsOrThrow();
 
 		return orphanedIndexIds;
 	}
