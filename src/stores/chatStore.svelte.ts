@@ -1362,6 +1362,13 @@ export class SessionRegistry {
 	 * the user has since edited by hand). Mirrors `graphSelection`'s ambient
 	 * scope — set alongside it everywhere it's assigned. */
 	graphSelectionTopicLabel: string | null = $state(null);
+	/** True when the current `graphSelection` value was republished by background
+	 * vault maintenance (a live patch pruning deleted notes out of the existing
+	 * selection) rather than a new user gesture. A chat tray's per-note dismissals
+	 * must survive maintenance pruning but reset on every real selection change —
+	 * and that distinction can't be inferred from the paths alone, since a user
+	 * picking a smaller selection also shrinks the path set. */
+	graphSelectionIsMaintenance: boolean = $state(false);
 	pendingAttachmentPaths: string[] | null = $state(null);
 	pendingAutoSubmit: boolean = $state(false);
 	/** When set, only the Input bound to this thread path consumes the pending

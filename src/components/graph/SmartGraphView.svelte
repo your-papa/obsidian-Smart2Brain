@@ -870,7 +870,7 @@ function flushLiveUpdate() {
 			const surviving = selectedPaths.filter((path) => !removed.has(path));
 			if (surviving.length !== selectedPaths.length) {
 				canvasComponent?.selectNodesByPaths(surviving);
-				handleSelectionChange(surviving);
+				handleSelectionChange(surviving, true);
 			}
 		}
 
@@ -1210,13 +1210,23 @@ function handleFocusCluster(cluster: number, pan = false, multi = true) {
  * Every path that changes the selection routes through here — canvas lasso,
  * topic label, panel row — so the graph and each open chat's context tray can
  * never disagree about what is selected.
+ *
+ * `isMaintenance` marks the one caller (the live-patch handler below) that
+ * republishes a *shrunk* version of the existing selection because notes were
+ * deleted out from under it — not a new user gesture. A chat tray needs this
+ * distinction verbatim, not inferred from path-set shape: a user picking a
+ * smaller selection (Shift-click, deselecting a topic, drilling into one
+ * cluster) also produces a subset of the prior selection, so shape alone
+ * can't tell the two apart. Per-chat dismissals should survive maintenance
+ * pruning but reset on every real selection change, however it was made.
  */
-function handleSelectionChange(paths: string[]) {
+function handleSelectionChange(paths: string[], isMaintenance = false) {
 	selectedPaths = paths;
 	const messenger = getSessionRegistry();
 	if (messenger) {
 		// Ambient: mirror the live graph selection into every open chat's tray.
 		messenger.graphSelection = [...paths];
+		messenger.graphSelectionIsMaintenance = isMaintenance;
 		// Callers set focusedClusters/selectedPaths before calling in, so this
 		// derivation is already current for the selection just adopted above.
 		messenger.graphSelectionTopicLabel = selectedTopicLabels?.join(", ") ?? null;
@@ -1322,6 +1332,7 @@ async function handleSendToChat() {
 	if (messenger) {
 		// Ambient selection (shown in every chat) …
 		messenger.graphSelection = [...paths];
+		messenger.graphSelectionIsMaintenance = false;
 		messenger.graphSelectionTopicLabel = topicLabel;
 		// … plus a one-shot signal so the just-opened/focused chat grabs focus.
 		messenger.pendingGraphNotes = [...paths];

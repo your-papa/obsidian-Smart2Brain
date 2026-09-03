@@ -23,6 +23,10 @@ interface Props {
 	/** Name of the topic(s) `graphPaths` exactly matches, or null/undefined if
 	 * the selection isn't a whole topic (e.g. Messenger.graphSelectionTopicLabel). */
 	topicLabel?: string | null;
+	/** True when `graphPaths` was republished by background vault maintenance
+	 * (a live patch pruning deleted notes) rather than a new user selection
+	 * gesture (e.g. Messenger.graphSelectionIsMaintenance). */
+	graphSelectionIsMaintenance?: boolean;
 	/** Content attachments (files whose bytes/content are inlined into the message). */
 	attachments?: ChatAttachment[];
 	/** Remove a content attachment. */
@@ -36,6 +40,7 @@ interface Props {
 let {
 	graphPaths = [],
 	topicLabel = null,
+	graphSelectionIsMaintenance = false,
 	attachments = [],
 	onRemoveAttachment,
 	onPromoteToAttachment,
@@ -87,29 +92,26 @@ let graphDismissed = $state(new Set<string>());
 // a single summary chip by default; expand on demand to review/remove individuals.
 let graphExpanded = $state(false);
 // `graphPaths` changes for two different reasons, which need opposite treatment:
-//  1. A genuinely new selection (topic click, panel row, lasso) — may share paths
-//     with the old one (re-selecting the same/an overlapping topic), but the user's
-//     old dismissals shouldn't carry over: without a reset, stale exclusions would
-//     filter fresh paths out of a selection the user never touched, shrinking the
-//     count or (since the topic label requires an exact match) permanently hiding
-//     the name for a selection gesture that has nothing to do with the dismissal.
+//  1. A genuinely new selection gesture (topic click, panel row, lasso, Shift-click,
+//     drilling into one cluster of a larger selection) — may be a subset of, equal
+//     to, or disjoint from the old one, but the user's old dismissals shouldn't
+//     carry over regardless of shape: without a reset, stale exclusions would filter
+//     fresh paths out of a selection the user never touched, and (since the topic
+//     label requires an exact match) permanently hide the name for a selection
+//     gesture that has nothing to do with the earlier dismissal.
 //  2. A background live-patch pruning vault-deleted notes out of the *current*
-//     selection (SmartGraphView's live-patch handler): this republishes a fresh
-//     array too, but it's the same selection minus some notes — a note the user
-//     explicitly dismissed must stay dismissed, not reappear because of unrelated
-//     vault maintenance.
-// Distinguish them by membership rather than array identity: case 2 only ever
-// removes paths (never introduces one, and never brings the count back up), so a
-// *strictly smaller* selection where every remaining path already existed is a
-// prune and must NOT reset dismissals. Anything else — a new path appearing, or
-// the same-size-or-larger selection re-arriving (re-selecting the same topic after
-// editing it by hand) — is case 1 and must reset.
-let previousGraphPaths: string[] = [];
+//     selection (SmartGraphView's live-patch handler): this republishes a fresh,
+//     shrunk array too, but it's the same selection minus some notes — a note the
+//     user explicitly dismissed must stay dismissed, not reappear because of
+//     unrelated vault maintenance.
+// These can't be told apart from the paths alone — a user picking a smaller
+// selection also produces a subset, so shape is not a valid signal (see the prior
+// `isPrune`-by-membership attempt). SmartGraphView knows which case it is by
+// construction (only its live-patch handler sets `graphSelectionIsMaintenance`), so
+// it's threaded through as an explicit flag instead of inferred here.
 $effect(() => {
-	const isPrune =
-		graphPaths.length < previousGraphPaths.length && graphPaths.every((p) => previousGraphPaths.includes(p));
-	if (!isPrune) graphDismissed = new Set();
-	previousGraphPaths = graphPaths;
+	void graphPaths; // establish the dependency; the reset itself is unconditional
+	if (!graphSelectionIsMaintenance) graphDismissed = new Set();
 });
 const activeGraphPaths = $derived(graphPaths.filter((p) => !graphDismissed.has(p)));
 // Once every graph note is dismissed there's nothing to expand.
