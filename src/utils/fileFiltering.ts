@@ -1,5 +1,6 @@
 import { Platform, type TFile, type Vault } from "obsidian";
-import { getData } from "../stores/dataStore.svelte";
+import { getAgentPathSource } from "./agentPathSource";
+import { agentRootDir } from "./agentPaths";
 import { THREAD_DATA_DEDUP_VERSION, inflateThreadData, sniffThreadDataVersion } from "../agent/threadDataCodec";
 import { gunzipPrefixToString, gunzipToString } from "./gzip";
 import { extractTextFromPdf } from "./pdfExtractor";
@@ -70,7 +71,7 @@ function normalizePattern(pattern: string): string {
 	return pattern.trim().replace(/^\/+|\/+$/g, "");
 }
 
-export function matchesPathPattern(filePath: string, pattern: string): boolean {
+function matchesPathPattern(filePath: string, pattern: string): boolean {
 	const normalizedPattern = normalizePattern(pattern);
 	if (!normalizedPattern) return false;
 
@@ -85,7 +86,7 @@ export function matchesPathPattern(filePath: string, pattern: string): boolean {
 	);
 }
 
-export function isInternallyExcludedPath(filePath: string, targetFolder: string): boolean {
+function isInternallyExcludedPath(filePath: string, targetFolder: string): boolean {
 	return matchesPathPattern(filePath, targetFolder);
 }
 
@@ -101,13 +102,13 @@ export function shouldProcessVaultPath(filePath: string, targetFolder: string): 
  * Extensions whose content can be read as UTF-8 text via `vault.cachedRead()`
  * or `vault.read()`. Canvas files are JSON internally and included here.
  */
-export const TEXT_INDEXABLE_EXTENSIONS = new Set(["md", "txt", "csv", "json", "yaml", "yml", "canvas", "chat"]);
+const TEXT_INDEXABLE_EXTENSIONS = new Set(["md", "txt", "csv", "json", "yaml", "yml", "canvas", "chat"]);
 
 /**
  * Extensions whose text is extracted from a binary container rather than read
  * directly. These are indexable, just not via `readTextFile`.
  */
-export const BINARY_TEXT_EXTENSIONS = new Set(["pdf"]);
+const BINARY_TEXT_EXTENSIONS = new Set(["pdf"]);
 
 /**
  * Extensions excluded from the *embedding* index.
@@ -128,7 +129,7 @@ export const BINARY_TEXT_EXTENSIONS = new Set(["pdf"]);
  *     embedding model and a separate image pipeline; until that exists they are
  *     pure noise rather than a missing feature.
  */
-export const NON_EMBEDDABLE_EXTENSIONS = new Set([
+const NON_EMBEDDABLE_EXTENSIONS = new Set([
 	"base",
 	"png",
 	"jpg",
@@ -190,13 +191,8 @@ export function isAgentPath(path: string, agentFolder: string): boolean {
  * treats the file as a normal note, preserving pre-relocation behavior rather than throwing.
  */
 export function isAgentFilePath(path: string): boolean {
-	let agentFolder: string;
-	try {
-		agentFolder = getData().agentFolder;
-	} catch {
-		return false;
-	}
-	return isAgentPath(path, agentFolder);
+	if (!getAgentPathSource()) return false;
+	return isAgentPath(path, agentRootDir());
 }
 
 /**

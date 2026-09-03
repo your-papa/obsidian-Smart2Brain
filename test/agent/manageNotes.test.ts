@@ -25,8 +25,8 @@ vi.mock("../../src/stores/pendingChangesStore.svelte", () => ({
 }));
 
 const mockGetData = vi.fn();
-vi.mock("../../src/stores/dataStore.svelte", () => ({
-	getData: () => mockGetData(),
+vi.mock("../../src/agent/tools/builtInToolDefaults", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../../src/agent/tools/builtInToolDefaults")>()),
 	DEFAULT_TOOLS_CONFIG: {
 		manage_notes: {
 			name: "manage_notes",
@@ -35,9 +35,13 @@ vi.mock("../../src/stores/dataStore.svelte", () => ({
 		},
 	},
 }));
+vi.mock("../../src/stores/dataStore.svelte", () => ({
+	getData: () => mockGetData(),
+}));
 
 const mockResolveVaultFileDetailed = vi.fn();
-vi.mock("../../src/utils/attachments", () => ({
+vi.mock("../../src/utils/pathResolution", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../../src/utils/pathResolution")>()),
 	resolveVaultFileDetailed: (...args: unknown[]) => mockResolveVaultFileDetailed(...args),
 }));
 

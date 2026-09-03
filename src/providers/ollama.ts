@@ -141,7 +141,7 @@ export const ollamaProvider: EmbeddingProviderDefinition = {
 			throw new Error("Ollama requires a server URL");
 		}
 
-		return createTransportedOllamaEmbeddings("ollama", {
+		return createTransportedOllamaEmbeddings({
 			model: modelId,
 			baseUrl: sanitizeBaseUrl(auth.baseUrl),
 		});

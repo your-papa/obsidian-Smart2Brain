@@ -1,12 +1,10 @@
-import { Modal } from "obsidian";
-import { mount, unmount } from "svelte";
+import { useAvailableModels } from "../../hooks/useAvailableModels.svelte";
 import ModalProvider from "../../lib/QueryClientProvider.svelte";
 import type SecondBrainPlugin from "../../main";
-import { useAvailableModels } from "../../hooks/useAvailableModels.svelte";
+import { isMobileUI } from "../../utils/platform";
 import ModelSelectionModalComponent from "./ModelSelectionModal.svelte";
 import { ModelSuggestModal } from "./ModelSuggestModal";
-import { isMobileUI } from "../../utils/platform";
-import { applyModalLayout } from "./modalLayout";
+import { SvelteModal } from "./SvelteModal";
 
 export type ModelType = "chat" | "embedding";
 
@@ -16,9 +14,7 @@ export interface SelectedModel {
 	supportsVision?: boolean;
 }
 
-export class ModelSelectionModal extends Modal {
-	private component: ReturnType<typeof ModelSelectionModalComponent> | null = null;
-	private restoreLayout: (() => void) | null = null;
+export class ModelSelectionModal extends SvelteModal {
 	private plugin: SecondBrainPlugin;
 	private modelType: ModelType;
 	private currentSelection: SelectedModel | null;
@@ -48,7 +44,6 @@ export class ModelSelectionModal extends Modal {
 		if (isMobileUI()) {
 			const models = useAvailableModels();
 			const hydrated = this.modelType === "chat" ? models.hydratedChatModels : models.hydratedEmbeddingModels;
-
 			new ModelSuggestModal(
 				this.app,
 				this.modelType,
@@ -59,25 +54,13 @@ export class ModelSelectionModal extends Modal {
 			).open();
 			return;
 		}
-
 		super.open();
 	}
 
 	onOpen() {
-		this.restoreLayout = applyModalLayout(this, {
-			fullScreenOnPhone: true,
-			width: "min(800px, 90vw)",
-			maxWidth: "90vw",
-			height: "min(600px, 80vh)",
-			maxHeight: "80vh",
-			contentPadding: "0",
-			contentOverflow: "hidden",
-		});
-
 		// Sentence case per Obsidian's plugin UI guidelines.
 		this.setTitle(this.modelType === "chat" ? "Select chat model" : "Select embedding model");
-
-		this.component = mount(
+		this.mountComponent(
 			ModalProvider<{
 				modal: ModelSelectionModal;
 				modelType: ModelType;
@@ -85,32 +68,27 @@ export class ModelSelectionModal extends Modal {
 				onSelect: (model: SelectedModel | null) => void;
 			}>,
 			{
-				target: this.contentEl,
-				props: {
-					plugin: this.plugin,
-					component: ModelSelectionModalComponent,
-					componentProps: {
-						modal: this,
-						modelType: this.modelType,
-						currentSelection: this.currentSelection,
-						onSelect: (model: SelectedModel | null) => {
-							this.onSelect(model);
-							this.close();
-						},
+				plugin: this.plugin,
+				component: ModelSelectionModalComponent,
+				componentProps: {
+					modal: this,
+					modelType: this.modelType,
+					currentSelection: this.currentSelection,
+					onSelect: (model: SelectedModel | null) => {
+						this.onSelect(model);
+						this.close();
 					},
 				},
 			},
+			{
+				fullScreenOnPhone: true,
+				width: "min(800px, 90vw)",
+				maxWidth: "90vw",
+				height: "min(600px, 80vh)",
+				maxHeight: "80vh",
+				contentPadding: "0",
+				contentOverflow: "hidden",
+			},
 		);
-	}
-
-	onClose() {
-		this.restoreLayout?.();
-		this.restoreLayout = null;
-
-		if (this.component) {
-			unmount(this.component);
-			this.component = null;
-		}
-		this.contentEl.empty();
 	}
 }

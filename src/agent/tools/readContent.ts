@@ -3,7 +3,7 @@ import { tool } from "@langchain/core/tools";
 import { HumanMessage } from "@langchain/core/messages";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { z } from "zod";
-import { DEFAULT_TOOLS_CONFIG, getData, getReadContentDescription } from "../../stores/dataStore.svelte";
+import { DEFAULT_TOOLS_CONFIG, getReadContentDescription } from "./builtInToolDefaults";
 import { getPendingChangesStore } from "../../stores/pendingChangesStore.svelte";
 import {
 	isImageExtension,
@@ -327,7 +327,7 @@ async function readExcalidrawContent(app: App, file: TFile, maxLength: number): 
 	return `Excalidraw drawing "${file.path}" contains no elements. The drawing appears to be empty.`;
 }
 
-export interface ReadNoteContentOptions {
+interface ReadNoteContentOptions {
 	imageProcessor?: BaseChatModel;
 	pdfProcessor?: BaseChatModel;
 	offset?: number;
@@ -345,10 +345,9 @@ export interface ReadNoteContentOptions {
  * shared with the public S2B api (`api.readContent`). Applies privacy checks and
  * uses the provided vision/PDF processors when the target needs analysis.
  */
-export async function readNoteContent(app: App, path: string, opts: ReadNoteContentOptions = {}): Promise<string> {
+async function readNoteContent(app: App, path: string, opts: ReadNoteContentOptions = {}): Promise<string> {
 	const agentId = opts.agentId ?? "";
 	const { imageProcessor, pdfProcessor, offset, length } = opts;
-	const pluginData = getData();
 
 	{
 		const { subpath, path: normalizedPath } = extractReferenceInfo(path);
@@ -589,7 +588,6 @@ export function createReadContentTool(
 	pdfProcessor?: BaseChatModel,
 	agentId = "",
 ) {
-	const pluginData = getData();
 	const defaultToolConfig = DEFAULT_TOOLS_CONFIG.read_content;
 	const getToolConfig = () => resolveToolAgent(agentId).toolsConfig.read_content;
 

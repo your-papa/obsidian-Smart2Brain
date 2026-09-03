@@ -19,7 +19,7 @@ type Timing =
 	| { kind: "span"; name: string; at: number; duration: number; blocking: boolean };
 
 /** A single recorded phase in a startup run (offset/duration relative to the first mark). */
-export interface StartupPhase {
+interface StartupPhase {
 	kind: "mark" | "span";
 	name: string;
 	/** ms since the first recorded mark */

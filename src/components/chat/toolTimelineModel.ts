@@ -1,4 +1,4 @@
-import type { AssistantTimelineEvent, ToolCallStatus } from "../../stores/chatStore.svelte";
+import type { AssistantTimelineEvent, ToolCallStatus } from "../../stores/chatTimeline";
 
 /**
  * A single tool call in the rendered timeline. When a tool ran inside a

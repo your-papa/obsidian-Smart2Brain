@@ -2,7 +2,8 @@
 import { DEFAULT_AGENT_ICON, type AgentConfig } from "../../types/plugin";
 import { getData } from "../../stores/dataStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
-import { chatHistoryContainsPrivateNotes, getSessionRegistry } from "../../stores/chatStore.svelte";
+import { getSessionRegistry } from "../../stores/chatStore.svelte";
+import { chatHistoryContainsPrivateNotes } from "../../stores/chatTimeline";
 import Icon from "../ui/Icon.svelte";
 import { PrivacyWarningModal } from "../modal/PrivacyWarningModal";
 import { AgentEditorModal } from "../modal/AgentEditorModal";

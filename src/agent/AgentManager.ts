@@ -4,7 +4,7 @@ import { Notice, normalizePath, Platform, TFile, type WorkspaceLeaf } from "obsi
 import { installObsidianFetch } from "../lib/obsidianFetch";
 import { invalidateProviderState } from "../lib/query";
 import type SecondBrainPlugin from "../main";
-import type { ChatModel } from "../stores/chatStore.svelte";
+import type { ChatModel } from "../stores/chatTimeline";
 import { getData } from "../stores/dataStore.svelte";
 import { getPendingChangesStore } from "../stores/pendingChangesStore.svelte";
 import { BUILT_IN_TOOL_IDS, type BuiltInToolId, type AgentConfig, type SkillMetadata } from "../types/plugin";
@@ -18,13 +18,13 @@ import {
 } from "../providers/openrouterModels";
 import type { VisibleNoteRef } from "../hooks/useVisibleNotes.svelte";
 import type { SelectionRef } from "../hooks/useSelection.svelte";
-import type { GraphNoteRef } from "../stores/chatStore.svelte";
+import type { GraphNoteRef } from "../stores/chatTimeline";
 
+import { ProviderRegistry } from "../providers/registry";
 import {
 	ProviderAuthError,
 	ProviderEndpointError,
 	ProviderNotFoundError,
-	ProviderRegistry,
 	ProviderRegistryError,
 	type AuthObject,
 	getProviderDefinition,
@@ -94,7 +94,6 @@ import { getRegistry } from "../providers/registry";
 import { ensureProviderRegistered } from "../providers/registrySync";
 
 import type { StructuredToolInterface } from "@langchain/core/tools";
-import type { MultiServerMCPClient } from "@langchain/mcp-adapters";
 
 const URL_REGEX = /https?:\/\/[^\s]+/g;
 const LANGCHAIN_TROUBLESHOOT_REGEX = /\n*Troubleshooting URL: https:\/\/docs\.langchain\.com\S*/g;
@@ -498,7 +497,6 @@ export class AgentManager {
 							);
 						});
 				},
-				defaultPrompt: DEFAULT_AGENT_PROMPT,
 			},
 			{ title: `System Prompt — ${agent.name}`, showDiff: true },
 		).open();
@@ -550,7 +548,6 @@ export class AgentManager {
 							);
 						});
 				},
-				defaultPrompt: bundled.content,
 			},
 			{ title: `Skill — ${skillName}`, showDiff: true },
 		).open();

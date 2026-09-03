@@ -15,7 +15,7 @@ import type { ProviderRegistry } from "../providers/registry";
 import { getPlugin } from "../stores/state.svelte";
 import type { VisibleNoteRef } from "../hooks/useVisibleNotes.svelte";
 import type { SelectionRef } from "../hooks/useSelection.svelte";
-import type { GraphNoteRef } from "../stores/chatStore.svelte";
+import type { GraphNoteRef } from "../stores/chatTimeline";
 import type { ChatAttachment, ReviewStatusRef, ThreadError } from "../types/shared";
 import {
 	AiTransportDowngradeRequiredError,
@@ -154,7 +154,6 @@ export interface AgentOptions {
 	telemetry?: Telemetry;
 	threadStore?: ThreadStore;
 	checkpointer?: BaseCheckpointSaver;
-	defaultPrompt?: string;
 }
 
 /**
@@ -321,7 +320,6 @@ export class Agent {
 	private readonly telemetry?: Telemetry;
 	private readonly threadStore?: ThreadStore;
 	private readonly registry: ProviderRegistry;
-	private readonly defaultPrompt: string;
 	/** Runnables memoized by agent-config cacheKey (built by AgentManager).
 	 *  Insertion-ordered, and used as an LRU — see {@link RUNNABLE_CACHE_MAX}. */
 	private readonly runnableCache = new Map<string, AgentRunnable>();
@@ -331,7 +329,6 @@ export class Agent {
 		this.telemetry = options.telemetry;
 		this.threadStore = options.threadStore;
 		this.checkpointer = this.wrapCheckpointer(options.checkpointer ?? new MemorySaver());
-		this.defaultPrompt = options.defaultPrompt ?? "You are a privacy-focused assistant.";
 		Logger.debug("agent.init", {
 			hasTelemetry: Boolean(this.telemetry),
 			hasThreadStore: Boolean(this.threadStore),

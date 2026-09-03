@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { AIMessage, type BaseMessage, HumanMessage, ToolMessage } from "@langchain/core/messages";
-import { ChatSession, buildCheckpointGraph, type CheckpointGraphState } from "../../src/stores/chatStore.svelte";
+import { ChatSession } from "../../src/stores/chatStore.svelte";
+import { buildCheckpointGraph, type CheckpointGraphState } from "../../src/stores/chatTimeline";
 import { PendingChangesStore, initPendingChangesStore } from "../../src/stores/pendingChangesStore.svelte";
 import type { ChatAttachment } from "../../src/types/shared";
 import type { CheckpointHistoryItem } from "../../src/agent/Agent";

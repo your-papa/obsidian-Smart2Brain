@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { toolHasConfigurableSettings } from "../../src/agent/builtInToolMeta";
+import { toolHasConfigurableSettings } from "../../src/agent/tools/builtInToolDefaults";
 import { BUILT_IN_TOOL_IDS } from "../../src/types/plugin";
 
 /*

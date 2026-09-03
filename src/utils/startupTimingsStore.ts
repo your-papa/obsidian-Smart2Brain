@@ -20,7 +20,7 @@ const STORAGE_FILE = "data/startup-timings.json";
 const MAX_RUNS = 20;
 
 /** One persisted startup run: the profiler record plus a wall-clock timestamp. */
-export interface PersistedStartupRun extends StartupRecord {
+interface PersistedStartupRun extends StartupRecord {
 	/** ISO 8601 wall-clock time the run was recorded. */
 	timestamp: string;
 }

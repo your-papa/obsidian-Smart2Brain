@@ -1,21 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// agentPaths resolves everything through getData(): the configurable agent root, and each
-// agent's *current* display name (its folder is name-derived, not id-derived).
+import { installAgentPathSource } from "../../src/utils/agentPathSource";
+
+// agentPaths resolves everything through the installed AgentPathSource: the configurable
+// agent root, and each agent's *current* display name (its folder is name-derived, not
+// id-derived). The data store installs itself at runtime; tests install a stand-in.
 const state: { agentFolder: string; agents: Record<string, { id: string; name?: string }> | undefined } = {
 	agentFolder: "Agents",
 	agents: { a1: { id: "a1", name: "S2B Agent" } },
 };
-vi.mock("../../src/stores/dataStore.svelte", () => ({
-	getData: () => ({
-		get agentFolder() {
-			return state.agentFolder;
-		},
-		get agents() {
-			return state.agents;
-		},
-	}),
-}));
+installAgentPathSource({
+	agentFolder: () => state.agentFolder,
+	agentName: (agentId) => state.agents?.[agentId]?.name,
+});
 
 import {
 	agentDefinitionPath,

@@ -149,7 +149,7 @@ export interface SmartGraphSettings {
 	/** Whether to render arrows for directed wiki links */
 	directedWikiEdges: boolean;
 	/** Chat model used for LLM-powered graph features (e.g., cluster labeling) */
-	graphChatModel: import("../stores/chatStore.svelte").ChatModel | null;
+	graphChatModel: import("../stores/chatTimeline").ChatModel | null;
 	/** Whether to automatically generate cluster labels after clustering */
 	autoLabelClusters: boolean;
 	/** When true, only include markdown files in the graph; otherwise all indexable files */
@@ -232,7 +232,7 @@ export const THEME_COLOR_VARS = [
  * Parse HSL components (h 0-360, s 0-100, l 0-100) from a CSS color string.
  * Supports hex, rgb(), and hsl() formats. Returns [0, 70, 55] as fallback.
  */
-export function parseHSL(color: string): [number, number, number] {
+function parseHSL(color: string): [number, number, number] {
 	const s = color.trim();
 
 	// hsl(H, S%, L%)

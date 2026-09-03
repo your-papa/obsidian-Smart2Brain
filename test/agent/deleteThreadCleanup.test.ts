@@ -39,7 +39,6 @@ vi.mock("../../src/agent/ObsidianChatManager", () => ({
 
 vi.mock("../../src/stores/dataStore.svelte", () => ({
 	getData: () => ({ targetFolder: "Chats" }),
-	DEFAULT_TOOLS_CONFIG: {},
 }));
 
 import { AgentManager } from "../../src/agent/AgentManager";

@@ -109,7 +109,7 @@ const TOPIC_SURFACE_GAP = 8;
  * drifted apart. Note-level edges are left alone — their weights are cosine
  * scores and small link counts that already behave.
  */
-export function weightPull(link: LayoutLink): number {
+function weightPull(link: LayoutLink): number {
 	const source = link.source as LayoutNode;
 	const target = link.target as LayoutNode;
 	if (source?.kind !== "topic" && target?.kind !== "topic") return 1;
@@ -139,7 +139,7 @@ export function weightPull(link: LayoutLink): number {
  * resolved to node objects (with their `kind`) once the link force
  * initializes — before that, callers may hold string ids.
  */
-export function makeWeightedLinkDistance(
+function makeWeightedLinkDistance(
 	effectiveLinkDistance: number,
 	nodeSize: number,
 	links: readonly LayoutLink[],

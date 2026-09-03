@@ -26,12 +26,11 @@ vi.mock("../../src/lib/secretStorage", () => ({
 	listSecrets: vi.fn(() => []),
 }));
 
+import { DEFAULT_TOOLS_CONFIG } from "../../src/agent/tools/builtInToolDefaults";
+import { DEFAULT_AGENT_ID, createDefaultAgentConfig } from "../../src/stores/agentDefaults";
 import {
 	PluginDataStore,
 	DEFAULT_SETTINGS,
-	DEFAULT_AGENT_ID,
-	DEFAULT_TOOLS_CONFIG,
-	createDefaultAgentConfig,
 	createData,
 	__resetPluginDataStoreForTests,
 	AddChatModelError,

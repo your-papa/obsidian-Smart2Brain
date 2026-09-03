@@ -1,5 +1,5 @@
 <script lang="ts">
-import type { BranchInfo } from "../../stores/chatStore.svelte";
+import type { BranchInfo } from "../../stores/chatTimeline";
 import { icon } from "../../utils/utils";
 
 interface Props {

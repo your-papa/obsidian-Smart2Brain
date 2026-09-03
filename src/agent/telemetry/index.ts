@@ -1,2 +1,2 @@
-export { type Telemetry, NullTelemetry } from "./Telemetry";
-export { LangSmithTelemetry, type LangSmithTelemetryOptions } from "./LangSmithTelemetry";
+export type { Telemetry } from "./Telemetry";
+export { LangSmithTelemetry } from "./LangSmithTelemetry";

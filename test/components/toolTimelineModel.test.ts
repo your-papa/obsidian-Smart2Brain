@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { AssistantTimelineEvent } from "../../src/stores/chatStore.svelte";
+import type { AssistantTimelineEvent } from "../../src/stores/chatTimeline";
 import {
 	buildStepsFromEvents,
 	foldSubAgentChildren,

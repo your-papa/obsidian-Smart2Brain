@@ -23,7 +23,7 @@ const MAX_DESCRIPTION_LENGTH = 1024;
 /** Maximum length for compatibility field */
 const MAX_COMPATIBILITY_LENGTH = 500;
 
-export interface ValidationError {
+interface ValidationError {
 	field: string;
 	message: string;
 }
@@ -92,7 +92,7 @@ export function validateDescription(description: string): ValidationResult {
  * @param compatibility - The compatibility string to validate
  * @returns Validation result with any errors
  */
-export function validateCompatibility(compatibility: string | undefined): ValidationResult {
+function validateCompatibility(compatibility: string | undefined): ValidationResult {
 	const errors: ValidationError[] = [];
 
 	if (compatibility && compatibility.length > MAX_COMPATIBILITY_LENGTH) {

@@ -984,7 +984,7 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 		config: RunnableConfig,
 		checkpoint: Checkpoint,
 		metadata: CheckpointMetadata,
-		newVersions: Record<string, number | string>,
+		_newVersions: Record<string, number | string>,
 	): Promise<RunnableConfig> {
 		const threadId = config.configurable?.thread_id;
 		const checkpointId = checkpoint.id;
@@ -1046,7 +1046,7 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 		};
 	}
 
-	async putWrites(config: RunnableConfig, writes: PendingWrite[], taskId: string): Promise<void> {
+	async putWrites(config: RunnableConfig, writes: PendingWrite[], _taskId: string): Promise<void> {
 		const threadId = config.configurable?.thread_id;
 		const checkpointId = config.configurable?.checkpoint_id;
 

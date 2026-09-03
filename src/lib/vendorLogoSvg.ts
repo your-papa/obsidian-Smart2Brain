@@ -85,9 +85,6 @@ function renderVendorLogoSvg(vendorId: string): string | null {
 }
 
 /** Whether this vendor has artwork, without paying for the render. */
-export function hasVendorLogo(vendorId: string | null | undefined): boolean {
-	return !!vendorId && vendorId in VENDOR_LOGO_COMPONENTS;
-}
 
 /**
  * A detached `<svg>` element for the vendor, or null when unknown. Each call

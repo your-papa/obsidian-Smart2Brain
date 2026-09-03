@@ -1,11 +1,4 @@
-import { type App, TFile } from "obsidian";
 import { IMAGE_EXTENSIONS, PDF_EXTENSIONS, TEXT_EXTENSIONS } from "../types/shared";
-import {
-	type ResolveVaultFileResult,
-	resolveVaultFileDetailed as resolveVaultFileDetailedShared,
-} from "./pathResolution";
-
-export type { ResolveVaultFileResult } from "./pathResolution";
 
 /**
  * Determines MIME type from file extension.
@@ -77,27 +70,4 @@ export function toBase64DataUri(buffer: ArrayBuffer, mimeType: string): string {
  */
 export function toBase64(buffer: ArrayBuffer): string {
 	return arrayBufferToBase64(buffer);
-}
-
-/**
- * Resolves a vault path to a TFile, handling both exact paths and basename-only references.
- * Obsidian wiki-links like ![[image.png]] may omit the folder path.
- */
-export function resolveVaultFile(app: App, path: string): TFile | null {
-	const result = resolveVaultFileDetailed(app, path);
-	return result.status === "found" ? result.file : null;
-}
-
-/**
- * Resolves a vault path to a TFile with explicit status for not-found vs ambiguous matches.
- */
-export function resolveVaultFileDetailed(app: App, path: string): ResolveVaultFileResult {
-	return resolveVaultFileDetailedShared(app, path);
-}
-
-/**
- * Reads a vault file as binary and returns the ArrayBuffer.
- */
-export async function readVaultBinary(app: App, file: TFile): Promise<ArrayBuffer> {
-	return app.vault.readBinary(file);
 }

@@ -2,7 +2,7 @@
 import { onMount } from "svelte";
 import type { BuiltInToolId } from "../../types/plugin";
 import type SecondBrainPlugin from "../../main";
-import { getToolDisplayName } from "../../agent/builtInToolMeta";
+import { getToolDisplayName } from "../../agent/tools/builtInToolDefaults";
 import ToolConfigForm from "./ToolConfigForm.svelte";
 import type { ToolConfigAccessors, ToolConfigModal } from "./ToolConfigModal";
 

@@ -43,13 +43,13 @@ export type AuthValidationResult = { valid: true } | { valid: false; error: stri
  *  - `apiKey`: store the returned key in the provider's `apiKey` auth field (e.g. OpenRouter).
  *  - `session`: the flow already persisted its own session store (e.g. Codex) — nothing to store.
  */
-export type OAuthSignInResult = { kind: "apiKey"; apiKey: string } | { kind: "session" };
+type OAuthSignInResult = { kind: "apiKey"; apiKey: string } | { kind: "session" };
 
 /**
  * Declares that a provider supports a browser-based OAuth sign-in flow, so the setup
  * modal can render a uniform sign-in UI without hard-coding per-provider branches.
  */
-export interface ProviderOAuthCapability {
+interface ProviderOAuthCapability {
 	/** Label for the sign-in tab + CTA button, e.g. "ChatGPT", "OpenRouter". */
 	label: string;
 

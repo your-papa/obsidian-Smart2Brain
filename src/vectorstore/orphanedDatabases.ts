@@ -21,7 +21,7 @@ import { Logger } from "../utils/logging";
 import { type DeleteDatabaseResult, deleteDatabase, getDbName } from "./types";
 
 /** Prefix shared by every HNSW vector database (`HNSWVectorStore`'s `DB_NAME_PREFIX`). */
-export const HNSW_DB_PREFIX = "s2b-hnsw";
+const HNSW_DB_PREFIX = "s2b-hnsw";
 
 /**
  * Suffix of the pre-schema-v3 sidecar database the `hnsw` library owned. Since
@@ -29,7 +29,7 @@ export const HNSW_DB_PREFIX = "s2b-hnsw";
  * upgrade, but an index that was never reopened since still carries one — and
  * it is the largest single object on disk (every vector, as doubles).
  */
-export const LEGACY_SIDECAR_SUFFIX = "-hnsw-index";
+const LEGACY_SIDECAR_SUFFIX = "-hnsw-index";
 
 export interface OrphanedDatabase {
 	name: string;
@@ -58,7 +58,7 @@ export function databaseNamesForIndex(vaultId: string, indexId: string): [main: 
 }
 
 /** Whether this runtime can enumerate databases at all (`indexedDB.databases()` is optional). */
-export function canEnumerateDatabases(): boolean {
+function canEnumerateDatabases(): boolean {
 	return typeof indexedDB !== "undefined" && typeof indexedDB.databases === "function";
 }
 

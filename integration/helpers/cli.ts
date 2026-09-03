@@ -141,7 +141,7 @@ function summarizePersistedChat(path: string): PersistedChatSummary | null {
 	};
 }
 
-export function listPersistedChatSummaries(): PersistedChatSummary[] {
+function listPersistedChatSummaries(): PersistedChatSummary[] {
 	try {
 		return readdirSync(CHAT_FILES_DIR)
 			.filter((name) => name.endsWith(".chat"))
@@ -192,20 +192,6 @@ export function domText(selector: string): string {
 export function domCount(selector: string): number {
 	const result = obsidian(`dev:dom selector='${selector}' total`, { ignoreError: true });
 	return Number.parseInt(result, 10) || 0;
-}
-
-/**
- * Get innerHTML of a DOM element.
- */
-export function domInner(selector: string): string {
-	return obsidian(`dev:dom selector='${selector}' inner`, { ignoreError: true });
-}
-
-/**
- * Get an attribute value from a DOM element.
- */
-export function domAttr(selector: string, attr: string): string {
-	return obsidian(`dev:dom selector='${selector}' attr=${attr}`, { ignoreError: true });
 }
 
 /**
@@ -293,13 +279,6 @@ export function closeAllModals({ maxPasses = 24 } = {}): void {
 			ignoreError: true,
 		});
 	}
-}
-
-/**
- * Take a screenshot and save to the given path.
- */
-export function screenshot(path: string): void {
-	obsidian(`dev:screenshot path="${path}"`);
 }
 
 /**

@@ -10,7 +10,6 @@ import {
 	scheduleBulkRun,
 } from "./bulkPacing";
 import { compileFilter, matchesPathFilter, matchesSearchFilter } from "../search/searchFilters";
-import { extractSearchTerms } from "../search/searchTermUtils";
 import { createQueryPlan, type QueryPlan } from "../search/queryPlan";
 import {
 	hasLexicalAliasSignal,
@@ -621,10 +620,6 @@ export class LexicalSearchService {
 		}
 
 		return undefined;
-	}
-
-	private extractSearchTerms(query: string): string[] {
-		return extractSearchTerms(query);
 	}
 
 	private buildQueryPlan(query: string | undefined): QueryPlan | null {

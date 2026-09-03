@@ -35,7 +35,7 @@
  * double-weights those four queries, making a single failure look like two. Keeping
  * them apart also means only this tier pays the recency-fixture setup cost.
  */
-export type JudgmentTier = "core" | "hard" | "recency" | "reformulation";
+type JudgmentTier = "core" | "hard" | "recency" | "reformulation";
 
 /**
  * A reformulation case: one information need, several phrasings of it.
@@ -97,7 +97,7 @@ export interface ReformulationJudgment {
 export type SearchAlgorithm = "lexical" | "semantic" | "hybrid";
 
 /** The difficulty axis a `hard` case probes; used to group benchmark output. */
-export type HardAxis =
+type HardAxis =
 	| "multi-hop"
 	| "cross-lingual"
 	| "long-context"

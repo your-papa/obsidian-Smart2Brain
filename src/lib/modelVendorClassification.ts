@@ -11,7 +11,7 @@ export interface UiClassifiableModel {
 	families?: string[];
 }
 
-export const UI_VENDOR_IDS = [
+const UI_VENDOR_IDS = [
 	"openai",
 	"anthropic",
 	"google",
@@ -55,12 +55,12 @@ const VENDOR_ID_ALIASES: Record<string, string> = {
  * claude-opus-latest`), which is the same lab as `anthropic` and must resolve
  * to the same logo rather than reading as an unknown vendor.
  */
-export function normalizeVendorId(rawVendor: string): string {
+function normalizeVendorId(rawVendor: string): string {
 	const withoutAliasMarker = rawVendor.startsWith("~") ? rawVendor.slice(1) : rawVendor;
 	return VENDOR_ID_ALIASES[withoutAliasMarker] ?? withoutAliasMarker;
 }
 
-export type UnclassifiedUiModelReason = "no_vendor_match" | "vendor_not_in_ui";
+type UnclassifiedUiModelReason = "no_vendor_match" | "vendor_not_in_ui";
 
 export interface UnclassifiedUiModel {
 	provider: string;

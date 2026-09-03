@@ -2,10 +2,11 @@ import { type App, normalizePath, type TFile } from "obsidian";
 import { tool } from "@langchain/core/tools";
 import type { RunnableConfig } from "@langchain/core/runnables";
 import { z } from "zod";
-import { DEFAULT_TOOLS_CONFIG, getData } from "../../stores/dataStore.svelte";
+import { getData } from "../../stores/dataStore.svelte";
+import { DEFAULT_TOOLS_CONFIG } from "./builtInToolDefaults";
 import { getPendingChangesStore } from "../../stores/pendingChangesStore.svelte";
 import type { PendingChange } from "../../types/shared";
-import { resolveVaultFileDetailed } from "../../utils/attachments";
+import { resolveVaultFileDetailed } from "../../utils/pathResolution";
 import { memoriesDir } from "../../utils/agentPaths";
 import { getIndexableVaultFiles, isTextIndexableFile, shouldProcessVaultPath } from "../../utils/fileFiltering";
 import { normalizeVaultPath } from "../../utils/pathUtils";
@@ -467,7 +468,7 @@ function isMemoryChange(change: PendingChange, folder: string): boolean {
  * @param toolCallId groups the staged changes; defaults to a fresh UUID when the
  *   caller has no run id (e.g. the api path outside a tool run).
  */
-export async function stageNoteOperations(
+async function stageNoteOperations(
 	app: App,
 	operations: ManageNotesInput["operations"],
 	threadId: string,

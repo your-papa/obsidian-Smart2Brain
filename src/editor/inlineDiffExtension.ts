@@ -225,12 +225,6 @@ function buildDetailBody(
  * actually built (well past plugin load). If `WidgetType` is somehow missing,
  * the inline-diff widgets degrade instead of taking down the plugin.
  */
-type PendingGroupWidget = WidgetType & {
-	entryId: string;
-	groupIndex: number;
-	groupTotal: number;
-};
-
 interface WidgetClasses {
 	PendingGroupWidget: new (
 		entryId: string,

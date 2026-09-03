@@ -22,6 +22,15 @@ vi.mock("../../src/stores/pendingChangesStore.svelte", () => ({
 }));
 
 // Mock dataStore
+vi.mock("../../src/agent/tools/builtInToolDefaults", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../../src/agent/tools/builtInToolDefaults")>()),
+	DEFAULT_TOOLS_CONFIG: {
+		manage_notes: {
+			name: "manage_notes",
+			description: "Manage notes",
+		},
+	},
+}));
 vi.mock("../../src/stores/dataStore.svelte", () => ({
 	getData: () => ({
 		getAgent: () => undefined,
@@ -35,12 +44,6 @@ vi.mock("../../src/stores/dataStore.svelte", () => ({
 			},
 		}),
 	}),
-	DEFAULT_TOOLS_CONFIG: {
-		manage_notes: {
-			name: "manage_notes",
-			description: "Manage notes",
-		},
-	},
 }));
 
 // Mock uuid
@@ -50,7 +53,8 @@ vi.mock("../../src/utils/uuid7Validator", () => ({
 
 // Mock attachments
 const mockResolveVaultFileDetailed = vi.fn();
-vi.mock("../../src/utils/attachments", () => ({
+vi.mock("../../src/utils/pathResolution", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../../src/utils/pathResolution")>()),
 	resolveVaultFileDetailed: (...args: unknown[]) => mockResolveVaultFileDetailed(...args),
 }));
 

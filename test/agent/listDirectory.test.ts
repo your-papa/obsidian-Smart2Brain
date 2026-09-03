@@ -13,14 +13,19 @@ vi.mock("../../src/stores/pendingChangesStore.svelte", () => ({
 }));
 
 const mockGetData = vi.fn();
-vi.mock("../../src/stores/dataStore.svelte", () => ({
-	getData: () => mockGetData(),
+vi.mock("../../src/agent/tools/builtInToolDefaults", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../../src/agent/tools/builtInToolDefaults")>()),
 	DEFAULT_TOOLS_CONFIG: {
 		list_directory: {
 			name: "list_directory",
 			description: "List directories and files in the vault.",
 		},
 	},
+}));
+import { installAgentPathSource } from "../../src/utils/agentPathSource";
+installAgentPathSource({ agentFolder: () => "Agents", agentName: () => undefined });
+vi.mock("../../src/stores/dataStore.svelte", () => ({
+	getData: () => mockGetData(),
 }));
 
 import type { App } from "obsidian";

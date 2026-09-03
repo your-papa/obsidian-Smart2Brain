@@ -15,7 +15,6 @@
  * - "tag": tag match incl. hierarchical (e.g. "#ml" matches "#ml/transformers")
  * - "extension": file extension (e.g. "md", "pdf")
  * - "paths": explicit frozen path list (for semantic clusters / lasso selections)
- * - "query": semantic/lexical/hybrid search query, resolved eagerly to a paths list
  * - "property": frontmatter property match — key exists, or key equals one of `values`
  */
 export type ViewFilterLeaf =
@@ -23,7 +22,6 @@ export type ViewFilterLeaf =
 	| { type: "tag"; value: string }
 	| { type: "extension"; value: string }
 	| { type: "paths"; value: string[] }
-	| { type: "query"; value: string; algorithm: "lexical" | "semantic" | "hybrid" }
 	| { type: "property"; value: string; values?: string[] };
 
 /**

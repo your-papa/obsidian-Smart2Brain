@@ -12,7 +12,7 @@
  * - baseUrl: Base URL for the API endpoint
  * - headers: Custom headers for API requests
  */
-export type AuthObjectKey = "apiKey" | "baseUrl" | "headers";
+type AuthObjectKey = "apiKey" | "baseUrl" | "headers";
 
 export type OpenAIAuthMode = "apiKey" | "codex";
 
@@ -79,12 +79,7 @@ export interface CodexSession {
 /**
  * Auth field definition with required: true
  */
-export type RequiredAuthField = AuthFieldDefinition & { required: true };
-
-/**
- * Auth field definition with required: false
- */
-export type OptionalAuthField = AuthFieldDefinition & { required: false };
+type RequiredAuthField = AuthFieldDefinition & { required: true };
 
 /**
  * Provider auth configuration that requires at least one field to be required.

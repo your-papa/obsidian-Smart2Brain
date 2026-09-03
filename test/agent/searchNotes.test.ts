@@ -78,9 +78,12 @@ let mockStoredDescription = "default description (embeddings available)";
 
 // The two description strings are inlined rather than pulled from constants: the factory
 // is hoisted above any `const` declaration, so it cannot reference one.
-vi.mock("../../src/stores/dataStore.svelte", () => ({
+vi.mock("../../src/agent/tools/builtInToolDefaults", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../../src/agent/tools/builtInToolDefaults")>()),
 	getSearchNotesDescription: (hasIndex: boolean) =>
 		hasIndex ? "default description (embeddings available)" : "default description (lexical only)",
+}));
+vi.mock("../../src/stores/dataStore.svelte", () => ({
 	getData: () => ({
 		getSearchEmbedModel: vi.fn().mockReturnValue(null),
 		getEmbedModels: vi.fn().mockReturnValue({}),

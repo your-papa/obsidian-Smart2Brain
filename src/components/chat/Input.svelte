@@ -4,14 +4,15 @@ import { selectChatModelAction, showActionNotice } from "../../utils/actionNotic
 import { onDestroy, onMount, untrack } from "svelte";
 import { useAvailableModels } from "../../hooks/useAvailableModels.svelte";
 import { EmbeddableMarkdownEditor } from "../../lib/editor";
-import { MessageState, type SessionRegistry } from "../../stores/chatStore.svelte";
+import { type SessionRegistry } from "../../stores/chatStore.svelte";
+import { MessageState } from "../../stores/chatTimeline";
 import { getPlugin } from "../../stores/state.svelte";
 import { icon } from "../../utils/utils";
 import { buildUsageEstimate, estimateContextUsageBreakdown } from "../../utils/tokenEstimator";
 import type { ChatAttachment } from "../../types/shared";
 import type { VisibleNote, VisibleNoteRef } from "../../hooks/useVisibleNotes.svelte";
 import type { SelectionRef } from "../../hooks/useSelection.svelte";
-import type { GraphNoteRef } from "../../stores/chatStore.svelte";
+import type { GraphNoteRef } from "../../stores/chatTimeline";
 import { mimeFromExtension } from "../../utils/attachments";
 import { extractObsidianDraggedPaths, hasObsidianFileDrag } from "../../utils/obsidianDrag";
 import { getData } from "../../stores/dataStore.svelte";

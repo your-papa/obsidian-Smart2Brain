@@ -13,7 +13,8 @@ import Dropdown from "../../components/ui/Dropdown.svelte";
 import Icon from "../../components/ui/Icon.svelte";
 import Toggle from "../../components/ui/Toggle.svelte";
 import { getProviderDefinition } from "../../providers/index";
-import { DEFAULT_AGENT_ID, getData } from "../../stores/dataStore.svelte";
+import { getData } from "../../stores/dataStore.svelte";
+import { DEFAULT_AGENT_ID } from "../../stores/agentDefaults";
 import { getPlugin } from "../../stores/state.svelte";
 import { DEFAULT_AGENT_ICON, type ChatOpenLocation } from "../../types/plugin";
 

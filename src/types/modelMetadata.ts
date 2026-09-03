@@ -1,4 +1,4 @@
-export interface ModelIdentity {
+interface ModelIdentity {
 	provider: string;
 	variantKey: string;
 	displayName: string;
@@ -31,5 +31,3 @@ export interface HydratedEmbeddingModelMetadata extends ModelIdentity {
 		inputUsdPer1M?: number;
 	};
 }
-
-export type HydratedModelMetadata = HydratedChatModelMetadata | HydratedEmbeddingModelMetadata;

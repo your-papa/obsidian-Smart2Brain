@@ -2,12 +2,12 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("obsidian", () => import("../__mocks__/obsidian"));
 
-// fileFiltering imports getData() at module load; isIndexableFile/isAgentFilePath resolve the
-// agent folder through it. isAgentPath itself is pure (folder passed explicitly).
-const mockGetData = vi.fn().mockReturnValue({ agentFolder: "Agents" });
-vi.mock("../../src/stores/dataStore.svelte", () => ({
-	getData: () => mockGetData(),
-}));
+import { installAgentPathSource } from "../../src/utils/agentPathSource";
+
+// isIndexableFile/isAgentFilePath resolve the agent folder through the installed
+// AgentPathSource (the data store at runtime). isAgentPath itself is pure (folder passed
+// explicitly).
+installAgentPathSource({ agentFolder: () => "Agents", agentName: () => undefined });
 
 import {
 	isAgentFilePath,
@@ -46,31 +46,29 @@ describe("isAgentPath (pure)", () => {
 
 describe("isAgentFilePath / isIndexableFile (folder from plugin data)", () => {
 	it("isAgentFilePath reads the configured agent folder", () => {
-		mockGetData.mockReturnValue({ agentFolder: "Agents" });
+		installAgentPathSource({ agentFolder: () => "Agents", agentName: () => undefined });
 		expect(isAgentFilePath("Agents/Skills/foo/SKILL.md")).toBe(true);
 		expect(isAgentFilePath("Agents/Memories/x.md")).toBe(true);
 		expect(isAgentFilePath("Projects/foo.md")).toBe(false);
 	});
 
 	it("isIndexableFile excludes agent-folder files and includes normal notes", () => {
-		mockGetData.mockReturnValue({ agentFolder: "Agents" });
+		installAgentPathSource({ agentFolder: () => "Agents", agentName: () => undefined });
 		expect(isIndexableFile({ path: "Agents/Skills/foo/SKILL.md" } as never)).toBe(false);
 		expect(isIndexableFile({ path: "Agents/Base Prompts/default-agent.md" } as never)).toBe(false);
 		expect(isIndexableFile({ path: "Projects/note.md" } as never)).toBe(true);
 	});
 
 	it("tracks a custom folder", () => {
-		mockGetData.mockReturnValue({ agentFolder: "Meta/Agents" });
+		installAgentPathSource({ agentFolder: () => "Meta/Agents", agentName: () => undefined });
 		expect(isAgentFilePath("Meta/Agents/Skills/foo/SKILL.md")).toBe(true);
 		expect(isAgentFilePath("Agents/Skills/foo/SKILL.md")).toBe(false);
 	});
 
 	it("fails open when the data store is uninitialized", () => {
-		mockGetData.mockImplementation(() => {
-			throw new Error("Plugin does not exist");
-		});
+		installAgentPathSource(null);
 		expect(isAgentFilePath("Agents/Skills/foo/SKILL.md")).toBe(false);
-		mockGetData.mockReturnValue({ agentFolder: "Agents" });
+		installAgentPathSource({ agentFolder: () => "Agents", agentName: () => undefined });
 	});
 });
 
@@ -385,7 +383,7 @@ describe("isEmbeddableFile (content-free extensions)", () => {
 	it("excludes files with no extractable text from the embedding index", () => {
 		// These were embedded as title-only vectors, which sit at the similarity noise
 		// floor (~0.46-0.48 against any query) and displace real notes.
-		mockGetData.mockReturnValue({ agentFolder: "Agents" });
+		installAgentPathSource({ agentFolder: () => "Agents", agentName: () => undefined });
 		expect(isEmbeddableFile(f("TaskNotes/Views/tasks.base", "base"))).toBe(false);
 		expect(isEmbeddableFile(f("Assets/diagram.png", "png"))).toBe(false);
 		expect(isEmbeddableFile(f("Assets/photo.JPG", "JPG"))).toBe(false);
@@ -393,14 +391,14 @@ describe("isEmbeddableFile (content-free extensions)", () => {
 	});
 
 	it("keeps notes and PDFs, whose text can be extracted", () => {
-		mockGetData.mockReturnValue({ agentFolder: "Agents" });
+		installAgentPathSource({ agentFolder: () => "Agents", agentName: () => undefined });
 		expect(isEmbeddableFile(f("Notes/note.md", "md"))).toBe(true);
 		expect(isEmbeddableFile(f("Papers/paper.pdf", "pdf"))).toBe(true);
 		expect(isEmbeddableFile(f("Chats/thread.chat", "chat"))).toBe(true);
 	});
 
 	it("still excludes agent-folder files regardless of extension", () => {
-		mockGetData.mockReturnValue({ agentFolder: "Agents" });
+		installAgentPathSource({ agentFolder: () => "Agents", agentName: () => undefined });
 		expect(isEmbeddableFile(f("Agents/Skills/foo/SKILL.md", "md"))).toBe(false);
 	});
 });
@@ -412,7 +410,7 @@ describe("isIndexableFile keeps content-free files searchable by name", () => {
 		// A user typing "Bild" or the name of a Bases view expects to find that file.
 		// MiniSearch matches on title/path and needs no content, so only the semantic
 		// pipeline filters these out.
-		mockGetData.mockReturnValue({ agentFolder: "Agents" });
+		installAgentPathSource({ agentFolder: () => "Agents", agentName: () => undefined });
 		expect(isIndexableFile(f("TaskNotes/Views/tasks.base", "base"))).toBe(true);
 		expect(isIndexableFile(f("Assets/Bild.png", "png"))).toBe(true);
 		expect(isIndexableFile(f("Assets/clip.mp4", "mp4"))).toBe(true);
@@ -447,7 +445,7 @@ describe("rename into a non-embeddable extension", () => {
 	// so `removeDocument(oldPath)` never ran and the pre-rename document stayed
 	// searchable. The guard now lives inside the handler, after the removal.
 	it("classifies the destination as non-embeddable, so the old vector must be dropped", () => {
-		mockGetData.mockReturnValue({ agentFolder: "Agents" });
+		installAgentPathSource({ agentFolder: () => "Agents", agentName: () => undefined });
 		const before = { path: "Notes/note.md", extension: "md" } as never;
 		const after = { path: "Notes/note.base", extension: "base" } as never;
 

@@ -6,6 +6,8 @@ let mockAgentFolder = "";
 vi.mock("../../src/stores/dataStore.svelte", () => ({
 	getData: () => ({ recentNotes: mockRecentNotes, agentFolder: mockAgentFolder }),
 }));
+import { installAgentPathSource } from "../../src/utils/agentPathSource";
+installAgentPathSource({ agentFolder: () => mockAgentFolder, agentName: () => undefined });
 
 import type { App } from "obsidian";
 import { getRecentNoteBoost, getRecentNotes, MAX_RECENT_BOOST } from "../../src/search/recentNotes";

@@ -395,7 +395,6 @@ export function createTransportedChatOllama(
 }
 
 export function createTransportedOpenAIEmbeddings(
-	providerId: string,
 	config: ConstructorParameters<typeof OpenAIEmbeddings>[0],
 ): OpenAIEmbeddings {
 	const baseConfig = config ?? {};
@@ -410,7 +409,6 @@ export function createTransportedOpenAIEmbeddings(
 }
 
 export function createTransportedOllamaEmbeddings(
-	providerId: string,
 	config: ConstructorParameters<typeof OllamaEmbeddings>[0],
 ): OllamaEmbeddings {
 	const baseConfig = config ?? {};

@@ -269,7 +269,7 @@ function selectTopPairs(
  * n·log n build instead, which loses below this size (the exact scan is
  * already sub-second and deterministic) and wins increasingly above it.
  */
-export const SEMANTIC_HNSW_MIN_CHUNKS = 2000;
+const SEMANTIC_HNSW_MIN_CHUNKS = 2000;
 
 /** Seed for the HNSW level-selection PRNG — fixed so rebuilds of the same vault produce the same edges. */
 const HNSW_LEVEL_SEED = 42;

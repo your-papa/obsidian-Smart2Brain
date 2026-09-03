@@ -5,7 +5,8 @@ import type { SearchAlgorithm } from "../../types/plugin";
 import { getLexicalSearchService, waitForLexicalSearch } from "../../search/LexicalSearchService";
 import { rankSearchResults } from "../../search/finalSearchRanking";
 import { buildRecentBoostMap, getRecentNotes } from "../../search/recentNotes";
-import { getData, getSearchNotesDescription } from "../../stores/dataStore.svelte";
+import { getData } from "../../stores/dataStore.svelte";
+import { getSearchNotesDescription } from "./builtInToolDefaults";
 import { getPendingChangesStore } from "../../stores/pendingChangesStore.svelte";
 import { normalizeVaultPath } from "../../utils/pathUtils";
 import { getVectorStoreService, type SearchFilter, type SearchResult, waitForVectorStore } from "../../vectorstore";
@@ -193,8 +194,8 @@ function normalizeTags(tags: string[] | undefined): string[] | undefined {
 async function hybridSearch(app: App, query: string, filter?: SearchFilter): Promise<SearchResult[]> {
 	// Run semantic and lexical search in parallel
 	const [semanticResults, lexicalResults] = await Promise.all([
-		embeddingsSearch(app, query, filter),
-		getLexicalResults(app, query, filter),
+		embeddingsSearch(query, filter),
+		getLexicalResults(query, filter),
 	]);
 
 	// NOTE: there is deliberately no "no results" suppression here.
@@ -256,7 +257,7 @@ async function getReadyLexicalSearchService() {
 /**
  * Get lexical search results using MiniSearch (BM25 based).
  */
-async function getLexicalResults(app: App, query: string, filter?: SearchFilter): Promise<SearchResult[]> {
+async function getLexicalResults(query: string, filter?: SearchFilter): Promise<SearchResult[]> {
 	const vectorStore = await getReadyLexicalSearchService();
 	if (!vectorStore) {
 		return [];
@@ -268,7 +269,7 @@ async function getLexicalResults(app: App, query: string, filter?: SearchFilter)
 /**
  * Embeddings-based semantic search using the VectorStoreService
  */
-async function embeddingsSearch(app: App, query: string, filter?: SearchFilter): Promise<SearchResult[]> {
+async function embeddingsSearch(query: string, filter?: SearchFilter): Promise<SearchResult[]> {
 	if (!(await waitForVectorStore())) {
 		Logger.warn("Semantic search is unavailable because the vector store is not ready");
 		return [];
@@ -330,14 +331,14 @@ export async function performSearch(
 	if (algorithm === "semantic") {
 		return rankSearchResults({
 			query,
-			semanticResults: await embeddingsSearch(app, query, filter),
+			semanticResults: await embeddingsSearch(query, filter),
 			recentBoostByPath: buildRecentBoostMap(getRecentNotes(app, filter)),
 		});
 	}
 
 	return rankSearchResults({
 		query,
-		lexicalResults: await getLexicalResults(app, query, filter),
+		lexicalResults: await getLexicalResults(query, filter),
 		recentBoostByPath: buildRecentBoostMap(getRecentNotes(app, filter)),
 	});
 }
@@ -360,7 +361,6 @@ async function browseWithFilter(filter: SearchFilter): Promise<SearchResult[]> {
  * Uses the search algorithm configured in plugin settings
  */
 export function createSearchNotesTool(app: App, agentId = "") {
-	const pluginData = getData();
 	const getSearchNotesConfig = () => resolveToolAgent(agentId).toolsConfig.search_notes;
 	const toolConfig = getSearchNotesConfig();
 	/**

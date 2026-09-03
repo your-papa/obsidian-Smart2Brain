@@ -1,25 +1,16 @@
-import { ItemView, type WorkspaceLeaf } from "obsidian";
-import { mount, unmount } from "svelte";
-import type SecondBrainPlugin from "../../main";
 import SmartGraphViewComponent from "../../components/graph/SmartGraphView.svelte";
 import { getSessionRegistry } from "../../stores/chatStore.svelte";
+import { SvelteItemView } from "../SvelteItemView";
 
 export const VIEW_TYPE_SMART_GRAPH = "smart-second-brain-graph";
 
-export class SmartGraphView extends ItemView {
-	plugin: SecondBrainPlugin;
-	component: ReturnType<typeof mount> | null = null;
+export class SmartGraphView extends SvelteItemView {
 	// A main-area tab, like Obsidian's core graph (which also sets this). Left at
 	// ItemView's default (false), Obsidian classifies the view as a sidebar
 	// utility: its window-level Escape handler then yanks focus to the
 	// most-recently-active navigation leaf, so pressing Escape in the graph
 	// appeared to open a random note.
 	navigation = true;
-
-	constructor(leaf: WorkspaceLeaf, plugin: SecondBrainPlugin) {
-		super(leaf);
-		this.plugin = plugin;
-	}
 
 	getViewType(): string {
 		return VIEW_TYPE_SMART_GRAPH;
@@ -34,14 +25,11 @@ export class SmartGraphView extends ItemView {
 	}
 
 	async onOpen(): Promise<void> {
-		this.contentEl.empty();
-		this.contentEl.addClass("smart-graph-container");
-		this.contentEl.setAttribute("data-testid", "smart-graph-view");
-
-		this.component = mount(SmartGraphViewComponent, {
-			target: this.contentEl,
-			props: {},
-		});
+		this.mountComponent(
+			SmartGraphViewComponent,
+			{},
+			{ containerClass: "smart-graph-container", testId: "smart-graph-view" },
+		);
 	}
 
 	async onClose(): Promise<void> {
@@ -51,10 +39,6 @@ export class SmartGraphView extends ItemView {
 			messenger.graphSelection = [];
 			messenger.pendingGraphNotes = [];
 		}
-
-		if (this.component) {
-			unmount(this.component);
-			this.component = null;
-		}
+		await super.onClose();
 	}
 }

@@ -1,6 +1,6 @@
-import { type App, Modal } from "obsidian";
-import { mount } from "svelte";
+import type { App } from "obsidian";
 import IntegrationPrivacyWarningComponent from "./IntegrationPrivacyWarningModal.svelte";
+import { SvelteModal } from "./SvelteModal";
 
 export interface IntegrationPrivacyWarningResult {
 	confirmed: boolean;
@@ -14,8 +14,7 @@ export interface IntegrationPrivacyWarningResult {
  * per-provider privacy rules (see docs on `createPluginApiExecTool`). Suppressible via a
  * "Don't ask again" checkbox; the caller is responsible for persisting that choice.
  */
-export class IntegrationPrivacyWarningModal extends Modal {
-	component!: IntegrationPrivacyWarningComponent;
+export class IntegrationPrivacyWarningModal extends SvelteModal {
 	private resolvePromise!: (value: IntegrationPrivacyWarningResult) => void;
 	private resolved = false;
 
@@ -34,20 +33,17 @@ export class IntegrationPrivacyWarningModal extends Modal {
 	}
 
 	onOpen() {
-		this.component = mount(IntegrationPrivacyWarningComponent, {
-			target: this.contentEl,
-			props: {
-				displayName: this.displayName,
-				onConfirm: (dontAskAgain: boolean) => {
-					this.resolved = true;
-					this.resolvePromise({ confirmed: true, dontAskAgain });
-					this.close();
-				},
-				onCancel: () => {
-					this.resolved = true;
-					this.resolvePromise({ confirmed: false, dontAskAgain: false });
-					this.close();
-				},
+		this.mountComponent(IntegrationPrivacyWarningComponent, {
+			displayName: this.displayName,
+			onConfirm: (dontAskAgain: boolean) => {
+				this.resolved = true;
+				this.resolvePromise({ confirmed: true, dontAskAgain });
+				this.close();
+			},
+			onCancel: () => {
+				this.resolved = true;
+				this.resolvePromise({ confirmed: false, dontAskAgain: false });
+				this.close();
 			},
 		});
 	}
@@ -56,6 +52,6 @@ export class IntegrationPrivacyWarningModal extends Modal {
 		if (!this.resolved) {
 			this.resolvePromise?.({ confirmed: false, dontAskAgain: false });
 		}
-		this.contentEl.empty();
+		super.onClose();
 	}
 }

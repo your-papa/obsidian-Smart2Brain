@@ -8,7 +8,7 @@ import {
 	type VisibleNoteRef,
 } from "../../hooks/useVisibleNotes.svelte";
 import { SelectionTracker, type SelectionRef } from "../../hooks/useSelection.svelte";
-import type { GraphNoteRef } from "../../stores/chatStore.svelte";
+import type { GraphNoteRef } from "../../stores/chatTimeline";
 import type { ChatAttachment } from "../../types/shared";
 import { getPlugin } from "../../stores/state.svelte";
 import { icon } from "../../utils/utils";
