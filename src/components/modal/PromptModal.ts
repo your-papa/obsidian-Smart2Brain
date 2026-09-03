@@ -4,7 +4,7 @@ import { type App, Modal } from "obsidian";
  * Obsidian-native single-line text prompt that replaces `window.prompt()`.
  * Resolves to the trimmed input value on confirm, or `null` on cancel/close.
  */
-export class PromptModal extends Modal {
+class PromptModal extends Modal {
 	private resolved = false;
 	private resolve!: (value: string | null) => void;
 	readonly promise: Promise<string | null>;

@@ -1,44 +1,8 @@
 import type { SearchMatchBadge, SearchResult } from "../vectorstore/types";
 import { extractSearchTerms } from "../search/searchTermUtils";
-import { escapeHtml } from "./html";
 
 export function getHighlightTerms(query: string): string[] {
 	return extractSearchTerms(query);
-}
-
-function escapeRegExp(text: string): string {
-	return text.replace(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`);
-}
-
-export function buildHighlightedHtml(
-	text: string,
-	terms: string[],
-	highlightClass = "s2b-search-result-highlight",
-): string {
-	const escapedText = escapeHtml(text);
-	if (!terms.length) {
-		return escapedText;
-	}
-
-	const pattern = new RegExp(`(${terms.map((term) => escapeRegExp(term)).join("|")})`, "giu");
-	let lastIndex = 0;
-	let html = "";
-
-	for (const match of text.matchAll(pattern)) {
-		const start = match.index ?? 0;
-		if (start > lastIndex) {
-			html += escapeHtml(text.slice(lastIndex, start));
-		}
-
-		html += `<mark class="${highlightClass}">${escapeHtml(match[0])}</mark>`;
-		lastIndex = start + match[0].length;
-	}
-
-	if (lastIndex < text.length) {
-		html += escapeHtml(text.slice(lastIndex));
-	}
-
-	return html;
 }
 
 function escapeForPattern(text: string): string {

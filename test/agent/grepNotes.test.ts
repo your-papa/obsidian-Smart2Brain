@@ -12,9 +12,12 @@ vi.mock("../../src/stores/pendingChangesStore.svelte", () => ({
 }));
 
 const mockGetData = vi.fn();
+vi.mock("../../src/agent/tools/builtInToolDefaults", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../../src/agent/tools/builtInToolDefaults")>()),
+	DEFAULT_TOOLS_CONFIG: { grep_notes: { name: "grep_notes", description: "grep" } },
+}));
 vi.mock("../../src/stores/dataStore.svelte", () => ({
 	getData: () => mockGetData(),
-	DEFAULT_TOOLS_CONFIG: { grep_notes: { name: "grep_notes", description: "grep" } },
 }));
 
 const mockGetIndexableVaultFiles = vi.fn().mockReturnValue([]);
@@ -53,7 +56,7 @@ describe("grep_notes tool", () => {
 		mockGetData.mockReturnValue({
 			getSelectedAgent: () => ({
 				chatModel: { provider: "test-provider" },
-				toolsConfig: { grep_notes: { name: "grep_notes", description: "grep", settings: { contextLines: 1 } } },
+				toolsConfig: { grep_notes: { name: "grep_notes", description: "grep" } },
 			}),
 		});
 	});

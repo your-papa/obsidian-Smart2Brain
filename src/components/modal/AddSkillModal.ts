@@ -1,12 +1,8 @@
-import { Modal } from "obsidian";
-import { mount, unmount } from "svelte";
 import type SecondBrainPlugin from "../../main";
 import AddSkillModalComponent from "./AddSkillModal.svelte";
-import { applyModalLayout } from "./modalLayout";
+import { SvelteModal } from "./SvelteModal";
 
-export class AddSkillModal extends Modal {
-	private component: ReturnType<typeof AddSkillModalComponent> | null = null;
-	private restoreLayout: (() => void) | null = null;
+export class AddSkillModal extends SvelteModal {
 	private plugin: SecondBrainPlugin;
 	private agentId: string;
 	private onSave: (skillId: string) => void | Promise<void>;
@@ -20,36 +16,18 @@ export class AddSkillModal extends Modal {
 
 	onOpen() {
 		this.setTitle("Add Custom Skill");
-
 		// The modal is just a couple of text fields now (instructions are written in the opened
 		// note), so let it size to its content instead of forcing a tall fixed height.
-		this.restoreLayout = applyModalLayout(this, {
-			width: "min(560px, 90vw)",
-			maxWidth: "90vw",
-			maxHeight: "85vh",
-			contentOverflow: "auto",
-			contentFill: false,
-		});
-
-		this.component = mount(AddSkillModalComponent, {
-			target: this.contentEl,
-			props: {
-				modal: this,
-				plugin: this.plugin,
-				agentId: this.agentId,
-				onSave: this.onSave,
+		this.mountComponent(
+			AddSkillModalComponent,
+			{ modal: this, plugin: this.plugin, agentId: this.agentId, onSave: this.onSave },
+			{
+				width: "min(560px, 90vw)",
+				maxWidth: "90vw",
+				maxHeight: "85vh",
+				contentOverflow: "auto",
+				contentFill: false,
 			},
-		});
-	}
-
-	onClose() {
-		this.restoreLayout?.();
-		this.restoreLayout = null;
-
-		if (this.component) {
-			unmount(this.component);
-			this.component = null;
-		}
-		this.contentEl.empty();
+		);
 	}
 }

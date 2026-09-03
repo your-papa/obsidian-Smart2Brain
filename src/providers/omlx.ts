@@ -261,7 +261,7 @@ export function createOmlxProvider(instanceId: string, displayName: string): Emb
 				encodingFormat: "float",
 				configuration: buildClientConfiguration(auth),
 			};
-			return createTransportedOpenAIEmbeddings(instanceId, embeddingConfig);
+			return createTransportedOpenAIEmbeddings(embeddingConfig);
 		},
 
 		validateAuth: async (auth: AuthObject): Promise<AuthValidationResult> => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { selectUnresolvedPendingIds, type ToolCallState } from "../../src/stores/chatStore.svelte";
+import { selectUnresolvedPendingIds, type ToolCallState } from "../../src/stores/chatTimeline";
 
 function call(id: string, status: ToolCallState["status"], name = "manage_notes"): ToolCallState {
 	return { id, name, status };

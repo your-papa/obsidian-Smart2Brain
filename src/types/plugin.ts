@@ -89,7 +89,7 @@ export type MCPTransportType = "stdio" | "http";
 /**
  * Base configuration shared by all MCP server types
  */
-export interface MCPServerBaseConfig {
+interface MCPServerBaseConfig {
 	/** Human-readable name for display */
 	displayName: string;
 	/** Transport type */
@@ -230,27 +230,19 @@ export interface StaleGuidance {
 /**
  * Tool-specific settings for read_content tool
  */
-export interface ReadContentSettings {
+interface ReadContentSettings {
 	/** Maximum content length to return (0 = unlimited) */
 	maxContentLength: number;
 	/** Vision model for images: undefined = auto-derive from chat model, null = disabled, ChatModel = explicit */
-	imageProcessor?: import("../stores/chatStore.svelte").ChatModel | null;
+	imageProcessor?: import("../stores/chatTimeline").ChatModel | null;
 	/** Vision model for PDFs: undefined = auto-derive from chat model, null = disabled, ChatModel = explicit */
-	pdfProcessor?: import("../stores/chatStore.svelte").ChatModel | null;
-}
-
-/**
- * Tool-specific settings for grep_notes tool
- */
-export interface GrepNotesSettings {
-	/** Lines of surrounding context to show on each side of a match */
-	contextLines: number;
+	pdfProcessor?: import("../stores/chatTimeline").ChatModel | null;
 }
 
 /**
  * Tool-specific settings for fetch_url tool
  */
-export interface FetchUrlSettings {
+interface FetchUrlSettings {
 	/** Maximum content length to return after cleaning (0 = unlimited) */
 	maxContentLength: number;
 }
@@ -266,12 +258,7 @@ export interface WebSearchSettings {
 /**
  * Union type of all tool-specific settings
  */
-export type ToolSpecificSettings =
-	| ReadContentSettings
-	| GrepNotesSettings
-	| FetchUrlSettings
-	| WebSearchSettings
-	| Record<string, never>;
+type ToolSpecificSettings = ReadContentSettings | FetchUrlSettings | WebSearchSettings | Record<string, never>;
 
 /**
  * Configuration for an individual tool
@@ -425,11 +412,11 @@ export interface AgentConfig {
 	/** Optional Obsidian icon ID or emoji/pictogram for visual identification */
 	icon?: string;
 	/** Selected chat model for this agent */
-	chatModel: import("../stores/chatStore.svelte").ChatModel | null;
+	chatModel: import("../stores/chatTimeline").ChatModel | null;
 	/** Optional summarization model; null means auto-use the chat model */
-	summarizationModel: import("../stores/chatStore.svelte").ChatModel | null;
+	summarizationModel: import("../stores/chatTimeline").ChatModel | null;
 	/** Optional title generation model; null means auto-use the chat model */
-	titleModel: import("../stores/chatStore.svelte").ChatModel | null;
+	titleModel: import("../stores/chatTimeline").ChatModel | null;
 	/** Skill enable states for this agent (skill name -> state) */
 	skills: Record<string, AgentSkillState>;
 	/** Configuration for built-in tools */
@@ -668,5 +655,3 @@ export interface PluginData {
 	 */
 	vaultSlug: string | null;
 }
-
-export type PluginDataKey = keyof PluginData;

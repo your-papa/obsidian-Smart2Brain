@@ -6,10 +6,6 @@
  * re-evaluate each time so saved views stay up-to-date as the vault
  * changes.  Frozen `paths` leaves are checked for existence — any
  * stale (deleted / renamed) paths are reported separately.
- *
- * `query` leaves are resolved asynchronously via a caller-supplied
- * `searchFn` to avoid circular imports (views.ts must not import searchNotes.ts).
- * The sync resolver returns empty paths for `query` leaves as a safe fallback.
  */
 
 import { type App, type TFile, getAllTags } from "obsidian";
@@ -31,7 +27,6 @@ export type PrivacyMembershipRule =
 	| { type: "folder"; value: string }
 	| { type: "tag"; value: string }
 	| { type: "extension"; value: string }
-	| { type: "query"; value: string; algorithm: "lexical" | "semantic" | "hybrid" }
 	| { type: "property"; value: string; values?: string[] };
 
 export interface PrivacyMembershipDraft {
@@ -85,7 +80,7 @@ export function cloneViewFilter(filter: ViewFilter): ViewFilter {
  *   to the renamed note, preserving subpath and alias. Obsidian rewrites the
  *   *frontmatter* on rename, so a filter left alone would drift out of sync with
  *   the very notes it targets. Plain (non-link) values are left alone.
- * - Other leaf types (`tag`, `extension`, `query`) don't reference paths and are
+ * - Other leaf types (`tag`, `extension`) don't reference paths and are
  *   returned unchanged.
  *
  * Returns the original `filter` reference when nothing changed, so callers can
@@ -199,8 +194,6 @@ export function clonePrivacyMembershipDraft(draft: PrivacyMembershipDraft): Priv
 
 /**
  * Recursively resolve a `ViewFilter` tree against the current vault state.
- * `query` leaves are not resolved here — they return empty paths.
- * Use `resolveViewFilterAsync` when `query` leaves must be resolved.
  *
  * @param app       - Obsidian `App` instance (provides vault + metadata cache)
  * @param filter    - The filter tree to resolve
@@ -353,28 +346,6 @@ export function matchesPrivacyMembershipDraftPath(app: App, draft: PrivacyMember
 	return normalized.autoIncludeRules.some((rule) => matchesPrivacyMembershipRulePath(app, rule, filePath));
 }
 
-/**
- * Async variant that rewrites `query` leaves to `paths` leaves by calling
- * `searchFn`, then delegates to the sync resolver.
- *
- * `searchFn` is passed as a parameter to avoid circular imports — callers
- * (e.g. SmartGraphView) supply their own search implementation.
- *
- * @param app       - Obsidian `App` instance
- * @param filter    - The filter tree (may contain `query` leaves)
- * @param searchFn  - Async function resolving a query string to file paths
- * @param universe  - Optional pre-computed universe of paths
- */
-export async function resolveViewFilterAsync(
-	app: App,
-	filter: ViewFilter,
-	searchFn: (q: string, algorithm: "lexical" | "semantic" | "hybrid") => Promise<{ path: string }[]>,
-	universe?: Set<string>,
-): Promise<ResolvedView> {
-	const rewritten = await rewriteQueryLeaves(filter, searchFn);
-	return resolveViewFilter(app, rewritten, universe);
-}
-
 // ---------------------------------------------------------------------------
 // Helpers — exported for unit testing
 // ---------------------------------------------------------------------------
@@ -484,11 +455,7 @@ function collectExcludedPaths(filter: ViewFilterGroup): string[] {
 
 function isPrivacyMembershipRule(filter: ViewFilter): filter is PrivacyMembershipRule {
 	return (
-		filter.type === "folder" ||
-		filter.type === "tag" ||
-		filter.type === "extension" ||
-		filter.type === "query" ||
-		filter.type === "property"
+		filter.type === "folder" || filter.type === "tag" || filter.type === "extension" || filter.type === "property"
 	);
 }
 
@@ -520,8 +487,6 @@ function describeMembershipRule(rule: PrivacyMembershipRule): string {
 			return `Tag: ${rule.value.startsWith("#") ? rule.value : `#${rule.value}`}`;
 		case "extension":
 			return `Type: ${rule.value.startsWith(".") ? rule.value.slice(1) : rule.value}`;
-		case "query":
-			return `Query: ${rule.value}`;
 		case "property":
 			return rule.values && rule.values.length > 0
 				? `Property: ${rule.value} = ${rule.values.join(", ")}`
@@ -555,8 +520,6 @@ function matchesPrivacyMembershipRulePath(app: App, rule: PrivacyMembershipRule,
 		}
 		case "property":
 			return matchesPropertyLeaf(app, filePath, rule.value, rule.values);
-		case "query":
-			return false;
 	}
 }
 
@@ -568,8 +531,6 @@ function clonePrivacyMembershipRule(rule: PrivacyMembershipRule): PrivacyMembers
 			return { type: "tag", value: rule.value };
 		case "extension":
 			return { type: "extension", value: rule.value };
-		case "query":
-			return { type: "query", value: rule.value, algorithm: rule.algorithm };
 		case "property":
 			return { type: "property", value: rule.value, values: rule.values ? [...rule.values] : undefined };
 	}
@@ -585,8 +546,6 @@ function cloneViewFilterLeaf(filter: ViewFilterLeaf): ViewFilterLeaf {
 			return { type: "extension", value: filter.value };
 		case "paths":
 			return { type: "paths", value: [...filter.value] };
-		case "query":
-			return { type: "query", value: filter.value, algorithm: filter.algorithm };
 		case "property":
 			return { type: "property", value: filter.value, values: filter.values ? [...filter.values] : undefined };
 	}
@@ -606,7 +565,6 @@ function isLeaf(filter: ViewFilter): filter is ViewFilterLeaf {
 		filter.type === "tag" ||
 		filter.type === "extension" ||
 		filter.type === "paths" ||
-		filter.type === "query" ||
 		filter.type === "property"
 	);
 }
@@ -632,10 +590,6 @@ function resolveLeaf(app: App, leaf: ViewFilterLeaf, universe: Set<string>): Res
 			return resolvePaths(app, leaf.value);
 		case "property":
 			return resolveProperty(app, leaf.value, leaf.values, universe);
-		case "query":
-			// Query leaves must be resolved async via resolveViewFilterAsync.
-			// Sync fallback returns empty — callers needing real results use the async path.
-			return { paths: new Set(), stalePaths: [] };
 	}
 }
 
@@ -838,33 +792,9 @@ function describeLeaf(leaf: ViewFilterLeaf): string {
 			return `ext:.${leaf.value}`;
 		case "paths":
 			return `${leaf.value.length} note${leaf.value.length === 1 ? "" : "s"}`;
-		case "query":
-			return `query(${leaf.algorithm}):${leaf.value.slice(0, 30)}${leaf.value.length > 30 ? "…" : ""}`;
 		case "property":
 			return leaf.values && leaf.values.length > 0
 				? `prop:${leaf.value}=${leaf.values.join("|")}`
 				: `prop:${leaf.value}`;
 	}
-}
-
-// ── Query leaf rewriting ────────────────────────────────────────────────
-
-/**
- * Recursively rewrite `query` leaves in a `ViewFilter` tree to `paths` leaves
- * by calling `searchFn`. All other leaf types are left unchanged.
- */
-async function rewriteQueryLeaves(
-	filter: ViewFilter,
-	searchFn: (q: string, algorithm: "lexical" | "semantic" | "hybrid") => Promise<{ path: string }[]>,
-): Promise<ViewFilter> {
-	if (isLeaf(filter)) {
-		if (filter.type === "query") {
-			const results = await searchFn(filter.value, filter.algorithm);
-			return { type: "paths", value: results.map((r) => r.path) };
-		}
-		return filter;
-	}
-	// Composite node: recurse into conditions
-	const rewrittenConditions = await Promise.all(filter.conditions.map((c) => rewriteQueryLeaves(c, searchFn)));
-	return { ...filter, conditions: rewrittenConditions };
 }

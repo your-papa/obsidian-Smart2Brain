@@ -14,7 +14,7 @@
  * an unrelated display setting.
  */
 
-import type { ChatModel } from "../../stores/chatStore.svelte";
+import type { ChatModel } from "../../stores/chatTimeline";
 import { getRegistry } from "../../providers/registry";
 import { createAiTransportContext, runWithAiTransportContext } from "../../lib/aiTransport";
 import { Logger } from "../../utils/logging";

@@ -8,7 +8,7 @@ import {
 	baseMessageToAssistantMessage,
 	AssistantState,
 	type CheckpointGraphState,
-} from "../../src/stores/chatStore.svelte";
+} from "../../src/stores/chatTimeline";
 import type { CheckpointHistoryItem } from "../../src/agent/Agent";
 
 /* --------------------------------------------------------------------------

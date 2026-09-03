@@ -6,7 +6,6 @@ describe("scoreLexicalCandidate", () => {
 	it("keeps separate identity and content evidence in the returned features", () => {
 		const features = scoreLexicalCandidate(
 			createQueryPlan("pm an cho 2"),
-			"pm an cho 2",
 			"PM and chores-2",
 			[],
 			[],
@@ -41,7 +40,6 @@ describe("scoreLexicalCandidate", () => {
 	it("gives alias token identity a stronger lexical tier than a plain title prefix", () => {
 		const aliasFeatures = scoreLexicalCandidate(
 			createQueryPlan("ekx"),
-			"ekx",
 			"SAP Workstream",
 			["SAP EKX"],
 			[],
@@ -68,7 +66,6 @@ describe("scoreLexicalCandidate", () => {
 
 		const titleFeatures = scoreLexicalCandidate(
 			createQueryPlan("ekx"),
-			"ekx",
 			"EKX Steering Sync",
 			[],
 			[],

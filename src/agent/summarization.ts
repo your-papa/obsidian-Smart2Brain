@@ -1,10 +1,10 @@
 import { Logger } from "../utils/logging";
 
-export const SUMMARY_TRIGGER_RATIO = 0.8;
+const SUMMARY_TRIGGER_RATIO = 0.8;
 export const SUMMARY_KEEP_MESSAGE_COUNT = 12;
-export const SUMMARY_MIN_TRIGGER_TOKENS = 12_000;
-export const SUMMARY_MIN_TRIM_TOKENS = 6_000;
-export const SUMMARY_MAX_TRIM_TOKENS = 24_000;
+const SUMMARY_MIN_TRIGGER_TOKENS = 12_000;
+const SUMMARY_MIN_TRIM_TOKENS = 6_000;
+const SUMMARY_MAX_TRIM_TOKENS = 24_000;
 export const SUMMARY_PREFIX = "Previous conversation summary";
 export const SUMMARY_PROMPT = `Summarize the earlier conversation so the assistant can continue the thread accurately.
 

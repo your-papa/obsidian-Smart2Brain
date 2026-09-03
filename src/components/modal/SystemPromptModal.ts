@@ -1,8 +1,6 @@
-import { Modal } from "obsidian";
-import { mount, unmount } from "svelte";
 import type SecondBrainPlugin from "../../main";
+import { SvelteModal } from "./SvelteModal";
 import SystemPromptModalComponent from "./SystemPromptModal.svelte";
-import { applyModalLayout } from "./modalLayout";
 
 /**
  * Custom accessors for agent-specific system prompt editing
@@ -19,9 +17,7 @@ export interface SystemPromptAccessors {
 	defaultPrompt?: string;
 }
 
-export class SystemPromptModal extends Modal {
-	private component: ReturnType<typeof SystemPromptModalComponent> | null = null;
-	private restoreLayout: (() => void) | null = null;
+export class SystemPromptModal extends SvelteModal {
 	private plugin: SecondBrainPlugin;
 	private accessors: SystemPromptAccessors;
 	private readonly titleText: string;
@@ -45,17 +41,9 @@ export class SystemPromptModal extends Modal {
 	}
 
 	onOpen() {
-		this.restoreLayout = applyModalLayout(this, {
-			fullScreenOnPhone: true,
-			width: "min(1200px, 94vw)",
-			maxWidth: "94vw",
-			height: "85vh",
-			contentOverflow: "hidden",
-		});
-
-		this.component = mount(SystemPromptModalComponent, {
-			target: this.contentEl,
-			props: {
+		this.mountComponent(
+			SystemPromptModalComponent,
+			{
 				modal: this,
 				plugin: this.plugin,
 				accessors: this.accessors,
@@ -63,17 +51,13 @@ export class SystemPromptModal extends Modal {
 				readOnly: this.readOnly,
 				showDiff: this.showDiff,
 			},
-		});
-	}
-
-	onClose() {
-		this.restoreLayout?.();
-		this.restoreLayout = null;
-
-		if (this.component) {
-			unmount(this.component);
-			this.component = null;
-		}
-		this.contentEl.empty();
+			{
+				fullScreenOnPhone: true,
+				width: "min(1200px, 94vw)",
+				maxWidth: "94vw",
+				height: "85vh",
+				contentOverflow: "hidden",
+			},
+		);
 	}
 }

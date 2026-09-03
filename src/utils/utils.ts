@@ -1,5 +1,4 @@
-import { MarkdownRenderer, setIcon } from "obsidian";
-import { getPlugin } from "../stores/state.svelte";
+import { setIcon } from "obsidian";
 
 function renderIcon(node: HTMLElement, iconId: string) {
 	node.replaceChildren();
@@ -19,9 +18,3 @@ export const icon = (node: HTMLElement, iconId: string) => {
 		},
 	};
 };
-
-export function wildTest(wildcard: string, str: string): boolean {
-	const w = wildcard.replace(/[.+^${}()|[\]\\]/g, "\\$&"); // regexp escape
-	const re = new RegExp(`\\b${w.replace(/\*/g, ".*").replace(/\?/g, ".")}`, "i");
-	return re.test(str);
-}

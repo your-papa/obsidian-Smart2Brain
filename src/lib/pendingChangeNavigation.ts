@@ -1,11 +1,7 @@
 import type { EditorView } from "@codemirror/view";
 import { diffLines } from "diff";
 import { MarkdownView, Notice, TFile } from "obsidian";
-import {
-	computeOriginalAffectedLines,
-	countOriginalLines,
-	insertionAnchorLine,
-} from "../editor/readingViewDiffProcessor";
+import { computeOriginalAffectedLines, countOriginalLines, insertionAnchorLine } from "../editor/diffLineMath";
 import type SecondBrainPlugin from "../main";
 import { getPendingChangesStore } from "../stores/pendingChangesStore.svelte";
 import type { PendingChange, PendingChangeEntry } from "../types/shared";
@@ -117,7 +113,7 @@ function stopsForEntry(entry: PendingChangeEntry): NavStop[] {
  * tiebreak. `getPendingForThread` returns pending-only but in insertion order,
  * which isn't stable enough for group-by-file — hence the sort here.
  */
-export function orderedPendingForThread(threadId: string): PendingChangeEntry[] {
+function orderedPendingForThread(threadId: string): PendingChangeEntry[] {
 	const store = getPendingChangesStore();
 	return [...store.getPendingForThread(threadId)].sort(
 		(a, b) => a.change.path.localeCompare(b.change.path) || a.createdAt - b.createdAt || a.id.localeCompare(b.id),
@@ -131,7 +127,7 @@ export function orderedPendingForThread(threadId: string): PendingChangeEntry[] 
  * expanding each into its groups and re-sorting by line keeps multi-spot files
  * visited top-to-bottom.
  */
-export function orderedStopsForThread(threadId: string): NavStop[] {
+function orderedStopsForThread(threadId: string): NavStop[] {
 	const entries = orderedPendingForThread(threadId);
 	const stops = entries.flatMap(stopsForEntry);
 	return stops.sort(
@@ -338,6 +334,3 @@ export async function navigateToPendingChange(
 }
 
 /** Drop a thread's cursor (e.g. when the thread is removed). */
-export function clearCursor(threadId: string): void {
-	cursors.delete(threadId);
-}

@@ -82,7 +82,7 @@ export function getRecentNoteBoost(ageMs: number): number {
 	return MAX_RECENT_BOOST - decayProgress * (MAX_RECENT_BOOST - MIN_RECENT_BOOST);
 }
 
-export function getRecentlyOpenedNotes(app: App, filter?: SearchFilter): SearchResult[] {
+function getRecentlyOpenedNotes(app: App, filter?: SearchFilter): SearchResult[] {
 	const pluginData = getData();
 	const getAbstractFileByPath = app.vault?.getAbstractFileByPath;
 	if (typeof getAbstractFileByPath !== "function") return [];

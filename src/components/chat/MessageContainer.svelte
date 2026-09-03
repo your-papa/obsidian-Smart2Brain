@@ -1,18 +1,19 @@
 <script lang="ts">
 import { Menu, Notice } from "obsidian";
 import { tick } from "svelte";
+import { type SessionRegistry } from "../../stores/chatStore.svelte";
 import {
 	type AssistantMessage,
 	AssistantState,
 	type MessagePair,
-	type SessionRegistry,
 	getMessagePairTimestamp,
-} from "../../stores/chatStore.svelte";
+} from "../../stores/chatTimeline";
 import type { UUIDv7 } from "../../utils/uuid7Validator";
 import { Logger } from "../../utils/logging";
 import { isMobileUI } from "../../utils/platform";
 import { longPress } from "../../utils/longPress";
-import { getPlugin, thinkingProcessPref } from "../../stores/state.svelte";
+import { getPlugin } from "../../stores/state.svelte";
+import { thinkingProcessPref } from "../../stores/thinkingProcessPref.svelte";
 import { getData } from "../../stores/dataStore.svelte";
 import { DEFAULT_AGENT_ICON } from "../../types/plugin";
 import { VIEW_TYPE_CHAT } from "../../views/chat/Chat";

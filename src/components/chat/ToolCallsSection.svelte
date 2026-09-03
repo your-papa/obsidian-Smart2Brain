@@ -1,5 +1,5 @@
 <script lang="ts">
-import type { AssistantTimelineEvent } from "../../stores/chatStore.svelte";
+import type { AssistantTimelineEvent } from "../../stores/chatTimeline";
 import { getData } from "../../stores/dataStore.svelte";
 import { getPendingChangesStore } from "../../stores/pendingChangesStore.svelte";
 import { buildToolOutputRenderModel, type ToolOutputRenderModel } from "./toolOutputRenderModel";

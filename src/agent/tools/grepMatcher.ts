@@ -7,7 +7,7 @@ export function escapeRegExp(literal: string): string {
 	return literal.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-export interface GrepMatcher {
+interface GrepMatcher {
 	/** Test whether a single line/string matches the needle. */
 	test(text: string): boolean;
 	/**

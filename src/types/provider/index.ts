@@ -8,23 +8,12 @@
 export type { ChatModelConfig, EmbedModelConfig } from "./models";
 
 // Auth types
-export type {
-	AuthObjectKey,
-	AuthFieldDefinition,
-	AuthObject,
-	CodexSession,
-	OpenAIAuthMode,
-	RequiredAuthField,
-	OptionalAuthField,
-	ProviderAuthConfig,
-} from "./auth";
+export type { AuthFieldDefinition, AuthObject, CodexSession, OpenAIAuthMode, ProviderAuthConfig } from "./auth";
 
 // Provider definition types
 export type {
 	LogoProps,
 	ProviderSetupInstructions,
-	ProviderOAuthCapability,
-	OAuthSignInResult,
 	AuthValidationResult,
 	BaseProviderDefinition,
 	EmbeddingProviderDefinition,

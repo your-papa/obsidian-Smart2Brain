@@ -6,7 +6,7 @@
  */
 
 /** Feature a suggestion depends on. `undefined` ⇒ always available. */
-export type SuggestionRequirement = "chat" | "search";
+type SuggestionRequirement = "chat" | "search";
 
 export interface SuggestedQuery {
 	/** Stable id, used as the dismissal key. */
@@ -329,7 +329,7 @@ export const updateNoticeId = (
 	}`;
 
 /** Maps a store stale-guidance record to a dismissable notice. */
-export function toUpdateNotice(record: StaleGuidanceLike): UpdateNotice {
+function toUpdateNotice(record: StaleGuidanceLike): UpdateNotice {
 	return {
 		id: updateNoticeId(record.agentId, record.kind, record.skillName, record.currentVersion),
 		agentId: record.agentId,

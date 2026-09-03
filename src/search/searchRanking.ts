@@ -53,7 +53,7 @@ export interface TitleBoostScale {
  * Create a `TitleBoostScale` from a single maximum value using the
  * proportions from the hybrid RRF post-fusion ranking.
  */
-export function titleBoostFromMax(maxBoost: number): TitleBoostScale {
+function titleBoostFromMax(maxBoost: number): TitleBoostScale {
 	return {
 		exact: maxBoost,
 		leadingPrefixNumeric: maxBoost * 0.98,
@@ -249,7 +249,7 @@ export function calculateTitleBoost(query: string | QueryPlan, title: string, sc
 /**
  * Extract aliases from frontmatter (handles both string and array forms).
  */
-export function getFrontmatterAliases(frontmatter: Record<string, unknown> | undefined): string[] {
+function getFrontmatterAliases(frontmatter: Record<string, unknown> | undefined): string[] {
 	if (!frontmatter) {
 		return [];
 	}

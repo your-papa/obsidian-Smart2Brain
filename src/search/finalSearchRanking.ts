@@ -97,8 +97,39 @@ const RANK_FUSION_WEIGHT = 1 - SCORE_FUSION_WEIGHT;
  * lever alone, with no model change. Note core rises monotonically across the whole
  * range while hard peaks and falls — tuning on core alone would have picked 0.93 and
  * silently broken three hard axes.
+ *
+ * **0.86 → 0.94 (2026-09-02), re-swept under the query instruction.** Once
+ * `queryInstruction.ts` started wrapping the query the way Qwen3/harrier are
+ * trained for, the semantic leg got materially better at exactly the axes the
+ * lexical leg had been covering for it (semantic-only `long-context` 0.54 → 0.68,
+ * `size-bias` 0.88 → 1.00), so the 0.88 cliff above no longer exists where it was.
+ * Full vitest suite on `harrier-oss-v1-0.6b-MLX-8bit`, one index build, instruction
+ * on throughout:
+ *
+ * | weight | core   | hard   | recency | size-bias | long-context | cross-lingual | polysemy |
+ * |--------|--------|--------|---------|-----------|--------------|---------------|----------|
+ * | 0.80   | 0.8889 | 0.7725 | 0.9077  | 0.7540    | 1.0000       | 0.6577        | 0.7878   |
+ * | 0.86   | 0.8942 | 0.7892 | 0.9077  | 0.7540    | 1.0000       | 0.7500        | 0.7951   |
+ * | 0.90   | 0.8944 | 0.7897 | 0.9077  | 0.7540    | 1.0000       | 0.7500        | 0.7937   |
+ * | 0.92   | 0.9174 | 0.8037 | 1.0000  | 0.8770    | 1.0000       | 0.7500        | 0.7916   |
+ * | 0.93   | 0.9427 | 0.8177 | 1.0000  | 1.0000    | 1.0000       | 0.7500        | 0.7864   |
+ * | **0.94** | **0.9427** | **0.8204** | **1.0000** | **1.0000** | **1.0000** | **0.7500** | 0.7879 |
+ * | 0.95   | 0.9427 | 0.8117 | 1.0000  | 1.0000    | 0.8984       | 0.7500        | 0.7852   |
+ * | 0.96   | 0.9427 | 0.8020 | 1.0000  | 1.0000    | 0.8443       | 0.7500        | 0.7749   |
+ *
+ * The plateau is narrow: `size-bias` finishes flipping to the real answer at 0.93
+ * (the padded `Type Specimen Production Handbook` that the instruction had lifted
+ * into the semantic leg's rank 2 is finally outvoted) and `long-context` starts
+ * sliding at 0.95. 0.94 is the last point where every previously-perfect axis is
+ * still perfect and has the best hard mean and MRR (0.8178). Below 0.92 the weight
+ * changes nothing on core — the instruction had already moved the semantic
+ * ordering, and only the fusion share decides whether it wins.
+ *
+ * `dilution` 1.0 and `multi-hop` 0.8155 at every weight; `intent-frame` 0.64-0.66
+ * throughout (query-side problem, see the README). Only harrier was swept; qwen3
+ * should be re-checked here before this is treated as model-independent.
  */
-const SEMANTIC_SOURCE_WEIGHT = 0.86;
+const SEMANTIC_SOURCE_WEIGHT = 0.94;
 const LEXICAL_SOURCE_WEIGHT = 1 - SEMANTIC_SOURCE_WEIGHT;
 
 /** Identity boosts, as a fraction of the (0-1) fused score. */

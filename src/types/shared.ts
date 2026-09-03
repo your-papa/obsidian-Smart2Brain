@@ -25,9 +25,6 @@ export interface ChatAttachment {
 }
 
 /** MIME types supported for chat attachments */
-export const SUPPORTED_IMAGE_MIMES = ["image/png", "image/jpeg", "image/gif", "image/webp"] as const;
-export const SUPPORTED_PDF_MIME = "application/pdf" as const;
-export const SUPPORTED_ATTACHMENT_MIMES = [...SUPPORTED_IMAGE_MIMES, SUPPORTED_PDF_MIME] as const;
 
 /** File extensions considered images for vault file detection and LLM vision APIs.
  * Only includes formats accepted by major providers (OpenAI, Anthropic, etc.).
@@ -43,10 +40,10 @@ export const TEXT_EXTENSIONS = new Set(["md", "txt", "csv", "json"]);
 // ============================================================================
 
 /** Status of a pending change proposed by the agent */
-export type PendingChangeStatus = "pending" | "accepted" | "rejected";
+type PendingChangeStatus = "pending" | "accepted" | "rejected";
 
 /** A staged note creation */
-export interface PendingNoteCreate {
+interface PendingNoteCreate {
 	type: "create";
 	/** Vault-relative path for the new file */
 	path: string;
@@ -55,7 +52,7 @@ export interface PendingNoteCreate {
 }
 
 /** A staged note update */
-export interface PendingNoteUpdate {
+interface PendingNoteUpdate {
 	type: "update";
 	/** Vault-relative path of the existing file */
 	path: string;
@@ -76,7 +73,7 @@ export interface PendingNoteUpdate {
 }
 
 /** A staged note deletion */
-export interface PendingNoteDelete {
+interface PendingNoteDelete {
 	type: "delete";
 	/** Vault-relative path of the file to delete */
 	path: string;
@@ -85,7 +82,7 @@ export interface PendingNoteDelete {
 }
 
 /** A staged note move */
-export interface PendingNoteMove {
+interface PendingNoteMove {
 	type: "move";
 	/** Current vault-relative path of the file */
 	path: string;

@@ -702,6 +702,85 @@ suite defends it; until then the block is reported, never gated.
 
 #### Recording results per model
 
+#### Query-side instruction for asymmetric models (2026-09-02)
+
+`src/vectorstore/queryInstruction.ts` wraps the search query in the model family's
+retrieval instruction before embedding (`Instruct: Given a web search query, retrieve
+relevant passages that answer the query\nQuery: …` for Qwen3-Embedding, harrier and
+gte-Qwen2; the BAAI sentence prefix for English BGE and mxbai). Documents stay raw, so
+an existing index serves both arms and the A/B below is against **one** harrier build.
+
+The failure it fixes was found on a phone vault (`openrouter:qwen/qwen3-embedding-4b`):
+for `history`, two `.chat` threads and a stub note reading "Note about a random topic"
+scored 0.51-0.53 while `Historical Conspiracies.md` scored 0.40 and sat at rank 9.
+Content-free text sits near the centroid, and so does a bare one-word query. With the
+instruction the same stored vectors gave the history note 0.385, `Ancient Egypt` 0.35 and
+every chat 0.26-0.33 — the right order. A natural-sentence query ("notes about history")
+made it *worse* (chats 0.68), so this is not something the user can phrase around.
+
+Measured on `omlx:harrier-oss-v1-0.6b-MLX-8bit`, bare → instructed, paired bootstrap on
+nDCG@10:
+
+| tier | bare | instructed | δ | 95% CI |
+|---|---|---|---|---|
+| semantic-only core (n=14) | 0.9271 | 0.9289 | +0.002 | n.s. |
+| **semantic-only hard (n=25)** | 0.7008 | **0.7983** | **+0.097** | [0.011, 0.193] ✓ |
+| hybrid core (n=14) | 0.9207 | 0.8942 | −0.027 | [−0.014, 0.088] n.s. |
+| hybrid hard (n=25) | 0.7903 | 0.7920 | +0.002 | n.s. |
+
+Semantic-only hard by axis: multi-hop 0.75 → 1.00, dilution 0.79 → 1.00, size-bias
+0.88 → 1.00, long-context 0.54 → 0.68, cross-lingual 0.62 → 0.73, polysemy 0.64 → 0.74;
+intent-frame flat (0.68 → 0.67). `feedback i received` goes from absent to rank 3.
+
+Three instruction sentences were swept, since the Qwen card recommends tailoring it:
+
+| instruction | sem core | sem hard | hyb core | hyb hard |
+|---|---|---|---|---|
+| (bare) | 0.9271 | 0.7008 | 0.9207 | 0.7903 |
+| **card default** "Given a web search query, retrieve relevant passages that answer the query" | 0.9289 | 0.7983 | 0.8942 | 0.7920 |
+| "Given a question or topic, retrieve notes from a personal knowledge base that answer or cover it" | 0.9080 | 0.8179 | 0.8939 | 0.7502 |
+| "Given a search query, retrieve the note that best matches it" | 0.9162 | 0.8125 | 0.8892 | 0.8076 |
+
+Every wording costs hybrid core the same ~0.03, so that is the instruction, not the
+sentence; only the card default leaves semantic core and hybrid hard untouched. The
+hybrid-core loss is concentrated in one query: the instructed semantic leg ranks the
+padded `Type Specimen Production Handbook` second for "what makes very small text
+readable" (bare: outside the top 8), and lexical already had it first, so fusion flips
+it above `Legibility at Small Sizes`. `size-bias` therefore reads 1.00 on semantic-only
+and 0.75 on hybrid at the same time. `SEMANTIC_SOURCE_WEIGHT` has not been re-swept
+under the instruction; with a stronger semantic leg the plateau may have moved.
+
+The instruction A/B above was measured via a runtime patch of `semanticSearch` on the
+live build, not through the vitest suite; the suite later reproduced it exactly
+(semantic-only core 0.9289 / hard 0.7983) once the slot vault had an oMLX key.
+`sap-hai:text-embedding-3-small` is a symmetric model and gets no prefix, so its rows
+are unaffected.
+
+##### `SEMANTIC_SOURCE_WEIGHT` re-swept under the instruction: 0.86 → 0.94
+
+The hybrid-core cost above was the fusion share, not the instruction. With the
+instruction on throughout, the full vitest suite on `harrier-oss-v1-0.6b-MLX-8bit`
+against one index build:
+
+| weight | core | hard | recency | size-bias | long-context | cross-lingual | polysemy | intent-frame |
+|---|---|---|---|---|---|---|---|---|
+| 0.80 | 0.8889 | 0.7725 | 0.9077 | 0.7540 | 1.0000 | 0.6577 | 0.7878 | 0.6439 |
+| 0.86 | 0.8942 | 0.7892 | 0.9077 | 0.7540 | 1.0000 | 0.7500 | 0.7951 | 0.6458 |
+| 0.90 | 0.8944 | 0.7897 | 0.9077 | 0.7540 | 1.0000 | 0.7500 | 0.7937 | 0.6504 |
+| 0.92 | 0.9174 | 0.8037 | 1.0000 | 0.8770 | 1.0000 | 0.7500 | 0.7916 | 0.6490 |
+| 0.93 | 0.9427 | 0.8177 | 1.0000 | 1.0000 | 1.0000 | 0.7500 | 0.7864 | 0.6499 |
+| **0.94** | **0.9427** | **0.8204** | **1.0000** | **1.0000** | **1.0000** | 0.7500 | 0.7879 | 0.6600 |
+| 0.95 | 0.9427 | 0.8117 | 1.0000 | 1.0000 | 0.8984 | 0.7500 | 0.7852 | 0.6600 |
+| 0.96 | 0.9427 | 0.8020 | 1.0000 | 1.0000 | 0.8443 | 0.7500 | 0.7749 | 0.6462 |
+
+`dilution` is 1.0000 and `multi-hop` 0.8155 at every weight. The old cliff at 0.88 is
+gone because the instructed semantic leg now carries `long-context` on its own until
+0.95; the padded size-bias distractor is outvoted from 0.93 up. The plateau is 0.93-0.94,
+so this constant is closer to an edge than 0.86 was — re-check the table before
+attributing a core move to something else. Core, hard and recency are all the highest
+values recorded for harrier; the floors were raised to 0.94 / 0.94 (MRR) / 0.98
+(recency). Only harrier was swept; qwen3 is unmeasured at this weight.
+
 #### ⚠ Correction: some 2026-08-18 hard-tier figures were measured on the wrong vault
 
 **Affected: the hard-tier totals and the `cross-lingual` axis. The ratcheted tiers are

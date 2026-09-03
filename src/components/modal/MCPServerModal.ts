@@ -1,9 +1,7 @@
-import { Modal } from "obsidian";
-import { mount, unmount } from "svelte";
 import type SecondBrainPlugin from "../../main";
 import type { MCPServerConfig } from "../../types/plugin";
+import { SvelteModal } from "./SvelteModal";
 import MCPServerModalComponent from "./MCPServerModal.svelte";
-import { applyModalLayout } from "./modalLayout";
 
 /**
  * Callback signature for MCPServerModal
@@ -22,9 +20,7 @@ export interface MCPServerAccessors {
 	hasServer: (serverId: string) => boolean;
 }
 
-export class MCPServerModal extends Modal {
-	private component: ReturnType<typeof MCPServerModalComponent> | null = null;
-	private restoreLayout: (() => void) | null = null;
+export class MCPServerModal extends SvelteModal {
 	private plugin: SecondBrainPlugin;
 	private serverId: string | null;
 	private existingConfig: MCPServerConfig | null;
@@ -60,18 +56,9 @@ export class MCPServerModal extends Modal {
 	}
 
 	onOpen() {
-		this.restoreLayout = applyModalLayout(this, {
-			fullScreenOnPhone: true,
-			width: "min(550px, 90vw)",
-			maxWidth: "90vw",
-			height: "auto",
-			maxHeight: "85vh",
-			contentOverflow: "auto",
-		});
-
-		this.component = mount(MCPServerModalComponent, {
-			target: this.contentEl,
-			props: {
+		this.mountComponent(
+			MCPServerModalComponent,
+			{
 				modal: this,
 				plugin: this.plugin,
 				serverId: this.serverId,
@@ -80,17 +67,14 @@ export class MCPServerModal extends Modal {
 				onDelete: this.onDelete,
 				accessors: this.accessors,
 			},
-		});
-	}
-
-	onClose() {
-		this.restoreLayout?.();
-		this.restoreLayout = null;
-
-		if (this.component) {
-			unmount(this.component);
-			this.component = null;
-		}
-		this.contentEl.empty();
+			{
+				fullScreenOnPhone: true,
+				width: "min(550px, 90vw)",
+				maxWidth: "90vw",
+				height: "auto",
+				maxHeight: "85vh",
+				contentOverflow: "auto",
+			},
+		);
 	}
 }

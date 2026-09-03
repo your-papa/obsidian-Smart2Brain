@@ -2,7 +2,11 @@
 import { getData } from "../../stores/dataStore.svelte";
 import type SecondBrainPlugin from "../../main";
 import { BUILT_IN_TOOL_IDS, type BuiltInToolId, type ToolConfig } from "../../types/plugin";
-import { getToolDescription, getToolDisplayName, toolHasConfigurableSettings } from "../../agent/builtInToolMeta";
+import {
+	getToolDescription,
+	getToolDisplayName,
+	toolHasConfigurableSettings,
+} from "../../agent/tools/builtInToolDefaults";
 import { toExecToolId } from "../../agent/integrations/pluginIntegrations";
 import { humanizeSkillName } from "../../skills";
 import Button from "../ui/Button.svelte";

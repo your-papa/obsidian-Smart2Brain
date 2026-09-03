@@ -1,4 +1,4 @@
-import type { ChatModel } from "../stores/chatStore.svelte";
+import type { ChatModel } from "../stores/chatTimeline";
 import { useAvailableModels } from "../hooks/useAvailableModels.svelte";
 
 /**

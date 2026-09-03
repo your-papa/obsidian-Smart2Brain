@@ -17,7 +17,7 @@
 /** A community assignment: node id → community id. */
 export type CommunityMap = Record<string, number>;
 
-export interface TopicHierarchyNode {
+interface TopicHierarchyNode {
 	/** Fine-level (child) topic id. */
 	id: number;
 	/** Coarse-level (parent) topic id this child rolls up into. */
@@ -112,7 +112,7 @@ export function countChildrenByParent(hierarchy: TopicHierarchy): Map<number, nu
  * Leiden's γ is inverse to community count — lower γ yields fewer, broader
  * communities — so the parent level uses a fraction of the current value.
  */
-export const COARSE_RESOLUTION_FACTOR = 0.35;
+const COARSE_RESOLUTION_FACTOR = 0.35;
 
 /** Derive the coarse resolution for a given fine resolution. */
 export function coarseResolutionFor(fineResolution: number): number {
@@ -167,7 +167,7 @@ export const MAX_DERIVED_GRANULARITY_LEVELS = 6;
  * (a huge vault whose coarsest partition is already large), the cap is waived
  * rather than offering no ladder at all.
  */
-export const MAX_USEFUL_TOPICS = 30;
+const MAX_USEFUL_TOPICS = 30;
 
 /**
  * How much bigger a rung's topic count must be than the previous rung's.
@@ -176,7 +176,7 @@ export const MAX_USEFUL_TOPICS = 30;
  * is not a different way of seeing the vault, but it cost a slider stop and a
  * Leiden run. Requiring a real jump keeps each step a visible regrouping.
  */
-export const MIN_RUNG_TOPIC_RATIO = 1.3;
+const MIN_RUNG_TOPIC_RATIO = 1.3;
 
 /**
  * Smallest group that counts as a topic.
@@ -194,7 +194,7 @@ export const MIN_TOPIC_SIZE = 2;
  * but once most groups are single notes the partition has stopped describing
  * structure.
  */
-export const MAX_SINGLETON_SHARE = 0.5;
+const MAX_SINGLETON_SHARE = 0.5;
 
 /**
  * Summarise a partition for laddering: how many real topics it has, and whether

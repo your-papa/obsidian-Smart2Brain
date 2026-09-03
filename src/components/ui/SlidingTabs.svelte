@@ -278,6 +278,26 @@ function registerTrigger(node: HTMLElement, id: T) {
 		width: var(--icon-size);
 		height: var(--icon-size);
 		flex-shrink: 0;
+		/* Optical centring. `align-items: center` on the label centres the icon on the
+		   20px LINE BOX, but a line box is not symmetric around the text it renders:
+		   with the stack's 14px/20px metrics the glyph ink of a label like "General"
+		   spans 246.40–262.84, centre 254.62, while the line box centre — and so the
+		   icon — lands at 255.48. That constant 0.86px surplus below the text is what
+		   reads as "icons sit low", and it is identical on every tab (measured), so it
+		   is a metrics offset rather than per-label jitter. Pull the icon up by that
+		   amount so it centres on the text's ink instead of on its line box.
+
+		   The translate also lifts the box off the half-pixel boundary it otherwise
+		   lands on (top 247.49), which was rasterising the 16px glyph across two
+		   device pixels and making it read soft as well as low. Use transform, not
+		   margin: margin would resize the flex item and retrigger the ResizeObserver
+		   that positions the sliding pill.
+
+		   Expressed in em (0.87px measured / 14px font = 0.062em) rather than as a
+		   raw px value: the gap is descender asymmetry, which is a property of the
+		   font at whatever size it is rendered, so it must scale with the label. A
+		   hard-coded px would go wrong the moment a theme changes the tab font size. */
+		transform: translateY(-0.062em);
 	}
 
 	.s2b-tab-icon :global(svg.svg-icon) {

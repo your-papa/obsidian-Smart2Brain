@@ -32,7 +32,6 @@ import { Logger } from "../utils/logging";
 import { matchesPathPrefix } from "../utils/pathUtils";
 import {
 	configureEmbedIndexAction,
-	indexingReportAction,
 	settingsAction,
 	showActionNotice,
 	showSettingsLinkNotice,
@@ -40,16 +39,15 @@ import {
 import { StartupProfiler } from "../utils/startupProfiler";
 import { getDefaultEmbeddingBatchSize, normalizeEmbeddingBatchSize } from "./batchSize";
 import { aggregateChunksToNotes } from "./chunkAggregation";
-import { createVectorStore } from "./index";
+import { formatRetrievalQuery } from "./queryInstruction";
+import { createVectorStore } from "./storeFactory";
 import {
 	type DefaultEmbedModel,
 	type DocumentVector,
 	INDEX_VERSION,
-	type IndexMetadata,
 	type IndexingProgress,
 	type IndexingReport,
 	type SearchFilter,
-	type SearchResult,
 	type SerializedIndex,
 	type SkipReason,
 	type SkippedFile,
@@ -667,16 +665,6 @@ export class VectorStoreService {
 		data.updateEmbeddingIndexStats(indexId, { dimensions });
 	}
 
-	/**
-	 * Get the instance for a given purpose (search or graph).
-	 */
-	private async getInstanceForPurpose(purpose: "search" | "graph"): Promise<IndexInstance | null> {
-		const data = getData();
-		const indexId = purpose === "search" ? data.searchEmbedIndex : data.graphEmbedIndex;
-		if (!indexId) return null;
-		return this.getOrCreateInstance(indexId);
-	}
-
 	private async getEmbeddingMaxInputTokens(
 		inst: IndexInstance,
 		defaultModel: DefaultEmbedModel | null,
@@ -864,13 +852,10 @@ export class VectorStoreService {
 			`[VectorStore] ${inst.indexId}: ${missingFiles.length} missing, ${staleFiles.length} stale, ${orphanedPaths.length} orphaned`,
 		);
 
-		let didMutateIndex = false;
-
 		if (orphanedPaths.length > 0) {
 			for (const path of orphanedPaths) {
 				await inst.store.remove(path);
 			}
-			didMutateIndex = true;
 			Logger.log(`[VectorStore] Removed ${orphanedPaths.length} orphaned entries`);
 		}
 
@@ -1750,15 +1735,21 @@ export class VectorStoreService {
 		if (!embeddings) return [];
 
 		try {
+			// Asymmetric models (Qwen3-Embedding, harrier, BGE) want the query
+			// wrapped in a task instruction that documents never carry — see
+			// `queryInstruction.ts` for the families and the measured effect.
+			// Documents are embedded raw at index time, so this is query-only
+			// and needs no reindex.
+			const embedInput = formatRetrievalQuery(model.model, query);
 			const maxContentLength = await this.getMaxEmbeddingContentLength(inst, model);
-			if (query.length > maxContentLength) {
+			if (embedInput.length > maxContentLength) {
 				Logger.warn(
-					`[VectorStore] Query too large for embedding model (${query.length} chars > ${maxContentLength} chars)`,
+					`[VectorStore] Query too large for embedding model (${embedInput.length} chars > ${maxContentLength} chars)`,
 				);
 				return [];
 			}
 
-			const queryVector = await embeddings.embedQuery(query);
+			const queryVector = await embeddings.embedQuery(embedInput);
 			if (!queryVector || queryVector.length === 0) {
 				Logger.error("[VectorStore] embedQuery returned empty result for search query");
 				return [];

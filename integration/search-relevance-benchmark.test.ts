@@ -130,9 +130,50 @@ const RESULT_LIMIT = 25;
  * Expect this to happen again as more holes are filled. A drop that coincides with new
  * judgments is the benchmark improving, not the ranker degrading — verify by checking
  * whether the ranking itself moved before lowering the floor.
+ *
+ * **Lowered 0.92 → 0.89 (2026-09-02), with the query-side instruction
+ * (`src/vectorstore/queryInstruction.ts`).** Qwen3-Embedding and harrier are trained
+ * to see a one-sentence task instruction on the *query* and nothing on documents. The
+ * bare query is what let content-free notes and `.chat` threads outrank a
+ * title-matching note for `history` on a phone vault (rank 9 → rank 1 with the
+ * instruction, same stored vectors; see the module docblock). Measured on
+ * `harrier-oss-v1-0.6b-MLX-8bit` against one index build, bare → instructed:
+ *   - semantic-only hard  0.7008 → 0.7983 (MRR 0.6881 → 0.8178); paired-bootstrap CI
+ *     [0.011, 0.193] — the one significant move
+ *   - semantic-only core  0.9271 → 0.9289
+ *   - hybrid hard         0.7903 → 0.7920
+ *   - hybrid core         0.9207 → 0.8942 (MRR 0.9286 → 0.8929); CI [-0.014, 0.088],
+ *     not significant, sign test 4 : 3 with 7 ties
+ * The hybrid-core cost is mostly one size-bias flip: the instructed semantic leg
+ * lifts the padded `Type Specimen Production Handbook` to rank 2 for "what makes
+ * very small text readable", where the lexical leg already had it first, so fusion
+ * puts it ahead of the real answer. Two note-oriented instruction wordings moved
+ * hybrid core by the same -0.027..-0.032 while losing elsewhere, so this is the
+ * instruction itself rather than its wording, and the model cards' default sentence
+ * was kept. Accepted because semantic-only is what the search modal runs after Tab
+ * and where the `search_notes` tool escalates to, and its gain is the significant
+ * one. The bare-query baseline on this build was already 0.9207, under the 0.9305
+ * last recorded, which the "reindex before comparing" note above accounts for.
+ *
+ * Measured with a runtime patch of `semanticSearch` on the same build rather than
+ * this suite (the slot vault had no oMLX key), which is byte-equivalent for the
+ * query path. `SEMANTIC_SOURCE_WEIGHT` was swept under bare queries and has not
+ * been re-swept under the instruction — the semantic leg is now more trustworthy,
+ * so that is the next knob to revisit, not this floor.
+ *
+ * **Raised 0.89 → 0.94 (2026-09-02, same day)** after that re-sweep:
+ * `SEMANTIC_SOURCE_WEIGHT` 0.86 → 0.94 in `finalSearchRanking.ts`. Measured with this
+ * suite on `harrier-oss-v1-0.6b-MLX-8bit`, one index build, instruction on: core
+ * 0.8942 → **0.9427** (MRR 0.8929 → **0.9643**), hard 0.7892 → **0.8204**, recency
+ * 0.9077 → **1.0000**, `size-bias` back to 1.0000 with `long-context` still 1.0000.
+ * The hybrid-core cost the previous paragraph accepted is gone: it was the fusion
+ * share, not the instruction, deciding that one size-bias flip. Floor sits just
+ * under the measured value as before; the plateau is only 0.93-0.94 wide (see the
+ * weight's docblock), so a build-order shift of the index could move core by more
+ * than on earlier constants — check the weight table before lowering this.
  */
-const BASELINE_MEAN_NDCG = 0.92;
-const BASELINE_MEAN_RR = 0.9;
+const BASELINE_MEAN_NDCG = 0.94;
+const BASELINE_MEAN_RR = 0.94;
 
 /**
  * Separate floor for the `recency` tier, which cannot share the core one.
@@ -154,8 +195,12 @@ const BASELINE_MEAN_RR = 0.9;
  * tier improved because two of its four cases restate `size-bias` queries, so
  * strengthening the semantic leg helped the real answer beat the padded distractor
  * here too.
+ *
+ * **Raised 0.88 → 0.98 (2026-09-02)** with `SEMANTIC_SOURCE_WEIGHT` 0.86 → 0.94 under
+ * the query instruction: `harrier` 0.9077 → **1.0000**. Same mechanism again — the
+ * two cases restating `size-bias` queries stop losing to the padded distractor.
  */
-const RECENCY_FLOOR_MEAN_NDCG = 0.88;
+const RECENCY_FLOOR_MEAN_NDCG = 0.98;
 
 /**
  * Floor for the `hard` tier — the model-discrimination cases.

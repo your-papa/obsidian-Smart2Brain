@@ -8,22 +8,14 @@
  * Kept for a later release; see the component at
  * `components/graph/NoteContextView.svelte`.
  */
-import { ItemView, MarkdownView, type EventRef, type TFile, type WorkspaceLeaf } from "obsidian";
-import { mount, unmount } from "svelte";
-import type SecondBrainPlugin from "../../main";
+import { MarkdownView, type EventRef, type TFile, type WorkspaceLeaf } from "obsidian";
 import NoteContextViewComponent from "../../components/graph/NoteContextView.svelte";
+import { SvelteItemView } from "../SvelteItemView";
 
 export const VIEW_TYPE_NOTE_CONTEXT = "smart-second-brain-note-context";
 
-export class NoteContextView extends ItemView {
-	plugin: SecondBrainPlugin;
-	component: ReturnType<typeof mount> | null = null;
+export class NoteContextView extends SvelteItemView {
 	workspaceRefs: EventRef[] = [];
-
-	constructor(leaf: WorkspaceLeaf, plugin: SecondBrainPlugin) {
-		super(leaf);
-		this.plugin = plugin;
-	}
 
 	getViewType(): string {
 		return VIEW_TYPE_NOTE_CONTEXT;
@@ -94,16 +86,13 @@ export class NoteContextView extends ItemView {
 	}
 
 	async onOpen(): Promise<void> {
-		this.contentEl.empty();
-		this.contentEl.addClass("note-context-container");
-		this.contentEl.dataset.testid = "note-context-view";
 		this.refreshTitle();
 		this.registerWorkspaceListeners();
-
-		this.component = mount(NoteContextViewComponent, {
-			target: this.contentEl,
-			props: {},
-		});
+		this.mountComponent(
+			NoteContextViewComponent,
+			{},
+			{ containerClass: "note-context-container", testId: "note-context-view" },
+		);
 	}
 
 	async onClose(): Promise<void> {
@@ -111,10 +100,6 @@ export class NoteContextView extends ItemView {
 			this.app.workspace.offref(ref);
 		}
 		this.workspaceRefs = [];
-
-		if (this.component) {
-			unmount(this.component);
-			this.component = null;
-		}
+		await super.onClose();
 	}
 }

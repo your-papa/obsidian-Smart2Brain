@@ -8,6 +8,11 @@ const state: { agentFolder: string; agents: Record<string, { id: string; name?: 
 	agentFolder: "Agents",
 	agents: { "default-agent": { id: "default-agent", name: "S2B Agent" } },
 };
+import { installAgentPathSource } from "../../src/utils/agentPathSource";
+installAgentPathSource({
+	agentFolder: () => state.agentFolder,
+	agentName: (agentId) => state.agents[agentId]?.name,
+});
 vi.mock("../../src/stores/dataStore.svelte", () => ({
 	getData: () => ({
 		get agentFolder() {

@@ -12,7 +12,7 @@ const CACHE_TTL_MS = 1000 * 60 * 60; // 1 hour (shorter than cloud APIs since lo
 /**
  * Model details from Ollama API
  */
-export interface OllamaModelDetails {
+interface OllamaModelDetails {
 	parent_model?: string;
 	format?: string;
 	family?: string;
@@ -24,7 +24,7 @@ export interface OllamaModelDetails {
 /**
  * Model info from Ollama API (the nested model_info object)
  */
-export interface OllamaModelInfoRaw {
+interface OllamaModelInfoRaw {
 	"general.architecture"?: string;
 	"general.parameter_count"?: number;
 	"llama.context_length"?: number;
@@ -35,7 +35,7 @@ export interface OllamaModelInfoRaw {
 /**
  * Full response from /api/show endpoint
  */
-export interface OllamaShowResponse {
+interface OllamaShowResponse {
 	modelfile?: string;
 	parameters?: string;
 	template?: string;
@@ -218,38 +218,10 @@ export function getOllamaModelsCache(baseUrl: string): Map<string, OllamaModelIn
 }
 
 /**
- * Synchronous lookup of model info from cached data
- */
-export function lookupOllamaModelSync(data: Map<string, OllamaModelInfo>, modelName: string): OllamaModelInfo | null {
-	return data.get(modelName) ?? null;
-}
-
-/**
  * Format parameter size for display (e.g., "8.0B" -> "8B")
  */
 export function formatParameterSize(size?: string): string {
 	if (!size) return "—";
 	// Remove trailing decimals from size (8.0B -> 8B)
 	return size.replace(/\.0([BKMGT])$/, "$1");
-}
-
-/**
- * Format context window for display
- */
-export function formatContextWindow(contextLength?: number): string {
-	if (!contextLength) return "—";
-	if (contextLength >= 1_000_000) {
-		return `${(contextLength / 1_000_000).toFixed(1)}M`;
-	}
-	if (contextLength >= 1_000) {
-		return `${Math.round(contextLength / 1_000)}K`;
-	}
-	return contextLength.toString();
-}
-
-/**
- * Clears the cached data (useful for testing or forcing refresh)
- */
-export function clearOllamaCache(): void {
-	cachedResponse = null;
 }

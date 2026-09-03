@@ -1,6 +1,6 @@
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
-import { DEFAULT_TOOLS_CONFIG } from "../../stores/dataStore.svelte";
+import { DEFAULT_TOOLS_CONFIG } from "./builtInToolDefaults";
 import { formatExecutionResult, type JavaScriptExecutionResult } from "./executeJavaScriptShared";
 import type { ExecuteJavaScriptWorkerRequest, ExecuteJavaScriptWorkerResponse } from "./executeJavaScriptWorker";
 import ExecuteJavaScriptWorkerConstructor from "./executeJavaScriptWorker?worker&inline";

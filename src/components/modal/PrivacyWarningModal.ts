@@ -1,9 +1,7 @@
-import { Modal } from "obsidian";
-import { mount } from "svelte";
 import PrivacyWarningComponent from "./PrivacyWarningModal.svelte";
+import { SvelteModal } from "./SvelteModal";
 
-export class PrivacyWarningModal extends Modal {
-	component!: PrivacyWarningComponent;
+export class PrivacyWarningModal extends SvelteModal {
 	private resolvePromise!: (value: boolean) => void;
 	private resolved = false;
 
@@ -15,20 +13,17 @@ export class PrivacyWarningModal extends Modal {
 	}
 
 	onOpen() {
-		this.component = mount(PrivacyWarningComponent, {
-			target: this.contentEl,
-			props: {
-				modal: this,
-				onConfirm: () => {
-					this.resolved = true;
-					this.resolvePromise(true);
-					this.close();
-				},
-				onCancel: () => {
-					this.resolved = true;
-					this.resolvePromise(false);
-					this.close();
-				},
+		this.mountComponent(PrivacyWarningComponent, {
+			modal: this,
+			onConfirm: () => {
+				this.resolved = true;
+				this.resolvePromise(true);
+				this.close();
+			},
+			onCancel: () => {
+				this.resolved = true;
+				this.resolvePromise(false);
+				this.close();
 			},
 		});
 	}
@@ -37,6 +32,6 @@ export class PrivacyWarningModal extends Modal {
 		if (!this.resolved) {
 			this.resolvePromise?.(false);
 		}
-		this.contentEl.empty();
+		super.onClose();
 	}
 }
