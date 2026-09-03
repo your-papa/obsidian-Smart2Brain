@@ -10,6 +10,9 @@ jobs:
         runs-on: ubuntu-latest
         permissions:
             contents: write
+            # Required by attest-build-provenance to mint the signing certificate.
+            id-token: write
+            attestations: write
 
         steps:
             - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -23,6 +26,18 @@ jobs:
 
             - name: Build plugin
               run: bun run build
+
+            # Signed provenance for the two built artifacts, so users can verify
+            # they came from this repo and workflow rather than a hand-built
+            # bundle:  gh attestation verify main.js --repo s2b-dev/smart-second-brain
+            # manifest.json is committed source, not a build output, so it is
+            # not attested — git history is already its provenance.
+            - name: Attest build provenance
+              uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
+              with:
+                  subject-path: |
+                      build/prod/main.js
+                      build/prod/styles.css
 
             # The release is created as a draft so the maintainer can attach
             # release notes and publish it by hand. Re-running on the same tag
