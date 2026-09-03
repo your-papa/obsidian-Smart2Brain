@@ -10,6 +10,7 @@
  * Ollama runs locally on the user's machine, defaulting to http://localhost:11434
  */
 
+import { Logger } from "../utils/logging";
 import { ChatOllama } from "@langchain/ollama";
 import OllamaLogo from "../components/ui/logos/OllamaLogo.svelte";
 import type {
@@ -209,7 +210,7 @@ export const ollamaProvider: EmbeddingProviderDefinition = {
 		// Fetch and cache model metadata in the background
 		// This populates the cache for the modal without blocking
 		fetchOllamaModelsInfo(baseUrl, modelNames).catch((err) => {
-			console.warn("Failed to fetch Ollama model metadata:", err);
+			Logger.warn("Failed to fetch Ollama model metadata:", err);
 		});
 
 		return modelNames;

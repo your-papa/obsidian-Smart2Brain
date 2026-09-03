@@ -61,7 +61,7 @@ export const MOBILE_BULK_MAX_DELAY_MS = 300_000;
 
 /** Yield the event loop for `ms` (a real pause on mobile, a bare yield on desktop). */
 export function bulkPause(ms: number): Promise<void> {
-	return new Promise((resolve) => setTimeout(resolve, ms));
+	return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
 /**

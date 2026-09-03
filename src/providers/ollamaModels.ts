@@ -7,6 +7,8 @@
  * @see https://github.com/ollama/ollama/blob/main/docs/api.md#show-model-information
  */
 
+import { Logger } from "../utils/logging";
+
 const CACHE_TTL_MS = 1000 * 60 * 60; // 1 hour (shorter than cloud APIs since local)
 
 /**
@@ -98,7 +100,7 @@ async function fetchModelInfo(baseUrl: string, modelName: string): Promise<Ollam
 		});
 
 		if (!response.ok) {
-			console.warn(`Failed to fetch Ollama model info for ${modelName}: ${response.status}`);
+			Logger.warn(`Failed to fetch Ollama model info for ${modelName}: ${response.status}`);
 			return null;
 		}
 
@@ -143,7 +145,7 @@ async function fetchModelInfo(baseUrl: string, modelName: string): Promise<Ollam
 			supportsTools,
 		};
 	} catch (error) {
-		console.warn(`Error fetching Ollama model info for ${modelName}:`, error);
+		Logger.warn(`Error fetching Ollama model info for ${modelName}:`, error);
 		return null;
 	}
 }

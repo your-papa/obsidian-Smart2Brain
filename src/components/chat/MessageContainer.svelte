@@ -175,12 +175,12 @@ function animateScrollTo(top: number) {
 		const eased = 1 - (1 - t) ** 3;
 		el.scrollTop = start + delta * eased;
 		if (t < 1) {
-			scrollRafId = requestAnimationFrame(step);
+			scrollRafId = window.requestAnimationFrame(step);
 		} else {
 			scrollRafId = null;
 		}
 	};
-	scrollRafId = requestAnimationFrame(step);
+	scrollRafId = window.requestAnimationFrame(step);
 }
 
 // Scroll a specific user message to the top of the container.
@@ -247,13 +247,13 @@ let nextAvailable = $state(false);
 // The nav arrows appear while scrolling (and on hover, via CSS). After scrolling
 // stops they linger briefly, then fade out.
 let isScrolling = $state(false);
-let scrollIdleTimer: ReturnType<typeof setTimeout> | undefined;
+let scrollIdleTimer: number | undefined;
 
 function handleScroll() {
 	recomputeActiveUserIndex();
 	isScrolling = true;
-	if (scrollIdleTimer) clearTimeout(scrollIdleTimer);
-	scrollIdleTimer = setTimeout(() => {
+	if (scrollIdleTimer) window.clearTimeout(scrollIdleTimer);
+	scrollIdleTimer = window.setTimeout(() => {
 		isScrolling = false;
 	}, 900);
 }
@@ -624,7 +624,7 @@ $effect(() => {
 
 $effect(() => {
 	return () => {
-		if (scrollIdleTimer) clearTimeout(scrollIdleTimer);
+		if (scrollIdleTimer) window.clearTimeout(scrollIdleTimer);
 		if (scrollRafId !== null) cancelAnimationFrame(scrollRafId);
 	};
 });

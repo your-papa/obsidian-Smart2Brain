@@ -231,7 +231,7 @@ function scrollToLine(view: MarkdownView, line: number): void {
 		}
 	};
 	apply();
-	requestAnimationFrame(apply);
+	window.requestAnimationFrame(apply);
 	window.setTimeout(apply, 50);
 	// One later retry: reading-mode layout can settle a frame or two late, so a
 	// final pass ensures the scroll lands where intended.

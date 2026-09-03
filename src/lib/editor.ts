@@ -314,7 +314,7 @@ export class EmbeddableMarkdownEditor {
 	 * Enter vim insert mode if vim keybindings are enabled in Obsidian.
 	 */
 	private enterVimInsertMode(): void {
-		setTimeout(() => {
+		window.setTimeout(() => {
 			try {
 				// Check if vim mode is enabled in Obsidian settings
 				// @ts-expect-error - Using internal API

@@ -87,7 +87,7 @@ async function openTagSearch(tag: string): Promise<boolean> {
 			// Use Obsidian's native command to properly initialize search
 			if (commands?.executeCommandById) {
 				await commands.executeCommandById("global-search:open");
-				await new Promise((resolve) => setTimeout(resolve, 50));
+				await new Promise((resolve) => window.setTimeout(resolve, 50));
 				searchLeaf = workspace.getLeavesOfType("search").first();
 				searchView = searchLeaf?.view as SearchView | undefined;
 			}

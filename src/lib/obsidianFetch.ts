@@ -84,7 +84,7 @@ export function createObsidianFetch(
 		// it instead — the request keeps running in the background but stops holding
 		// the caller hostage.
 		const timeoutController = new AbortController();
-		const timeoutId = setTimeout(() => {
+		const timeoutId = window.setTimeout(() => {
 			timeoutController.abort(
 				new DOMException(`Request timed out after ${REQUEST_TIMEOUT_MS}ms`, "TimeoutError"),
 			);
@@ -101,7 +101,7 @@ export function createObsidianFetch(
 		}
 		const settled = timeoutController.signal;
 		const cleanup = () => {
-			clearTimeout(timeoutId);
+			window.clearTimeout(timeoutId);
 			callerSignal?.removeEventListener("abort", onCallerAbort);
 		};
 

@@ -17,18 +17,18 @@ const FETCH_TIMEOUT_MS = 15_000;
  */
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
 	return new Promise<T>((resolve, reject) => {
-		const timer = setTimeout(() => {
+		const timer = window.setTimeout(() => {
 			const err = new Error(`Web search timed out after ${timeoutMs}ms.`);
 			err.name = "TimeoutError";
 			reject(err);
 		}, timeoutMs);
 		promise.then(
 			(value) => {
-				clearTimeout(timer);
+				window.clearTimeout(timer);
 				resolve(value);
 			},
 			(error) => {
-				clearTimeout(timer);
+				window.clearTimeout(timer);
 				reject(error);
 			},
 		);

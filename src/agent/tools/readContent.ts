@@ -82,7 +82,7 @@ function truncateContent(content: string, maxChars: number): string {
  */
 function parsePdfPageFragment(subpath: string): number[] | null {
 	if (!subpath) return null;
-	const match = subpath.match(/^#page=([\d,\-]+)$/);
+	const match = subpath.match(/^#page=([\d,-]+)$/);
 	if (!match) return null;
 
 	const pages: number[] = [];

@@ -671,8 +671,8 @@ let buildGraphSignature = $derived(
 );
 $effect(() => {
 	buildGraphSignature;
-	const timer = setTimeout(() => untrack(() => void buildGraph()), 300);
-	return () => clearTimeout(timer);
+	const timer = window.setTimeout(() => untrack(() => void buildGraph()), 300);
+	return () => window.clearTimeout(timer);
 });
 
 // Re-apply segment coloring when highlight toggles change (no Leiden re-run needed).
@@ -747,7 +747,7 @@ const SEMANTIC_RETRY_MAX_ATTEMPTS = 24;
 let liveTopicDrift = 0;
 /** True once the first full build has landed — live patches diff against it. */
 let hasBuiltOnce = false;
-let liveUpdateTimer: ReturnType<typeof setTimeout> | null = null;
+let liveUpdateTimer: number | null = null;
 /** Renames since the last flush, applied to the canvas position cache first. */
 let pendingRenames: Array<{ from: string; to: string }> = [];
 /**
@@ -756,7 +756,7 @@ let pendingRenames: Array<{ from: string; to: string }> = [];
  * running; `attempts` bounds the wait.
  */
 const pendingSemantic = new Map<string, { mtime: number; attempts: number }>();
-let semanticRetryTimer: ReturnType<typeof setTimeout> | null = null;
+let semanticRetryTimer: number | null = null;
 let isProcessingSemantic = false;
 
 function isLiveRelevantFile(file: TAbstractFile): file is TFile {
@@ -771,8 +771,8 @@ function queueSemanticRefresh(file: TFile) {
 
 function scheduleLiveUpdate() {
 	if (isDestroyed) return;
-	if (liveUpdateTimer != null) clearTimeout(liveUpdateTimer);
-	liveUpdateTimer = setTimeout(() => {
+	if (liveUpdateTimer != null) window.clearTimeout(liveUpdateTimer);
+	liveUpdateTimer = window.setTimeout(() => {
 		liveUpdateTimer = null;
 		flushLiveUpdate();
 	}, LIVE_UPDATE_DEBOUNCE_MS);
@@ -811,8 +811,8 @@ const liveMetadataEventRef = plugin.app.metadataCache.on("resolved", () => sched
 onDestroy(() => {
 	for (const ref of liveVaultEventRefs) plugin.app.vault.offref(ref);
 	plugin.app.metadataCache.offref(liveMetadataEventRef);
-	if (liveUpdateTimer != null) clearTimeout(liveUpdateTimer);
-	if (semanticRetryTimer != null) clearTimeout(semanticRetryTimer);
+	if (liveUpdateTimer != null) window.clearTimeout(liveUpdateTimer);
+	if (semanticRetryTimer != null) window.clearTimeout(semanticRetryTimer);
 });
 
 /** Apply pending vault changes to the open graph. */
@@ -1088,7 +1088,7 @@ async function processPendingSemanticQueries() {
 
 function scheduleSemanticRetry() {
 	if (isDestroyed || pendingSemantic.size === 0 || semanticRetryTimer != null) return;
-	semanticRetryTimer = setTimeout(() => {
+	semanticRetryTimer = window.setTimeout(() => {
 		semanticRetryTimer = null;
 		void processPendingSemanticQueries();
 	}, SEMANTIC_RETRY_INTERVAL_MS);

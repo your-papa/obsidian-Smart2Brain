@@ -223,7 +223,7 @@ $effect(() => {
 });
 
 export function focusEditor() {
-	requestAnimationFrame(() => {
+	window.requestAnimationFrame(() => {
 		markdownEditor?.focus();
 	});
 }
@@ -250,7 +250,7 @@ $effect(() => {
 		// transaction dispatches — otherwise decoration plugins can throw on a
 		// stale position ("No tile at position N").
 		inputValue = text;
-		requestAnimationFrame(() => {
+		window.requestAnimationFrame(() => {
 			// If auto-submit already sent and cleared the input this tick, don't
 			// resurrect the text into the cleared editor — that makes a sent
 			// message look like it's still sitting unsent in the input.
@@ -382,7 +382,7 @@ $effect(() => {
 	// Untracked: seeding reads/writes the attachment state, which must not
 	// become a dependency of this effect (it only reacts to the edit target).
 	untrack(() => void seedEditAttachments(session?.getEditAttachments(pair.id) ?? []));
-	requestAnimationFrame(() => {
+	window.requestAnimationFrame(() => {
 		markdownEditor?.setValue(text);
 		markdownEditor?.focus();
 	});
@@ -459,7 +459,7 @@ $effect(() => {
 		const hadNotes = registry.pendingGraphNotes.length > 0;
 		registry.pendingGraphNotes = null;
 		if (hadNotes) {
-			requestAnimationFrame(() => markdownEditor?.focus());
+			window.requestAnimationFrame(() => markdownEditor?.focus());
 		}
 	}
 });
@@ -564,7 +564,7 @@ function initializeEditor() {
 	});
 
 	// Focus the editor after next paint
-	requestAnimationFrame(() => {
+	window.requestAnimationFrame(() => {
 		markdownEditor?.focus();
 	});
 }
@@ -577,13 +577,13 @@ function expandFullscreen() {
 	isFullscreen = true;
 	isFullscreenVisible = false;
 	// Double rAF ensures the start geometry is fully painted before transition begins.
-	requestAnimationFrame(() => {
-		requestAnimationFrame(() => {
+	window.requestAnimationFrame(() => {
+		window.requestAnimationFrame(() => {
 			fullscreenNoTransition = false;
-			requestAnimationFrame(() => {
+			window.requestAnimationFrame(() => {
 				isFullscreenVisible = true;
 			});
-			setTimeout(() => {
+			window.setTimeout(() => {
 				fullscreenTransitioning = false;
 			}, FULLSCREEN_TRANSITION_MS);
 			markdownEditor?.focus();
@@ -595,12 +595,12 @@ function collapseFullscreen() {
 	if (fullscreenTransitioning || !isFullscreen) return;
 	fullscreenTransitioning = true;
 	isFullscreenVisible = false;
-	setTimeout(() => {
+	window.setTimeout(() => {
 		isFullscreen = false;
 		fullscreenNoTransition = false;
 		fullscreenPlaceholderHeight = 0;
 		fullscreenTransitioning = false;
-		requestAnimationFrame(() => markdownEditor?.focus());
+		window.requestAnimationFrame(() => markdownEditor?.focus());
 	}, FULLSCREEN_TRANSITION_MS);
 }
 
@@ -996,7 +996,7 @@ async function attachVaultFilesByPath(paths: string[]) {
 	}
 
 	if (attachedCount > 0) {
-		requestAnimationFrame(() => markdownEditor?.focus());
+		window.requestAnimationFrame(() => markdownEditor?.focus());
 	}
 }
 

@@ -263,7 +263,7 @@ export class LexicalSearchService {
 			this.bulkAttempts.clear();
 			if (notice) {
 				notice.setMessage(`✓ Search index updated: ${added} notes`);
-				setTimeout(() => notice.hide(), 3000);
+				window.setTimeout(() => notice.hide(), 3000);
 			}
 		} catch (error) {
 			// An unexpected abort (not a per-file failure) — don't leave a stuck

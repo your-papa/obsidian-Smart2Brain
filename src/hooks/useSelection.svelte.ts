@@ -195,7 +195,7 @@ export class SelectionTracker {
 
 	#scheduleRefresh() {
 		if (this.#refreshFrame !== undefined) return;
-		this.#refreshFrame = requestAnimationFrame(() => {
+		this.#refreshFrame = window.requestAnimationFrame(() => {
 			this.#refreshFrame = undefined;
 			this.#refresh();
 		});
