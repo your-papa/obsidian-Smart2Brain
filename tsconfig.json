@@ -1,21 +1,35 @@
 {
-    "extends": "@tsconfig/svelte/tsconfig.json",
-    "compilerOptions": {
-        "target": "ESNext",
-        "useDefineForClassFields": true,
-        "module": "ES6",
-        "resolveJsonModule": true,
-        "allowJs": true,
-        "isolatedModules": true,
-        "noEmitOnError": true,
-        "plugins": [
-            {
-                "name": "typescript-svelte-plugin",
-                // the following options can be set additionally; they are optional; their default values are listed here
-                "enabled": true, // enables this plugin
-                "assumeIsSvelteProject": true // if true, skip detection and always assume it's a Svelte project
-            }
-        ]
-    },
-    "include": ["src/**/*.d.ts", "src/**/*.ts", "src/**/*.js", "src/**/*.svelte"]
+  "extends": "@tsconfig/svelte/tsconfig.json",
+  "compilerOptions": {
+    "target": "ESNext",
+    "useDefineForClassFields": true,
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "allowJs": true,
+    "isolatedModules": true,
+    "noEmitOnError": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "types": ["svelte", "vite/client"],
+    "plugins": [
+      {
+        "name": "typescript-svelte-plugin",
+        "enabled": true,
+        "assumeIsSvelteProject": true,
+      },
+    ],
+  },
+  "watchOptions": {
+    "watchFile": "useFsEvents",
+    "watchDirectory": "useFsEvents",
+  },
+  "include": [
+    "src/**/*.d.ts",
+    "src/**/*.ts",
+    "src/**/*.js",
+    "src/**/*.svelte",
+  ],
 }

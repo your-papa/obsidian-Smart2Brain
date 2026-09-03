@@ -1,12 +1,44 @@
 {
-	"$schema": "https://biomejs.dev/schemas/1.2.2/schema.json",
+	"$schema": "https://biomejs.dev/schemas/1.9.4/schema.json",
+	"files": {
+		"ignore": ["build/**", "integration/S2B Test Vault/**"]
+	},
 	"organizeImports": {
 		"enabled": true
 	},
 	"linter": {
 		"enabled": true,
 		"rules": {
-			"recommended": true
+			"recommended": true,
+			"style": {
+				"useConst": "off",
+				"useImportType": "off"
+			}
 		}
-	}
+	},
+	"formatter": {
+		"enabled": true,
+		"formatWithErrors": false,
+		"indentStyle": "tab",
+		"indentWidth": 4,
+		"lineWidth": 120
+	},
+	"javascript": {
+		"formatter": {
+			"semicolons": "always",
+			"trailingCommas": "all"
+		}
+	},
+	"overrides": [
+		{
+			"include": ["test/**", "integration/**"],
+			"linter": {
+				"rules": {
+					"style": {
+						"noNonNullAssertion": "off"
+					}
+				}
+			}
+		}
+	]
 }

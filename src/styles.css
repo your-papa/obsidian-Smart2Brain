@@ -1,3 +1,1548 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Hide scrollbar utility */
+.scrollbar-hide {
+	scrollbar-width: none; /* Firefox */
+	-ms-overflow-style: none; /* IE/Edge */
+}
+.scrollbar-hide::-webkit-scrollbar {
+	display: none; /* Chrome/Safari/Opera */
+}
+
+:root {
+	--icon-xs: 0.75rem;
+	--icon-sm: 1rem;
+	--icon-md: 1.25rem;
+	--icon-lg: 1.5rem;
+	--icon-xl: 2rem;
+}
+
+.obsidian-border {
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+/* Obsidian border-solid fix utilities
+   In Obsidian, border-solid creates borders on all sides by default.
+   These utilities reset unwanted borders to 0. Use with border-solid + border-[color] */
+@layer utilities {
+	.ob-border-b {
+		border-top-width: 0;
+		border-left-width: 0;
+		border-right-width: 0;
+	}
+	.ob-border-t {
+		border-bottom-width: 0;
+		border-left-width: 0;
+		border-right-width: 0;
+	}
+	.ob-border-x {
+		border-top-width: 0;
+		border-bottom-width: 0;
+	}
+	.ob-border-y {
+		border-left-width: 0;
+		border-right-width: 0;
+	}
+}
+
+/* Note access policy modal — the title carries the same shield-check mark, in
+   the same accent colour, as the settings row that opens it. Lives here rather
+   than in the Svelte component because the title element belongs to Obsidian's
+   modal chrome, outside the mounted component's scope. */
+.s2b-privacy-modal-title {
+	display: flex;
+	align-items: center;
+	justify-content: flex-start;
+	gap: 8px;
+	/* Obsidian's .modal-title carries auto side-margins that centre it; zero the
+	   inline ones so the icon+text pair sits at the leading edge. The close
+	   button is absolutely positioned top-right, so leave room for it. */
+	margin-inline: 0;
+	padding-inline-end: 2rem;
+}
+
+.s2b-privacy-modal-title-icon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	/* Sizing the wrapper alone leaves the inner svg at Obsidian's default
+	   dimensions, overflowing the box — which reads as the icon sitting
+	   off-centre next to the title. The svg sizes itself from --icon-size. */
+	--icon-size: 16px;
+	width: 16px;
+	height: 16px;
+	color: var(--text-accent);
+	flex-shrink: 0;
+}
+
+/* Search Modal Styles */
+.s2b-search-modal .prompt-results {
+	max-height: 400px;
+}
+
+/* Obsidian positions the prompt modal itself (`position: absolute` plus a `top`
+   offset that pins it near the top of the window). Do NOT give
+   `.s2b-search-modal` `position: relative` — that re-resolves the offset against
+   the flex-centred `.modal-container` and drops the whole modal into the middle
+   of the screen. */
+
+/* Selected rows are the sole selection indicator: the selection is cleared when
+   the query changes, so everything selected is always on screen. */
+.s2b-search-modal .suggestion-item.s2b-search-result-item-selected {
+	background: color-mix(in srgb, var(--interactive-accent) 8%, var(--background-secondary));
+	box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--interactive-accent) 25%, transparent);
+}
+
+/* Focused + selected: keep the highlight visible with a stronger accent so the
+   cursor position is still distinguishable on an already-selected row. */
+.s2b-search-modal .suggestion-item.s2b-search-result-item-selected.is-selected {
+	background: color-mix(in srgb, var(--interactive-accent) 22%, var(--background-secondary));
+	box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--interactive-accent) 55%, transparent);
+}
+
+.s2b-pill {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	padding: 4px 10px;
+	border-radius: 999px;
+	background: var(--s2b-pill-bg, color-mix(in srgb, var(--background-secondary) 92%, var(--background-primary)));
+	border: 1px solid var(--s2b-pill-border, var(--background-modifier-border));
+	color: var(--s2b-pill-color, var(--text-muted));
+	white-space: nowrap;
+	box-shadow: none;
+	/* Pills are often <button>s, which do not inherit the app font. Inherit the family
+	   only — the `font` shorthand would also reset the size and line-height set below,
+	   which is what it silently did while it sat after them. */
+	font-family: inherit;
+	font-size: 11px;
+	line-height: 1.15;
+	text-align: left;
+}
+
+/* Many pills are <button>s (context-tray chips, graph members), and Obsidian's
+   app.css button background outspecifies the bare `.s2b-pill` class — those
+   pills rendered `--interactive-normal` grey while span pills showed the
+   intended fill. Re-state fill and hover at button specificity; this file
+   loads after app.css, so the equal-specificity tie breaks our way. */
+button.s2b-pill {
+	background: var(--s2b-pill-bg, color-mix(in srgb, var(--background-secondary) 92%, var(--background-primary)));
+}
+
+button.s2b-pill--interactive:hover {
+	background: var(--s2b-pill-bg-hover, var(--background-modifier-hover));
+}
+
+.s2b-pill--interactive {
+	cursor: pointer;
+	transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, opacity 0.15s ease;
+}
+
+.s2b-pill--interactive:hover {
+	background: var(--s2b-pill-bg-hover, var(--background-modifier-hover));
+	border-color: var(--s2b-pill-border-hover, var(--background-modifier-border));
+	color: var(--s2b-pill-color-hover, var(--text-normal));
+	transform: none;
+	box-shadow: none;
+}
+
+.s2b-pill--interactive:focus-visible {
+	outline: none;
+	box-shadow: 0 0 0 2px color-mix(in srgb, var(--interactive-accent) 18%, transparent);
+}
+
+.s2b-pill--history {
+	padding: 2px 8px;
+	cursor: default;
+}
+
+/* Inline filter chips inside the input container */
+.s2b-inline-chips-container.prompt-input-container {
+	display: flex;
+	flex-wrap: nowrap;
+	/* Centre, not flex-start: mobile core sizes the input to a fixed 52px while
+	   this container is also 52px with 6px padding, so a top-aligned input spilled
+	   6px out of the bottom and the text rode low the moment a query was typed.
+	   The input is sized to its line box below; centring keeps it on the pill's
+	   axis in both the empty and typed states. */
+	align-items: center;
+	gap: 8px;
+	min-height: var(--prompt-input-height, 40px);
+	height: auto;
+	padding: 6px 8px;
+	position: relative;
+}
+
+.s2b-inline-input-content {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	align-content: center;
+	gap: 4px;
+	min-width: 0;
+	flex: 1 1 100%;
+	width: 100%;
+	padding-left: 8px;
+	padding-right: calc(var(--prompt-input-height, 40px) - 12px);
+}
+
+.s2b-inline-chips {
+	display: contents;
+}
+
+/* Centred on the container's axis rather than a fixed offset, so they track
+   whatever height it takes. `bottom: auto` and the `!important` on `top` are
+   both load-bearing: core sets its own `top` for these (computed ~25.7px, sized
+   for the taller empty-state container) and wins without them, which left the
+   clear "x" 5px above the container top and 13px below it — visibly high once
+   the container settles at 52px. */
+.s2b-inline-chips-container.prompt-input-container > .search-input-icon,
+.s2b-inline-chips-container.prompt-input-container > .search-input-clear-button,
+.s2b-inline-chips-container.prompt-input-container > .prompt-input-cta {
+	position: absolute;
+	top: 50% !important;
+	bottom: auto !important;
+	transform: translateY(-50%);
+	z-index: 1;
+}
+
+.s2b-inline-chips-container.prompt-input-container > .search-input-icon {
+	left: 8px;
+}
+
+.s2b-inline-chips-container.prompt-input-container > .search-input-clear-button,
+.s2b-inline-chips-container.prompt-input-container > .prompt-input-cta {
+	right: 8px;
+}
+
+.s2b-inline-input {
+	flex: 1 1 0;
+	min-width: 0;
+	width: auto;
+	align-self: center;
+	padding-left: 0 !important;
+	padding-inline-start: 0 !important;
+	padding-right: 0 !important;
+	padding-inline-end: 0 !important;
+	margin-left: 0 !important;
+	text-indent: 0 !important;
+	/* Mobile Obsidian gives `.prompt-input` its own pill: a 44px radius plus a
+	   visible border. Normally that IS the search field, but our inline-chips
+	   wrapper re-parents it inside `.prompt-input-container`, which already draws
+	   the same pill — so the two nest and it reads as an input inside an input.
+	   The container is the real field here; strip the inner chrome and let the
+	   input be plain text on top of it. Desktop is unaffected (no border/radius
+	   is set on `.prompt-input` there).
+
+	   `appearance: none` is the load-bearing one: iOS paints the native rounded
+	   text-field chrome for `-webkit-appearance: auto`, and that outline survives
+	   `border`/`background`/`box-shadow` overrides — verified on-device, where the
+	   pill was still drawn with computed `border-width: 0`. */
+	appearance: none !important;
+	-webkit-appearance: none !important;
+	background: transparent !important;
+	border: none !important;
+	border-radius: 0 !important;
+	box-shadow: none !important;
+
+	/* Text dropped ~6px the moment the first character was typed. Mobile core
+	   sizes BOTH `.prompt-input-container` and `.prompt-input` to a fixed 52px,
+	   and the container adds 6px padding top and bottom — so the 52px input can
+	   never fit inside the container's 40px content box. While empty the
+	   container was 65px and the overflow was invisible; once a query exists it
+	   collapses to 52px and, with the container's `align-items: flex-start`, the
+	   input spills 6px past the bottom and the text rides low. Measured
+	   on-device: empty → input 473-525 inside container 466-531; typed → input
+	   485-537 against container 479-531.
+
+	   Drop core's fixed height and the vertical padding that made it that tall,
+	   so the input collapses to its line box; the container then centres it (see
+	   the `align-items` override below). Verified on-device: 15px above and
+	   below in BOTH the empty and typed states, so nothing moves as you type. */
+	height: auto !important;
+	min-height: 0 !important;
+	padding-top: 0 !important;
+	padding-bottom: 0 !important;
+}
+
+.s2b-inline-input-content.s2b-inline-input-content-has-chips .s2b-inline-input {
+	margin-left: 2px !important;
+}
+
+.s2b-inline-chip {
+	appearance: none;
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	padding: 2px 10px 2px 8px;
+	border-radius: 999px;
+	border: 1px solid var(--tag-border-color, var(--background-modifier-border));
+	background: none;
+	background-color: var(--tag-background, color-mix(in srgb, var(--text-accent) 10%, transparent)) !important;
+	box-shadow: none !important;
+	color: var(--tag-color, var(--text-accent));
+	font-size: 0.72em;
+	font-family: inherit;
+	line-height: 1;
+	cursor: pointer;
+	white-space: nowrap;
+	max-width: 200px;
+	flex-shrink: 0;
+	text-align: left;
+}
+
+.s2b-inline-chip-icon {
+	display: flex;
+	align-items: center;
+	flex-shrink: 0;
+	width: 14px;
+	height: 14px;
+	color: var(--tag-color, var(--text-accent));
+}
+
+.s2b-inline-chip-icon .svg-icon,
+.s2b-inline-chip-icon svg {
+	width: 14px;
+	height: 14px;
+	color: inherit;
+	stroke: currentColor;
+}
+
+.s2b-inline-chip:hover {
+	background-color: var(--tag-background-hover, color-mix(in srgb, var(--text-accent) 10%, transparent)) !important;
+	border-color: var(
+		--tag-border-color-hover,
+		color-mix(in srgb, var(--interactive-accent) 35%, var(--background-modifier-border))
+	);
+}
+
+.s2b-inline-chip-label {
+	color: var(--tag-color, var(--text-accent));
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.s2b-inline-chip-remove {
+	font-size: 1.05em;
+	line-height: 1;
+	color: var(--tag-color, var(--text-accent));
+	opacity: 0.7;
+	flex-shrink: 0;
+}
+
+.s2b-inline-chip:hover .s2b-inline-chip-label,
+.s2b-inline-chip:hover .s2b-inline-chip-remove {
+	color: var(--tag-color-hover, var(--tag-color, var(--text-accent)));
+}
+
+.s2b-inline-chip:hover .s2b-inline-chip-remove {
+	color: var(--tag-color-remove-hover, var(--tag-color-hover, var(--tag-color, var(--text-accent))));
+	opacity: 1;
+}
+
+.s2b-inline-chip-mode {
+	background: color-mix(in srgb, var(--interactive-accent) 10%, var(--background-secondary));
+	color: var(--text-accent);
+	font-weight: 500;
+}
+
+/* Autocomplete suggestion styles */
+.s2b-search-autocomplete {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 4px 0;
+}
+
+.s2b-search-autocomplete-icon {
+	display: flex;
+	align-items: center;
+	color: var(--text-muted);
+	flex-shrink: 0;
+}
+
+.s2b-search-autocomplete-icon svg {
+	width: 16px;
+	height: 16px;
+}
+
+.s2b-search-autocomplete-text {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.s2b-search-autocomplete-hint {
+	color: var(--text-faint);
+	font-size: var(--font-smallest);
+	flex-shrink: 0;
+}
+
+.s2b-search-result {
+	display: flex;
+	flex-direction: column;
+	gap: 3px;
+	padding: 5px 0;
+}
+
+.s2b-search-result-title {
+	display: flex;
+	align-items: flex-start;
+	gap: 8px;
+	min-width: 0;
+}
+
+.s2b-search-result-title-meta {
+	display: flex;
+	align-items: center;
+	flex-wrap: nowrap;
+	gap: 6px;
+	min-width: 0;
+	flex: 1;
+	overflow: hidden;
+}
+
+.s2b-search-result-name {
+	font-weight: 500;
+	color: var(--text-normal);
+	/* The name is what the row exists to show, so it shrinks last: it keeps a
+	   readable floor and the secondary metadata beside it gives way first. Without
+	   the floor, a long path or tag strip drives it to zero width and the row reads
+	   as though the name had scrolled off to the left. */
+	flex: 0 1 auto;
+	min-width: 6ch;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.s2b-search-result-title-secondary {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	min-width: 0;
+	flex-wrap: nowrap;
+	/* Shrinkable, and clipped rather than `visible`: the intrinsic width of the
+	   path + tag strip must not push past the row's right edge. */
+	flex: 0 1 auto;
+	overflow: hidden;
+}
+
+.s2b-search-result-note-icon,
+.s2b-path-icon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: var(--icon-sm);
+	height: var(--icon-sm);
+	flex-shrink: 0;
+	color: var(--text-muted);
+	overflow: hidden;
+}
+
+.s2b-search-result-note-icon .svg-icon,
+.s2b-search-result-note-icon svg,
+.s2b-path-icon .svg-icon,
+.s2b-path-icon svg {
+	width: var(--icon-sm);
+	height: var(--icon-sm);
+	display: block;
+}
+
+.s2b-search-result-note-icon-emoji {
+	font-size: 0.95rem;
+	line-height: 1;
+}
+
+.s2b-search-result-separator {
+	color: var(--text-faint);
+	font-size: 0.8em;
+	line-height: 1;
+	flex-shrink: 0;
+}
+
+.s2b-search-result-path {
+	font-size: 0.85em;
+	color: var(--text-muted);
+	flex: 0 1 auto;
+	min-width: 0;
+	max-width: 100%;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.s2b-search-result-explanation {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+
+	font-size: 0.85em;
+	color: var(--text-muted);
+	line-height: 1.35;
+	word-break: break-word;
+}
+
+.s2b-search-result-heading {
+	color: var(--text-muted);
+	font-weight: 500;
+}
+
+.s2b-search-result-snippet {
+	font-size: 0.85em;
+	color: var(--text-muted);
+	line-height: 1.35;
+	display: -webkit-box;
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 2;
+	overflow: hidden;
+	word-break: break-word;
+}
+
+.s2b-search-result-highlight {
+	background: color-mix(in srgb, var(--interactive-accent) 18%, transparent);
+	color: var(--text-normal);
+	padding: 0 2px;
+	border-radius: 3px;
+}
+
+.s2b-search-result-highlight-title {
+	background: transparent;
+	color: inherit;
+	padding: 0;
+	border-radius: 0;
+	font-weight: 700;
+}
+
+.s2b-search-result-badges {
+	display: flex;
+	gap: 6px;
+	flex-wrap: wrap;
+	justify-content: flex-end;
+	margin-left: auto;
+	flex-shrink: 0;
+}
+
+.s2b-search-result-badge {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 16px;
+	height: 16px;
+	padding: 0;
+	border-radius: 0;
+	background: transparent;
+	color: var(--text-faint);
+	opacity: 0.78;
+	border: none;
+}
+
+.s2b-search-result-badge-icon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 14px;
+	height: 14px;
+	line-height: 1;
+}
+
+.s2b-search-result-badge-icon svg {
+	width: 14px;
+	height: 14px;
+	stroke-width: 2.1;
+}
+
+.s2b-search-result-badge-title {
+	color: inherit;
+}
+
+.s2b-search-result-badge-alias {
+	color: inherit;
+}
+
+.s2b-search-result-badge-tag {
+	color: inherit;
+}
+
+.s2b-search-result-badge-path {
+	color: inherit;
+}
+
+.s2b-search-result-badge-heading {
+	color: inherit;
+}
+
+.s2b-search-result-badge-content {
+	color: inherit;
+	opacity: 0.56;
+}
+
+.s2b-search-result-badge-semantic {
+	color: inherit;
+}
+
+.s2b-search-result-badge-recent {
+	color: inherit;
+}
+
+.s2b-search-result-tags {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	flex-wrap: nowrap;
+	/* `min-width: max-content` here used to pin the strip to its full intrinsic
+	   width, which is what forced all shrinkage onto the note name. Individual
+	   pills still refuse to shrink (`.s2b-search-result-tag` is `flex: 0 0 auto`
+	   and `nowrap`), so the strip clips whole pills off its end instead of
+	   squashing them. */
+	flex: 0 1 auto;
+	min-width: 0;
+	overflow: hidden;
+}
+
+.s2b-search-result-tag {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	flex: 0 0 auto;
+	justify-content: flex-start;
+	font-size: 0.72em;
+	line-height: 1;
+	color: var(--tag-color, var(--text-accent));
+	background-color: var(--tag-background, color-mix(in srgb, var(--text-accent) 10%, transparent));
+	border: 1px solid var(--tag-border-color, color-mix(in srgb, var(--text-accent) 25%, transparent));
+	border-radius: 999px;
+	padding: 2px 10px 2px 8px;
+	white-space: nowrap;
+}
+
+.s2b-search-result-tag-icon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: var(--icon-xs);
+	height: var(--icon-xs);
+	flex-shrink: 0;
+	overflow: hidden;
+	margin: 0;
+}
+
+.s2b-search-result-tag-icon .svg-icon,
+.s2b-search-result-tag-icon svg {
+	width: var(--icon-xs);
+	height: var(--icon-xs);
+	display: block;
+}
+
+.s2b-search-result-tag-label {
+	display: inline-flex;
+	align-items: center;
+	line-height: 1;
+	min-height: var(--icon-xs);
+	white-space: nowrap;
+	margin: 0;
+	padding: 0;
+}
+
+.s2b-search-result-tag-overflow {
+	--tag-color: var(--text-muted);
+	--tag-background: color-mix(in srgb, var(--text-muted) 10%, transparent);
+	--tag-border-color: color-mix(in srgb, var(--text-muted) 25%, transparent);
+	font-weight: 600;
+}
+
+.s2b-search-empty {
+	padding: 16px;
+	text-align: center;
+	color: var(--text-muted);
+}
+
+.s2b-search-semantic-hint {
+	padding: 6px 16px;
+	text-align: center;
+	color: var(--text-faint);
+	font-size: var(--font-smallest);
+}
+
+/* Smart Graph View */
+.smart-graph-container {
+	padding: 0 !important;
+	overflow: hidden;
+}
+
+.smart-graph-container .view-content {
+	padding: 0;
+}
+/* Inline diff decorations — word-level (edit view) */
+.s2b-diff-word-removed {
+	background-color: rgba(220, 50, 47, 0.18);
+	border-radius: 2px;
+	padding: 0 1px;
+}
+
+.s2b-diff-word-added {
+	display: inline;
+	background-color: rgba(0, 180, 0, 0.18);
+	border-radius: 2px;
+	padding: 0 1px;
+	white-space: pre-wrap;
+}
+
+/* Editor line-background tints — additive, no document reflow. Applied via
+   Decoration.line to the lines a pending change group covers. */
+.s2b-diff-line-removed {
+	background-color: rgba(220, 50, 47, 0.18);
+}
+
+.s2b-diff-line-added {
+	background-color: rgba(0, 180, 0, 0.18);
+}
+
+/* Neutral tint for removed lines in word-diff mode: marks the source lines the
+   card refers to without the "deleted" (red) connotation. */
+.s2b-diff-line-muted {
+	background-color: var(--background-modifier-hover);
+}
+
+/* Reading-view section tints — additive class on the rendered section. */
+.s2b-diff-section {
+	border-radius: 4px;
+}
+
+.s2b-diff-section-removed {
+	background-color: rgba(220, 50, 47, 0.18);
+}
+
+.s2b-diff-section-added {
+	background-color: rgba(0, 180, 0, 0.18);
+}
+
+/* Word-diff mode already shows old+new inline in the card, so the section's own
+   rendered original is a duplicate — hide it and drop the (now-empty) tint. */
+.s2b-diff-hide-original > :not(.s2b-diff-reading-group) {
+	display: none;
+}
+
+.s2b-diff-hide-original.s2b-diff-section-removed,
+.s2b-diff-hide-original.s2b-diff-section-added {
+	background-color: transparent;
+}
+
+/* The injected review card sits inside the tinted section; give it the normal
+   background so the section highlight only shows under the original text, not
+   under the diff view itself. */
+.s2b-diff-reading-group {
+	background-color: var(--background-primary);
+	border-radius: 4px;
+}
+
+/* The rendered original follows the review card inside the tinted section. Its
+   natural paragraph margin-top would push a full blank line between the new
+   pane and the original — edit mode stacks them flush, so collapse it here to
+   keep the two views consistent (the card's own margin-bottom is the separator). */
+.s2b-diff-section > .s2b-diff-reading-group + * {
+	margin-top: 0;
+}
+
+/* Group wrapper + detail body (both views). */
+.s2b-diff-edit-group,
+.s2b-diff-reading-group {
+	margin: 4px 0;
+}
+
+.s2b-diff-detail {
+	margin-top: 4px;
+	font-family: var(--font-text);
+	font-size: var(--font-text-size);
+	line-height: var(--line-height-normal);
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+
+/* Action bar for pending change accept/reject buttons.
+   Visual language is shared with the chat-side `PendingChangesBar.svelte`:
+   colour tokens over hardcoded rgba, and transparent buttons that tint on
+   hover rather than filled boxes. It keeps its own --background-secondary
+   fill (unlike the chat bar's page-coloured one) because this bar sits on
+   note background and has to read as plugin chrome, not as note content. */
+.s2b-diff-action-bar-widget,
+.s2b-diff-actions-bar {
+	display: flex;
+	align-items: center;
+	/* Nowrap + a container query (below) instead of wrapping: a wrapped bar
+	   doubles in height and shoves the diff down the note, which is worse
+	   than dropping two button labels. */
+	flex-wrap: nowrap;
+	gap: 8px;
+	padding: 4px 8px;
+	background-color: var(--background-secondary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+	margin: 4px 0;
+	/* Query container for the label collapse below. The real constraint is how
+	   wide THIS BAR is — not the viewport: a note can be in a narrow sidebar
+	   leaf, a split, or a narrow window, and only the bar's own width tracks
+	   all three. Same reasoning as `.chat-input-wrapper` in Input.svelte. */
+	container-type: inline-size;
+	container-name: s2b-diff-bar;
+}
+
+/* Every control is fixed-size; only the label may shrink (see below), so the
+   browser can't squeeze the buttons and deform their touch targets. */
+.s2b-diff-action-bar-widget > *,
+.s2b-diff-actions-bar > * {
+	flex-shrink: 0;
+}
+
+/* Below this width the two words don't fit beside the label, counter and three
+   icon buttons. Shed them and let the check/x glyphs carry the meaning — the
+   same icon-only treatment the chat bar's entry rows already use. The buttons
+   keep their aria-labels, so this is purely visual. */
+@container s2b-diff-bar (max-width: 320px) {
+	.s2b-diff-btn-label {
+		display: none;
+	}
+}
+
+/* Banner shown at the top of a note's inline diff when other chats also have a
+   pending update to the same file (only the latest is rendered inline). */
+.s2b-diff-cross-thread-banner {
+	font-size: var(--font-ui-smaller);
+	line-height: 1.4;
+	padding: 6px 10px;
+	margin: 4px 0;
+	/* Matches the action bar it sits above. */
+	border-radius: var(--radius-m);
+	/* color-mix on the hex var rather than the theme-dependent -hsl form, which
+	   some themes leave undefined — see the note on .s2b-diff-accept-btn. */
+	background-color: color-mix(in srgb, var(--color-orange) 15%, transparent);
+	border: 1px solid color-mix(in srgb, var(--color-orange) 35%, transparent);
+	color: var(--text-normal);
+}
+
+.s2b-diff-actions-label {
+	/* Matches `.pcb-entry-header` in PendingChangesBar.svelte so the two review
+	   surfaces share one type scale. */
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	/* Absorb free space so the buttons sit at the right — unless a position
+	   indicator follows the label, in which case the indicator carries the
+	   auto-margin instead (see below) and the two sit together on the left. */
+	margin-right: auto;
+	/* The bar is nowrap, so overflow has to go somewhere: this label is the only
+	   thing allowed to give. It ellipsizes down toward "Pending c…" in the last
+	   sliver of width before the container query drops the button labels. */
+	flex-shrink: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* Position of this change group among the note's pending changes (e.g. "2/3"),
+   shown directly after the "Pending change" label. Stays visible at rest
+   (unlike the hover-only chevrons/toggle) so the user sees where they are at a
+   glance. It takes over the auto-margin so it hugs the label on the left.
+   Matches the label's font-size + line-height so the two text baselines line up
+   in the center-aligned bar (a smaller font floats visibly higher). */
+.s2b-diff-position-indicator {
+	font-size: var(--font-ui-smaller);
+	line-height: 1;
+	color: var(--text-muted);
+	opacity: 0.8;
+	font-variant-numeric: tabular-nums;
+	margin-right: auto;
+}
+
+/* When the indicator is present, the label no longer needs the spacer — drop
+   its auto-margin so the label and indicator stay adjacent (gap only). */
+.s2b-diff-actions-label:has(+ .s2b-diff-position-indicator) {
+	margin-right: 0;
+}
+
+/* Accept / Reject. Mirrors `.pcb-action` in PendingChangesBar.svelte: no fill
+   at rest, colour carried by the text + glyph, and a translucent tint of that
+   same colour on hover. Scoped under the bar containers (0,2,0) for the same
+   reason as the icon buttons below — `background: transparent` has to beat
+   Obsidian's default `button:not(.clickable-icon)` fill (0,1,1). */
+.s2b-diff-actions-bar .s2b-diff-accept-btn,
+.s2b-diff-actions-bar .s2b-diff-reject-btn,
+.s2b-diff-action-bar-widget .s2b-diff-accept-btn,
+.s2b-diff-action-bar-widget .s2b-diff-reject-btn {
+	display: flex;
+	align-items: center;
+	gap: 3px;
+	font-size: var(--font-ui-smaller);
+	font-weight: var(--font-medium);
+	padding: 2px 8px;
+	border-radius: var(--radius-s);
+	cursor: pointer;
+	border: none;
+	box-shadow: none;
+	background: transparent;
+	transition: background 100ms ease;
+}
+
+/* The glyph sits beside the word at rest and carries the button alone once the
+   container query drops the label. 12px matches the chat bar's icon buttons. */
+.s2b-diff-btn-icon {
+	display: flex;
+	align-items: center;
+	--icon-size: 12px;
+}
+
+.s2b-diff-btn-icon svg {
+	width: 12px;
+	height: 12px;
+}
+
+/* Scoped under the bar containers (0,2,0) so `background: none` beats
+   Obsidian's default `button:not(.clickable-icon)` (0,1,1) at rest AND on hover
+   — otherwise the icons show an ugly --interactive-normal background at rest. */
+.s2b-diff-actions-bar .s2b-diff-toggle-btn,
+.s2b-diff-action-bar-widget .s2b-diff-toggle-btn {
+	opacity: 0;
+	transition: opacity 0.15s ease;
+	background: none;
+	border: none;
+	cursor: pointer;
+	color: var(--text-muted);
+	padding: 2px;
+	border-radius: 4px;
+	display: flex;
+	align-items: center;
+}
+
+.s2b-diff-actions-bar .s2b-diff-toggle-btn:hover,
+.s2b-diff-action-bar-widget .s2b-diff-toggle-btn:hover {
+	color: var(--text-normal);
+	background: var(--background-modifier-hover);
+}
+
+/* Prev/next pending-change chevrons in the note's diff action bar. Hidden at
+   rest and revealed on hover (like the view-mode toggle) to keep the resting
+   bar clean; the position indicator stays visible so navigation context isn't
+   lost. Scoped under the bar for the same specificity reason as the toggle. */
+.s2b-diff-actions-bar .s2b-diff-nav-btn,
+.s2b-diff-action-bar-widget .s2b-diff-nav-btn {
+	opacity: 0;
+	transition: opacity 0.15s ease;
+	background: none;
+	border: none;
+	cursor: pointer;
+	color: var(--text-muted);
+	padding: 2px;
+	border-radius: 4px;
+	display: flex;
+	align-items: center;
+}
+
+.s2b-diff-actions-bar .s2b-diff-nav-btn:hover,
+.s2b-diff-action-bar-widget .s2b-diff-nav-btn:hover {
+	color: var(--text-normal);
+	background: var(--background-modifier-hover);
+}
+
+.s2b-diff-actions-bar:hover .s2b-diff-toggle-btn,
+.s2b-diff-actions-bar:hover .s2b-diff-nav-btn,
+.s2b-diff-action-bar-widget:hover .s2b-diff-toggle-btn,
+.s2b-diff-action-bar-widget:hover .s2b-diff-nav-btn {
+	opacity: 1;
+}
+
+/* Theme tokens, not hardcoded rgba: these buttons are chrome, so unlike the
+   diff body tints they should track the user's theme like the rest of the UI.
+   Tints go through `color-mix` on the HEX var rather than
+   `hsla(var(--color-green-hsl), …)`: the -hsl forms are theme-dependent and are
+   simply absent in some themes (Cupertino), where the hsla() collapses to
+   transparent and the hover state silently disappears. The hex vars are
+   always defined. */
+.s2b-diff-actions-bar .s2b-diff-accept-btn,
+.s2b-diff-action-bar-widget .s2b-diff-accept-btn {
+	color: var(--color-green);
+}
+
+.s2b-diff-actions-bar .s2b-diff-accept-btn:hover,
+.s2b-diff-action-bar-widget .s2b-diff-accept-btn:hover {
+	background: color-mix(in srgb, var(--color-green) 15%, transparent);
+}
+
+/* Stale entry: the accept is guaranteed to fail its conflict check, so the
+   in-note bars disable it with an explanatory title (parity with the chat bar).
+   Kept visible but clearly inert, and pointer-events stay on so the title
+   tooltip still explains why — matching `.pcb-action-icon[disabled]`. */
+.s2b-diff-actions-bar .s2b-diff-accept-btn[disabled],
+.s2b-diff-action-bar-widget .s2b-diff-accept-btn[disabled] {
+	opacity: 0.35;
+	cursor: not-allowed;
+}
+
+.s2b-diff-actions-bar .s2b-diff-accept-btn[disabled]:hover,
+.s2b-diff-action-bar-widget .s2b-diff-accept-btn[disabled]:hover {
+	background: transparent;
+}
+
+.s2b-diff-actions-bar .s2b-diff-reject-btn,
+.s2b-diff-action-bar-widget .s2b-diff-reject-btn {
+	color: var(--color-red);
+}
+
+.s2b-diff-actions-bar .s2b-diff-reject-btn:hover,
+.s2b-diff-action-bar-widget .s2b-diff-reject-btn:hover {
+	background: color-mix(in srgb, var(--color-red) 15%, transparent);
+}
+
+.s2b-reading-diff-word-removed {
+	background-color: rgba(220, 50, 47, 0.18);
+	border-radius: 2px;
+	padding: 0 1px;
+}
+
+.s2b-reading-diff-word-added {
+	background-color: rgba(0, 180, 0, 0.18);
+	border-radius: 2px;
+	padding: 0 1px;
+}
+
+/* Two-pane stacked diff (reading view) */
+.s2b-diff-two-pane {
+	display: flex;
+	flex-direction: column;
+	gap: 0;
+	border-radius: 4px;
+	overflow: hidden;
+	border: 1px solid var(--background-modifier-border);
+}
+
+.s2b-diff-pane-removed,
+.s2b-diff-pane-added {
+	padding: 0;
+}
+
+.s2b-diff-pane-removed > *:first-child,
+.s2b-diff-pane-added > *:first-child {
+	margin-top: 0;
+}
+
+.s2b-diff-pane-removed > *:last-child,
+.s2b-diff-pane-added > *:last-child {
+	margin-bottom: 0;
+}
+
+.s2b-diff-pane-removed {
+	background-color: rgba(220, 50, 47, 0.18);
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.s2b-diff-pane-added {
+	background-color: rgba(0, 180, 0, 0.18);
+}
+
+.s2b-diff-two-pane pre {
+	margin: 0;
+	white-space: pre-wrap;
+	word-break: break-word;
+	font-family: var(--font-monospace);
+	font-size: var(--font-smaller);
+}
+
+/* Selection highlight — accent-tinted band persisted after focus leaves the note.
+   Kept prominent (not faint) so the captured text is obvious at a glance. */
+.s2b-selection-highlight {
+	background-color: color-mix(in srgb, var(--interactive-accent) 28%, transparent);
+	border-radius: 2px;
+}
+
+::highlight(s2b-selection) {
+	background-color: color-mix(in srgb, var(--interactive-accent) 28%, transparent);
+}
+
+/* Chat embed preview — icon sizing (setIcon injects SVG after mount, needs global rule) */
+.s2b-chat-embed-icon svg,
+.s2b-chat-embed-icon .svg-icon {
+	width: 20px;
+	height: 20px;
+}
+
+/* ────────────────────────────────────────────────────────────────────────
+   Mobile / touch adaptations
+   Much of the chat UI reveals actions on :hover (message footers, code-copy,
+   picker-row actions). Touch devices have no hover, so those affordances are
+   invisible and unreachable. `@media (hover: none)` targets touch/pen inputs
+   (phones, tablets, touch laptops) without a width breakpoint — always show
+   the affordance and re-enable pointer events there. We keep the entry/exit
+   transition on hover-capable devices untouched.
+   ──────────────────────────────────────────────────────────────────────── */
+@media (hover: none) {
+	/* Message action footers (edit / copy / regenerate / branch navigator).
+	   These use Tailwind `opacity-0 group-hover:opacity-100 pointer-events-none
+	   group-hover:pointer-events-auto` — override to always-visible on touch. */
+	.message-footer {
+		opacity: 1 !important;
+		transform: none !important;
+		pointer-events: auto !important;
+	}
+
+	/* Pending-change bar chevrons and diff-mode toggle. Both sit at `opacity: 0`
+	   until the bar is hovered, which on touch means permanently invisible —
+	   taking cross-file navigation and the word-diff/two-pane switch with them.
+	   Show them at rest here; desktop keeps its cleaner hover-reveal. */
+	.s2b-diff-actions-bar .s2b-diff-nav-btn,
+	.s2b-diff-actions-bar .s2b-diff-toggle-btn,
+	.s2b-diff-action-bar-widget .s2b-diff-nav-btn,
+	.s2b-diff-action-bar-widget .s2b-diff-toggle-btn {
+		opacity: 1;
+	}
+
+	/* Code-block copy button lives in `<pre>` and is revealed on `pre:hover`.
+	   Show it persistently on touch so code is copyable. Code blocks appear in
+	   chat messages and in tool-call output, so cover both containers. */
+	.message-text pre .clickable-icon,
+	.tool-output-content pre .clickable-icon {
+		opacity: 1 !important;
+	}
+
+	/* Shared picker-row trailing action (PickerOptionRow) — revealed on
+	   :hover/:focus-within; always show on touch. */
+	.picker-option-action {
+		opacity: 1 !important;
+	}
+
+	/* Generic hover-reveal hook: any element that fades in on group-hover
+	   (collapse chevron, …) tagged with this class shows on touch. */
+	.s2b-hover-reveal {
+		opacity: 1 !important;
+	}
+}
+
+/* Follow-up actions under the mobile result list / empty state: the semantic
+   offer and "Ask the agent". These replaced a toggle strip above the input,
+   which asked the user to pick a search mode before seeing a single result.
+   Rendered inline with the results so the offer sits where the doubt forms. */
+.s2b-search-followup {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 10px 14px;
+	border-top: 1px solid var(--background-modifier-border);
+}
+
+.s2b-search-followup-label {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+}
+
+.s2b-search-followup-action {
+	min-height: 36px;
+	padding: 6px 14px;
+	font-size: var(--font-ui-small);
+	/* Sits at the row's end so the label reads first, action second. */
+	margin-left: auto;
+	flex-shrink: 0;
+}
+
+.s2b-search-mobile-icon {
+	display: inline-flex;
+	align-items: center;
+}
+
+.s2b-search-mobile-icon svg {
+	width: 16px;
+	height: 16px;
+}
+
+/* ---------------------------------------------------------------------------
+   Mobile model picker (ModelSuggestModal)
+
+   A SuggestModal rather than the desktop Svelte modal, because Obsidian pins
+   `.prompt` above the keyboard on a phone and flows results upward — behaviour
+   the floating modal can't match without re-implementing keyboard tracking.
+   Rows carry the same information as the desktop cards (name, slug, provider,
+   context, pricing, capabilities, favourite star).
+   --------------------------------------------------------------------------- */
+
+.s2b-model-filter-bar {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 8px 12px;
+	/* .prompt is a flex column with a fixed total height (input + this bar +
+	   results); as a plain block child this bar has no intrinsic height for
+	   flexbox to respect, so it gets squeezed to a sliver instead of showing
+	   its pills. flex-shrink: 0 plus an explicit height fixes the basis.
+
+	   The height must cover the pills plus this padding: at 44px with 36px pills
+	   and 12px of vertical padding the content needed 48px, so every pill was
+	   clipped top and bottom. Derive it from the same numbers instead of
+	   hard-coding, so restyling a pill can't silently re-clip the row. */
+	flex-shrink: 0;
+	min-height: calc(36px + 16px);
+	box-sizing: border-box;
+	/* One scrolling row: a wrapping bar would push the results list down by an
+	   unpredictable amount every time the vendor set changes.
+
+	   `overflow-y: hidden` is load-bearing, not decoration. `overflow-x: auto`
+	   alone computes to `auto` on BOTH axes, and since the pills' 36px min-height
+	   plus this 16px of padding exactly fills the box, any sub-pixel rounding
+	   leaves a few stray pixels of vertical scroll — the row could be nudged up
+	   and down. Pinning the block axis makes the bar horizontal-only. */
+	overflow-x: auto;
+	overflow-y: hidden;
+	scrollbar-width: none;
+}
+
+.s2b-model-filter-bar::-webkit-scrollbar {
+	display: none;
+}
+
+/* NOTE: do NOT constrain the phone prompt's height from here. A previous
+   `height: auto; max-height: calc(100dvh - ...)` rule (meant to shrink themes'
+   full-bleed prompts back to a bottom sheet) broke the default theme on real
+   iOS: `dvh` tracks the keyboard-shrunken viewport there, so the cap landed
+   mid-screen, pushed the box's bottom under the keyboard, and clipped the
+   results list — none of which reproduces in the desktop mobile emulator,
+   which has no on-screen keyboard. Core manages the prompt's height itself;
+   only the top inset needs help, and `applyPromptSafeArea` in `promptLayout.ts`
+   handles that from script (a unitless theme `--prompt-top: 0` makes the CSS
+   `max()` spelling invalid, so it cannot live here). */
+
+/* Opt-in checkbox inside ConfirmModal, for a secondary destructive action the
+   user can bundle with the deletion (e.g. also discarding a provider's
+   embeddings). Sits between the message and the button row. */
+.s2b-confirm-checkbox {
+	margin: 0.75em 0;
+}
+
+.s2b-confirm-checkbox label {
+	display: flex;
+	align-items: center;
+	gap: 0.5em;
+	cursor: pointer;
+}
+
+.s2b-confirm-checkbox input {
+	flex-shrink: 0;
+	margin: 0;
+}
+
+/* Indented to the label's text edge (checkbox width + gap) so the description
+   reads as belonging to the option rather than to the dialog. */
+.s2b-confirm-checkbox-desc {
+	margin-top: 0.25em;
+	padding-inline-start: calc(var(--checkbox-size, 16px) + 0.5em);
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	line-height: 1.4;
+}
+
+.s2b-model-filter-bar .s2b-pill {
+	min-height: 36px;
+	padding: 6px 14px;
+	font-size: var(--font-ui-small);
+	flex-shrink: 0;
+	/* Slightly wider than the base pill's 4px: these pills are taller and carry
+	   18px vendor artwork rather than a small inline glyph. */
+	gap: 6px;
+}
+
+/* Shared active state for filter pills (mobile filter strip and the desktop
+   model modal's provider bar). The `:hover` selector keeps the active fill
+   from being washed out by the `--interactive`-hover rule, which otherwise
+   outspecifies this one on mouse-over. */
+.s2b-pill.s2b-pill--active,
+button.s2b-pill--interactive.s2b-pill--active:hover {
+	background: color-mix(in srgb, var(--interactive-accent) 18%, var(--background-secondary));
+	border-color: color-mix(in srgb, var(--interactive-accent) 45%, var(--background-modifier-border));
+	color: var(--text-accent);
+}
+
+/* Matches the filled star on a favourited row, so "Favorites is on" and "this
+   model is favourited" use the same visual language. Scoped to the monochrome
+   star only — vendor artwork keeps its own fills. */
+.s2b-model-filter-fav.s2b-pill--active .s2b-model-filter-icon svg {
+	fill: currentColor;
+}
+
+.s2b-model-filter-icon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	/* The bar scrolls horizontally, so nothing inside a pill may be squeezed. */
+	flex-shrink: 0;
+}
+
+.s2b-model-filter-icon svg {
+	width: 16px;
+	height: 16px;
+}
+
+/* Vendor marks are monochrome `currentColor` glyphs, not multi-colour brand
+   artwork, so they take the pill's text colour by design: muted at rest and
+   accent-tinted while active, tracking the label beside them. This mirrors the
+   suggestion rows, which set `--text-normal` on their own logo wrapper for the
+   same reason. Sized a touch larger than the star so they stay legible. */
+.s2b-model-filter-icon--vendor,
+.s2b-model-filter-icon--vendor svg {
+	width: 18px;
+	height: 18px;
+}
+
+.s2b-model-suggestion {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.s2b-model-suggestion--selected {
+	background: color-mix(in srgb, var(--interactive-accent) 12%, transparent);
+}
+
+.s2b-model-suggestion-header {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.s2b-model-suggestion-info {
+	flex: 1;
+	min-width: 0;
+}
+
+.s2b-model-suggestion-name {
+	font-weight: 500;
+	color: var(--text-normal);
+	/* Without the slug line beneath it the name is the row's only identifier,
+	   so keep it on one line and let the tail truncate rather than reflowing
+	   the row to two lines. */
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.s2b-model-suggestion-logo {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex-shrink: 0;
+	color: var(--text-normal);
+}
+
+.s2b-model-suggestion-actions {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	flex-shrink: 0;
+}
+
+/* Full 44px touch target: this sits inside a row that itself selects a model,
+   so an undersized star turns a favourite tap into an accidental selection.
+   `.clickable-icon` supplies the transparent-at-rest background, hover fill and
+   rounding; only the touch sizing and the favourite state belong here. Without
+   that class the bare <button> keeps the host's default chrome, which on mobile
+   reads as a permanently highlighted grey box. */
+.s2b-model-suggestion-fav.clickable-icon {
+	width: 44px;
+	height: 44px;
+	padding: 0;
+	flex-shrink: 0;
+	color: var(--text-faint);
+}
+
+/* A 44px target needs a mark big enough to read as its occupant rather than a
+   speck floating in an empty square. */
+.s2b-model-suggestion-fav.clickable-icon svg {
+	width: 22px;
+	height: 22px;
+}
+
+/* Lucide's star is an outline (`fill: none`), so colour alone is a weak on/off
+   signal at phone size — filling the glyph makes the favourited state read at a
+   glance instead of relying on a faint-vs-accent stroke comparison. */
+.s2b-model-suggestion-fav.clickable-icon.is-favorite {
+	color: var(--text-accent);
+}
+
+.s2b-model-suggestion-fav.clickable-icon.is-favorite svg {
+	fill: currentColor;
+}
+
+.s2b-model-suggestion-check {
+	display: inline-flex;
+	align-items: center;
+	color: var(--text-accent);
+}
+
+.s2b-model-suggestion-meta {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+}
+
+.s2b-model-suggestion-tag {
+	display: inline-block;
+	padding: 2px 8px;
+	font-size: var(--font-ui-smaller);
+	line-height: 1.3;
+	background: var(--background-primary);
+	border-radius: var(--radius-s);
+	color: var(--text-muted);
+	white-space: nowrap;
+}
+
+.s2b-model-suggestion-tag--provider {
+	background: var(--background-modifier-border);
+	color: var(--text-normal);
+}
+
+.s2b-model-suggestion-tag.capability {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	padding: 4px;
+	background: color-mix(in srgb, var(--interactive-accent) 15%, transparent);
+	color: var(--text-accent);
+}
+
+.s2b-model-suggestion-tag.capability svg {
+	width: 13px;
+	height: 13px;
+}
+
+/* Model-management grids are fixed 2/3 columns; a phone can't fit that without
+   clipping model names. Collapse to a single column on mobile. */
+.is-mobile .s2b-model-grid {
+	grid-template-columns: 1fr !important;
+}
+
+/* Touch tap-target floors. Several icon buttons are sized to their glyph
+   (16–28px), below the ~44px comfortable touch target. Bump them on mobile.
+   Obsidian already touch-sizes bare .clickable-icon, so we target only the
+   custom-sized ones here. */
+.is-mobile .branch-nav-btn,
+.is-mobile .s2b-model-favorite {
+	min-width: 40px;
+	min-height: 40px;
+}
+
+/* Message action rows (edit / copy / regenerate) and the composer's icon
+   buttons pin themselves to `--icon-s` with `min-width: 0 !important` in
+   component scope, which lands them at ~30x26 — roughly half the 44px touch
+   floor and the smallest hit areas in the chat. The component rules win on
+   `!important`, so the mobile override has to match it to raise the floor.
+   Padding (not width/height) does the growing, so the glyph keeps its size
+   and only the tappable box expands. */
+.is-mobile .footer-actions button,
+.is-mobile .attach-context-button.clickable-icon,
+.is-mobile .chat-input-icon-button.clickable-icon,
+.is-mobile .graph-controls .clickable-icon,
+.is-mobile .s2b-bottom-sheet .clickable-icon,
+.is-mobile .provider-icon-button.clickable-icon,
+.is-mobile .pcb-action-icon,
+.is-mobile .s2b-diff-nav-btn,
+.is-mobile .s2b-diff-toggle-btn {
+	min-width: 44px !important;
+	min-height: 44px !important;
+	padding: 10px !important;
+	box-sizing: border-box !important;
+}
+
+/* The in-note bar's Accept/Reject are the same 2px-padded controls, but they
+   may still carry a text label (the container query only drops it below 320px),
+   so square 44px padding would balloon them. Raise the tappable height and let
+   the inline padding stay proportional to the content. */
+.is-mobile .s2b-diff-accept-btn,
+.is-mobile .s2b-diff-reject-btn {
+	min-height: 44px !important;
+	padding-block: 10px !important;
+	padding-inline: 12px !important;
+	box-sizing: border-box !important;
+}
+
+/* The attach and send buttons are deliberately `border-radius: 999px` on
+   desktop (see the comments at their own definitions) — at their small
+   desktop size that reads as a soft accent chip. Grown to the 44px mobile
+   touch floor above, 999px makes them full circles, which felt too far from
+   the input's own softer 22px corner. Squircle them down instead of going
+   fully square, so they still read as buttons rather than tiles. */
+.is-mobile .attach-context-button.clickable-icon,
+.is-mobile .send-message-button {
+	border-radius: 20px !important;
+}
+
+/* The model/agent pills are text buttons rather than icon boxes — give them
+   the vertical floor without forcing a square, so the label still sets width. */
+.is-mobile .model-select-btn.clickable-icon {
+	min-height: 44px !important;
+	padding-block: 8px !important;
+}
+
+/* The message-nav cluster (jump/step through messages) stacks four 22px
+   buttons vertically in a floating overlay. A full 44px box each would make
+   the stack ~176px tall and cover the conversation, so widen to 44px for the
+   horizontal grab area but keep the rows at 36px — still a comfortable target
+   in the dominant (vertical) axis of a stacked list. The code-copy button sits
+   inside `<pre>` and gets the full square. */
+.is-mobile .message-nav button {
+	min-width: 44px !important;
+	min-height: 36px !important;
+	padding: 6px !important;
+	box-sizing: border-box !important;
+}
+
+/* Code blocks render in chat messages AND in tool-call output
+   (`.tool-output-content`), so key off `pre` rather than a single container. */
+.is-mobile .message-text pre .clickable-icon,
+.is-mobile .tool-output-content pre .clickable-icon {
+	min-width: 44px !important;
+	min-height: 44px !important;
+	padding: 10px !important;
+	box-sizing: border-box !important;
+}
+
+/* Chat markdown tables. `.message-text` is `!w-full !max-w-full`, so a table
+   wider than the bubble gets crushed rather than scrolled: on a 402px phone a
+   3-column table squeezes its prose column to ~112px and wraps one or two
+   words per line. Scope the horizontal scroll to the table itself (not the
+   whole message) so prose/code around it stays put; `-webkit-overflow-scrolling`
+   keeps the scroll momentum native on iOS. */
+.is-mobile .message-text table {
+	display: block;
+	width: max-content;
+	max-width: 100%;
+	overflow-x: auto;
+	-webkit-overflow-scrolling: touch;
+	table-layout: auto;
+}
+
+.is-mobile .message-text table th,
+.is-mobile .message-text table td {
+	min-width: 8ch;
+	/* Long wikilinks/paths in table cells otherwise break mid-token and stack
+	   into an unreadable column. */
+	word-break: normal;
+	overflow-wrap: anywhere;
+}
+
+/* Long-press feedback on user message bubbles (see `longPress.ts`). The
+   bubble is the gesture wrapper's direct child (CollapsibleUserBubble's own
+   root div). Scale/dim it down over the same duration as LONG_PRESS_MS so the
+   shrink completes right as the context menu opens — a "charging up" cue
+   rather than an instant flash. Releasing early (or scrolling, which cancels
+   the press) snaps back much faster since that's just "never mind", not part
+   of the cue. `transform-origin` anchors the bubble's own top-right corner
+   (where it visually starts) instead of shrinking toward its centre. */
+.is-mobile .s2b-user-press-target > div {
+	transform-origin: top right;
+	transition: transform 120ms ease-out, opacity 120ms ease-out;
+}
+
+.is-mobile .s2b-long-pressing > div {
+	transform: scale(0.96);
+	opacity: 0.7;
+	transition: transform 500ms ease-out, opacity 500ms ease-out;
+}

@@ -25,3 +25,30 @@ workspace.json
 *.njsproj
 *.sln
 *.sw?
+.envrc
+.env
+.direnv/*
+# Codesearch index
+.codesearch
+
+# btca cache
+.btca
+
+.opencode
+# Ignore agent-local state, but share the project's permission allowlist.
+# A negation cannot re-include a file under an excluded directory, so the
+# directory itself must stay unignored and its contents excluded instead.
+.claude/*
+!.claude/settings.json
+!.claude/skills/
+
+# Obsidian data and local state
+/data.json
+/data/
+
+# Auto-generated files
+main.js
+
+# Local research artifacts — internal, not for publication
+/competitor-analysis.html
+/smart-second-brain-features.html

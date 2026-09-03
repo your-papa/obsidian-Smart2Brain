@@ -1,0 +1,59 @@
+# Obsidian workspace state (user-specific)
+.obsidian/workspace.json
+.obsidian/workspace-mobile.json
+.obsidian/graph.json
+.obsidian/hotkeys.json
+.obsidian/core-plugins.json
+.obsidian/core-plugins-migration.json
+.obsidian/backlink.json
+.obsidian/bookmarks.json
+.obsidian/canvas.json
+
+# Plugin build artifacts (symlinked or copied from build/)
+.obsidian/plugins/smart-second-brain/
+
+# Obsidian cache
+.obsidian/plugins/.obsidian/
+.trash/
+
+# Generated search-relevance corpus (~300 notes, 1.9MB).
+# Deterministic: `bun run corpus:generate` reproduces it byte-for-byte from a
+# seeded script, so the generator is the source of truth rather than the output.
+Corpus/
+
+# Generated Zettelkasten notes (31 of the 59 in Zettel/).
+# Unlike Corpus/, this directory is MIXED: the other 28 notes are hand-written
+# fixtures consolidated in from the old Topics/, Large Notes/ and vault root, and
+# nothing regenerates them — so the directory itself must stay tracked. Only the
+# notes `bun run corpus:generate` writes are listed here.
+Zettel/1-1 with Priya - March.md
+Zettel/2026-03-16.md
+Zettel/2026-03-17.md
+Zettel/2026-03-18.md
+Zettel/Block Layout in the Storage Engine.md
+Zettel/Blocked on Legal Review.md
+Zettel/Context Window Budget.md
+Zettel/Evaluation Pipeline.md
+Zettel/Feedback Scoring Service.md
+Zettel/How the Vendor Pitched It.md
+Zettel/Internal Pitch for the Platform Work.md
+Zettel/Migration Retro.md
+Zettel/Migration Write-up - Draft.md
+Zettel/Nightly Run Failures.md
+Zettel/Noise - Kahneman, Sibony, Sunstein.md
+Zettel/Notes Before Review Season.md
+Zettel/On Shipping Before It's Ready.md
+Zettel/PR Review Backlog.md
+Zettel/Platform Hiring - Spring.md
+Zettel/Protecting Focus Blocks.md
+Zettel/Replica Sync Lag.md
+Zettel/Scaling the Scoring Stage.md
+Zettel/Team Capacity, Honestly.md
+Zettel/The Cost of Switching.md
+Zettel/The Ingest Charge Nobody Modelled.md
+Zettel/The Shape of Design - Chimero.md
+Zettel/The Weekly Sync Is Too Long.md
+Zettel/Thinking in Systems - Meadows.md
+Zettel/Vendor Call - Observability Tooling.md
+Zettel/Weekly Review 2026-03-14.md
+Zettel/What Running a Team Actually Involves.md

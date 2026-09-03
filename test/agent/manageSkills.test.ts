@@ -1,0 +1,280 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("obsidian", () => import("../__mocks__/obsidian"));
+
+const mockGetData = vi.fn();
+vi.mock("../../src/stores/dataStore.svelte", () => ({
+	getData: () => mockGetData(),
+}));
+
+import type { App } from "obsidian";
+import type { SkillsService } from "../../src/skills/SkillsService";
+import { createManageSkillsTool } from "../../src/agent/tools/manageSkills";
+
+const RUN_CONFIG = { configurable: { thread_id: "t1" }, runId: "run-1" };
+
+const DATAVIEW_MD = `---
+name: dataview
+description: Old description
+license: MIT
+metadata:
+  linkedPlugin: "dataview"
+  displayName: "Dataview"
+---
+
+# Dataview
+
+Old body.
+`;
+
+function makeSkillsService(cache: Map<string, unknown>) {
+	return {
+		getCachedSkills: () => cache,
+	} as unknown as SkillsService;
+}
+
+function makeApp(files: Record<string, string>) {
+	const store = { ...files };
+	const write = vi.fn(async (p: string, content: string) => {
+		store[p] = content;
+	});
+	const mkdir = vi.fn(async () => {});
+	const rmdir = vi.fn(async (p: string) => {
+		for (const key of Object.keys(store)) {
+			if (key === p || key.startsWith(`${p}/`)) delete store[key];
+		}
+	});
+	const app = {
+		vault: {
+			adapter: {
+				read: vi.fn(async (p: string) => {
+					if (!(p in store)) throw new Error(`ENOENT ${p}`);
+					return store[p];
+				}),
+				exists: vi.fn(async (p: string) => p in store),
+				write,
+				mkdir,
+				rmdir,
+			},
+		},
+	} as unknown as App;
+	return { app, store, write, mkdir, rmdir };
+}
+
+function dataviewCache() {
+	return new Map<string, unknown>([
+		[
+			"dataview",
+			{
+				path: "Agents/Skills/dataview",
+				frontmatter: {
+					name: "dataview",
+					description: "Old description",
+					metadata: { linkedPlugin: "dataview", displayName: "Dataview" },
+				},
+			},
+		],
+		[
+			"other",
+			{
+				path: "Agents/Skills/other",
+				frontmatter: { name: "other", description: "Another skill" },
+			},
+		],
+		[
+			"explore-vault",
+			{
+				path: "Agents/Skills/explore-vault",
+				frontmatter: { name: "explore-vault", description: "Core skill" },
+			},
+		],
+	]);
+}
+
+function agentWithSkills(skills: Record<string, { enabled: boolean }>) {
+	return { skills };
+}
+
+describe("manage_skills tool", () => {
+	beforeEach(() => {
+		// Agent has dataview + explore-vault attached (enabled by default), "other" explicitly disabled.
+		mockGetData.mockReturnValue({
+			getAgent: () => agentWithSkills({ other: { enabled: false } }),
+			getSelectedAgent: () => agentWithSkills({ other: { enabled: false } }),
+		});
+	});
+
+	describe("update operation", () => {
+		it("applies a valid body edit immediately", async () => {
+			const svc = makeSkillsService(dataviewCache());
+			const { app, write } = makeApp({ "Agents/Skills/dataview/SKILL.md": DATAVIEW_MD });
+			const t = createManageSkillsTool(svc, app, "agent-1");
+
+			const res = await t.invoke(
+				{ type: "update", skillName: "dataview", newBody: "# Dataview\n\nVerified: use api.pages()." },
+				RUN_CONFIG,
+			);
+
+			expect(write).toHaveBeenCalledTimes(1);
+			const [path, newContent] = write.mock.calls[0];
+			expect(path).toBe("Agents/Skills/dataview/SKILL.md");
+			expect(newContent).toContain("Verified: use api.pages().");
+			// Frontmatter preserved verbatim (name + linkedPlugin intact).
+			expect(newContent).toContain("name: dataview");
+			expect(newContent).toContain('linkedPlugin: "dataview"');
+			expect(res).toMatch(/updated/i);
+		});
+
+		it("updates the description line when provided, preserving other frontmatter", async () => {
+			const svc = makeSkillsService(dataviewCache());
+			const { app, write } = makeApp({ "Agents/Skills/dataview/SKILL.md": DATAVIEW_MD });
+			const t = createManageSkillsTool(svc, app, "agent-1");
+
+			await t.invoke(
+				{
+					type: "update",
+					skillName: "dataview",
+					newBody: "# Dataview\n\nBody.",
+					newDescription: "New verified description",
+				},
+				RUN_CONFIG,
+			);
+
+			const [, newContent] = write.mock.calls[0];
+			expect(newContent).toContain("description: New verified description");
+			expect(newContent).not.toContain("description: Old description");
+			expect(newContent).toContain('linkedPlugin: "dataview"');
+		});
+
+		it("makes no write when the content is unchanged", async () => {
+			const svc = makeSkillsService(dataviewCache());
+			const { app, write } = makeApp({ "Agents/Skills/dataview/SKILL.md": DATAVIEW_MD });
+			const t = createManageSkillsTool(svc, app, "agent-1");
+			const res = await t.invoke(
+				{ type: "update", skillName: "dataview", newBody: "# Dataview\n\nOld body." },
+				RUN_CONFIG,
+			);
+			expect(write).not.toHaveBeenCalled();
+			expect(res).toMatch(/no changes/i);
+		});
+
+		it("rejects editing a skill not attached to this agent", async () => {
+			const svc = makeSkillsService(dataviewCache());
+			const { app, write } = makeApp({ "Agents/Skills/other/SKILL.md": "" });
+			const t = createManageSkillsTool(svc, app, "agent-1");
+			const res = await t.invoke({ type: "update", skillName: "other", newBody: "x" }, RUN_CONFIG);
+			expect(res).toMatch(/not attached/i);
+			expect(write).not.toHaveBeenCalled();
+		});
+	});
+
+	describe("create operation", () => {
+		it("writes the new skill file and does not write an agent.skills entry (attach-on-exist)", async () => {
+			const svc = makeSkillsService(dataviewCache());
+			const { app, write, mkdir } = makeApp({});
+			const t = createManageSkillsTool(svc, app, "agent-1");
+
+			const res = await t.invoke(
+				{ type: "create", name: "weekly-review", description: "Reviews the week", body: "Do the review." },
+				RUN_CONFIG,
+			);
+
+			expect(mkdir).toHaveBeenCalledWith("Agents/Skills/weekly-review");
+			expect(write).toHaveBeenCalledTimes(1);
+			const [path, content] = write.mock.calls[0];
+			expect(path).toBe("Agents/Skills/weekly-review/SKILL.md");
+			expect(content).toContain("name: weekly-review");
+			expect(content).toContain("description: Reviews the week");
+			expect(res).toMatch(/created and attached/i);
+		});
+
+		it("rejects a duplicate skill name", async () => {
+			const svc = makeSkillsService(dataviewCache());
+			const { app, write } = makeApp({ "Agents/Skills/dataview/SKILL.md": DATAVIEW_MD });
+			const t = createManageSkillsTool(svc, app, "agent-1");
+
+			const res = await t.invoke({ type: "create", name: "dataview", description: "x", body: "y" }, RUN_CONFIG);
+
+			expect(res).toMatch(/already exists/i);
+			expect(write).not.toHaveBeenCalled();
+		});
+
+		it("rejects an invalid skill name", async () => {
+			const svc = makeSkillsService(dataviewCache());
+			const { app, write } = makeApp({});
+			const t = createManageSkillsTool(svc, app, "agent-1");
+			const res = await t.invoke({ type: "create", name: "Not Valid!", description: "x", body: "y" }, RUN_CONFIG);
+			expect(res).toMatch(/invalid name/i);
+			expect(write).not.toHaveBeenCalled();
+		});
+
+		it("grants only allow-listed tools and drops the rest", async () => {
+			const svc = makeSkillsService(dataviewCache());
+			const { app, write } = makeApp({});
+			const t = createManageSkillsTool(svc, app, "agent-1");
+
+			const res = await t.invoke(
+				{
+					type: "create",
+					name: "my-skill",
+					description: "x",
+					body: "y",
+					allowedTools: ["search_notes", "manage_notes", "execute_javascript", "manage_skills"],
+				},
+				RUN_CONFIG,
+			);
+
+			const [, content] = write.mock.calls[0];
+			expect(content).toContain("allowed-tools: search_notes");
+			expect(content).not.toContain("manage_notes");
+			expect(content).not.toContain("execute_javascript");
+			expect(res).toMatch(/dropped/i);
+			expect(res).toMatch(/manage_notes/);
+		});
+	});
+
+	describe("delete operation", () => {
+		it("refuses to delete a core skill", async () => {
+			const svc = makeSkillsService(dataviewCache());
+			const { app, rmdir } = makeApp({});
+			const t = createManageSkillsTool(svc, app, "agent-1");
+			const res = await t.invoke({ type: "delete", name: "explore-vault" }, RUN_CONFIG);
+			expect(res).toMatch(/cannot be deleted/i);
+			expect(rmdir).not.toHaveBeenCalled();
+		});
+
+		it("refuses to delete a skill not attached to this agent", async () => {
+			const svc = makeSkillsService(dataviewCache());
+			const { app, rmdir } = makeApp({ "Agents/Skills/other/SKILL.md": "" });
+			const t = createManageSkillsTool(svc, app, "agent-1");
+			const res = await t.invoke({ type: "delete", name: "other" }, RUN_CONFIG);
+			expect(res).toMatch(/not attached/i);
+			expect(rmdir).not.toHaveBeenCalled();
+		});
+
+		it("removes the whole folder for an attached, non-core skill", async () => {
+			const svc = makeSkillsService(dataviewCache());
+			const { app, rmdir, store } = makeApp({ "Agents/Skills/dataview/SKILL.md": DATAVIEW_MD });
+			const t = createManageSkillsTool(svc, app, "agent-1");
+			const res = await t.invoke({ type: "delete", name: "dataview" }, RUN_CONFIG);
+
+			expect(rmdir).toHaveBeenCalledWith("Agents/Skills/dataview", true);
+			expect(store["Agents/Skills/dataview/SKILL.md"]).toBeUndefined();
+			expect(res).toMatch(/deleted/i);
+		});
+
+		it("drops the agent's stale skills entry after delete", async () => {
+			const svc = makeSkillsService(dataviewCache());
+			const agent = agentWithSkills({ other: { enabled: false }, dataview: { enabled: true } });
+			mockGetData.mockReturnValue({
+				getAgent: () => agent,
+				getSelectedAgent: () => agent,
+			});
+			const { app } = makeApp({ "Agents/Skills/dataview/SKILL.md": DATAVIEW_MD });
+			const t = createManageSkillsTool(svc, app, "agent-1");
+			await t.invoke({ type: "delete", name: "dataview" }, RUN_CONFIG);
+
+			expect("dataview" in agent.skills).toBe(false);
+		});
+	});
+});

@@ -1,0 +1,18 @@
+name: Task
+description: A development task, refactor, or tracking issue. Mainly for maintainers.
+title: ""
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For work that isn't a user-facing bug or feature request: refactors, tech debt,
+        flaky tests, release chores, tracking issues.
+        If you are a user reporting a problem, please use the bug or feature template instead.
+  - type: textarea
+    id: body
+    attributes:
+      label: Description
+      description: What needs doing, and why. Link related issues, PRs, or code.
+    validations:
+      required: true
