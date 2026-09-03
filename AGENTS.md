@@ -72,6 +72,16 @@ and the `redirects` block in `../site/astro.config.mjs`. Rendering goes through
 `components/ui/DocsLink.svelte` (icon variant for setting rows via `nameSuffix`,
 inline variant for section descriptions).
 
+**Never open an external `http(s)` URL with `window.open`.** Obsidian's iOS
+WKWebView never implements window creation, so it returns null unconditionally
+there and the click silently does nothing — verified on-device (see
+`navigateToAuthorizeUrl` in `providers/openrouterOAuth.ts`). Render an anchor
+instead: `components/ui/ExternalLinkButton.svelte` covers the common case of a
+setting row wanting something that *looks* like a button, and matches Obsidian's
+button metrics (`height: var(--input-height)`, `4px 12px`) so it sits flush next
+to real ones. `obsidian://` deep links are exempt — the app's protocol handler
+takes those, no window involved.
+
 ## Architecture
 
 This section is the canonical description of the architecture. (A longer

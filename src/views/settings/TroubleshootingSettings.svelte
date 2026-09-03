@@ -10,6 +10,7 @@ import { getData } from "../../stores/dataStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
 import { ConfirmModal } from "../../components/modal/ConfirmModal";
 import DocsLink from "../../components/ui/DocsLink.svelte";
+import ExternalLinkButton from "../../components/ui/ExternalLinkButton.svelte";
 import { Logger } from "../../utils/logging";
 
 const pluginData = getData();
@@ -17,14 +18,6 @@ const plugin = getPlugin();
 const githubIssuesListUrl =
 	"https://github.com/s2b-dev/smart-second-brain/issues?q=is%3Aissue%20state%3Aopen%20label%3Abug";
 const githubIssuesNewUrl = "https://github.com/s2b-dev/smart-second-brain/issues/new/choose";
-
-function openGitHubIssues() {
-	window.open(githubIssuesListUrl, "_blank", "noopener,noreferrer");
-}
-
-function openGitHubIssue() {
-	window.open(githubIssuesNewUrl, "_blank", "noopener,noreferrer");
-}
 
 async function handleCleanupPluginData() {
 	const modal = new ConfirmModal(
@@ -93,12 +86,8 @@ async function handleCleanupPluginData() {
     desc="Look through existing GitHub issues to see whether the problem is already tracked. If it is not, open a new issue and include what you tried, any error messages, and steps to reproduce it."
   >
     <div class="flex gap-2 flex-wrap">
-      <Button
-        buttonText="View existing issues"
-        iconId="lucide-external-link"
-        onClick={openGitHubIssues}
-      />
-      <Button buttonText="Open new issue" iconId="lucide-external-link" onClick={openGitHubIssue} />
+      <ExternalLinkButton href={githubIssuesListUrl} label="View existing issues" />
+      <ExternalLinkButton href={githubIssuesNewUrl} label="Open new issue" />
     </div>
   </SettingItem>
 
