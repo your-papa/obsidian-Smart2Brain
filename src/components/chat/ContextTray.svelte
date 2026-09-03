@@ -86,17 +86,30 @@ let graphDismissed = $state(new Set<string>());
 // Graph selections can be large (lasso-select of many nodes). Collapse them into
 // a single summary chip by default; expand on demand to review/remove individuals.
 let graphExpanded = $state(false);
-// `graphPaths` is a fresh array every time the registry adopts a new selection
-// (SmartGraphView always assigns `[...paths]`), so identity distinguishes "the same
-// selection, edited by dismissal" from "a new selection that happens to share paths
-// with the old one". Reset dismissals on that boundary: without it, dismissing a note
-// then re-selecting the same or an overlapping topic would filter fresh paths through
-// stale exclusions, silently shrinking (or emptying) a selection the user never
-// touched — and, since the topic label requires an exact match, permanently hide the
-// name for a selection gesture that has nothing to do with the earlier dismissal.
+// `graphPaths` changes for two different reasons, which need opposite treatment:
+//  1. A genuinely new selection (topic click, panel row, lasso) — may share paths
+//     with the old one (re-selecting the same/an overlapping topic), but the user's
+//     old dismissals shouldn't carry over: without a reset, stale exclusions would
+//     filter fresh paths out of a selection the user never touched, shrinking the
+//     count or (since the topic label requires an exact match) permanently hiding
+//     the name for a selection gesture that has nothing to do with the dismissal.
+//  2. A background live-patch pruning vault-deleted notes out of the *current*
+//     selection (SmartGraphView's live-patch handler): this republishes a fresh
+//     array too, but it's the same selection minus some notes — a note the user
+//     explicitly dismissed must stay dismissed, not reappear because of unrelated
+//     vault maintenance.
+// Distinguish them by membership rather than array identity: case 2 only ever
+// removes paths (never introduces one, and never brings the count back up), so a
+// *strictly smaller* selection where every remaining path already existed is a
+// prune and must NOT reset dismissals. Anything else — a new path appearing, or
+// the same-size-or-larger selection re-arriving (re-selecting the same topic after
+// editing it by hand) — is case 1 and must reset.
+let previousGraphPaths: string[] = [];
 $effect(() => {
-	void graphPaths; // establish the dependency; the reset itself is unconditional
-	graphDismissed = new Set();
+	const isPrune =
+		graphPaths.length < previousGraphPaths.length && graphPaths.every((p) => previousGraphPaths.includes(p));
+	if (!isPrune) graphDismissed = new Set();
+	previousGraphPaths = graphPaths;
 });
 const activeGraphPaths = $derived(graphPaths.filter((p) => !graphDismissed.has(p)));
 // Once every graph note is dismissed there's nothing to expand.
