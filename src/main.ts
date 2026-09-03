@@ -495,9 +495,13 @@ export default class SecondBrainPlugin extends Plugin {
 		this.sessionRegistry = createSessionRegistry(this.agentManager);
 
 		// Global running-agent indicator in the status bar: shows the single
-		// streaming chat (if any) and lets the user stop it from anywhere.
-		const statusBarEl = this.addStatusBarItem();
-		this.runningIndicator = mount(RunningIndicator, { target: statusBarEl, props: {} });
+		// streaming chat (if any) and lets the user stop it from anywhere. Mobile has
+		// no status bar (addStatusBarItem is a no-op there), so skip the mount entirely
+		// rather than running a reactive component into a detached element.
+		if (!isMobileUI()) {
+			const statusBarEl = this.addStatusBarItem();
+			this.runningIndicator = mount(RunningIndicator, { target: statusBarEl, props: {} });
+		}
 
 		this.addCommand({
 			id: "open-chat",
