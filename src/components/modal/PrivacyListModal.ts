@@ -1,12 +1,8 @@
-import { Modal, setIcon } from "obsidian";
-import { mount, unmount } from "svelte";
-import { applyModalLayout } from "./modalLayout";
+import { setIcon } from "obsidian";
 import PrivacyListComponent from "./PrivacyListModal.svelte";
+import { SvelteModal } from "./SvelteModal";
 
-export class PrivacyListModal extends Modal {
-	private component: Record<string, never> | null = null;
-	private restoreLayout: (() => void) | null = null;
-
+export class PrivacyListModal extends SvelteModal {
 	onOpen() {
 		// `setTitle` only takes a string, so the icon is prepended to `titleEl`
 		// directly. `shield-check` in `--text-accent` is the same treatment the
@@ -19,30 +15,17 @@ export class PrivacyListModal extends Modal {
 		setIcon(titleIconEl, "shield-check");
 		titleIconEl.setAttribute("aria-hidden", "true");
 		this.titleEl.prepend(titleIconEl);
-		this.restoreLayout = applyModalLayout(this, {
-			fullScreenOnPhone: true,
-			width: "min(960px, 96vw)",
-			maxWidth: "96vw",
-			height: "min(840px, 92vh)",
-			contentOverflow: "hidden",
-		});
 
-		this.component = mount(PrivacyListComponent, {
-			target: this.contentEl,
-			props: {
-				modal: this,
+		this.mountComponent(
+			PrivacyListComponent,
+			{ modal: this },
+			{
+				fullScreenOnPhone: true,
+				width: "min(960px, 96vw)",
+				maxWidth: "96vw",
+				height: "min(840px, 92vh)",
+				contentOverflow: "hidden",
 			},
-		});
-	}
-
-	onClose() {
-		this.restoreLayout?.();
-		this.restoreLayout = null;
-
-		if (this.component) {
-			unmount(this.component);
-			this.component = null;
-		}
-		this.contentEl.empty();
+		);
 	}
 }

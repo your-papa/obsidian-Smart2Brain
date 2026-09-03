@@ -1,10 +1,8 @@
-import { Modal } from "obsidian";
-import { mount, unmount } from "svelte";
 import ModalProvider from "../../lib/QueryClientProvider.svelte";
 import type SecondBrainPlugin from "../../main";
-import type { SelectedModel } from "./ModelSelectionModal";
 import EmbeddingIndexSetupModalComponent from "./EmbeddingIndexSetupModal.svelte";
-import { applyModalLayout } from "./modalLayout";
+import type { SelectedModel } from "./ModelSelectionModal";
+import { SvelteModal } from "./SvelteModal";
 
 export interface EmbeddingIndexSetupModalOptions {
 	purpose: "search" | "graph";
@@ -17,9 +15,7 @@ export interface EmbeddingIndexSetupModalOptions {
 	onImport?: () => Promise<boolean>;
 }
 
-export class EmbeddingIndexSetupModal extends Modal {
-	private component: ReturnType<typeof EmbeddingIndexSetupModalComponent> | null = null;
-	private restoreLayout: (() => void) | null = null;
+export class EmbeddingIndexSetupModal extends SvelteModal {
 	private readonly plugin: SecondBrainPlugin;
 	private readonly options: EmbeddingIndexSetupModalOptions;
 
@@ -30,23 +26,13 @@ export class EmbeddingIndexSetupModal extends Modal {
 	}
 
 	onOpen() {
-		this.restoreLayout = applyModalLayout(this, {
-			width: "min(620px, 92vw)",
-			maxWidth: "90vw",
-			height: "auto",
-			maxHeight: "80vh",
-			contentPadding: "16px",
-			contentFill: false,
-		});
-
 		this.setTitle(
 			this.options.purpose === "search" ? "Configure Search Embedding Index" : "Configure Graph Embedding Index",
 		);
-
 		// Wrapped in ModalProvider: the component calls `useAvailableModels()`, which
 		// resolves a QueryClient from Svelte context. Mounting it bare threw
 		// "No QueryClient was found in Svelte context" and left the modal blank.
-		this.component = mount(
+		this.mountComponent(
 			ModalProvider<{
 				modal: EmbeddingIndexSetupModal;
 				plugin: SecondBrainPlugin;
@@ -55,30 +41,24 @@ export class EmbeddingIndexSetupModal extends Modal {
 				onImport?: () => Promise<boolean>;
 			}>,
 			{
-				target: this.contentEl,
-				props: {
+				plugin: this.plugin,
+				component: EmbeddingIndexSetupModalComponent,
+				componentProps: {
+					modal: this,
 					plugin: this.plugin,
-					component: EmbeddingIndexSetupModalComponent,
-					componentProps: {
-						modal: this,
-						plugin: this.plugin,
-						currentSelection: this.options.currentSelection,
-						onSave: this.options.onSave,
-						onImport: this.options.onImport,
-					},
+					currentSelection: this.options.currentSelection,
+					onSave: this.options.onSave,
+					onImport: this.options.onImport,
 				},
 			},
+			{
+				width: "min(620px, 92vw)",
+				maxWidth: "90vw",
+				height: "auto",
+				maxHeight: "80vh",
+				contentPadding: "16px",
+				contentFill: false,
+			},
 		);
-	}
-
-	onClose() {
-		this.restoreLayout?.();
-		this.restoreLayout = null;
-
-		if (this.component) {
-			unmount(this.component);
-			this.component = null;
-		}
-		this.contentEl.empty();
 	}
 }

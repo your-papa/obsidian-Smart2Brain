@@ -1,6 +1,6 @@
 import { type Modal, Platform } from "obsidian";
 
-interface ModalLayoutOptions {
+export interface ModalLayoutOptions {
 	width?: string;
 	maxWidth?: string;
 	height?: string;

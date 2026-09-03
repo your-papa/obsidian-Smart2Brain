@@ -1,24 +1,8 @@
-import { Modal } from "obsidian";
-import { mount, unmount } from "svelte";
 import SearchDisplaySettingsComponent from "./SearchDisplaySettingsModal.svelte";
+import { SvelteModal } from "./SvelteModal";
 
-export class SearchDisplaySettingsModal extends Modal {
-	private component: Record<string, never> | null = null;
-
+export class SearchDisplaySettingsModal extends SvelteModal {
 	onOpen() {
-		this.component = mount(SearchDisplaySettingsComponent, {
-			target: this.contentEl,
-			props: {
-				modal: this,
-			},
-		});
-	}
-
-	onClose() {
-		if (this.component) {
-			unmount(this.component);
-			this.component = null;
-		}
-		this.contentEl.empty();
+		this.mountComponent(SearchDisplaySettingsComponent, { modal: this });
 	}
 }
