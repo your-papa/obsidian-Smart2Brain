@@ -5,6 +5,7 @@ import { Platform } from "obsidian";
 import AuthConfigFields from "../../components/settings/AuthConfigFields.svelte";
 import SettingItem from "../../components/settings/SettingItem.svelte";
 import Button from "../../components/ui/Button.svelte";
+import CircularLoader from "../../components/ui/CircularLoader.svelte";
 import DocsLink from "../../components/ui/DocsLink.svelte";
 import Text from "../../components/ui/Text.svelte";
 import Toggle from "../../components/ui/Toggle.svelte";
@@ -30,6 +31,7 @@ import {
 	getProviderDefinition,
 } from "../../providers/index";
 import { getData, slugifyProviderName } from "../../stores/dataStore.svelte";
+import { icon } from "../../utils/utils";
 import type { ProviderSetupModal } from "./ProviderSetup";
 
 interface Props {
@@ -152,11 +154,6 @@ async function handleOAuthSignIn() {
 			// Store the OAuth-obtained key as a managed secret so validation re-runs and Save enables.
 			data.setProviderAuthField(providerId, "apiKey", result.apiKey, true);
 		}
-		// A completed OAuth sign-in is a clear terminal action — once the connection
-		// validates and the provider commits, auto-close the modal so the user gets
-		// unambiguous feedback (the provider appears in the list) rather than having to
-		// spot the small green header icon. The commit effect honors this flag.
-		closeAfterCommit = true;
 		invalidateAuthState(providerId);
 	} catch (error) {
 		// A user-initiated cancel isn't a failure — clear the flow silently so the CTA
@@ -254,11 +251,6 @@ async function handleSelectTemplate(id: ProviderTemplateId) {
 // or while a commit is already in flight (the effect can re-fire mid-await).
 let isCommitting = false;
 
-// Set by a completed OAuth sign-in: once the provider commits, auto-close the modal after
-// a short beat so the "Connected" check is briefly visible. Manual API-key entry doesn't
-// set this — the modal stays open so the user can still adjust trusted/advanced fields.
-let closeAfterCommit = false;
-
 // Promotes a draft to a fully configured provider the moment its connection validates.
 // This replaces the old "Add Provider" button: display name / auth / trusted all
 // autosave as they change, so the only remaining commit steps are slug-finalizing the
@@ -299,14 +291,6 @@ async function commitProvider() {
 		invalidateProviderState(providerId);
 	} finally {
 		isCommitting = false;
-	}
-
-	// OAuth sign-in path: the provider is now committed and shows "Connected". Close the
-	// modal after a short beat so the green check is briefly visible — the provider then
-	// appears in the list, which is the clearest confirmation.
-	if (closeAfterCommit) {
-		closeAfterCommit = false;
-		window.setTimeout(() => modal.close(), 800);
 	}
 }
 
@@ -374,7 +358,15 @@ function renderHeaderLogo() {
 		});
 
 		// Status + trust icons after the title (icon → name → status → trust).
+		// Recreating the host must also recreate the component: leaving the old one mounted
+		// kept it rendering into the now-detached span while the `!headerStatusComponent`
+		// guard below suppressed a remount, so the connection check silently vanished from
+		// the header. Tear both down together.
 		if (!headerStatusHost || headerStatusHost.parentElement !== header) {
+			if (headerStatusComponent) {
+				unmount(headerStatusComponent);
+				headerStatusComponent = null;
+			}
 			headerStatusHost?.remove();
 			headerStatusHost = header.createSpan({ cls: "provider-setup-header-status" });
 			title.after(headerStatusHost);
@@ -426,6 +418,22 @@ $effect(() => {
 		untrack(() => void commitProvider());
 	}
 });
+
+// In-body connection status. The header carries the same verdict as a small icon, but that
+// is easy to miss — especially in onboarding, where the user has never seen this modal and
+// has no "Add" button to press, so nothing tells them the provider took. The status row
+// below is the primary signal; the header icon stays as a secondary cue.
+type ConnectionStatus = "idle" | "checking" | "connected" | "failed";
+const connectionStatus = $derived.by<ConnectionStatus>(() => {
+	if (!hasCredentials) return "idle";
+	if (query.isPending || query.isFetching) return "checking";
+	if (query.data?.success) return "connected";
+	if (query.data !== undefined) return "failed";
+	return "idle";
+});
+const connectionError = $derived(
+	query.data && !query.data.success ? (query.data.message ?? "Authentication failed") : "Authentication failed",
+);
 </script>
 
 {#if step === "pick"}
@@ -520,8 +528,41 @@ $effect(() => {
     {:else}
       <AuthConfigFields provider={providerId} afterRequired={trustedToggle} />
     {/if}
+
+    {@render connectionStatusRow()}
   </div>
 {/if}
+
+{#snippet connectionStatusRow()}
+  <!-- The modal has no submit button (auth autosaves and the provider commits itself the
+       moment validation passes), so without this row a successful setup looks identical to
+       an untouched form. Spell the verdict out, and give the user an explicit way to leave. -->
+  <div class="provider-connection-row">
+    <div class="provider-connection-status" role="status" aria-live="polite">
+      {#if connectionStatus === "checking"}
+        <CircularLoader size={16} color="var(--text-muted)" />
+        <span class="provider-connection-text">Checking connection…</span>
+      {:else if connectionStatus === "connected"}
+        <span class="provider-connection-icon is-success" use:icon={"check-circle"}></span>
+        <span class="provider-connection-text is-success">Connected</span>
+      {:else if connectionStatus === "failed"}
+        <span class="provider-connection-icon is-error" use:icon={"x-circle"}></span>
+        <span class="provider-connection-text is-error">{connectionError}</span>
+      {:else}
+        <span class="provider-connection-text is-muted">
+          Enter your credentials above — the connection is checked automatically.
+        </span>
+      {/if}
+    </div>
+
+    <Button
+      buttonText="Done"
+      cta={connectionStatus === "connected"}
+      disabled={connectionStatus !== "connected"}
+      onClick={() => modal.close()}
+    />
+  </div>
+{/snippet}
 
 {#snippet trustedToggle()}
   <SettingItem
@@ -586,6 +627,59 @@ $effect(() => {
     color: var(--text-success, #4caf50);
     font-size: var(--font-ui-small);
     font-weight: 500;
+  }
+
+  .provider-connection-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--size-4-3);
+    margin-top: var(--size-4-2);
+    padding: var(--size-4-3);
+    border-top: 1px solid var(--background-modifier-border);
+  }
+
+  .provider-connection-status {
+    display: flex;
+    align-items: center;
+    gap: var(--size-4-2);
+    min-width: 0;
+  }
+
+  .provider-connection-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+  }
+
+  /* The action injects a bare <svg>, which defaults to 100%/auto and overflows the box. */
+  .provider-connection-icon :global(svg) {
+    width: 16px;
+    height: 16px;
+  }
+
+  .provider-connection-text {
+    font-size: var(--font-ui-small);
+    overflow-wrap: anywhere;
+  }
+
+  .provider-connection-text.is-muted {
+    color: var(--text-muted);
+  }
+
+  .is-success {
+    color: var(--text-success, #4caf50);
+  }
+
+  .provider-connection-text.is-success {
+    font-weight: 500;
+  }
+
+  .is-error {
+    color: var(--text-error);
   }
 
   .auth-alt-toggle {
