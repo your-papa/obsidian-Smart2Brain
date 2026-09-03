@@ -1373,20 +1373,42 @@ function clusterLabel(cluster: number): string {
 }
 
 /**
- * Name the topics `paths` exactly matches under `communities` (path → cluster
- * index), or null if it isn't an exact match — used only by the live-patch
- * handler, whose `communities` is current but whose canvas isn't yet (see
- * `handleSelectionChange`'s `topicLabelOverride` doc). Mirrors
- * `getNodePathsForClusters`'s exclusion of unsorted notes (`cluster == null`
- * never matches, even if `UNSORTED_CLUSTER` is itself focused) — but unlike
- * the canvas method, doesn't resolve collapsed topic nodes back to their
- * members, so a selection touching a currently-collapsed topic conservatively
- * falls back to null (count-based label) rather than risk a wrong match.
+ * Name the topics `paths` exactly matches under `communities` (path → raw
+ * Leiden community id), or null if it isn't an exact match — used only by the
+ * live-patch handler, whose `communities` is current but whose canvas isn't
+ * yet (see `handleSelectionChange`'s `topicLabelOverride` doc).
+ *
+ * `focusedClusters` holds *segment indices* (`segments[i]`, assigned `i` by
+ * `resolveAndApplySegments`/`resolveSegmentsByLeiden` after sorting and
+ * dropping undersized communities) — not raw community ids. The two numeric
+ * spaces aren't interchangeable: sorting and drops mean a segment's index can
+ * differ from its `communityId`. Map through `segments[i].communityId` (set
+ * by `resolveAndApplySegments`, already current — it runs synchronously
+ * inside `applyLivePatch`, before this is called) rather than comparing
+ * `communities` values against `focusedClusters` directly.
+ *
+ * Mirrors `getNodePathsForClusters`'s exclusion of unsorted notes (`cluster
+ * == null` never matches, even if `UNSORTED_CLUSTER` is itself focused) —
+ * but unlike the canvas method, doesn't resolve collapsed topic nodes back
+ * to their members, so a selection touching a currently-collapsed topic
+ * conservatively falls back to null (count-based label) rather than risk a
+ * wrong match.
  */
 function topicLabelForCommunities(communities: Record<string, number>, paths: string[]): string[] | null {
 	if (focusedClusters.size === 0 || paths.length === 0) return null;
+	const focusedCommunityIds = new Set(
+		[...focusedClusters].flatMap((cluster) => {
+			const id = segments[cluster]?.communityId;
+			return id === undefined ? [] : [id];
+		}),
+	);
+	// Every focused segment must have resolved to a real community id — if
+	// segments haven't caught up either (shouldn't happen, but this is exactly
+	// the kind of ordering assumption that bit the canvas-based check), bail
+	// out to the safe count-based fallback rather than risk a wrong match.
+	if (focusedCommunityIds.size !== focusedClusters.size) return null;
 	const topicPaths = Object.entries(communities)
-		.filter(([, cluster]) => focusedClusters.has(cluster))
+		.filter(([, communityId]) => focusedCommunityIds.has(communityId))
 		.map(([path]) => path);
 	const selected = new Set(paths);
 	if (topicPaths.length !== selected.size || !topicPaths.every((path) => selected.has(path))) return null;
