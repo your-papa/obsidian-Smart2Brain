@@ -361,7 +361,7 @@ export function setCachedSemanticEdges(key: string, edges: GraphEdge[]): void {
 const TOPIC_CACHE_VERSION = 4;
 
 /** One graph's cached derivations, as carried in a snapshot. */
-export interface CachedGraphEntry {
+interface CachedGraphEntry {
 	leiden: Map<string, Record<string, number>>;
 	granularityLadder: number[] | null;
 	/** The γ this graph was last viewed at; null when never chosen. */

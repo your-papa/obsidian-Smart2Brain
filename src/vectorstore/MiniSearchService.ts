@@ -11,7 +11,6 @@ import {
 	type LexicalCandidateEvidence,
 	type LexicalRankingFeatures,
 	type LexicalScoringConfig,
-	getLexicalMatchTier,
 	scoreLexicalCandidate,
 } from "../search/lexicalScoring";
 import { type QueryPlan, createQueryPlan } from "../search/queryPlan";
@@ -689,7 +688,7 @@ export class MiniSearchService {
 		}
 
 		const rankedResults = Array.from(evidenceByPath.values())
-			.map((evidence): RankedLexicalResult => this.createRankedLexicalResult(queryPlan, query, evidence))
+			.map((evidence): RankedLexicalResult => this.createRankedLexicalResult(queryPlan, evidence))
 			.sort((left, right) => right.matchTier - left.matchTier || right.adjustedScore - left.adjustedScore);
 
 		return rankedResults.slice(0, limit).map(({ result, adjustedScore, features }) => ({
@@ -731,11 +730,7 @@ export class MiniSearchService {
 		evidenceByPath.set(result.id, existing);
 	}
 
-	private createRankedLexicalResult(
-		queryPlan: QueryPlan,
-		query: string,
-		evidence: CandidateEvidence,
-	): RankedLexicalResult {
+	private createRankedLexicalResult(queryPlan: QueryPlan, evidence: CandidateEvidence): RankedLexicalResult {
 		const result = this.getStoredResult(evidence.path);
 		const title =
 			(result as MiniSearchResult & { title?: string }).title ||
@@ -751,7 +746,6 @@ export class MiniSearchService {
 		);
 		const features = scoreLexicalCandidate(
 			queryPlan,
-			query,
 			title,
 			aliases,
 			tags,

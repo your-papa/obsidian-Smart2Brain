@@ -31,7 +31,5 @@
     "src/**/*.ts",
     "src/**/*.js",
     "src/**/*.svelte",
-    "v2/src/**/*.ts",
-    "v2/src/**/*.svelte",
   ],
 }

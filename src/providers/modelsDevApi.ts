@@ -44,7 +44,7 @@ export interface ModelsDevModelInfo {
 }
 
 /** Provider entry from models.dev */
-export interface ModelsDevProvider {
+interface ModelsDevProvider {
 	id: string;
 	env?: string[];
 	npm?: string;
@@ -306,39 +306,6 @@ export async function lookupModelInfo(providerId: string, modelId: string): Prom
 }
 
 /**
- * Extracts chat model configuration from models.dev info
- */
-export function extractChatModelConfig(info: ModelsDevModelInfo): {
-	contextWindow: number;
-	supportsToolCalls: boolean;
-	supportsReasoning: boolean;
-	supportsStructuredOutput: boolean;
-	supportsVision: boolean;
-} {
-	return {
-		contextWindow: info.limit?.context ?? 128000,
-		supportsToolCalls: info.tool_call ?? false,
-		supportsReasoning: info.reasoning ?? false,
-		supportsStructuredOutput: info.structured_output ?? false,
-		supportsVision: info.attachment ?? false,
-	};
-}
-
-/**
- * Extracts embedding model configuration from models.dev info
- */
-export function extractEmbedModelConfig(info: ModelsDevModelInfo): {
-	contextWindow: number;
-	dimensions: number;
-} {
-	return {
-		contextWindow: info.limit?.context ?? 8192,
-		// models.dev doesn't typically include dimensions, use sensible default
-		dimensions: 1536,
-	};
-}
-
-/**
  * Checks if a model is likely an embedding model based on its info
  */
 export function isEmbeddingModel(info: ModelsDevModelInfo): boolean {
@@ -347,11 +314,4 @@ export function isEmbeddingModel(info: ModelsDevModelInfo): boolean {
 	const family = info.family?.toLowerCase() ?? "";
 
 	return name.includes("embed") || id.includes("embed") || family.includes("embed") || family === "text-embedding";
-}
-
-/**
- * Clears the cached data (useful for testing or forcing refresh)
- */
-export function clearModelsDevCache(): void {
-	cachedResponse = null;
 }

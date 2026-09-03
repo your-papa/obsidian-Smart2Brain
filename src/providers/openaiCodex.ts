@@ -1,12 +1,7 @@
 import type { Server, IncomingMessage, ServerResponse } from "node:http";
 import { Platform, requestUrl } from "obsidian";
 import { getPlugin } from "../stores/state.svelte";
-import {
-	clearCodexSession,
-	getCodexSession,
-	getCodexSessionStorageKey,
-	saveCodexSession,
-} from "../stores/providerRuntime.svelte";
+import { clearCodexSession, getCodexSession, saveCodexSession } from "../stores/providerRuntime.svelte";
 import type { CodexSession } from "../types/provider";
 import { Logger } from "../utils/logging";
 import { performAiFetch } from "../lib/aiTransport";
@@ -231,11 +226,11 @@ function buildCodexSession(tokens: TokenResponse): CodexSession {
 	};
 }
 
-export function getStoredOpenAICodexSession(): CodexSession | null {
+function getStoredOpenAICodexSession(): CodexSession | null {
 	return getCodexSession();
 }
 
-export function saveOpenAICodexSession(session: CodexSession): void {
+function saveOpenAICodexSession(session: CodexSession): void {
 	saveCodexSession(session);
 }
 
@@ -605,12 +600,4 @@ export function createOpenAICodexFetch(): typeof fetch {
 			headers,
 		});
 	}) as typeof fetch;
-}
-
-export function getOpenAICodexCallbackOrigin(): string {
-	return `http://${CALLBACK_HOST}:${CALLBACK_PORT}`;
-}
-
-export function getOpenAICodexSecretId(): string {
-	return getCodexSessionStorageKey();
 }

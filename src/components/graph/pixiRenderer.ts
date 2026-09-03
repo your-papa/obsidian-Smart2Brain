@@ -229,7 +229,6 @@ export class PixiRenderer {
 	// Pixi core
 	private app!: Application;
 	private viewport!: Viewport;
-	private containerEl!: HTMLElement;
 
 	// Layers (world-space, inside viewport)
 	private hullLayer!: Container;
@@ -349,7 +348,6 @@ export class PixiRenderer {
 	// ── Lifecycle ──────────────────────────────────────────
 
 	async init(containerEl: HTMLElement, theme: ThemeColors): Promise<void> {
-		this.containerEl = containerEl;
 		this._theme = theme;
 
 		const rect = containerEl.getBoundingClientRect();

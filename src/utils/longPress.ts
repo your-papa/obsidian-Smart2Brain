@@ -16,7 +16,7 @@
  * give the user a "charging up" cue toward the menu opening.
  */
 
-export const LONG_PRESS_MS = 500;
+const LONG_PRESS_MS = 500;
 const MOVE_TOLERANCE_PX = 10;
 
 /** Class toggled on the node for the duration of an armed press, so CSS can

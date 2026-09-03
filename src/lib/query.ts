@@ -223,39 +223,3 @@ export function removeProviderQueries(provider: string) {
 	plugin.queryClient.removeQueries({ queryKey: ["provider", provider] });
 	plugin.queryClient.removeQueries({ queryKey: ["models", provider] });
 }
-
-/**
- * Query for model discovery - returns all available models.
- *
- * @param provider - Function returning the provider ID (e.g., "openai", "anthropic")
- */
-export function createModelDiscoveryQuery(provider: () => string) {
-	const data = getData();
-
-	return createQuery<string[]>(() => ({
-		queryKey: ["models", provider()],
-		queryFn: async () => {
-			const providerId = provider();
-
-			// Get resolved auth state (with secrets resolved)
-			const resolvedAuth = data.getResolvedAuthState(providerId);
-			if (!resolvedAuth) {
-				return [];
-			}
-
-			// Get provider definition for model discovery
-			const providerDef = getProviderDefinition(providerId, data.getAllProviderMeta());
-			if (!providerDef) {
-				return [];
-			}
-
-			// Discover models from the provider's API
-			try {
-				return await providerDef.discoverModels(resolvedAuth);
-			} catch (error) {
-				Logger.warn(`Model discovery failed for ${providerId}:`, error);
-				return [];
-			}
-		},
-	}));
-}

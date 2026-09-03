@@ -19,7 +19,6 @@ import type {
 	BaseProviderDefinition,
 	ChatModelConfig,
 	EmbeddingProviderDefinition,
-	LogoProps,
 	ProviderSetupInstructions,
 } from "../types/provider/index";
 
@@ -228,7 +227,7 @@ export function createOpenAICompatibleProvider(
 				configuration,
 			};
 
-			return createTransportedOpenAIEmbeddings(config.id, embeddingConfig);
+			return createTransportedOpenAIEmbeddings(embeddingConfig);
 		},
 		discoverEmbeddingModels: async (auth: AuthObject): Promise<string[]> => {
 			const entries = await fetchModelEntries(auth, config.id, defaultBaseUrl);

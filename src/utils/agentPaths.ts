@@ -12,8 +12,8 @@ import { getData } from "../stores/dataStore.svelte";
  *
  * Everything else directly under the root is one folder per agent (see {@link agentDir}).
  */
-export const MEMORIES_SUBDIR = "Memories";
-export const SKILLS_SUBDIR = "Skills";
+const MEMORIES_SUBDIR = "Memories";
+const SKILLS_SUBDIR = "Skills";
 
 /**
  * The retired per-agent prompt folder, replaced by `<agentFolder>/<Agent Name>/AGENT.md`. The
@@ -24,10 +24,10 @@ export const SKILLS_SUBDIR = "Skills";
 const LEGACY_SYSTEM_PROMPTS_SUBDIR = "System Prompts";
 
 /** Filename of an agent's definition note inside its own folder. */
-export const AGENT_DEFINITION_FILENAME = "AGENT.md";
+const AGENT_DEFINITION_FILENAME = "AGENT.md";
 
 /** Default agent root folder when unset. */
-export const DEFAULT_AGENT_FOLDER = "Agents";
+const DEFAULT_AGENT_FOLDER = "Agents";
 
 /** The configured agent root folder, resolved from plugin data (falls back to the default). */
 export function agentRootDir(): string {

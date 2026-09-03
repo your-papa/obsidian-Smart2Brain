@@ -142,34 +142,3 @@ export class ModelNotFoundError extends ProviderRegistryError {
 		this.name = "ModelNotFoundError";
 	}
 }
-
-/**
- * Error thrown when a required provider package fails to import.
- *
- * This error is thrown when:
- * - An optional provider package is not installed
- * - A required export is missing from a package
- * - A package fails to load for any reason
- *
- * This is particularly useful for providers like SAP AI Core that require
- * optional packages that users must install separately.
- *
- * @example
- * ```typescript
- * // Package not installed
- * throw new ProviderImportError(
- *   "sap-ai-core",
- *   "@sap-ai-sdk/langchain",
- *   new Error("Package not installed. Run: npm install @sap-ai-sdk/langchain")
- * );
- * // → "Failed to import package "@sap-ai-sdk/langchain" for provider "sap-ai-core": Package not installed. Run: npm install @sap-ai-sdk/langchain"
- * ```
- */
-export class ProviderImportError extends ProviderRegistryError {
-	constructor(provider: string, packageName: string, cause?: Error) {
-		const causeMessage = cause?.message ?? "Unknown error";
-		super(`Failed to import package "${packageName}" for provider "${provider}": ${causeMessage}`);
-		this.name = "ProviderImportError";
-		this.cause = cause;
-	}
-}

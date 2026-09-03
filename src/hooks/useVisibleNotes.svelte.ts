@@ -97,7 +97,7 @@ function getContext(type: string, leaf: WorkspaceLeaf): string | undefined {
  * Multiple visible panes (e.g. a side-by-side split) yield multiple notes.
  * To reference a non-visible note the user types a [[wikilink]].
  */
-export function getVisibleNotes(workspace: Workspace): VisibleNote[] {
+function getVisibleNotes(workspace: Workspace): VisibleNote[] {
 	const visible: VisibleNote[] = [];
 	const seen = new Set<string>();
 

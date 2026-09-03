@@ -20,7 +20,7 @@ export interface ProviderTemplateDefinition {
 	description: string;
 }
 
-export const PROVIDER_TEMPLATES: readonly ProviderTemplateDefinition[] = [
+const PROVIDER_TEMPLATES: readonly ProviderTemplateDefinition[] = [
 	{
 		id: "openai",
 		displayName: "OpenAI",
@@ -133,29 +133,19 @@ export {
 	ProviderEndpointError,
 	ModelNotFoundError,
 	ProviderNotFoundError,
-	ProviderImportError,
 } from "./errors";
 
 export { ProviderRegistry } from "./registry";
 
 export { createOpenAICompatibleProvider } from "./openai-compatible";
-export { createOmlxProvider } from "./omlx";
 
 export type {
 	AuthObject,
-	AuthObjectKey,
-	CodexSession,
 	AuthFieldDefinition,
-	AuthValidationResult,
 	BaseProviderDefinition,
-	EmbeddingProviderDefinition,
 	ChatModelConfig,
 	EmbedModelConfig,
 	LogoProps,
-	ProviderAuthConfig,
-	ProviderSetupInstructions,
-	RequiredAuthField,
-	OptionalAuthField,
 	OpenAIAuthMode,
 	ProviderInstanceMeta,
 	ProviderTemplateId,
@@ -166,4 +156,3 @@ export { isEmbeddingProvider } from "../types/provider/index";
 export { anthropicProvider } from "./anthropic";
 export { openaiProvider } from "./openai";
 export { ollamaProvider } from "./ollama";
-export { openrouterProvider } from "./openrouter";

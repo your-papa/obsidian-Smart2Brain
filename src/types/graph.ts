@@ -232,7 +232,7 @@ export const THEME_COLOR_VARS = [
  * Parse HSL components (h 0-360, s 0-100, l 0-100) from a CSS color string.
  * Supports hex, rgb(), and hsl() formats. Returns [0, 70, 55] as fallback.
  */
-export function parseHSL(color: string): [number, number, number] {
+function parseHSL(color: string): [number, number, number] {
 	const s = color.trim();
 
 	// hsl(H, S%, L%)

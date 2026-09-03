@@ -1907,8 +1907,6 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 			return this.searchResults;
 		}
 
-		const filter = this.buildActiveFilter();
-
 		// Deduplicate: only trigger a new search when the key changes
 		const searchKey = this.buildSearchKey(query);
 		if (searchKey !== this.lastRequestedSearchKey) {

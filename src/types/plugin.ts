@@ -89,7 +89,7 @@ export type MCPTransportType = "stdio" | "http";
 /**
  * Base configuration shared by all MCP server types
  */
-export interface MCPServerBaseConfig {
+interface MCPServerBaseConfig {
 	/** Human-readable name for display */
 	displayName: string;
 	/** Transport type */
@@ -230,7 +230,7 @@ export interface StaleGuidance {
 /**
  * Tool-specific settings for read_content tool
  */
-export interface ReadContentSettings {
+interface ReadContentSettings {
 	/** Maximum content length to return (0 = unlimited) */
 	maxContentLength: number;
 	/** Vision model for images: undefined = auto-derive from chat model, null = disabled, ChatModel = explicit */
@@ -242,7 +242,7 @@ export interface ReadContentSettings {
 /**
  * Tool-specific settings for fetch_url tool
  */
-export interface FetchUrlSettings {
+interface FetchUrlSettings {
 	/** Maximum content length to return after cleaning (0 = unlimited) */
 	maxContentLength: number;
 }
@@ -258,7 +258,7 @@ export interface WebSearchSettings {
 /**
  * Union type of all tool-specific settings
  */
-export type ToolSpecificSettings = ReadContentSettings | FetchUrlSettings | WebSearchSettings | Record<string, never>;
+type ToolSpecificSettings = ReadContentSettings | FetchUrlSettings | WebSearchSettings | Record<string, never>;
 
 /**
  * Configuration for an individual tool
@@ -655,5 +655,3 @@ export interface PluginData {
 	 */
 	vaultSlug: string | null;
 }
-
-export type PluginDataKey = keyof PluginData;

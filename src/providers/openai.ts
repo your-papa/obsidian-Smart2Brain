@@ -265,7 +265,7 @@ export const openaiProvider: EmbeddingProviderDefinition = {
 			};
 		}
 
-		return createTransportedOpenAIEmbeddings("openai", config);
+		return createTransportedOpenAIEmbeddings(config);
 	},
 
 	validateAuth: async (auth: AuthObject): Promise<AuthValidationResult> => {

@@ -50,7 +50,8 @@ vi.mock("../../src/utils/uuid7Validator", () => ({
 
 // Mock attachments
 const mockResolveVaultFileDetailed = vi.fn();
-vi.mock("../../src/utils/attachments", () => ({
+vi.mock("../../src/utils/pathResolution", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../../src/utils/pathResolution")>()),
 	resolveVaultFileDetailed: (...args: unknown[]) => mockResolveVaultFileDetailed(...args),
 }));
 

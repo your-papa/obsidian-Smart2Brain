@@ -119,7 +119,6 @@ export function getLexicalMatchTier(
 
 export function scoreLexicalCandidate(
 	queryPlan: QueryPlan,
-	rawQuery: string,
 	title: string,
 	aliases: string[],
 	tags: string[],

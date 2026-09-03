@@ -14,7 +14,6 @@
 
 import { ChatOpenAI } from "@langchain/openai";
 import { requestUrl } from "obsidian";
-import GenericAIIcon from "../components/ui/logos/GenericAIIcon.svelte";
 import type {
 	AuthObject,
 	AuthValidationResult,
@@ -182,7 +181,7 @@ export const openrouterProvider: EmbeddingProviderDefinition = {
 			(config.configuration as Record<string, unknown>).defaultHeaders = auth.headers;
 		}
 
-		return createTransportedOpenAIEmbeddings("openrouter", config);
+		return createTransportedOpenAIEmbeddings(config);
 	},
 
 	validateAuth: async (auth: AuthObject): Promise<AuthValidationResult> => {

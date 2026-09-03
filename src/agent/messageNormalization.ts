@@ -34,7 +34,7 @@ export function normalizeMessages(messages: unknown[]): BaseMessage[] {
 	return result;
 }
 
-export function normalizeMessage(msg: Record<string, unknown>): BaseMessage | undefined {
+function normalizeMessage(msg: Record<string, unknown>): BaseMessage | undefined {
 	// Check if it's already a BaseMessage instance (has _getType method)
 	if (typeof (msg as { _getType?: unknown })._getType === "function") {
 		return normalizeBaseMessageInstance(msg as Record<string, unknown> & { _getType: () => string });
@@ -309,7 +309,7 @@ function parseToolArgs(args: unknown): Record<string, unknown> {
 	return {};
 }
 
-export function readLangChainClassName(identifier: unknown): string | undefined {
+function readLangChainClassName(identifier: unknown): string | undefined {
 	if (typeof identifier === "string") {
 		return identifier.split(":").pop();
 	}

@@ -81,7 +81,7 @@ export interface ToolCallState {
 	parentToolCallId?: string;
 }
 
-export type AssistantTimelineEventType = "preamble" | "tool_pending" | "tool_start" | "tool_end";
+type AssistantTimelineEventType = "preamble" | "tool_pending" | "tool_start" | "tool_end";
 
 export interface AssistantTimelineEvent {
 	id: string;
@@ -100,7 +100,7 @@ export interface AssistantTimelineEvent {
 	parentToolCallId?: string;
 }
 
-export interface UserMessage {
+interface UserMessage {
 	content: string;
 	attachments?: ChatAttachment[];
 	visibleNotes?: VisibleNoteRef[];
@@ -149,7 +149,7 @@ export interface AssistantMessage {
 	errorCode?: string;
 }
 
-export interface TranscriptEvent {
+interface TranscriptEvent {
 	type: "summarization_marker";
 	label: string;
 	source: "summarization" | "manual_summarization";
@@ -244,7 +244,7 @@ export interface ChatRecord {
  * Canonical Checkpoint Graph Model
  * ---------------------------------------------------------------------------*/
 
-export interface CheckpointNode {
+interface CheckpointNode {
 	checkpointId: string;
 	parentCheckpointId?: string;
 	step: number;
@@ -845,7 +845,7 @@ function extractTextContent(message: BaseMessage): string {
 }
 
 /** Formats graph-selected notes into a context block for the agent. */
-export function formatGraphNotesContext(notes: GraphNoteRef[]): string {
+function formatGraphNotesContext(notes: GraphNoteRef[]): string {
 	if (notes.length === 0) return "";
 	const links = notes.map((n) => `- [[${n.path.replace(/\.md$/, "")}]]`);
 	return `[Graph-selected notes]\n${links.join("\n")}`;
@@ -857,7 +857,7 @@ export function formatGraphNotesContext(notes: GraphNoteRef[]): string {
  * said "will be reviewed", and every later turn it would keep assuming its
  * edits were (or will be) applied — including ones the user rejected.
  */
-export function formatReviewOutcomesContext(status: ReviewStatusRef): string {
+function formatReviewOutcomesContext(status: ReviewStatusRef): string {
 	const pendingProposals = status.pendingProposals ?? [];
 	// Messages persisted before proposals carried ids kept only paths. Their block
 	// is reconstructed here to be stripped by exact match, so it has to render the
@@ -2995,7 +2995,6 @@ export class SessionRegistry {
 	/** Wires session callbacks: map rekeying on rename. Run-state is read
 	 * per-session (no registry slot to push into). */
 	private buildSessionOptions(
-		id: string,
 		base: Pick<
 			ChatSessionOptions,
 			"graphState" | "errorCount" | "lastErrorMessage" | "bootstrapMessages" | "onNeedReload" | "selectedAgentId"
@@ -3254,7 +3253,7 @@ export class SessionRegistry {
 
 			const session = new ChatSession(
 				id,
-				this.buildSessionOptions(id, {
+				this.buildSessionOptions({
 					graphState: graph,
 					errorCount,
 					lastErrorMessage,

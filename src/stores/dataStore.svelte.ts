@@ -30,7 +30,6 @@ import type {
 	PromptFileReader,
 	PromptFileSnapshot,
 	RecentNoteEntry,
-	SearchAlgorithm,
 	StaleGuidance,
 	ToolConfig,
 	ToolsConfig,
@@ -193,65 +192,19 @@ function createProviderState(templateId: ProviderTemplateId): StoredProviderStat
  */
 export const DEFAULT_AGENT_ID = "default-agent";
 
-const READ_CONTENT_GUIDANCE_SHARED = `When reading a note that contains embedded PDFs (\`![[doc.pdf]]\`) or text files (\`![[notes.md]]\`, \`![[data.csv]]\`), use \`read_content\` to read them.
-When the user attaches files directly in the chat (PDFs, images, or text files), they are included automatically in the message — no need to call \`read_content\` for those. Attached PDFs and images are processed natively by the model, which is more capable than text extraction.
-Text files (.md, .txt, .csv, .json) are returned as-is.
-PDF page references are supported: \`[[report.pdf#page=3]]\` for a single page, \`[[report.pdf#page=1-3,5]]\` for multiple pages or ranges. Only the requested pages are returned.
-For large text files, use \`offset\` and \`length\` to read in chunks. When a response ends with a 'characters remaining' notice, call \`read_content\` again with the indicated \`offset\` to continue reading.`;
-
-/** No processors: images can't be read, PDFs use text extraction */
-export const READ_CONTENT_GUIDANCE_NONE = `${READ_CONTENT_GUIDANCE_SHARED}
-For images (\`![[image.png]]\` or \`![alt](image.png)\`), \`read_content\` cannot process them visually. Ask the user to attach images directly in the chat input instead.
-PDFs accessed via \`read_content\` are converted to plain text locally. This works for any model but loses layout, images, and formatting. If precise visual understanding matters, suggest the user attach the PDF directly instead.`;
-
-/** Image processor only: images analyzed by vision model, PDFs use text extraction */
-export const READ_CONTENT_GUIDANCE_IMAGE = `${READ_CONTENT_GUIDANCE_SHARED}
-For images (\`![[image.png]]\` or \`![alt](image.png)\`), \`read_content\` analyzes them using a vision model. Use it to read and understand images in notes.
-PDFs accessed via \`read_content\` are converted to plain text locally. This works for any model but loses layout, images, and formatting. If precise visual understanding matters, suggest the user attach the PDF directly instead.`;
-
-/** PDF processor only: images can't be read, PDFs analyzed by vision model */
-export const READ_CONTENT_GUIDANCE_PDF = `${READ_CONTENT_GUIDANCE_SHARED}
-For images (\`![[image.png]]\` or \`![alt](image.png)\`), \`read_content\` cannot process them visually. Ask the user to attach images directly in the chat input instead.
-PDFs accessed via \`read_content\` are analyzed by a vision model with full understanding of charts, tables, diagrams, and visual layout.`;
-
-/** Both processors: images and PDFs analyzed by vision model */
-export const READ_CONTENT_GUIDANCE_BOTH = `${READ_CONTENT_GUIDANCE_SHARED}
-For images (\`![[image.png]]\` or \`![alt](image.png)\`), \`read_content\` analyzes them using a vision model. Use it to read and understand images in notes.
-PDFs accessed via \`read_content\` are analyzed by a vision model with full understanding of charts, tables, diagrams, and visual layout.`;
-
-/** All 4 default guidance variants for matching against user config */
-export const READ_CONTENT_GUIDANCE_DEFAULTS = new Set([
-	READ_CONTENT_GUIDANCE_NONE,
-	READ_CONTENT_GUIDANCE_IMAGE,
-	READ_CONTENT_GUIDANCE_PDF,
-	READ_CONTENT_GUIDANCE_BOTH,
-]);
-
-/**
- * Returns the appropriate read_content prompt guidance based on processor configuration.
- */
-export function getReadContentGuidance(hasImageProcessor: boolean, hasPdfProcessor: boolean): string {
-	if (hasImageProcessor && hasPdfProcessor) return READ_CONTENT_GUIDANCE_BOTH;
-	if (hasImageProcessor) return READ_CONTENT_GUIDANCE_IMAGE;
-	if (hasPdfProcessor) return READ_CONTENT_GUIDANCE_PDF;
-	return READ_CONTENT_GUIDANCE_NONE;
-}
-
-// --- read_content tool description variants ---
-
 const READ_CONTENT_DESC_SHARED = "Read content of vault files by path or wiki link.";
 
 /** No processors: images can't be read */
-export const READ_CONTENT_DESC_NONE = `${READ_CONTENT_DESC_SHARED} Supports text, PDFs, and Excalidraw. Images must be attached directly in chat.`;
+const READ_CONTENT_DESC_NONE = `${READ_CONTENT_DESC_SHARED} Supports text, PDFs, and Excalidraw. Images must be attached directly in chat.`;
 
 /** Image processor only */
-export const READ_CONTENT_DESC_IMAGE = `${READ_CONTENT_DESC_SHARED} Supports text, PDFs, images, and Excalidraw.`;
+const READ_CONTENT_DESC_IMAGE = `${READ_CONTENT_DESC_SHARED} Supports text, PDFs, images, and Excalidraw.`;
 
 /** PDF processor only */
-export const READ_CONTENT_DESC_PDF = `${READ_CONTENT_DESC_SHARED} Supports text, PDFs (analyzed via vision model), and Excalidraw. Images must be attached directly in chat.`;
+const READ_CONTENT_DESC_PDF = `${READ_CONTENT_DESC_SHARED} Supports text, PDFs (analyzed via vision model), and Excalidraw. Images must be attached directly in chat.`;
 
 /** Both processors */
-export const READ_CONTENT_DESC_BOTH = `${READ_CONTENT_DESC_SHARED} Supports text, PDFs (analyzed via vision model), images, and Excalidraw.`;
+const READ_CONTENT_DESC_BOTH = `${READ_CONTENT_DESC_SHARED} Supports text, PDFs (analyzed via vision model), images, and Excalidraw.`;
 
 /**
  * Returns the appropriate read_content description based on processor configuration.
@@ -267,10 +220,10 @@ const SEARCH_NOTES_DESC_SHARED =
 	"Search through your Obsidian notes, or return recently opened notes. Returns structured JSON with matching file names, paths, tags, match reasons, short match snippets or headings, and metadata (properties/frontmatter), plus a count of results hidden by privacy rules. Use this to identify relevant notes before using other tools.";
 
 /** An embedding index exists, so all three retrieval strategies are usable. */
-export const SEARCH_NOTES_DESC_EMBEDDINGS = `${SEARCH_NOTES_DESC_SHARED} Pick the retrieval strategy with \`algorithm\`: \`lexical\` (default, fast, exact keyword matching) is usually the right first attempt — escalate to \`semantic\` or \`hybrid\` when wording rather than content is the obstacle.`;
+const SEARCH_NOTES_DESC_EMBEDDINGS = `${SEARCH_NOTES_DESC_SHARED} Pick the retrieval strategy with \`algorithm\`: \`lexical\` (default, fast, exact keyword matching) is usually the right first attempt — escalate to \`semantic\` or \`hybrid\` when wording rather than content is the obstacle.`;
 
 /** No embedding index — semantic and hybrid will fall back to lexical. */
-export const SEARCH_NOTES_DESC_LEXICAL_ONLY = `${SEARCH_NOTES_DESC_SHARED} This vault has no embedding index configured, so only \`algorithm: "lexical"\` is available; \`semantic\` and \`hybrid\` fall back to it and say so. Vary your search *terms* rather than the algorithm.`;
+const SEARCH_NOTES_DESC_LEXICAL_ONLY = `${SEARCH_NOTES_DESC_SHARED} This vault has no embedding index configured, so only \`algorithm: "lexical"\` is available; \`semantic\` and \`hybrid\` fall back to it and say so. Vary your search *terms* rather than the algorithm.`;
 
 /** Returns the search_notes description matching the vault's embedding-index state. */
 export function getSearchNotesDescription(hasEmbeddingIndex: boolean): string {

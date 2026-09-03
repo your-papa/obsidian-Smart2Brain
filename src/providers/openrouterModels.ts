@@ -13,7 +13,7 @@ const CACHE_TTL_MS = 1000 * 60 * 60 * 24; // 24 hours
 /**
  * Model pricing from OpenRouter API (per token costs)
  */
-export interface OpenRouterPricing {
+interface OpenRouterPricing {
 	/** Cost per prompt/input token (string for precision) */
 	prompt: string;
 	/** Cost per completion/output token (string for precision) */
@@ -27,7 +27,7 @@ export interface OpenRouterPricing {
 /**
  * Model architecture info from OpenRouter API
  */
-export interface OpenRouterArchitecture {
+interface OpenRouterArchitecture {
 	/** Model modality (e.g., "text->text", "text+image->text") */
 	modality?: string;
 	/** Input modalities (e.g., ["text", "image", "file"]) */
@@ -43,7 +43,7 @@ export interface OpenRouterArchitecture {
 /**
  * Top provider info from OpenRouter API
  */
-export interface OpenRouterTopProvider {
+interface OpenRouterTopProvider {
 	/** Context length for top provider */
 	context_length?: number;
 	/** Max completion tokens */
@@ -122,13 +122,6 @@ export function populateOpenRouterCache(models: OpenRouterModelInfo[]): void {
 }
 
 /**
- * Checks if the cache is still valid.
- */
-export function hasValidCache(): boolean {
-	return cachedResponse !== null && Date.now() - cachedResponse.timestamp < CACHE_TTL_MS;
-}
-
-/**
  * Fetches and caches OpenRouter models data.
  * Uses the public endpoint (no auth required).
  */
@@ -177,48 +170,6 @@ export async function fetchOpenRouterModels(): Promise<Map<string, OpenRouterMod
 }
 
 /**
- * Synchronous lookup of model info from cached data
- */
-export function lookupOpenRouterModelSync(
-	data: Map<string, OpenRouterModelInfo>,
-	modelId: string,
-): OpenRouterModelInfo | null {
-	return data.get(modelId) ?? null;
-}
-
-/**
- * Format context window for display
- */
-export function formatContextWindow(contextLength?: number): string {
-	if (!contextLength) return "—";
-	if (contextLength >= 1_000_000) {
-		return `${(contextLength / 1_000_000).toFixed(1)}M`;
-	}
-	if (contextLength >= 1_000) {
-		return `${Math.round(contextLength / 1_000)}K`;
-	}
-	return contextLength.toString();
-}
-
-/**
- * Format cost for display (per million tokens)
- * OpenRouter API returns cost per token as a string
- */
-export function formatCostPerMillion(costPerToken?: string): string {
-	if (!costPerToken) return "—";
-	const cost = Number.parseFloat(costPerToken);
-	if (Number.isNaN(cost)) return "—";
-	if (cost === 0) return "Free";
-
-	// Convert from per-token to per-million tokens
-	const perMillion = cost * 1_000_000;
-
-	if (perMillion < 0.01) return `$${perMillion.toFixed(4)}`;
-	if (perMillion < 1) return `$${perMillion.toFixed(2)}`;
-	return `$${perMillion.toFixed(2)}`;
-}
-
-/**
  * Derive capabilities from OpenRouter model info.
  * The API encodes capabilities via `architecture.input_modalities` and `supported_parameters`.
  */
@@ -257,11 +208,4 @@ export function isEmbeddingModel(info: OpenRouterModelInfo): boolean {
 		id.includes("nomic-") ||
 		id.includes("-embedding")
 	);
-}
-
-/**
- * Clears the cached data (useful for testing or forcing refresh)
- */
-export function clearOpenRouterCache(): void {
-	cachedResponse = null;
 }

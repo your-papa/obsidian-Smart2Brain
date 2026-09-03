@@ -117,7 +117,7 @@ const fakeData = {
 };
 
 vi.mock("../../src/stores/dataStore.svelte", () => ({ getData: () => fakeData }));
-vi.mock("../../src/vectorstore/index", () => ({
+vi.mock("../../src/vectorstore/storeFactory", () => ({
 	createVectorStore: (_vaultId: string, indexId: string) => {
 		const store = new FakeStore();
 		stores.set(indexId, store);

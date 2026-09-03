@@ -19,7 +19,7 @@ export function truncateOutput(value: string, maxChars = MAX_OUTPUT_CHARS): stri
 }
 
 /** Format an execution return value as a readable string for the agent. */
-export function formatResult(value: unknown): string {
+function formatResult(value: unknown): string {
 	if (value === undefined) return "undefined";
 	if (typeof value === "string") return value;
 	try {

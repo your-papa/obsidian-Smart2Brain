@@ -35,7 +35,7 @@ type SettingsNoticeOptions = {
 	duration?: number;
 };
 
-export function openPluginSettingsTab(app: App, tab: PluginSettingsTabId): void {
+function openPluginSettingsTab(app: App, tab: PluginSettingsTabId): void {
 	requestSettingsTab(tab);
 
 	const appWithSettings = app as App & {
@@ -47,7 +47,7 @@ export function openPluginSettingsTab(app: App, tab: PluginSettingsTabId): void 
 }
 
 /** Open one of Obsidian's own settings tabs (hotkeys, community-plugins, …). */
-export function openObsidianSettingsTab(app: App, tabId: string): void {
+function openObsidianSettingsTab(app: App, tabId: string): void {
 	const appWithSettings = app as App & {
 		setting?: { open: () => void; openTabById: (id: string) => void };
 	};

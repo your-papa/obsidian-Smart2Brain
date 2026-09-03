@@ -6,7 +6,7 @@ import type { BuiltInToolId } from "../types/plugin";
  * agent's `toolsConfig` (user-editable); these are the fallback defaults + the
  * plugin-requirement hint used purely for UI rendering.
  */
-export interface BuiltInToolMeta {
+interface BuiltInToolMeta {
 	id: BuiltInToolId;
 	defaultName: string;
 	defaultDescription: string;
@@ -18,7 +18,7 @@ export interface BuiltInToolMeta {
  * agent-level `ToolsModal` (per-tool sections) so the display-name title-casing and
  * default descriptions live in exactly one place.
  */
-export const BUILT_IN_TOOL_META: BuiltInToolMeta[] = [
+const BUILT_IN_TOOL_META: BuiltInToolMeta[] = [
 	{
 		id: "search_notes",
 		defaultName: "Search Notes",
@@ -85,10 +85,6 @@ export const BUILT_IN_TOOL_META: BuiltInToolMeta[] = [
 ];
 
 const META_BY_ID = new Map<BuiltInToolId, BuiltInToolMeta>(BUILT_IN_TOOL_META.map((meta) => [meta.id, meta]));
-
-export function getBuiltInToolMeta(toolId: BuiltInToolId): BuiltInToolMeta | undefined {
-	return META_BY_ID.get(toolId);
-}
 
 /**
  * Human-facing display name for a tool. Prefers the agent's configured tool name,

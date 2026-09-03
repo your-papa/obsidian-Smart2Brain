@@ -94,7 +94,6 @@ import { getRegistry } from "../providers/registry";
 import { ensureProviderRegistered } from "../providers/registrySync";
 
 import type { StructuredToolInterface } from "@langchain/core/tools";
-import type { MultiServerMCPClient } from "@langchain/mcp-adapters";
 
 const URL_REGEX = /https?:\/\/[^\s]+/g;
 const LANGCHAIN_TROUBLESHOOT_REGEX = /\n*Troubleshooting URL: https:\/\/docs\.langchain\.com\S*/g;
@@ -498,7 +497,6 @@ export class AgentManager {
 							);
 						});
 				},
-				defaultPrompt: DEFAULT_AGENT_PROMPT,
 			},
 			{ title: `System Prompt — ${agent.name}`, showDiff: true },
 		).open();
@@ -550,7 +548,6 @@ export class AgentManager {
 							);
 						});
 				},
-				defaultPrompt: bundled.content,
 			},
 			{ title: `Skill — ${skillName}`, showDiff: true },
 		).open();

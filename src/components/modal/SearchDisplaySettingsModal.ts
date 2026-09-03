@@ -1,4 +1,3 @@
-import type { App } from "obsidian";
 import { Modal } from "obsidian";
 import { mount, unmount } from "svelte";
 import SearchDisplaySettingsComponent from "./SearchDisplaySettingsModal.svelte";
