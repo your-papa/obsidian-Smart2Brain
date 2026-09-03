@@ -321,7 +321,12 @@ async function runCommit() {
 	invalidateProviderState(providerId);
 }
 
+// Monotonic id per blur, so a handler that had to wait out a commit can tell whether a
+// newer blur has superseded it before it writes.
+let blurSeq = 0;
+
 async function handleDisplayNameBlur(nextName: string) {
+	const seq = ++blurSeq;
 	const trimmedName = nextName.trim();
 	if (!trimmedName || trimmedName === providerMeta?.displayName) {
 		displayName = providerMeta?.displayName ?? "";
@@ -338,6 +343,13 @@ async function handleDisplayNameBlur(nextName: string) {
 	// disagree with the ID derived from it.
 	if (isCommitting) {
 		await commitSettled();
+		// The user may have refocused and blurred again while we waited. This invocation's
+		// value is then stale: writing it would clobber the newer edit in storage, and the
+		// `displayName = trimmedName` below would yank it out of the input. The newer blur
+		// persists what is current, so drop this one. (`displayName` can't be used as the
+		// staleness signal — the input is passed `value={displayName}`, not `bind:`, so it
+		// doesn't track typing.)
+		if (blurSeq !== seq) return;
 		// Re-check against the post-commit meta: if the commit stored this very name, the
 		// write is redundant. `providerMeta` is now keyed by the settled `providerId`.
 		if (trimmedName === providerMeta?.displayName) {
