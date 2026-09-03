@@ -282,12 +282,23 @@ async function commitProvider() {
 			let finalId = base;
 			let n = 2;
 			while (otherIds.has(finalId)) finalId = `${base}-${n++}`;
-			try {
-				await data.renameProvider(providerId, finalId);
+			// `renameProvider` re-keys everything synchronously and only awaits its persist,
+			// so take the promise without awaiting and point `providerId` at the new ID in
+			// the same turn. Awaiting first would leave `providerId` naming a key that no
+			// longer exists for the length of a settings write — the window every "Provider
+			// not found" failure in this modal came from.
+			const renamed = data.renameProvider(providerId, finalId);
+			// Its validation guards reject rather than throw (it's async), so confirm the
+			// re-key actually happened before adopting the new ID.
+			const oldId = providerId;
+			if (data.getProviderMeta(finalId) && !data.getProviderMeta(oldId)) {
 				modal.selectedProvider = finalId;
 				providerId = finalId;
+			}
+			try {
+				await renamed;
 			} catch {
-				// keep draft ID if rename somehow fails
+				// keep whichever ID is live if the persist fails
 			}
 		}
 		data.setProviderConfigured(providerId, true);
@@ -497,11 +508,12 @@ const canFinish = $derived(
       name="Provider name"
       desc="Name this provider instance so you can distinguish it later."
     >
-      <!-- Disabled while the commit runs. The commit renames the draft to a slug derived
-           from this name, and `providerId` only catches up after `renameProvider` awaits
-           its save — an edit landing in that window would write against an ID that no
-           longer exists. The window is a rename plus one settings write, and disabling
-           makes it unreachable rather than something to reconcile afterwards. -->
+      <!-- Disabled while the commit runs: it derives the provider's permanent ID from this
+           name, so editing it mid-flight has nothing sensible to mean. Note this is not
+           what makes the rename safe — disabling a focused input fires a blur, and Svelte
+           only flushes `isCommitting` to the DOM after the effect has already entered the
+           commit, so that blur lands *inside* the window rather than before it. The fix is
+           in commitProvider, which no longer leaves `providerId` stale across an await. -->
       <Text
         inputType="text"
         value={displayName}
