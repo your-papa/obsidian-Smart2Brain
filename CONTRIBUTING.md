@@ -57,8 +57,6 @@ Integration tests need a live Obsidian instance and are optional for most change
 ## Branches and pull requests
 
 - Open pull requests against **`main`**. Work on a branch in your fork; one PR per change.
-  (Until the 2.0 release lands, day-to-day development happens on `dev`; after that, `dev` is
-  merged into `main` and retired.)
 - Keep PRs small and focused. A PR that fixes a bug *and* refactors the module *and* renames a
   setting will be asked to split.
 - Describe how you tested the change in a real vault. CI proves the code compiles and the unit
