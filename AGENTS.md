@@ -63,6 +63,15 @@ release" and covers the provider list, bundled skills, built-in tools,
 `BUILT_IN_TOOL_IDS`, `src/skills/defaults/`, or `manifest.json` means the site
 needs updating too.
 
+The plugin also links *into* that site from several surfaces (Troubleshooting
+settings, the privacy row, onboarding, provider setup, the Agent editor). Every
+one of those URLs lives in `src/utils/docs.ts` — never inline a
+`smartsecondbrain.dev` URL at a call site. That file is a contract with the
+site's routes: when they move, reconcile it against `../site/dist/sitemap-0.xml`
+and the `redirects` block in `../site/astro.config.mjs`. Rendering goes through
+`components/ui/DocsLink.svelte` (icon variant for setting rows via `nameSuffix`,
+inline variant for section descriptions).
+
 ## Architecture
 
 This section is the canonical description of the architecture. (A longer

@@ -12,6 +12,7 @@ import { Tabs } from "bits-ui";
 import { createObsidianFetch } from "../../lib/obsidianFetch";
 import SettingContainer from "../settings/SettingContainer.svelte";
 import Button from "../ui/Button.svelte";
+import DocsLink from "../ui/DocsLink.svelte";
 import SlidingTabs, { type SlidingTab } from "../ui/SlidingTabs.svelte";
 import Text from "../ui/Text.svelte";
 import type { AddSkillModal } from "./AddSkillModal";
@@ -225,7 +226,12 @@ async function handleSave() {
         />
       </SettingContainer>
 
+      <!-- SkillsMP is where skills are found; the docs explain the SKILL.md format an
+           imported one has to satisfy, so both belong on this row. -->
       <SettingContainer name="Browse skills" desc="Find community skills on skillsmp.com.">
+        {#snippet nameSuffix()}
+          <DocsLink doc="skills" subject="Skills" />
+        {/snippet}
         <Button buttonText="Open SkillsMP" onClick={openSkillsMarketplace} />
       </SettingContainer>
 

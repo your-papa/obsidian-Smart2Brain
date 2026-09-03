@@ -5,6 +5,7 @@ import ProviderItem from "../../components/settings/ProviderItem.svelte";
 import SettingGroup from "../../components/settings/SettingGroup.svelte";
 import SettingItem from "../../components/settings/SettingItem.svelte";
 import Button from "../../components/ui/Button.svelte";
+import DocsLink from "../../components/ui/DocsLink.svelte";
 import { getData } from "../../stores/dataStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
 import { icon } from "../../utils/utils";
@@ -54,6 +55,10 @@ function handleOpenProviderSetup() {
         use:icon={"shield-check"}
         aria-hidden="true"
       ></span>
+      <!-- Two vault modes crossed with per-provider trust, where the same toggle
+           inverts meaning depending on the mode — more than one description line
+           can carry, so link the page that lays it out. -->
+      <DocsLink doc="privacyModel" subject="Note access policy" />
     {/snippet}
 
     <Button onClick={() => privacyListModal.open()} buttonText="Manage" />

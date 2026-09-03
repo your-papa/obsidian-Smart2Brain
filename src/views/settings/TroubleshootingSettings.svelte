@@ -9,6 +9,7 @@ import Toggle from "../../components/ui/Toggle.svelte";
 import { getData } from "../../stores/dataStore.svelte";
 import { getPlugin } from "../../stores/state.svelte";
 import { ConfirmModal } from "../../components/modal/ConfirmModal";
+import { openDocs } from "../../utils/docs";
 import { Logger } from "../../utils/logging";
 
 const pluginData = getData();
@@ -76,9 +77,24 @@ async function handleCleanupPluginData() {
 
 <!-- Maintenance -->
 <SettingGroup heading="Maintenance">
+  <!-- Docs first, GitHub as the escalation path: the troubleshooting guide is
+       organised by symptom (the agent won't respond, search returns nothing, a note
+       is being withheld, …), so it answers most of what would otherwise arrive as
+       an issue. -->
   <SettingItem
-    name="Need more help?"
-    desc="First look through existing GitHub issues to see whether the problem is already tracked. If it is not, open a new issue and include what you tried, any error messages, and steps to reproduce it."
+    name="Troubleshooting guide"
+    desc="Common problems and how to resolve them — the agent not responding, unhelpful search results, withheld notes, missing MCP tools, and mobile-specific issues."
+  >
+    <Button
+      buttonText="Open guide"
+      iconId="lucide-external-link"
+      onClick={() => openDocs("troubleshooting")}
+    />
+  </SettingItem>
+
+  <SettingItem
+    name="Still stuck?"
+    desc="Look through existing GitHub issues to see whether the problem is already tracked. If it is not, open a new issue and include what you tried, any error messages, and steps to reproduce it."
   >
     <div class="flex gap-2 flex-wrap">
       <Button
