@@ -260,6 +260,15 @@ async function handleSelectTemplate(id: ProviderTemplateId) {
 // the Done button can stay disabled across the commit's awaits — closing mid-rename would
 // race the ID change, and `markSubmitted` only lands after it.
 let isCommitting = $state(false);
+// Resolves when the in-flight commit finishes, so a blur that lands mid-commit can wait for
+// `providerId` to become authoritative instead of writing against an ID being renamed away.
+let commitDone: Promise<void> | null = null;
+// A waiting blur only needs to know the commit has *finished* — whether it succeeded is
+// commitProvider's business, and letting a rejection through here would escape the blur
+// handler's try/catch as an unhandled rejection.
+async function commitSettled() {
+	await commitDone?.catch(() => {});
+}
 
 // Promotes a draft to a fully configured provider the moment its connection validates.
 // This replaces the old "Add Provider" button: display name / auth / trusted all
@@ -268,40 +277,48 @@ let isCommitting = $state(false);
 async function commitProvider() {
 	if (isConfigured || isCommitting) return;
 	isCommitting = true;
+	// Publish the in-flight commit so a concurrent blur can await it (see commitSettled).
+	// Assigned before the first await so a blur in the same tick already sees it.
+	commitDone = runCommit();
 	try {
-		// Rename the draft to a slug derived from the final display name — this is the
-		// only point where the ID changes. Doing it once (not on every name edit) keeps
-		// downstream references stable while producing a human-readable, recoverable ID.
-		const name = displayName.trim() || (providerMeta?.displayName ?? "");
-		const base = slugifyProviderName(name);
-		if (base && base !== providerId) {
-			// Collide only against configured providers (minus this draft). Unconfigured
-			// providers are stale drafts, not real conflicts — counting them would push a
-			// legitimately-named provider to "openai-2".
-			const otherIds = new Set(data.getConfiguredProviders().filter((id) => id !== providerId));
-			let finalId = base;
-			let n = 2;
-			while (otherIds.has(finalId)) finalId = `${base}-${n++}`;
-			try {
-				await data.renameProvider(providerId, finalId);
-				modal.selectedProvider = finalId;
-				providerId = finalId;
-			} catch {
-				// keep draft ID if rename somehow fails
-			}
-		}
-		data.setProviderConfigured(providerId, true);
-		// Mark submitted BEFORE any await — the provider is now committed. Otherwise closing
-		// the modal during the fetchQuery below (e.g. right after seeing "Connected") would
-		// hit onClose with isSubmitted still false and delete the just-configured provider.
-		modal.markSubmitted();
-		// The auth query re-keys on providerId, so it re-fires under the new ID after a
-		// rename — refetch so the inline status stays "Connected" rather than flashing.
-		await modal.plugin.queryClient.fetchQuery(getProviderStateQueryOptions(providerId));
-		invalidateProviderState(providerId);
+		await commitDone;
 	} finally {
 		isCommitting = false;
+		commitDone = null;
 	}
+}
+
+async function runCommit() {
+	// Rename the draft to a slug derived from the final display name — this is the
+	// only point where the ID changes. Doing it once (not on every name edit) keeps
+	// downstream references stable while producing a human-readable, recoverable ID.
+	const name = displayName.trim() || (providerMeta?.displayName ?? "");
+	const base = slugifyProviderName(name);
+	if (base && base !== providerId) {
+		// Collide only against configured providers (minus this draft). Unconfigured
+		// providers are stale drafts, not real conflicts — counting them would push a
+		// legitimately-named provider to "openai-2".
+		const otherIds = new Set(data.getConfiguredProviders().filter((id) => id !== providerId));
+		let finalId = base;
+		let n = 2;
+		while (otherIds.has(finalId)) finalId = `${base}-${n++}`;
+		try {
+			await data.renameProvider(providerId, finalId);
+			modal.selectedProvider = finalId;
+			providerId = finalId;
+		} catch {
+			// keep draft ID if rename somehow fails
+		}
+	}
+	data.setProviderConfigured(providerId, true);
+	// Mark submitted BEFORE any await — the provider is now committed. Otherwise closing
+	// the modal during the fetchQuery below (e.g. right after seeing "Connected") would
+	// hit onClose with isSubmitted still false and delete the just-configured provider.
+	modal.markSubmitted();
+	// The auth query re-keys on providerId, so it re-fires under the new ID after a
+	// rename — refetch so the inline status stays "Connected" rather than flashing.
+	await modal.plugin.queryClient.fetchQuery(getProviderStateQueryOptions(providerId));
+	invalidateProviderState(providerId);
 }
 
 async function handleDisplayNameBlur(nextName: string) {
@@ -315,10 +332,18 @@ async function handleDisplayNameBlur(nextName: string) {
 	// but then awaits its save, and `providerId` is only reassigned after that await — so a
 	// blur landing in that window would write against an ID that no longer exists, throw
 	// "Provider not found", and strand Done disabled on a provider that connected fine.
-	// The commit already slugifies the name it captured; nothing is lost by ignoring this.
+	// Don't drop the name, though: the commit captured whatever `displayName` held when it
+	// started, which may differ from what the user has since typed. Defer the write until
+	// the commit settles and `providerId` is authoritative again, so the stored name can't
+	// disagree with the ID derived from it.
 	if (isCommitting) {
-		displayName = providerMeta?.displayName ?? trimmedName;
-		return;
+		await commitSettled();
+		// Re-check against the post-commit meta: if the commit stored this very name, the
+		// write is redundant. `providerMeta` is now keyed by the settled `providerId`.
+		if (trimmedName === providerMeta?.displayName) {
+			displayNameError = null;
+			return;
+		}
 	}
 	pendingDisplayNameSaves += 1;
 	try {
