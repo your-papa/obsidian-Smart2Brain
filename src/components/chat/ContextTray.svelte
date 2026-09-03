@@ -92,9 +92,13 @@ $effect(() => {
 	if (activeGraphPaths.length === 0 && graphExpanded) graphExpanded = false;
 });
 // The topic name only describes the full, untouched selection — once the user
-// dismisses any member from this chat's tray, the remaining notes no longer
-// are that topic, so fall back to the count-based label.
-const effectiveTopicLabel = $derived(graphDismissed.size === 0 ? topicLabel : null);
+// dismisses any member of THIS selection from the tray, the remaining notes no
+// longer are that topic, so fall back to the count-based label. Compare against
+// `graphPaths.length` rather than `graphDismissed.size`: dismissals accumulate
+// across selections in the same mounted chat, so a stale dismissal from an
+// earlier (now-replaced) selection must not suppress the label for a later,
+// still-untouched one.
+const effectiveTopicLabel = $derived(activeGraphPaths.length === graphPaths.length ? topicLabel : null);
 
 // --- One-way outputs. Derived, not synced through effects, per the repo's
 // Svelte guidance. Exposed as getter functions (Svelte disallows exporting
