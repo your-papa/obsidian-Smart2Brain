@@ -216,14 +216,14 @@ function hitSlack(pointerType: string): number {
 
 // Long-press → context menu (touch has no right-click). Armed on pointerdown
 // over a node, cancelled by movement/lift; fires the same menu as oncontextmenu.
-let longPressTimer: ReturnType<typeof setTimeout> | null = null;
+let longPressTimer: number | null = null;
 let longPressFired = false;
 const LONG_PRESS_MS = 500;
 const LONG_PRESS_MOVE_TOLERANCE = 10;
 
 function cancelLongPress() {
 	if (longPressTimer !== null) {
-		clearTimeout(longPressTimer);
+		window.clearTimeout(longPressTimer);
 		longPressTimer = null;
 	}
 }
@@ -267,7 +267,7 @@ let forceTickCount = 0;
 // Hide canvas during the initial chaos phase on fresh loads (no cached positions).
 // Starts hidden; revealed immediately when positions are known, or after 300ms on fresh loads.
 let canvasVisible = $state(false);
-let canvasRevealTimer: ReturnType<typeof setTimeout> | null = null;
+let canvasRevealTimer: number | null = null;
 
 // Simulation reference — $state so the hot-update $effect re-runs when simulation is (re)created
 let simulation: ReturnType<typeof forceSimulation<SimNode>> | null = $state(null);
@@ -452,9 +452,9 @@ let hoverAlphas: Map<string, number> = new Map();
 let outgoingHulls: Array<{ cluster: number; color: string; path: Array<{ x: number; y: number }> }> = [];
 let hullFadeProgress = 1;
 /** Releases the sustained alpha after a collapse/expand transition. */
-let retargetTimer: ReturnType<typeof setTimeout> | null = null;
+let retargetTimer: number | null = null;
 /** Fires the corrective fit once post-settle drift has stopped. */
-let settleFitTimer: ReturnType<typeof setTimeout> | null = null;
+let settleFitTimer: number | null = null;
 /** Signature of the current grouping; a change starts a new cross-fade. */
 let lastHullSignature = "";
 /** Most recently built hull shapes, captured so a change can fade from them. */
@@ -551,7 +551,7 @@ function requestRender(mode: RenderMode) {
 		pendingRenderMode = mode;
 	}
 	if (renderRafId != null) return;
-	renderRafId = requestAnimationFrame(() => {
+	renderRafId = window.requestAnimationFrame(() => {
 		renderRafId = null;
 		const nextMode = pendingRenderMode ?? "world";
 		pendingRenderMode = null;
@@ -1737,7 +1737,7 @@ function handleMouseDown(e: PointerEvent) {
 			}
 			longPressFired = false;
 			cancelLongPress();
-			longPressTimer = setTimeout(() => {
+			longPressTimer = window.setTimeout(() => {
 				longPressTimer = null;
 				longPressFired = true;
 				openNodeMenu(node, e.clientX, e.clientY);
@@ -2462,8 +2462,8 @@ function setupForceSimulation(
 					// and framed, and an unconditional refit reads as the camera
 					// lurching out for no reason a second after it arrived.
 					const settledBounds = computeNodeBounds(simNodes);
-					if (settleFitTimer != null) clearTimeout(settleFitTimer);
-					settleFitTimer = setTimeout(() => {
+					if (settleFitTimer != null) window.clearTimeout(settleFitTimer);
+					settleFitTimer = window.setTimeout(() => {
 						settleFitTimer = null;
 						if (driftedSince(settledBounds)) {
 							animateCameraToNodes(undefined, GRAPH_FIT_PADDING, 500);
@@ -2489,8 +2489,8 @@ function setupForceSimulation(
 	// already partially settled rather than the initial random-pile explosion.
 	if (isFreshLayout) {
 		canvasVisible = false;
-		if (canvasRevealTimer != null) clearTimeout(canvasRevealTimer);
-		canvasRevealTimer = setTimeout(() => {
+		if (canvasRevealTimer != null) window.clearTimeout(canvasRevealTimer);
+		canvasRevealTimer = window.setTimeout(() => {
 			canvasVisible = true;
 			canvasRevealTimer = null;
 		}, 300);
@@ -2898,9 +2898,9 @@ onMount(() => {
 			cancelAnimationFrame(renderRafId);
 			renderRafId = null;
 		}
-		if (retargetTimer != null) clearTimeout(retargetTimer);
-		if (settleFitTimer != null) clearTimeout(settleFitTimer);
-		if (canvasRevealTimer != null) clearTimeout(canvasRevealTimer);
+		if (retargetTimer != null) window.clearTimeout(retargetTimer);
+		if (settleFitTimer != null) window.clearTimeout(settleFitTimer);
+		if (canvasRevealTimer != null) window.clearTimeout(canvasRevealTimer);
 		if (simulation) {
 			simulation.stop();
 			simulation = null;
@@ -2993,8 +2993,8 @@ export function followLayout() {
 	// layout comes to rest.
 	simulation.alphaTarget(RETARGET_ALPHA).velocityDecay(RECLUSTER_VELOCITY_DECAY).restart();
 	isReclustering = true;
-	if (retargetTimer != null) clearTimeout(retargetTimer);
-	retargetTimer = setTimeout(() => {
+	if (retargetTimer != null) window.clearTimeout(retargetTimer);
+	retargetTimer = window.setTimeout(() => {
 		retargetTimer = null;
 		// Back to 0 so the layout can actually come to rest.
 		simulation?.alphaTarget(0);

@@ -185,7 +185,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 	   otherwise bound only to Tab / Alt+Enter (unreachable without a keyboard). */
 	private pendingPostOpenFrameId: number | null = null;
 	private pendingFocusFrameId: number | null = null;
-	private pendingFocusTimeoutIds: ReturnType<typeof globalThis.setTimeout>[] = [];
+	private pendingFocusTimeoutIds: number[] = [];
 	private hasPrimedOpenResults = false;
 
 	constructor(app: App, options: SearchModalOptions = {}) {
@@ -1046,12 +1046,12 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 			this.autocompleteHydrationTimeout = null;
 		}
 		if (this.pendingPostOpenFrameId !== null) {
-			globalThis.cancelAnimationFrame(this.pendingPostOpenFrameId);
+			window.cancelAnimationFrame(this.pendingPostOpenFrameId);
 			this.pendingPostOpenFrameId = null;
 		}
 		this.hasPrimedOpenResults = false;
 		if (this.pendingFocusFrameId !== null) {
-			globalThis.cancelAnimationFrame(this.pendingFocusFrameId);
+			window.cancelAnimationFrame(this.pendingFocusFrameId);
 			this.pendingFocusFrameId = null;
 		}
 		this.clearPendingFocusTimeouts();
@@ -1059,10 +1059,10 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 
 	private schedulePostOpenHydration(): void {
 		if (this.pendingPostOpenFrameId !== null) {
-			globalThis.cancelAnimationFrame(this.pendingPostOpenFrameId);
+			window.cancelAnimationFrame(this.pendingPostOpenFrameId);
 		}
 
-		this.pendingPostOpenFrameId = globalThis.requestAnimationFrame(() => {
+		this.pendingPostOpenFrameId = window.requestAnimationFrame(() => {
 			this.pendingPostOpenFrameId = null;
 			if (this.isClosed) {
 				return;
@@ -1183,15 +1183,15 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 
 	private scheduleInputFocus(): void {
 		if (this.pendingFocusFrameId !== null) {
-			globalThis.cancelAnimationFrame(this.pendingFocusFrameId);
+			window.cancelAnimationFrame(this.pendingFocusFrameId);
 		}
 		this.clearPendingFocusTimeouts();
 
-		this.pendingFocusFrameId = globalThis.requestAnimationFrame(() => {
+		this.pendingFocusFrameId = window.requestAnimationFrame(() => {
 			this.pendingFocusFrameId = null;
 			this.focusInput();
 			for (const delay of [0, 50, 150, 400, 800]) {
-				const timeoutId = globalThis.setTimeout(() => {
+				const timeoutId = window.setTimeout(() => {
 					this.pendingFocusTimeoutIds = this.pendingFocusTimeoutIds.filter((id) => id !== timeoutId);
 					this.focusInput();
 				}, delay);
@@ -1202,7 +1202,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 
 	private clearPendingFocusTimeouts(): void {
 		for (const timeoutId of this.pendingFocusTimeoutIds) {
-			globalThis.clearTimeout(timeoutId);
+			window.clearTimeout(timeoutId);
 		}
 		this.pendingFocusTimeoutIds = [];
 	}
@@ -1606,9 +1606,9 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 			ctx.fillStyle = grad;
 			ctx.fill("evenodd");
 
-			this.glowAnimationId = requestAnimationFrame(animate);
+			this.glowAnimationId = window.requestAnimationFrame(animate);
 		};
-		this.glowAnimationId = requestAnimationFrame(animate);
+		this.glowAnimationId = window.requestAnimationFrame(animate);
 	}
 
 	private stopGlowAnimation(): void {

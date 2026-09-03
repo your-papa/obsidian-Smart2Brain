@@ -18,7 +18,7 @@ interface PendingOpenRouterAuth {
 	codeVerifier: string;
 	resolve: (apiKey: string) => void;
 	reject: (error: Error) => void;
-	timeoutId: ReturnType<typeof setTimeout>;
+	timeoutId: number;
 	redirectUri: string;
 	/** Guards against a double-resolve (server callback vs. manual paste racing). */
 	settled: boolean;
@@ -48,7 +48,7 @@ const HTML_SUCCESS = `<!doctype html>
       <h1 style="margin-bottom:1rem;">OpenRouter Connected</h1>
       <p>You can close this window and return to Obsidian.</p>
     </div>
-    <script>setTimeout(() => window.close(), 1500)</script>
+    <script>window.setTimeout(() => window.close(), 1500)</script>
   </body>
 </html>`;
 
@@ -77,7 +77,7 @@ function oauthErrorPage(res: ServerResponse, error: string): void {
 
 function cleanupPendingOpenRouterAuth() {
 	if (!pendingOpenRouterAuth) return;
-	clearTimeout(pendingOpenRouterAuth.timeoutId);
+	window.clearTimeout(pendingOpenRouterAuth.timeoutId);
 	pendingOpenRouterAuth.server?.close();
 	pendingOpenRouterAuth = null;
 }
@@ -353,7 +353,7 @@ export async function signInWithOpenRouter(): Promise<string> {
 			reject,
 			redirectUri: redirectUri ?? "",
 			settled: false,
-			timeoutId: setTimeout(() => {
+			timeoutId: window.setTimeout(() => {
 				if (!pendingOpenRouterAuth || pendingOpenRouterAuth.settled) return;
 				pendingOpenRouterAuth.settled = true;
 				pendingOpenRouterAuth.reject(new Error("Timed out waiting for OpenRouter sign-in"));

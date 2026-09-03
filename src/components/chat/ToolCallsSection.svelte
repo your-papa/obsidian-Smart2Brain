@@ -361,8 +361,8 @@ $effect(() => {
 		runningSeconds = Math.max(0, Math.floor((Date.now() - runStartedAtMs) / 1000));
 	};
 	tick();
-	const timer = setInterval(tick, 1000);
-	return () => clearInterval(timer);
+	const timer = window.setInterval(tick, 1000);
+	return () => window.clearInterval(timer);
 });
 
 // The tools executing right now. Only the COUNT is used: the tool row rendered

@@ -198,7 +198,7 @@ function scrollManualCodeIntoView(e: FocusEvent) {
 	if (!Platform.isMobileApp) return;
 	const target = e.currentTarget;
 	if (!(target instanceof HTMLElement)) return;
-	setTimeout(() => target.scrollIntoView({ block: "nearest", behavior: "smooth" }), 350);
+	window.setTimeout(() => target.scrollIntoView({ block: "nearest", behavior: "smooth" }), 350);
 }
 
 function handleOAuthDisconnect() {
@@ -306,7 +306,7 @@ async function commitProvider() {
 	// appears in the list, which is the clearest confirmation.
 	if (closeAfterCommit) {
 		closeAfterCommit = false;
-		setTimeout(() => modal.close(), 800);
+		window.setTimeout(() => modal.close(), 800);
 	}
 }
 

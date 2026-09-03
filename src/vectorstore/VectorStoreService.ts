@@ -383,7 +383,7 @@ export class VectorStoreService {
 	private readonly instances: Map<string, IndexInstance> = new Map();
 	private readonly initializingInstances = new Map<string, Promise<IndexInstance>>();
 	private readonly progressListeners = new Map<string, Set<(progress: IndexingProgress) => void>>();
-	private readonly modifyTimers = new Map<string, ReturnType<typeof setTimeout>>();
+	private readonly modifyTimers = new Map<string, number>();
 	private isInitialized = false;
 	private readonly vaultId: string;
 	/** Crash-backoff marker for scheduled bulk runs (`s2b-embedding-bulk-attempts:<vaultId>`). */
@@ -907,7 +907,7 @@ export class VectorStoreService {
 						? `Indexing cancelled (${outcome.indexedChunks} chunks updated)`
 						: `✓ Index updated: ${outcome.indexedChunks} chunks`,
 				);
-				setTimeout(() => notice.hide(), 3000);
+				window.setTimeout(() => notice.hide(), 3000);
 			}
 			Logger.log(`[VectorStore] Indexed ${outcome.indexedChunks} chunks for ${inst.indexId}`);
 		}
@@ -997,11 +997,11 @@ export class VectorStoreService {
 	 */
 	private handleFileModify(file: TFile): void {
 		const existing = this.modifyTimers.get(file.path);
-		if (existing) clearTimeout(existing);
+		if (existing) window.clearTimeout(existing);
 
 		this.modifyTimers.set(
 			file.path,
-			setTimeout(async () => {
+			window.setTimeout(async () => {
 				this.modifyTimers.delete(file.path);
 
 				for (const inst of this.instances.values()) {
@@ -1331,7 +1331,7 @@ export class VectorStoreService {
 					? `Indexing cancelled (${indexed} notes indexed so far)`
 					: `✓ Indexed ${indexed} notes${skippedText}`,
 			);
-			setTimeout(() => notice.hide(), 3000);
+			window.setTimeout(() => notice.hide(), 3000);
 
 			Logger.log(`[VectorStore] Full index complete for ${inst.indexId}: ${indexed} indexed, ${skipped} skipped`);
 		} catch (error) {
@@ -2368,7 +2368,7 @@ export class VectorStoreService {
 	 */
 	async cleanup(): Promise<void> {
 		try {
-			for (const timer of this.modifyTimers.values()) clearTimeout(timer);
+			for (const timer of this.modifyTimers.values()) window.clearTimeout(timer);
 			this.modifyTimers.clear();
 			// Wait for any in-progress initialization before cleaning up
 			if (this.initPromise) {

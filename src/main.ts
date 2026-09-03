@@ -828,7 +828,7 @@ export default class SecondBrainPlugin extends Plugin {
 					const restore = () => {
 						if (scroller.isConnected) scroller.scrollTop = prevScrollTop;
 					};
-					requestAnimationFrame(restore);
+					window.requestAnimationFrame(restore);
 					for (const delay of [50, 100, 200, 350, 500]) {
 						window.setTimeout(restore, delay);
 					}

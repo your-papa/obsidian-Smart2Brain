@@ -625,7 +625,7 @@ const inlineDiffSideEffects = ViewPlugin.fromClass(
 		private initialized = false;
 		private refreshAttempts = 0;
 		private lastFilePath: string | null = null;
-		private docRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+		private docRefreshTimer: number | null = null;
 
 		constructor(view: EditorView) {
 			this.view = view;
@@ -642,7 +642,7 @@ const inlineDiffSideEffects = ViewPlugin.fromClass(
 		}
 
 		private scheduleInitialRefresh() {
-			requestAnimationFrame(() => {
+			window.requestAnimationFrame(() => {
 				if (this.initialized) return;
 
 				const hasFilePath = getEditorFilePath(this.view.state) !== null;
@@ -676,8 +676,8 @@ const inlineDiffSideEffects = ViewPlugin.fromClass(
 			// once per keystroke. The mapped set stays visually correct meanwhile;
 			// the rebuild re-verifies group text and updates the bars' stale state.
 			if (update.docChanged) {
-				if (this.docRefreshTimer) clearTimeout(this.docRefreshTimer);
-				this.docRefreshTimer = setTimeout(() => {
+				if (this.docRefreshTimer) window.clearTimeout(this.docRefreshTimer);
+				this.docRefreshTimer = window.setTimeout(() => {
 					this.docRefreshTimer = null;
 					this.refreshHandler();
 				}, 250);
@@ -685,7 +685,7 @@ const inlineDiffSideEffects = ViewPlugin.fromClass(
 		}
 
 		destroy() {
-			if (this.docRefreshTimer) clearTimeout(this.docRefreshTimer);
+			if (this.docRefreshTimer) window.clearTimeout(this.docRefreshTimer);
 			document.removeEventListener("s2b-pending-changes-updated", this.refreshHandler);
 			document.removeEventListener("s2b-diff-mode-changed", this.refreshHandler);
 		}

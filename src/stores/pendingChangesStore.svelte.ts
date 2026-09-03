@@ -126,7 +126,7 @@ export class PendingChangesStore {
 	#entries: PendingChangeEntry[] = $state([]);
 	#revision = $state(0);
 	readonly #plugin: SecondBrainPlugin;
-	#saveTimer: ReturnType<typeof setTimeout> | null = null;
+	#saveTimer: number | null = null;
 	readonly #processingGroups = new Set<string>();
 	readonly #fileLocks = new Map<string, Promise<void>>();
 	readonly #batchProcessing = new Set<string>();
@@ -234,8 +234,8 @@ export class PendingChangesStore {
 	}
 
 	private scheduleSave(): void {
-		if (this.#saveTimer) clearTimeout(this.#saveTimer);
-		this.#saveTimer = setTimeout(
+		if (this.#saveTimer) window.clearTimeout(this.#saveTimer);
+		this.#saveTimer = window.setTimeout(
 			() => void this.saveToDisk().catch((e) => Logger.error("[PendingChanges] Failed to save:", e)),
 			SAVE_DEBOUNCE_MS,
 		);
@@ -251,7 +251,7 @@ export class PendingChangesStore {
 	 */
 	private flushSave(): void {
 		if (this.#saveTimer) {
-			clearTimeout(this.#saveTimer);
+			window.clearTimeout(this.#saveTimer);
 			this.#saveTimer = null;
 		}
 		void this.saveToDisk().catch((e) => Logger.error("[PendingChanges] Failed to save:", e));
@@ -1064,7 +1064,7 @@ export class PendingChangesStore {
 
 	cleanup(): void {
 		if (this.#saveTimer) {
-			clearTimeout(this.#saveTimer);
+			window.clearTimeout(this.#saveTimer);
 			this.#saveTimer = null;
 			// Flush any pending writes so data isn't lost on unload
 			void this.saveToDisk().catch((e) => Logger.error("[PendingChanges] Failed to save on cleanup:", e));

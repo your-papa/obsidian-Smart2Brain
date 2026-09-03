@@ -45,7 +45,7 @@ interface PendingOpenAICodexAuth {
 	redirectUri: string;
 	resolve: (session: CodexSession) => void;
 	reject: (error: Error) => void;
-	timeoutId: ReturnType<typeof setTimeout>;
+	timeoutId: number;
 }
 
 let pendingOpenAICodexAuth: PendingOpenAICodexAuth | null = null;
@@ -67,7 +67,7 @@ const HTML_SUCCESS = `<!doctype html>
       <h1 style="margin-bottom:1rem;">Authorization Successful</h1>
       <p>You can close this window and return to Obsidian.</p>
     </div>
-    <script>setTimeout(() => window.close(), 1500)</script>
+    <script>window.setTimeout(() => window.close(), 1500)</script>
   </body>
 </html>`;
 
@@ -94,7 +94,7 @@ const oauthErrorPage = (res: import("node:http").ServerResponse, error: string):
 
 function cleanupPendingOpenAICodexAuth() {
 	if (!pendingOpenAICodexAuth) return;
-	clearTimeout(pendingOpenAICodexAuth.timeoutId);
+	window.clearTimeout(pendingOpenAICodexAuth.timeoutId);
 	pendingOpenAICodexAuth.server.close();
 	pendingOpenAICodexAuth = null;
 }
@@ -405,7 +405,7 @@ async function startOpenAICodexAuthServer(expectedState: string, pkce: PkceCodes
 				redirectUri,
 				resolve: () => undefined,
 				reject: () => undefined,
-				timeoutId: setTimeout(() => undefined, OAUTH_TIMEOUT_MS),
+				timeoutId: window.setTimeout(() => undefined, OAUTH_TIMEOUT_MS),
 			};
 			resolve();
 		});
@@ -444,8 +444,8 @@ export async function signInWithOpenAICodex(): Promise<CodexSession> {
 
 		pendingOpenAICodexAuth.resolve = resolve;
 		pendingOpenAICodexAuth.reject = reject;
-		clearTimeout(pendingOpenAICodexAuth.timeoutId);
-		pendingOpenAICodexAuth.timeoutId = setTimeout(() => {
+		window.clearTimeout(pendingOpenAICodexAuth.timeoutId);
+		pendingOpenAICodexAuth.timeoutId = window.setTimeout(() => {
 			if (!pendingOpenAICodexAuth) return;
 			pendingOpenAICodexAuth.reject(new Error("Timed out waiting for ChatGPT sign-in"));
 			cleanupPendingOpenAICodexAuth();

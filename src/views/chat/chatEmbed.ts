@@ -10,7 +10,7 @@ import {
 import { Logger } from "../../utils/logging";
 
 /** Yield to the browser so it can paint/handle input before continuing. */
-const yieldToMain = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+const yieldToMain = (): Promise<void> => new Promise((resolve) => window.setTimeout(resolve, 0));
 
 /**
  * Shape of the context object Obsidian's (internal) embed registry passes to an
@@ -90,7 +90,7 @@ class ChatEmbed extends MarkdownRenderChild {
 		// already-queued embed, spreading their CPU bursts across frames.
 		const delay = pendingLoadCount * STAGGER_MS;
 		pendingLoadCount++;
-		setTimeout(() => {
+		window.setTimeout(() => {
 			pendingLoadCount = Math.max(0, pendingLoadCount - 1);
 			void this.loadContent();
 		}, delay);
