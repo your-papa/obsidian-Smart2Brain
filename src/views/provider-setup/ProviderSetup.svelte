@@ -311,6 +311,15 @@ async function handleDisplayNameBlur(nextName: string) {
 		displayNameError = null;
 		return;
 	}
+	// A commit in flight is mid-rename: `renameProvider` re-keys providerMeta synchronously
+	// but then awaits its save, and `providerId` is only reassigned after that await — so a
+	// blur landing in that window would write against an ID that no longer exists, throw
+	// "Provider not found", and strand Done disabled on a provider that connected fine.
+	// The commit already slugifies the name it captured; nothing is lost by ignoring this.
+	if (isCommitting) {
+		displayName = providerMeta?.displayName ?? trimmedName;
+		return;
+	}
 	pendingDisplayNameSaves += 1;
 	try {
 		await data.updateProviderMeta(providerId, { displayName: trimmedName });
