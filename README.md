@@ -1,9 +1,9 @@
 <div align="center">
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.svg">
-  <source media="(prefers-color-scheme: light)" srcset="assets/logo-light.svg">
-  <img alt="Smart Second Brain" src="assets/logo-light.svg" width="300">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/s2b-dev/smart-second-brain/main/assets/logo-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/s2b-dev/smart-second-brain/main/assets/logo-light.svg">
+  <img alt="Smart Second Brain" src="https://raw.githubusercontent.com/s2b-dev/smart-second-brain/main/assets/logo-light.svg" width="300">
 </picture>
 
 </div>
@@ -17,8 +17,8 @@ Search surfaces your notes, the graph reveals how they connect, and the assistan
 **[smartsecondbrain.dev](https://smartsecondbrain.dev)** has a demo video, the features, setup guides, and documentation.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/hero-desktop-dark.png">
-  <img alt="Smart Second Brain: the smart graph beside a chat that reads your notes and proposes an edit" src="assets/hero-desktop-light.png">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/s2b-dev/smart-second-brain/main/assets/hero-desktop-dark.png">
+  <img alt="Smart Second Brain: the smart graph beside a chat that reads your notes and proposes an edit" src="https://raw.githubusercontent.com/s2b-dev/smart-second-brain/main/assets/hero-desktop-light.png">
 </picture>
 
 ## Install
