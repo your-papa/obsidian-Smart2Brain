@@ -429,7 +429,10 @@ export class PendingChangesStore {
 						`File "${change.path}" was modified after the delete was proposed. Review the note and re-stage the delete.`,
 					);
 				}
-				await app.vault.trash(file, true);
+				// trashFile honours the user's "Deleted files" setting (system trash, vault
+				// .trash, or permanent). `vault.trash(file, true)` hardcoded system trash and
+				// ignored that choice.
+				await app.fileManager.trashFile(file);
 			} else if (change.type === "move") {
 				const file = app.vault.getAbstractFileByPath(normalizedPath);
 				if (!(file instanceof TFile)) {
