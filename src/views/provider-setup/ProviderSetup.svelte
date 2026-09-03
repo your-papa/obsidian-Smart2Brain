@@ -214,9 +214,18 @@ const headerStatusProps = $state<{ provider: string }>({
 });
 let displayName = $state("");
 let displayNameError = $state<string | null>(null);
-// Whether the name field currently has focus. Gates the stored-name sync effect below so
-// it can't overwrite what the user is typing (the input binds `displayName` two-way).
+// Whether the name field currently has focus.
 let isEditingDisplayName = $state(false);
+// Whether a blurred name is still on its way to storage. Blur clears the focus flag
+// immediately, but a write deferred behind an in-flight commit hasn't landed yet — without
+// this, the sync effect would overwrite the pending value with the stored one during the
+// commit's rename, and the resumed handler would read its own clobbering as a newer edit
+// and drop the name entirely.
+let unsavedDisplayName = $state<string | null>(null);
+// The field is the user's while either holds: don't sync stored state over it.
+function hasUnsavedDisplayName() {
+	return isEditingDisplayName || unsavedDisplayName !== null;
+}
 // Number of display-name saves currently in flight. `displayNameError` still holds its
 // previous value until an await settles, so without this Done could enable mid-save on a
 // name whose validity isn't known yet — and the commit's slug is derived from that same
@@ -243,12 +252,13 @@ function getTemplateLogo(id: ProviderTemplateId): Component<LogoProps> {
 	return TEMPLATE_LOGOS[id] ?? GenericAIIcon;
 }
 
-// Mirror the stored name into the input — but not while the user is typing in it. With
-// `bind:value` the input reads this back, so an unguarded sync (this effect re-runs on any
-// providerMeta change, e.g. the commit's rename) would overwrite an in-progress edit.
+// Mirror the stored name into the input — but never on top of a value the user owns. With
+// `bind:value` the input reads this back, and this effect re-runs on any providerMeta
+// change (notably the commit's own rename), so an unguarded sync would clobber both an
+// in-progress edit and a blurred edit still waiting to be written.
 $effect(() => {
 	const stored = providerMeta?.displayName ?? "";
-	if (untrack(() => isEditingDisplayName)) return;
+	if (untrack(() => hasUnsavedDisplayName())) return;
 	displayName = stored;
 });
 
@@ -338,10 +348,23 @@ async function handleDisplayNameBlur(nextName: string) {
 	isEditingDisplayName = false;
 	const trimmedName = nextName.trim();
 	if (!trimmedName || trimmedName === providerMeta?.displayName) {
+		unsavedDisplayName = null;
 		displayName = providerMeta?.displayName ?? "";
 		displayNameError = null;
 		return;
 	}
+	// Claim the field until this value reaches storage (or is superseded), so the sync
+	// effect can't overwrite it while we wait out a commit.
+	unsavedDisplayName = trimmedName;
+	try {
+		await saveDisplayName(trimmedName, seq);
+	} finally {
+		// Only release the claim if it's still ours — a newer blur may have taken it.
+		if (blurSeq === seq) unsavedDisplayName = null;
+	}
+}
+
+async function saveDisplayName(trimmedName: string, seq: number) {
 	// A commit in flight is mid-rename: `renameProvider` re-keys providerMeta synchronously
 	// but then awaits its save, and `providerId` is only reassigned after that await — so a
 	// blur landing in that window would write against an ID that no longer exists, throw
@@ -352,12 +375,14 @@ async function handleDisplayNameBlur(nextName: string) {
 	// disagree with the ID derived from it.
 	if (isCommitting) {
 		await commitSettled();
-		// The user may have edited the field while we waited. This invocation's value is then
-		// stale: writing it would clobber the newer edit in storage, and the
+		// The user may have edited the field while we waited, which makes this invocation's
+		// value stale: writing it would clobber the newer edit in storage, and the
 		// `displayName = trimmedName` below would yank it out of the input. Two ways to be
 		// superseded, and both need checking — a newer blur (the counter), or typing with no
-		// second blur, which never re-enters this handler and is only visible through the
-		// live binding on the input.
+		// second blur, which never re-enters this handler and shows up only in the bound
+		// value. The claim above is what makes that second comparison trustworthy: nothing
+		// else can write `displayName` while this save is pending, so a difference here is
+		// the user's typing rather than the sync effect.
 		if (blurSeq !== seq || displayName.trim() !== trimmedName) return;
 		// Re-check against the post-commit meta: if the commit stored this very name, the
 		// write is redundant. `providerMeta` is now keyed by the settled `providerId`.
