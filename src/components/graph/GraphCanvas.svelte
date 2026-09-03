@@ -14,7 +14,8 @@ import {
 	type BoundingBox,
 	type FramingPadding,
 } from "../../utils/graphAnimation";
-import { buildTopicRegion, centroid } from "../../utils/convexHull";
+import { buildTopicRegion } from "../../utils/convexHull";
+import { type WorldRect, pointInPolygon, rectContains, trimOutliers } from "../../utils/graphGeometry";
 import { autoNodeSize, densityForceProfile, nodeDrawRadius, zoomNodeScale } from "../../utils/graphUtils";
 import { applyLayoutForces, clusterCohesionForce, type LayoutPhysicsConfig } from "../../utils/graphLayout";
 import { resolveNodePaths, topicNodeId } from "../../utils/mergeNodes";
@@ -396,13 +397,6 @@ const SETTLE_FIT_DELAY_MS = 900;
 /** Extra world-space breathing room between a topic's outermost node and its region edge. */
 const HULL_PADDING = 26;
 
-/**
- * How far past the median centroid distance a member may sit before it stops
- * shaping its topic's region. Low enough to keep strays from stretching a hull
- * across the canvas, high enough not to clip genuinely spread-out topics.
- */
-const HULL_OUTLIER_FACTOR = 2.2;
-
 // Smooth hover highlighting: per-node alpha lerps toward target on each frame.
 // 0 = fully dimmed, 1 = fully visible. Drives node, edge, and label opacity.
 let hoverAlphas: Map<string, number> = new Map();
@@ -552,7 +546,6 @@ let lastViewportScale = 1;
  * it; a pan past it forces a re-tessellation before the gap scrolls into view.
  */
 const EDGE_CULL_MARGIN = 0.35;
-type WorldRect = { minX: number; minY: number; maxX: number; maxY: number };
 /** Cull rect used at the last edge tessellation — null when nothing was culled. */
 let lastEdgeCullRect: WorldRect | null = null;
 /** Set when a pan left the culled margin; forces an edge redraw next render. */
@@ -565,10 +558,6 @@ function viewWorldRect(renderer: PixiRenderer, marginFactor: number): WorldRect 
 	const mx = (br.x - tl.x) * marginFactor;
 	const my = (br.y - tl.y) * marginFactor;
 	return { minX: tl.x - mx, minY: tl.y - my, maxX: br.x + mx, maxY: br.y + my };
-}
-
-function rectContains(outer: WorldRect, inner: WorldRect): boolean {
-	return inner.minX >= outer.minX && inner.maxX <= outer.maxX && inner.minY >= outer.minY && inner.maxY <= outer.maxY;
 }
 
 /**
@@ -771,24 +760,6 @@ function getNodeClusterMap(): Map<string, number | undefined> {
 }
 
 /**
- * Ray-casting point-in-polygon test.
- * Returns true if (px, py) is inside the polygon defined by `poly`.
- */
-function pointInPolygon(px: number, py: number, poly: Array<{ x: number; y: number }>): boolean {
-	let inside = false;
-	for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-		const xi = poly[i].x;
-		const yi = poly[i].y;
-		const xj = poly[j].x;
-		const yj = poly[j].y;
-		if (yi > py !== yj > py && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi) {
-			inside = !inside;
-		}
-	}
-	return inside;
-}
-
-/**
  * Clear the current lasso selection.
  */
 export function clearSelection() {
@@ -988,29 +959,6 @@ function computeTopicHulls(): Array<{ cluster: number; color: string; path: Arra
 
 	lastHullPaths = hulls;
 	return hulls;
-}
-
-/**
- * Drop members that sit far outside their topic's core.
- *
- * A convex hull is defined by its extremes, so one stray node drags the whole
- * region with it. Anything beyond {@link HULL_OUTLIER_FACTOR} times the median
- * distance from the centroid is excluded from the shape — the node still
- * renders, it just doesn't define the boundary.
- */
-function trimOutliers(points: Array<{ x: number; y: number }>): Array<{ x: number; y: number }> {
-	if (points.length < 4) return points;
-
-	const center = centroid(points);
-	const distances = points.map((point) => Math.hypot(point.x - center.x, point.y - center.y));
-	const sorted = [...distances].sort((a, b) => a - b);
-	const median = sorted[Math.floor(sorted.length / 2)];
-	if (median <= 0) return points;
-
-	const limit = median * HULL_OUTLIER_FACTOR;
-	const kept = points.filter((_, index) => distances[index] <= limit);
-	// Never trim away so much that the region stops representing the topic.
-	return kept.length >= 3 ? kept : points;
 }
 
 /**
