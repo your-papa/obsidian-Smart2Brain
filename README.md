@@ -65,7 +65,8 @@ To try a dev build in a real vault, run `bun run setup-vault` once to symlink `b
 
 - Report a bug or request a feature [here](https://github.com/s2b-dev/smart-second-brain/issues/new/choose)
 - Ask a question in the [Q&A](https://github.com/s2b-dev/smart-second-brain/discussions/categories/q-a)
-- Pull requests welcome
+- Share a skill, agent, or workflow in [Show and tell](https://github.com/s2b-dev/smart-second-brain/discussions/categories/show-and-tell)
+- Pull requests welcome — read [CONTRIBUTING.md](CONTRIBUTING.md) first, including how we handle AI-assisted contributions
 
 We initially built this as a university project. That's long finished — we keep developing it in our spare time, as an experimental playground for state-of-the-art AI and as a tool for the Obsidian workflow we're passionate about.
 

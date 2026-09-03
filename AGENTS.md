@@ -6,6 +6,13 @@ This file provides guidance to coding agents working in this repository.
 
 Smart Second Brain is an Obsidian plugin (`smart-second-brain`) that turns the vault into an AI-assisted second brain: chat-with-your-notes via a RAG pipeline, a smart graph view, and provider-agnostic LLM support (OpenAI, Ollama, oMLX, Anthropic, OpenRouter, OpenAI-compatible endpoints). Runs on desktop and mobile (`isDesktopOnly: false`). Stack: Svelte 5 (runes) + TypeScript + Vite + LangChain/LangGraph, with Tailwind for styles, Biome for lint/format, Vitest for tests, and Bun as the package manager.
 
+## Contributing
+
+Human-facing contribution rules (branch model, PR expectations, the AI-assistance policy,
+provider and skill recipes) live in [CONTRIBUTING.md](CONTRIBUTING.md). CI (`.github/workflows/ci.yml`)
+runs the Biome format and lint checks, `bun run check`, `bun run test`, and `bun run build` on every pull request; a
+change that fails any of those locally will fail there too.
+
 ## Commands
 
 Use `bun` (not npm/yarn). The lockfile is `bun.lock`.
@@ -87,7 +94,7 @@ August 2026; recover it from git history if useful, but do not trust it.)
 - `src/components/` — Feature-vertical Svelte UI: `chat/`, `graph/`, `settings/`, `modal/`, plus shared `ui/` primitives. Markdown rendering goes through Obsidian's renderer (not a custom one). A modal whose body is a Svelte component extends `modal/SvelteModal.ts` (`mountComponent(component, props, layout?)`; it owns mount/unmount and the layout override) rather than re-implementing the lifecycle.
 - `src/views/` — Thin Obsidian view wrappers (`ItemView`/`FileView`/`PluginSettingTab`) that mount Svelte components. Svelte-bodied `ItemView`s extend `views/SvelteItemView.ts`, the view-side twin of `SvelteModal`.
 - `src/editor/` — CodeMirror extensions (`inlineDiffExtension`, `selectionHighlightExtension`) and a markdown post-processor for reading-view diffs. Pending-change refresh is event-driven via the custom `s2b-pending-changes-updated` DOM event.
-- `src/lib/` — Adapters that hide host quirks: `obsidianFetch.ts` (native fetch first, `requestUrl` fallback for CORS), `aiTransport.ts` (streaming-mode fallback), `secretStorage.ts`, `query.ts` (TanStack Query), `i18n.ts` + `en.json`/`de.json`.
+- `src/lib/` — Adapters that hide host quirks: `obsidianFetch.ts` (native fetch first, `requestUrl` fallback for CORS), `aiTransport.ts` (streaming-mode fallback), `secretStorage.ts`, `query.ts` (TanStack Query), `i18n.ts` + `en.json` (English only at present).
 - `src/hooks/` — Svelte 5 reactive context helpers (`*.svelte.ts`): visible notes, selection, available models, secrets.
 - `src/utils/` — Pure helpers (PDF extraction, clustering/projection, worker orchestration via `computeWorkerManager.ts`, token estimation, wikilink extraction).
 

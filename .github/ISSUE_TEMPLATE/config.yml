@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question or setup help
+    url: https://github.com/s2b-dev/smart-second-brain/discussions/categories/q-a
+    about: Ask the community. Setup, provider, and "how do I" questions belong here, not in issues.
+  - name: Documentation
+    url: https://smartsecondbrain.dev
+    about: Getting started, features, privacy model, and troubleshooting guides.
+  - name: Share a skill, agent, or workflow
+    url: https://github.com/s2b-dev/smart-second-brain/discussions/categories/show-and-tell
+    about: Built something with S2B? Show it off here.
