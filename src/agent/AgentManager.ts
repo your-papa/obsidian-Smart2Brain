@@ -477,6 +477,8 @@ export class AgentManager {
 			this.plugin,
 			{
 				getPrompt: () => promptFiles?.getAgentPrompt(agentId) ?? DEFAULT_AGENT_PROMPT,
+				// The factory default this agent's AGENT.md body was written from.
+				defaultPrompt: DEFAULT_AGENT_PROMPT,
 				// The modal closes synchronously after this, so a rejected write would read as
 				// a successful save (and leave an unhandled rejection). The edit only exists
 				// in the closed editor at that point — say so rather than letting the user
@@ -530,6 +532,11 @@ export class AgentManager {
 			this.plugin,
 			{
 				getPrompt: () => current,
+				// The shipped body this skill was seeded from. Without it the modal falls back
+				// to DEFAULT_AGENT_PROMPT and diffs the skill against the *agent* system prompt
+				// — two unrelated documents, so the whole pane highlights and "Use default"
+				// would overwrite the skill with the base prompt.
+				defaultPrompt: bundled.content,
 				// The modal closes synchronously after calling this, so a rejected write would
 				// otherwise read as a successful save (and leave an unhandled rejection). The
 				// edit only exists in the closed editor at that point, so say so explicitly
