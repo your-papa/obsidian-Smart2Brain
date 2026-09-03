@@ -209,9 +209,8 @@ let headerStatusHost: HTMLSpanElement | null = null;
 let headerStatusComponent: ReturnType<typeof mount> | null = null;
 // Reactive prop bag for the imperatively-mounted header status component. Mutating these
 // fields propagates to the mounted subtree (Svelte 5 mount props are reactive via $state).
-const headerStatusProps = $state<{ provider: string; showStatus: boolean }>({
+const headerStatusProps = $state<{ provider: string }>({
 	provider: untrack(() => providerId),
-	showStatus: false,
 });
 let displayName = $state("");
 let displayNameError = $state<string | null>(null);
@@ -332,8 +331,8 @@ function renderHeaderLogo() {
 	if (step !== "configure") return;
 	const title = modal.titleEl;
 	const header = title.parentElement;
-	// Don't let the title stretch — it would push the status/trust icons onto a new
-	// line, where they collide with the absolutely-positioned .modal-close-button.
+	// Don't let the title stretch — it would push the trust icon onto a new line, where
+	// it collides with the absolutely-positioned .modal-close-button.
 	// Zero the inline margins too: Obsidian's .modal-title uses auto side-margins that
 	// resolve to a large value in a flex row, opening a gap on either side of the title.
 	title.setCssStyles({ margin: "0", flex: "0 0 auto" });
@@ -366,11 +365,11 @@ function renderHeaderLogo() {
 			props: { width: 32, height: 32 },
 		});
 
-		// Status + trust icons after the title (icon → name → status → trust).
+		// Trust icon after the title (logo → name → trust).
 		// Recreating the host must also recreate the component: leaving the old one mounted
 		// kept it rendering into the now-detached span while the `!headerStatusComponent`
-		// guard below suppressed a remount, so the connection check silently vanished from
-		// the header. Tear both down together.
+		// guard below suppressed a remount, so the icon silently vanished from the header.
+		// Tear both down together.
 		if (!headerStatusHost || headerStatusHost.parentElement !== header) {
 			if (headerStatusComponent) {
 				unmount(headerStatusComponent);
@@ -411,11 +410,10 @@ $effect(() => {
 	};
 });
 
-// Keep the imperatively-mounted header status component's props in sync with the modal's
-// reactive state (provider id after rename, and the empty-state gate).
+// Keep the imperatively-mounted header component's props in sync with the modal's reactive
+// state (the provider id changes once, when a committed draft is renamed to its slug).
 $effect(() => {
 	headerStatusProps.provider = providerId;
-	headerStatusProps.showStatus = hasCredentials;
 });
 
 // Live commit: once the connection validates on the configure step, promote the draft to
