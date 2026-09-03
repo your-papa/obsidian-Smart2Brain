@@ -222,18 +222,30 @@ function getSelectionGroupLabel(): string {
 >
   {#snippet actions()}
     {#if indexProgress.isIndexing}
-      <div class="index-progress-summary">
-        <ProgressBar progress={indexProgress.percentage} />
-        <span>
-          {indexProgress.indexed}/{indexProgress.total}
-          {#if indexProgress.skipped > 0}
-            ({indexProgress.skipped} skipped)
-          {/if}
-          {#if indexProgress.etaMs !== null}
-            (~{formatEta(indexProgress.etaMs)} left)
-          {/if}
-        </span>
-      </div>
+      <!-- The progress summary is desktop-only. A phone settings row has no width
+           for a bar plus its counts plus Cancel: the bar ends up a squashed sliver
+           and reports nothing legibly. Nothing is lost by dropping it — the
+           indexing Notice (VectorStoreService.updateNotice) already shows the same
+           count, skipped tally, ETA, its own bar and a percentage, and it floats
+           above whatever screen you are on rather than only this one.
+
+           Cancel stays: the Notice carries no way to stop a run, so this is the
+           only control that can, and alone in the row it lands as the native
+           full-width action. -->
+      {#if !Platform.isPhone}
+        <div class="index-progress-summary">
+          <ProgressBar progress={indexProgress.percentage} />
+          <span>
+            {indexProgress.indexed}/{indexProgress.total}
+            {#if indexProgress.skipped > 0}
+              ({indexProgress.skipped} skipped)
+            {/if}
+            {#if indexProgress.etaMs !== null}
+              (~{formatEta(indexProgress.etaMs)} left)
+            {/if}
+          </span>
+        </div>
+      {/if}
       <Button buttonText="Cancel" onClick={cancelIndexing} />
     {:else}
       <!-- Importing an existing index lives inside the setup modal, as the
@@ -326,7 +338,9 @@ function getSelectionGroupLabel(): string {
     min-width: 220px;
   }
 
-  /* The 220px floor overflows a phone row alongside the Cancel button. */
+  /* The 220px floor overflows a narrow row alongside the Cancel button. Phones
+     drop the summary outright (see the markup), but tablets are `.is-mobile`
+     without being `.is-phone` and still render it, so they still need this. */
   :global(.is-mobile) .index-progress-summary {
     min-width: 0;
     flex: 1;
