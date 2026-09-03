@@ -215,6 +215,10 @@ const headerStatusProps = $state<{ provider: string; showStatus: boolean }>({
 });
 let displayName = $state("");
 let displayNameError = $state<string | null>(null);
+// True while a display-name save is in flight. `displayNameError` still holds its previous
+// value until the await settles, so without this Done could enable mid-save on a name whose
+// validity isn't known yet — and the commit's slug is derived from that same name.
+let isSavingDisplayName = $state(false);
 const isTrusted = $derived(data.isProviderTrusted(providerId));
 
 // Logos per template for the picker grid. Templates without a dedicated logo
@@ -303,6 +307,7 @@ async function handleDisplayNameBlur(nextName: string) {
 		displayNameError = null;
 		return;
 	}
+	isSavingDisplayName = true;
 	try {
 		await data.updateProviderMeta(providerId, { displayName: trimmedName });
 		displayName = trimmedName;
@@ -310,6 +315,8 @@ async function handleDisplayNameBlur(nextName: string) {
 		modal.refreshTitle(trimmedName);
 	} catch (e) {
 		displayNameError = e instanceof Error ? e.message : "Invalid name";
+	} finally {
+		isSavingDisplayName = false;
 	}
 }
 
@@ -416,7 +423,10 @@ $effect(() => {
 // it no-ops once configured, so later validation failures never un-configure it.
 $effect(() => {
 	if (step !== "configure") return;
-	if (query.data?.success && !isConfigured && !displayNameError) {
+	// Wait out an in-flight name save too: the commit slugifies the display name into the
+	// provider's final ID, so committing mid-save could derive it from a name that is about
+	// to be rejected. The save settling re-runs this effect.
+	if (query.data?.success && !isConfigured && !displayNameError && !isSavingDisplayName) {
 		untrack(() => void commitProvider());
 	}
 });
@@ -441,9 +451,13 @@ const connectionError = $derived(
 // enough to leave safely: the commit effect skips while `displayNameError` is set, so
 // closing then would hit onClose with an uncommitted draft and delete it along with the
 // credentials the user just entered; and closing mid-commit races `renameProvider`, whose
-// ID change lands before `markSubmitted`. Editing an already-configured provider has
-// nothing to commit, so it's ready as soon as it validates.
-const canFinish = $derived(connectionStatus === "connected" && isConfigured && !isCommitting && !displayNameError);
+// ID change lands before `markSubmitted`. A name save still in flight counts as unsettled
+// too — `displayNameError` lags the await, and the commit slugifies that same name.
+// Editing an already-configured provider has nothing to commit, so it's ready as soon as
+// it validates.
+const canFinish = $derived(
+	connectionStatus === "connected" && isConfigured && !isCommitting && !displayNameError && !isSavingDisplayName,
+);
 </script>
 
 {#if step === "pick"}
