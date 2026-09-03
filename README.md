@@ -16,11 +16,7 @@ Search surfaces your notes, the graph reveals how they connect, and the assistan
 
 **[smartsecondbrain.dev](https://smartsecondbrain.dev)** has the features, setup guides, and documentation.
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://github.com/s2b-dev/smart-second-brain/assets/48623649/3e9cb3bc-ea57-4afc-b616-9c9360e39232">
-  <source media="(prefers-color-scheme: light)" srcset="https://github.com/s2b-dev/smart-second-brain/assets/48623649/9948671a-ebc4-4315-b376-0918c6f7f4f8">
-  <img alt="S2B Chat" src="https://github.com/s2b-dev/smart-second-brain/assets/48623649/9948671a-ebc4-4315-b376-0918c6f7f4f8">
-</picture>
+https://github.com/user-attachments/assets/48d2144e-7f29-4771-befc-512559864166
 
 ## Install
 
@@ -35,6 +31,10 @@ Out of the box, nothing leaves your machine. The only network requests are to th
 - **[Search](https://smartsecondbrain.dev/search/)** that combines keyword matching with meaning, so you find the note you were thinking of rather than the one you typed ([how it works](https://smartsecondbrain.dev/search/how-it-works/))
 - **[Smart Graph](https://smartsecondbrain.dev/graph/)** that groups your vault by topic and draws the connections you never linked by hand ([how it works](https://smartsecondbrain.dev/graph/how-it-works/))
 - **[Agents](https://smartsecondbrain.dev/agents/)** that read and write your notes, with skills, memory, MCP, and integrations with your other plugins
+
+All of it runs on your phone too:
+
+https://github.com/user-attachments/assets/4a5739a0-f8e7-4df3-a259-765e34818774
 
 ## Contributing
 
