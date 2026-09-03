@@ -21,6 +21,12 @@ Search surfaces your notes, the graph reveals how they connect, and the assistan
   <img alt="Smart Second Brain: the smart graph beside a chat that reads your notes and proposes an edit" src="https://raw.githubusercontent.com/s2b-dev/smart-second-brain/main/assets/hero-desktop-light.png">
 </picture>
 
+## Features
+
+- **[Search](https://smartsecondbrain.dev/search/)** that combines keyword matching with meaning, so you find the note you were thinking of rather than the one you typed ([how it works](https://smartsecondbrain.dev/search/how-it-works/))
+- **[Smart Graph](https://smartsecondbrain.dev/graph/)** that groups your vault by topic and draws the connections you never linked by hand ([how it works](https://smartsecondbrain.dev/graph/how-it-works/))
+- **[Agents](https://smartsecondbrain.dev/agents/)** that read and write your notes, with skills, memory, MCP, and integrations with your other plugins
+
 ## Install
 
 Install **Smart Second Brain** from Obsidian's community plugins and enable it. Search and the Smart Graph work immediately, with no configuration.
@@ -28,12 +34,6 @@ Install **Smart Second Brain** from Obsidian's community plugins and enable it. 
 Add an embedding model to unlock semantic search and graph clustering; add an AI provider to enable the agent. See the [getting started guide](https://smartsecondbrain.dev/start/installation/).
 
 Out of the box, nothing leaves your machine. The only network requests are to the providers you configure, and there is no telemetry — see [privacy](https://smartsecondbrain.dev/privacy/model/).
-
-## Features
-
-- **[Search](https://smartsecondbrain.dev/search/)** that combines keyword matching with meaning, so you find the note you were thinking of rather than the one you typed ([how it works](https://smartsecondbrain.dev/search/how-it-works/))
-- **[Smart Graph](https://smartsecondbrain.dev/graph/)** that groups your vault by topic and draws the connections you never linked by hand ([how it works](https://smartsecondbrain.dev/graph/how-it-works/))
-- **[Agents](https://smartsecondbrain.dev/agents/)** that read and write your notes, with skills, memory, MCP, and integrations with your other plugins
 
 ## Contributing
 
