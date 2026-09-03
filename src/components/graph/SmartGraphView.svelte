@@ -870,7 +870,7 @@ function flushLiveUpdate() {
 			const surviving = selectedPaths.filter((path) => !removed.has(path));
 			if (surviving.length !== selectedPaths.length) {
 				canvasComponent?.selectNodesByPaths(surviving);
-				handleSelectionChange(surviving, true);
+				handleSelectionChange(surviving, true, topicLabelForCommunities(communities, surviving));
 			}
 		}
 
@@ -1219,8 +1219,18 @@ function handleFocusCluster(cluster: number, pan = false, multi = true) {
  * cluster) also produces a subset of the prior selection, so shape alone
  * can't tell the two apart. Per-chat dismissals should survive maintenance
  * pruning but reset on every real selection change, however it was made.
+ *
+ * `topicLabelOverride` lets the same maintenance caller supply a label it
+ * already computed synchronously against the just-updated `communities`,
+ * instead of falling through to `selectedTopicLabels`. That derivation reads
+ * `canvasComponent`'s `simNodes`, which the canvas only rebuilds from
+ * `graphData` on its own next reactive flush — still stale in the same
+ * synchronous block that just reassigned `graphData` via `applyLivePatch`.
+ * Every other caller sets `focusedClusters`/`selectedPaths` and calls in
+ * synchronously too, but through *this* component's own reactive graph
+ * (`segments`, `effectiveClusterLabels`), which is current already.
  */
-function handleSelectionChange(paths: string[], isMaintenance = false) {
+function handleSelectionChange(paths: string[], isMaintenance = false, topicLabelOverride?: string[] | null) {
 	selectedPaths = paths;
 	const messenger = getSessionRegistry();
 	if (messenger) {
@@ -1228,8 +1238,10 @@ function handleSelectionChange(paths: string[], isMaintenance = false) {
 		messenger.graphSelection = [...paths];
 		messenger.graphSelectionIsMaintenance = isMaintenance;
 		// Callers set focusedClusters/selectedPaths before calling in, so this
-		// derivation is already current for the selection just adopted above.
-		messenger.graphSelectionTopicLabel = selectedTopicLabels?.join(", ") ?? null;
+		// derivation is already current for the selection just adopted above —
+		// except the maintenance caller, which passes its own override (see above).
+		const labels = topicLabelOverride !== undefined ? topicLabelOverride : selectedTopicLabels;
+		messenger.graphSelectionTopicLabel = labels?.join(", ") ?? null;
 	}
 }
 
@@ -1352,6 +1364,35 @@ function handleClearSelection() {
 	handleSelectionChange([]);
 }
 
+/** Same naming ladder (and same fallbacks) the canvas uses for a topic node, so
+ * every surface calls a topic exactly what its pill did. */
+function clusterLabel(cluster: number): string {
+	return cluster === UNSORTED_CLUSTER
+		? "Unsorted"
+		: (effectiveClusterLabels[cluster] ?? segments[cluster]?.label ?? `Topic ${cluster}`);
+}
+
+/**
+ * Name the topics `paths` exactly matches under `communities` (path → cluster
+ * index), or null if it isn't an exact match — used only by the live-patch
+ * handler, whose `communities` is current but whose canvas isn't yet (see
+ * `handleSelectionChange`'s `topicLabelOverride` doc). Mirrors
+ * `getNodePathsForClusters`'s exclusion of unsorted notes (`cluster == null`
+ * never matches, even if `UNSORTED_CLUSTER` is itself focused) — but unlike
+ * the canvas method, doesn't resolve collapsed topic nodes back to their
+ * members, so a selection touching a currently-collapsed topic conservatively
+ * falls back to null (count-based label) rather than risk a wrong match.
+ */
+function topicLabelForCommunities(communities: Record<string, number>, paths: string[]): string[] | null {
+	if (focusedClusters.size === 0 || paths.length === 0) return null;
+	const topicPaths = Object.entries(communities)
+		.filter(([, cluster]) => focusedClusters.has(cluster))
+		.map(([path]) => path);
+	const selected = new Set(paths);
+	if (topicPaths.length !== selected.size || !topicPaths.every((path) => selected.has(path))) return null;
+	return [...focusedClusters].map(clusterLabel);
+}
+
 /**
  * Name the topics the current selection consists of, or null if it isn't one.
  *
@@ -1369,14 +1410,7 @@ let selectedTopicLabels: string[] | null = $derived.by(() => {
 	const topicPaths = new Set(canvasComponent?.getNodePathsForClusters(focusedClusters) ?? []);
 	const selected = new Set(selectedPaths);
 	if (topicPaths.size !== selected.size || ![...topicPaths].every((path) => selected.has(path))) return null;
-	// Same naming ladder (and same fallbacks) the canvas uses for a topic node,
-	// so the bar calls a topic exactly what its pill did — including the
-	// `UNSORTED_CLUSTER` sentinel, which is negative and so indexes no segment.
-	return [...focusedClusters].map((cluster) =>
-		cluster === UNSORTED_CLUSTER
-			? "Unsorted"
-			: (effectiveClusterLabels[cluster] ?? segments[cluster]?.label ?? `Topic ${cluster}`),
-	);
+	return [...focusedClusters].map(clusterLabel);
 });
 
 async function handleImmerse() {
