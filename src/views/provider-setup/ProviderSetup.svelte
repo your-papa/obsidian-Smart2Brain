@@ -5,6 +5,7 @@ import { Platform } from "obsidian";
 import AuthConfigFields from "../../components/settings/AuthConfigFields.svelte";
 import SettingItem from "../../components/settings/SettingItem.svelte";
 import Button from "../../components/ui/Button.svelte";
+import DocsLink from "../../components/ui/DocsLink.svelte";
 import Text from "../../components/ui/Text.svelte";
 import Toggle from "../../components/ui/Toggle.svelte";
 import ProviderSetupHeader from "./ProviderSetupHeader.svelte";
@@ -429,7 +430,16 @@ $effect(() => {
 
 {#if step === "pick"}
   <div class="modal-content">
-    <p class="provider-picker-desc">Choose a provider to connect.</p>
+    <!-- The docs cover local setup (Ollama) and how to pick a model — the two
+         things a new user stalls on before they can tell whether a failure is their
+         endpoint, their key, or their model choice. -->
+    <p class="provider-picker-desc">
+      Choose a provider to connect. <DocsLink
+        variant="inline"
+        doc="providers"
+        label="Setup guide"
+      />
+    </p>
     <div class="provider-picker-grid">
       {#each providerTemplates as template (template.id)}
         {@const Logo = getTemplateLogo(template.id)}

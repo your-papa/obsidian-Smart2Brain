@@ -6,6 +6,7 @@ import Button from "../../components/ui/Button.svelte";
 import Toggle from "../../components/ui/Toggle.svelte";
 import { useAvailableModels } from "../../hooks/useAvailableModels.svelte";
 import type SecondBrainPlugin from "../../main";
+import { DOCS } from "../../utils/docs";
 import { buildPersistedChatModel } from "../../utils/persistedChatModel";
 import { getData } from "../../stores/dataStore.svelte";
 import { isMobileUI } from "../../utils/platform";
@@ -433,7 +434,18 @@ function openHotkeysSettings() {
 	</div>
 
 	<footer class="s2b-onboarding-footer" class:s2b-fade-in={playIntro} style="--s2b-order: 8">
-		<Button buttonText="Skip" onClick={skip} />
+		<!-- Docs sit with Skip rather than among the CTAs: this is the one screen every
+		     user sees, so it is where a link to the full documentation has the most
+		     reach, but it must not compete with the two actions on the right. -->
+		<div class="s2b-onboarding-footer-secondary">
+			<Button buttonText="Skip" onClick={skip} />
+			<a
+				class="s2b-onboarding-link"
+				href={DOCS.home}
+				target="_blank"
+				rel="noopener noreferrer">Documentation ↗</a
+			>
+		</div>
 		<div class="s2b-onboarding-footer-primary">
 			<Button buttonText="Explore the graph" onClick={exploreGraph} />
 			<Button
@@ -828,6 +840,12 @@ function openHotkeysSettings() {
 		margin-left: auto;
 	}
 
+	.s2b-onboarding-footer-secondary {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+	}
+
 	/* On a phone the three buttons don't fit on one line, and `flex-wrap` on a
 	   `space-between` row broke them into a ragged stack — Skip alone on one line,
 	   the other two sharing the next, each a different width.
@@ -852,7 +870,10 @@ function openHotkeysSettings() {
 		padding-bottom: calc(52px + env(safe-area-inset-bottom) + 12px) !important;
 	}
 
-	:global(.is-mobile) .s2b-onboarding-footer-primary {
+	/* Both groups dissolve on mobile so their children become direct flex items of
+	   the stacked footer and the `order` rules below can interleave them. */
+	:global(.is-mobile) .s2b-onboarding-footer-primary,
+	:global(.is-mobile) .s2b-onboarding-footer-secondary {
 		display: contents;
 	}
 
@@ -870,11 +891,29 @@ function openHotkeysSettings() {
 		order: -1;
 	}
 
-	/* Skip stays last and reads as the low-emphasis way out. */
-	:global(.is-mobile) .s2b-onboarding-footer > :global(button) {
+	/* Skip stays last and reads as the low-emphasis way out.
+
+	   Matched through `-secondary`, not as a child of the footer: `display: contents`
+	   removes that wrapper from *layout* (so Skip does become a flex item of the
+	   stacked footer, and `order` below works), but it does NOT change the DOM tree
+	   the selector walks — Skip's parent element is still the wrapper. Selecting
+	   `.s2b-onboarding-footer > button` therefore stops matching and Skip renders
+	   with its default solid background instead of quiet. */
+	:global(.is-mobile) .s2b-onboarding-footer-secondary > :global(button) {
 		order: 0;
 		background: transparent;
 		box-shadow: none;
 		color: var(--text-muted);
+	}
+
+	/* The docs link trails Skip, centred to match the stacked full-width buttons
+	   rather than hugging the left edge. `all: unset` leaves it `display: inline`;
+	   as a flex item that blockifies anyway, but say so explicitly so the
+	   text-align actually has a box to work on. */
+	:global(.is-mobile) .s2b-onboarding-footer-secondary > .s2b-onboarding-link {
+		order: 1;
+		display: block;
+		text-align: center;
+		padding-block: 0.25rem;
 	}
 </style>

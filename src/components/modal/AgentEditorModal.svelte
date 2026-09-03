@@ -14,6 +14,7 @@ import SettingGroup from "../settings/SettingGroup.svelte";
 import SettingItem from "../settings/SettingItem.svelte";
 import Badge from "../ui/Badge.svelte";
 import Button from "../ui/Button.svelte";
+import DocsLink from "../ui/DocsLink.svelte";
 import Icon from "../ui/Icon.svelte";
 import PickerPopover from "../ui/PickerPopover.svelte";
 import Search from "../ui/Search.svelte";
@@ -892,6 +893,7 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
               Built-in skills every agent can use — vault exploration, note editing, web access, and
               skill management. Each is a skill: toggle it to attach its tools, or open its note to
               edit its instructions. Individual tools are configured from the Tools row above.
+              <DocsLink variant="inline" doc="skills" />
             </div>
           </div>
         </div>
@@ -933,6 +935,7 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
             <div class="setting-item-description">
               Skills backed by your installed community plugins. Each bundles a skill (and, where
               available, code-scripting) behind one switch.
+              <DocsLink variant="inline" doc="integrations" />
             </div>
           </div>
         </div>
@@ -1090,7 +1093,12 @@ function getServerToolsState(serverId: string): MCPServerToolsState | undefined 
           <div class="setting-item-description skill-empty-state">No custom skills yet</div>
         {/if}
 
+        <!-- A heading row rather than a section with an intro paragraph, so the docs
+             link takes the compact icon form here. -->
         <SettingContainer name="MCP servers" isHeading>
+          {#snippet nameSuffix()}
+            <DocsLink doc="mcp" subject="MCP servers" />
+          {/snippet}
           <Button buttonText="Add server" onClick={openAddMCPServer} />
         </SettingContainer>
         {#if mcpServerIds.length > 0}

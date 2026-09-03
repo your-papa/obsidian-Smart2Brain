@@ -63,6 +63,25 @@ release" and covers the provider list, bundled skills, built-in tools,
 `BUILT_IN_TOOL_IDS`, `src/skills/defaults/`, or `manifest.json` means the site
 needs updating too.
 
+The plugin also links *into* that site from several surfaces (Troubleshooting
+settings, the privacy row, onboarding, provider setup, the Agent editor). Every
+one of those URLs lives in `src/utils/docs.ts` — never inline a
+`smartsecondbrain.dev` URL at a call site. That file is a contract with the
+site's routes: when they move, reconcile it against `../site/dist/sitemap-0.xml`
+and the `redirects` block in `../site/astro.config.mjs`. Rendering goes through
+`components/ui/DocsLink.svelte` (icon variant for setting rows via `nameSuffix`,
+inline variant for section descriptions).
+
+**Never open an external `http(s)` URL with `window.open`.** Obsidian's iOS
+WKWebView never implements window creation, so it returns null unconditionally
+there and the click silently does nothing — verified on-device (see
+`navigateToAuthorizeUrl` in `providers/openrouterOAuth.ts`). Render an anchor
+instead: `components/ui/ExternalLinkButton.svelte` covers the common case of a
+setting row wanting something that *looks* like a button, and matches Obsidian's
+button metrics (`height: var(--input-height)`, `4px 12px`) so it sits flush next
+to real ones. `obsidian://` deep links are exempt — the app's protocol handler
+takes those, no window involved.
+
 ## Architecture
 
 This section is the canonical description of the architecture. (A longer

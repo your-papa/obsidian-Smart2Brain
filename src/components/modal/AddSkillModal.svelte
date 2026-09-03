@@ -12,6 +12,8 @@ import { Tabs } from "bits-ui";
 import { createObsidianFetch } from "../../lib/obsidianFetch";
 import SettingContainer from "../settings/SettingContainer.svelte";
 import Button from "../ui/Button.svelte";
+import DocsLink from "../ui/DocsLink.svelte";
+import ExternalLinkButton from "../ui/ExternalLinkButton.svelte";
 import SlidingTabs, { type SlidingTab } from "../ui/SlidingTabs.svelte";
 import Text from "../ui/Text.svelte";
 import type { AddSkillModal } from "./AddSkillModal";
@@ -128,9 +130,7 @@ async function handleImport() {
 	}
 }
 
-function openSkillsMarketplace() {
-	window.open("https://skillsmp.com/", "_blank");
-}
+const SKILLS_MARKETPLACE_URL = "https://skillsmp.com/";
 
 /** Starter body written into a brand-new skill (when not importing an existing one). */
 function scaffoldBody(): string {
@@ -225,8 +225,13 @@ async function handleSave() {
         />
       </SettingContainer>
 
+      <!-- SkillsMP is where skills are found; the docs explain the SKILL.md format an
+           imported one has to satisfy, so both belong on this row. -->
       <SettingContainer name="Browse skills" desc="Find community skills on skillsmp.com.">
-        <Button buttonText="Open SkillsMP" onClick={openSkillsMarketplace} />
+        {#snippet nameSuffix()}
+          <DocsLink doc="skills" subject="Skills" />
+        {/snippet}
+        <ExternalLinkButton href={SKILLS_MARKETPLACE_URL} label="Open SkillsMP" />
       </SettingContainer>
 
       {#if importError}
