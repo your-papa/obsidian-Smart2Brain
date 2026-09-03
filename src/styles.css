@@ -410,8 +410,12 @@ button.s2b-pill--interactive:hover {
 .s2b-search-result-name {
 	font-weight: 500;
 	color: var(--text-normal);
+	/* The name is what the row exists to show, so it shrinks last: it keeps a
+	   readable floor and the secondary metadata beside it gives way first. Without
+	   the floor, a long path or tag strip drives it to zero width and the row reads
+	   as though the name had scrolled off to the left. */
 	flex: 0 1 auto;
-	min-width: 0;
+	min-width: 6ch;
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
@@ -423,8 +427,10 @@ button.s2b-pill--interactive:hover {
 	gap: 6px;
 	min-width: 0;
 	flex-wrap: nowrap;
-	flex: 0 0 auto;
-	overflow: visible;
+	/* Shrinkable, and clipped rather than `visible`: the intrinsic width of the
+	   path + tag strip must not push past the row's right edge. */
+	flex: 0 1 auto;
+	overflow: hidden;
 }
 
 .s2b-search-result-note-icon,
@@ -589,9 +595,14 @@ button.s2b-pill--interactive:hover {
 	align-items: center;
 	gap: 4px;
 	flex-wrap: nowrap;
-	flex: 0 0 auto;
-	min-width: max-content;
-	overflow: visible;
+	/* `min-width: max-content` here used to pin the strip to its full intrinsic
+	   width, which is what forced all shrinkage onto the note name. Individual
+	   pills still refuse to shrink (`.s2b-search-result-tag` is `flex: 0 0 auto`
+	   and `nowrap`), so the strip clips whole pills off its end instead of
+	   squashing them. */
+	flex: 0 1 auto;
+	min-width: 0;
+	overflow: hidden;
 }
 
 .s2b-search-result-tag {

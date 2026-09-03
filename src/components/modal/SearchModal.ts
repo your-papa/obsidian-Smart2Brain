@@ -1942,9 +1942,15 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		const highlightTerms = getHighlightTerms(this.currentQuery);
 		const searchSettings = getData();
 		const showPath = searchSettings.searchShowPath;
-		const showTags = searchSettings.searchShowTags;
+		// A phone row has no width to spare: a tag strip is `max-content` wide and
+		// squeezes the note name — the one thing the row exists to show — down to
+		// nothing. Suppress tags there regardless of the setting, which is desktop-
+		// scoped (the settings toggle says so, and is disabled on phones).
+		const showTags = searchSettings.searchShowTags && !Platform.isPhone;
 		const showMatchBadges = searchSettings.searchShowMatchBadges;
 		const showMatchContext = searchSettings.searchShowMatchContext;
+		// Feeds `shouldShowMatchExplanation` too: with tags hidden the snippet is no
+		// longer redundant with them, so an empty list is the right input there.
 		const displayTags = showTags ? getFrontmatterDisplayTags(result.frontmatter) : [];
 
 		// Title row
