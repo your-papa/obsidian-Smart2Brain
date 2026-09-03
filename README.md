@@ -37,9 +37,11 @@ The plugin only makes network requests to the AI providers **you** configure —
 Everything lives at **[smartsecondbrain.dev](https://smartsecondbrain.dev)**:
 
 - [Getting started](https://smartsecondbrain.dev/start/installation/) — install, first run, connecting a provider
-- [Features](https://smartsecondbrain.dev/features/search/) — search, graph, agent, skills, MCP, memory
+- [Search](https://smartsecondbrain.dev/search/) — hybrid lexical + semantic search
+- [Graph](https://smartsecondbrain.dev/graph/) — the smart graph view
+- [Agents](https://smartsecondbrain.dev/agents/) — skills, integrations, memory, MCP
 - [Privacy](https://smartsecondbrain.dev/privacy/model/) — what leaves your machine, and what never does
-- [How it works](https://smartsecondbrain.dev/internals/architecture/) — architecture and retrieval internals
+- How it works — [search](https://smartsecondbrain.dev/search/how-it-works/) and [graph](https://smartsecondbrain.dev/graph/how-it-works/) internals
 
 ## Development
 
