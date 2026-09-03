@@ -282,12 +282,23 @@ async function commitProvider() {
 			let finalId = base;
 			let n = 2;
 			while (otherIds.has(finalId)) finalId = `${base}-${n++}`;
-			try {
-				await data.renameProvider(providerId, finalId);
+			// `renameProvider` re-keys everything synchronously and only awaits its persist,
+			// so take the promise without awaiting and point `providerId` at the new ID in
+			// the same turn. Awaiting first would leave `providerId` naming a key that no
+			// longer exists for the length of a settings write — the window every "Provider
+			// not found" failure in this modal came from.
+			const renamed = data.renameProvider(providerId, finalId);
+			// Its validation guards reject rather than throw (it's async), so confirm the
+			// re-key actually happened before adopting the new ID.
+			const oldId = providerId;
+			if (data.getProviderMeta(finalId) && !data.getProviderMeta(oldId)) {
 				modal.selectedProvider = finalId;
 				providerId = finalId;
+			}
+			try {
+				await renamed;
 			} catch {
-				// keep draft ID if rename somehow fails
+				// keep whichever ID is live if the persist fails
 			}
 		}
 		data.setProviderConfigured(providerId, true);
@@ -309,15 +320,6 @@ async function handleDisplayNameBlur(nextName: string) {
 	if (!trimmedName || trimmedName === providerMeta?.displayName) {
 		displayName = providerMeta?.displayName ?? "";
 		displayNameError = null;
-		return;
-	}
-	// A commit in flight is mid-rename: `renameProvider` re-keys providerMeta synchronously
-	// but then awaits its save, and `providerId` is only reassigned after that await — so a
-	// blur landing in that window would write against an ID that no longer exists, throw
-	// "Provider not found", and strand Done disabled on a provider that connected fine.
-	// The commit already slugifies the name it captured; nothing is lost by ignoring this.
-	if (isCommitting) {
-		displayName = providerMeta?.displayName ?? trimmedName;
 		return;
 	}
 	pendingDisplayNameSaves += 1;
@@ -506,9 +508,16 @@ const canFinish = $derived(
       name="Provider name"
       desc="Name this provider instance so you can distinguish it later."
     >
+      <!-- Disabled while the commit runs: it derives the provider's permanent ID from this
+           name, so editing it mid-flight has nothing sensible to mean. Note this is not
+           what makes the rename safe — disabling a focused input fires a blur, and Svelte
+           only flushes `isCommitting` to the DOM after the effect has already entered the
+           commit, so that blur lands *inside* the window rather than before it. The fix is
+           in commitProvider, which no longer leaves `providerId` stale across an await. -->
       <Text
         inputType="text"
         value={displayName}
+        disabled={isCommitting}
         placeholder={providerDefinition?.displayName ?? "New Provider"}
         onblur={(value: string) => void handleDisplayNameBlur(value)}
       />
