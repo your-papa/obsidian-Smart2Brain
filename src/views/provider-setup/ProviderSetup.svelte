@@ -214,10 +214,15 @@ const headerStatusProps = $state<{ provider: string }>({
 });
 let displayName = $state("");
 let displayNameError = $state<string | null>(null);
-// True while a display-name save is in flight. `displayNameError` still holds its previous
-// value until the await settles, so without this Done could enable mid-save on a name whose
-// validity isn't known yet — and the commit's slug is derived from that same name.
-let isSavingDisplayName = $state(false);
+// Number of display-name saves currently in flight. `displayNameError` still holds its
+// previous value until an await settles, so without this Done could enable mid-save on a
+// name whose validity isn't known yet — and the commit's slug is derived from that same
+// name. A counter rather than a boolean: blurring twice before the first save settles
+// would otherwise let the first completion clear the flag while the second is still
+// running, reopening the commit gate and letting `renameProvider` move the ID out from
+// under it.
+let pendingDisplayNameSaves = $state(0);
+const isSavingDisplayName = $derived(pendingDisplayNameSaves > 0);
 const isTrusted = $derived(data.isProviderTrusted(providerId));
 
 // Logos per template for the picker grid. Templates without a dedicated logo
@@ -306,7 +311,7 @@ async function handleDisplayNameBlur(nextName: string) {
 		displayNameError = null;
 		return;
 	}
-	isSavingDisplayName = true;
+	pendingDisplayNameSaves += 1;
 	try {
 		await data.updateProviderMeta(providerId, { displayName: trimmedName });
 		displayName = trimmedName;
@@ -315,7 +320,7 @@ async function handleDisplayNameBlur(nextName: string) {
 	} catch (e) {
 		displayNameError = e instanceof Error ? e.message : "Invalid name";
 	} finally {
-		isSavingDisplayName = false;
+		pendingDisplayNameSaves -= 1;
 	}
 }
 
