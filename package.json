@@ -84,7 +84,6 @@
     "body-parser": "^2.3.0",
     "ajv": "^8.18.0",
     "ip-address": "^10.7.0",
-    "picomatch": "^4.0.7",
     "nanoid": "^3.3.18",
     "postcss": "^8.5.28",
     "postcss-selector-parser": "^6.1.3",
