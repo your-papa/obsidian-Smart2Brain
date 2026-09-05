@@ -347,6 +347,8 @@ function createReadingDiffActionBar(
 		position.className = "s2b-diff-position-indicator";
 		position.textContent = `${groupIndex + 1}/${groupTotal}`;
 		bar.appendChild(position);
+		// The indicator takes over the label's auto-margin (see styles.css).
+		label.classList.add("s2b-diff-actions-label-with-indicator");
 	}
 
 	// Prev/next chevrons: step through this chat thread's pending changes across

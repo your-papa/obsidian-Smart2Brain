@@ -860,8 +860,10 @@ button.s2b-pill--interactive:hover {
 }
 
 /* When the indicator is present, the label no longer needs the spacer — drop
-   its auto-margin so the label and indicator stay adjacent (gap only). */
-.s2b-diff-actions-label:has(+ .s2b-diff-position-indicator) {
+   its auto-margin so the label and indicator stay adjacent (gap only). The
+   action bars add this class alongside the indicator (a `:has()` selector
+   would do it in CSS alone, but Obsidian's guidelines discourage it). */
+.s2b-diff-actions-label.s2b-diff-actions-label-with-indicator {
 	margin-right: 0;
 }
 
