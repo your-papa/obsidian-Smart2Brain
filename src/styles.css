@@ -191,22 +191,32 @@ button.s2b-pill--interactive:hover {
 	padding-right: calc(var(--prompt-input-height, 40px) - 12px);
 }
 
+/* Chips sit inline before the input. A real flex box (not `display: contents`,
+   which Obsidian's baseline WebView only partially supports) that wraps like
+   its parent and shares the same 4px gap, so the chips still flow with the
+   input as one row and break onto the next line together. */
 .s2b-inline-chips {
-	display: contents;
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 4px;
+	flex: 0 1 auto;
+	min-width: 0;
 }
 
 /* Centred on the container's axis rather than a fixed offset, so they track
-   whatever height it takes. `bottom: auto` and the `!important` on `top` are
-   both load-bearing: core sets its own `top` for these (computed ~25.7px, sized
-   for the taller empty-state container) and wins without them, which left the
-   clear "x" 5px above the container top and 13px below it — visibly high once
-   the container settles at 52px. */
+   whatever height it takes. `bottom: auto` is load-bearing: core positions
+   these from `top` (computed ~25.7px, sized for the taller empty-state
+   container) and its own `bottom`, which left the clear "x" 5px above the
+   container top and 13px below it — visibly high once the container settles at
+   52px. The two-class container selector out-specifies core's
+   `.is-mobile .prompt-input-cta` / `.prompt-input-container .search-input-clear-button`. */
 .s2b-inline-chips-container.prompt-input-container > .search-input-icon,
 .s2b-inline-chips-container.prompt-input-container > .search-input-clear-button,
 .s2b-inline-chips-container.prompt-input-container > .prompt-input-cta {
 	position: absolute;
-	top: 50% !important;
-	bottom: auto !important;
+	top: 50%;
+	bottom: auto;
 	transform: translateY(-50%);
 	z-index: 1;
 }
@@ -220,17 +230,22 @@ button.s2b-pill--interactive:hover {
 	right: 8px;
 }
 
-.s2b-inline-input {
+/* The re-parented `.prompt-input`. Naming the modal (`.prompt`), the container
+   and the element out-specifies every core rule for it, up to
+   `.is-mobile .prompt-input[type="text"]:not(:placeholder-shown)` (0,4,0), so
+   none of these need `!important`. The leading inset is the one property a
+   theme (Cupertino) pins with `!important`; `updateInlineInputSpacing` sets it
+   inline at the same priority, so the `0` here is only the default-theme rest. */
+.prompt.s2b-search-modal .prompt-input-container input.s2b-inline-input {
 	flex: 1 1 0;
 	min-width: 0;
 	width: auto;
 	align-self: center;
-	padding-left: 0 !important;
-	padding-inline-start: 0 !important;
-	padding-right: 0 !important;
-	padding-inline-end: 0 !important;
-	margin-left: 0 !important;
-	text-indent: 0 !important;
+	padding-left: 0;
+	padding-inline-start: 0;
+	padding-right: 0;
+	padding-inline-end: 0;
+	margin-left: 0;
 	/* Mobile Obsidian gives `.prompt-input` its own pill: a 44px radius plus a
 	   visible border. Normally that IS the search field, but our inline-chips
 	   wrapper re-parents it inside `.prompt-input-container`, which already draws
@@ -243,12 +258,12 @@ button.s2b-pill--interactive:hover {
 	   text-field chrome for `-webkit-appearance: auto`, and that outline survives
 	   `border`/`background`/`box-shadow` overrides — verified on-device, where the
 	   pill was still drawn with computed `border-width: 0`. */
-	appearance: none !important;
-	-webkit-appearance: none !important;
-	background: transparent !important;
-	border: none !important;
-	border-radius: 0 !important;
-	box-shadow: none !important;
+	appearance: none;
+	-webkit-appearance: none;
+	background: transparent;
+	border: none;
+	border-radius: 0;
+	box-shadow: none;
 
 	/* Text dropped ~6px the moment the first character was typed. Mobile core
 	   sizes BOTH `.prompt-input-container` and `.prompt-input` to a fixed 52px,
@@ -264,14 +279,17 @@ button.s2b-pill--interactive:hover {
 	   so the input collapses to its line box; the container then centres it (see
 	   the `align-items` override below). Verified on-device: 15px above and
 	   below in BOTH the empty and typed states, so nothing moves as you type. */
-	height: auto !important;
-	min-height: 0 !important;
-	padding-top: 0 !important;
-	padding-bottom: 0 !important;
+	height: auto;
+	min-height: 0;
+	padding-top: 0;
+	padding-bottom: 0;
 }
 
-.s2b-inline-input-content.s2b-inline-input-content-has-chips .s2b-inline-input {
-	margin-left: 2px !important;
+.prompt.s2b-search-modal
+	.prompt-input-container
+	.s2b-inline-input-content.s2b-inline-input-content-has-chips
+	input.s2b-inline-input {
+	margin-left: 2px;
 }
 
 .s2b-inline-chip {
@@ -1102,10 +1120,12 @@ button.s2b-pill--interactive:hover {
 	/* Message action footers (edit / copy / regenerate / branch navigator).
 	   These use Tailwind `opacity-0 group-hover:opacity-100 pointer-events-none
 	   group-hover:pointer-events-auto` — override to always-visible on touch. */
-	.message-footer {
-		opacity: 1 !important;
-		transform: none !important;
-		pointer-events: auto !important;
+	/* `body` is the extra weight that beats the Tailwind utilities on the element
+	   (each a single class); `translate-y-*` writes `transform`, so reset that too. */
+	body .message-footer {
+		opacity: 1;
+		transform: none;
+		pointer-events: auto;
 	}
 
 	/* Pending-change bar chevrons and diff-mode toggle. Both sit at `opacity: 0`
@@ -1122,21 +1142,22 @@ button.s2b-pill--interactive:hover {
 	/* Code-block copy button lives in `<pre>` and is revealed on `pre:hover`.
 	   Show it persistently on touch so code is copyable. Code blocks appear in
 	   chat messages and in tool-call output, so cover both containers. */
-	.message-text pre .clickable-icon,
-	.tool-output-content pre .clickable-icon {
-		opacity: 1 !important;
+	body .message-text pre .clickable-icon,
+	body .tool-output-content pre .clickable-icon {
+		opacity: 1;
 	}
 
 	/* Shared picker-row trailing action (PickerOptionRow) — revealed on
-	   :hover/:focus-within; always show on touch. */
-	.picker-option-action {
-		opacity: 1 !important;
+	   :hover/:focus-within; always show on touch. The row ancestor plus `body`
+	   out-specifies the component's scoped `.picker-option-action` rule. */
+	body .picker-option-row .picker-option-action {
+		opacity: 1;
 	}
 
 	/* Generic hover-reveal hook: any element that fades in on group-hover
 	   (collapse chevron, …) tagged with this class shows on touch. */
-	.s2b-hover-reveal {
-		opacity: 1 !important;
+	body .s2b-hover-reveal {
+		opacity: 1;
 	}
 }
 
@@ -1435,8 +1456,8 @@ button.s2b-pill--interactive.s2b-pill--active:hover {
 
 /* Model-management grids are fixed 2/3 columns; a phone can't fit that without
    clipping model names. Collapse to a single column on mobile. */
-.is-mobile .s2b-model-grid {
-	grid-template-columns: 1fr !important;
+body.is-mobile .s2b-model-grid {
+	grid-template-columns: 1fr;
 }
 
 /* Touch tap-target floors. Several icon buttons are sized to their glyph
@@ -1450,37 +1471,37 @@ button.s2b-pill--interactive.s2b-pill--active:hover {
 }
 
 /* Message action rows (edit / copy / regenerate) and the composer's icon
-   buttons pin themselves to `--icon-s` with `min-width: 0 !important` in
-   component scope, which lands them at ~30x26 — roughly half the 44px touch
-   floor and the smallest hit areas in the chat. The component rules win on
-   `!important`, so the mobile override has to match it to raise the floor.
+   buttons pin themselves to `--icon-s` in component scope, which lands them
+   at ~30x26 — roughly half the 44px touch floor and the smallest hit areas in
+   the chat. Every selector here names `body.is-mobile` plus the same ancestors
+   the component rules use, so it out-specifies them without `!important`.
    Padding (not width/height) does the growing, so the glyph keeps its size
    and only the tappable box expands. */
-.is-mobile .footer-actions button,
-.is-mobile .attach-context-button.clickable-icon,
-.is-mobile .chat-input-icon-button.clickable-icon,
-.is-mobile .graph-controls .clickable-icon,
-.is-mobile .s2b-bottom-sheet .clickable-icon,
-.is-mobile .provider-icon-button.clickable-icon,
-.is-mobile .pcb-action-icon,
-.is-mobile .s2b-diff-nav-btn,
-.is-mobile .s2b-diff-toggle-btn {
-	min-width: 44px !important;
-	min-height: 44px !important;
-	padding: 10px !important;
-	box-sizing: border-box !important;
+body.is-mobile .footer-actions button,
+body.is-mobile .attach-context-button.clickable-icon,
+body.is-mobile .chat-input-container .chat-input-icon-button.clickable-icon,
+body.is-mobile .graph-controls .clickable-icon,
+body.is-mobile .s2b-bottom-sheet .clickable-icon,
+body.is-mobile .provider-icon-button.clickable-icon,
+body.is-mobile .pcb-action-icon,
+body.is-mobile .s2b-diff-nav-btn,
+body.is-mobile .s2b-diff-toggle-btn {
+	min-width: 44px;
+	min-height: 44px;
+	padding: 10px;
+	box-sizing: border-box;
 }
 
 /* The in-note bar's Accept/Reject are the same 2px-padded controls, but they
    may still carry a text label (the container query only drops it below 320px),
    so square 44px padding would balloon them. Raise the tappable height and let
    the inline padding stay proportional to the content. */
-.is-mobile .s2b-diff-accept-btn,
-.is-mobile .s2b-diff-reject-btn {
-	min-height: 44px !important;
-	padding-block: 10px !important;
-	padding-inline: 12px !important;
-	box-sizing: border-box !important;
+body.is-mobile .s2b-diff-accept-btn,
+body.is-mobile .s2b-diff-reject-btn {
+	min-height: 44px;
+	padding-block: 10px;
+	padding-inline: 12px;
+	box-sizing: border-box;
 }
 
 /* The attach and send buttons are deliberately `border-radius: 999px` on
@@ -1489,16 +1510,16 @@ button.s2b-pill--interactive.s2b-pill--active:hover {
    touch floor above, 999px makes them full circles, which felt too far from
    the input's own softer 22px corner. Squircle them down instead of going
    fully square, so they still read as buttons rather than tiles. */
-.is-mobile .attach-context-button.clickable-icon,
-.is-mobile .send-message-button {
-	border-radius: 20px !important;
+body.is-mobile .attach-context-button.clickable-icon,
+body.is-mobile .chat-input-container button.send-message-button {
+	border-radius: 20px;
 }
 
 /* The model/agent pills are text buttons rather than icon boxes — give them
    the vertical floor without forcing a square, so the label still sets width. */
-.is-mobile .model-select-btn.clickable-icon {
-	min-height: 44px !important;
-	padding-block: 8px !important;
+body.is-mobile .model-select-btn.clickable-icon {
+	min-height: 44px;
+	padding-block: 8px;
 }
 
 /* The message-nav cluster (jump/step through messages) stacks four 22px
@@ -1507,21 +1528,21 @@ button.s2b-pill--interactive.s2b-pill--active:hover {
    horizontal grab area but keep the rows at 36px — still a comfortable target
    in the dominant (vertical) axis of a stacked list. The code-copy button sits
    inside `<pre>` and gets the full square. */
-.is-mobile .message-nav button {
-	min-width: 44px !important;
-	min-height: 36px !important;
-	padding: 6px !important;
-	box-sizing: border-box !important;
+body.is-mobile .message-nav button {
+	min-width: 44px;
+	min-height: 36px;
+	padding: 6px;
+	box-sizing: border-box;
 }
 
 /* Code blocks render in chat messages AND in tool-call output
    (`.tool-output-content`), so key off `pre` rather than a single container. */
-.is-mobile .message-text pre .clickable-icon,
-.is-mobile .tool-output-content pre .clickable-icon {
-	min-width: 44px !important;
-	min-height: 44px !important;
-	padding: 10px !important;
-	box-sizing: border-box !important;
+body.is-mobile .message-text pre .clickable-icon,
+body.is-mobile .tool-output-content pre .clickable-icon {
+	min-width: 44px;
+	min-height: 44px;
+	padding: 10px;
+	box-sizing: border-box;
 }
 
 /* Chat markdown tables. `.message-text` is `!w-full !max-w-full`, so a table
@@ -1612,19 +1633,12 @@ button.s2b-pill--interactive.s2b-pill--active:hover {
 	flex: 1;
 	min-height: 0;
 }
-/* Phone sheet: push core's header/close buttons below the notch. Themes such as
-   Cupertino pin `top` with !important, so this must too. */
+/* Phone sheet: push core's header/close buttons below the notch. Core and
+   themes (Cupertino pins it with `!important`) position these from `top`, so
+   rather than fight that, shift the button by the inset on top of whatever
+   `top` they chose. */
 .modal .s2b-modal-sheet-header-button {
-	top: calc(var(--safe-area-inset-top, 0px) + var(--size-4-3)) !important;
-}
-
-/* Search modal input: neutralise theme padding so the inline chips sit flush.
-   Themes (Cupertino, Baseline) set these with !important, hence the override. */
-.s2b-search-modal .s2b-search-input {
-	padding-right: 0 !important;
-	padding-inline-end: 0 !important;
-	margin-left: 0 !important;
-	text-indent: 0 !important;
+	translate: 0 var(--safe-area-inset-top, 0px);
 }
 /* Search modal glow: the gradient overlay replaces the modal's own border. */
 /* SuggestModal's element carries `.prompt`, not `.modal`; naming it beats core's

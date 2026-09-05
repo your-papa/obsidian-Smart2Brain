@@ -1301,20 +1301,24 @@ $effect(() => {
   .message-nav :global(button) {
     color: var(--text-muted);
     /* Override Obsidian's .clickable-icon defaults (padding, min-width, hover
-       box-shadow/background) so the arrows are a tight, chrome-free icon box. */
-    background: transparent !important;
-    box-shadow: none !important;
-    width: var(--icon-s) !important;
-    height: var(--icon-s) !important;
-    min-width: 0 !important;
-    padding: 2px !important;
+       box-shadow/background) so the arrows are a tight, chrome-free icon box.
+       The scoped `.message-nav` ancestor plus the element (0,2,1) already
+       out-specifies core's `.clickable-icon` / `.is-mobile .clickable-icon`
+       (0,2,0), and leaves the mobile touch-target rule in styles.css
+       (`body.is-mobile .message-nav button`) able to win on specificity. */
+    background: transparent;
+    box-shadow: none;
+    width: var(--icon-s);
+    height: var(--icon-s);
+    min-width: 0;
+    padding: 2px;
     box-sizing: content-box;
     border-radius: 4px;
   }
 
   .message-nav :global(button:hover) {
     color: var(--text-normal);
-    background: transparent !important;
-    box-shadow: none !important;
+    background: transparent;
+    box-shadow: none;
   }
 </style>
