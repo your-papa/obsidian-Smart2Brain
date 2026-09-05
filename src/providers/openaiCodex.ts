@@ -1,4 +1,3 @@
-import type { Server, IncomingMessage, ServerResponse } from "node:http";
 import { Platform, requestUrl } from "obsidian";
 import { getPlugin } from "../stores/state.svelte";
 import { clearCodexSession, getCodexSession, saveCodexSession } from "../stores/providerRuntime.svelte";
@@ -6,7 +5,14 @@ import type { CodexSession } from "../types/provider";
 import { Logger } from "../utils/logging";
 import { performAiFetch } from "../lib/aiTransport";
 import { escapeHtml } from "../utils/html";
-import { arrayBufferToBase64Url, base64UrlToString, requireNodeHttp } from "./oauthNode";
+import {
+	arrayBufferToBase64Url,
+	base64UrlToString,
+	type NodeHttpIncomingMessage as IncomingMessage,
+	type NodeHttpServer as Server,
+	type NodeHttpServerResponse as ServerResponse,
+	requireNodeHttp,
+} from "./oauthNode";
 
 const CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
 const ISSUER = "https://auth.openai.com";
@@ -82,12 +88,12 @@ const htmlError = (error: string) => `<!doctype html>
   </body>
 </html>`;
 
-const oauthSuccessPage = (res: import("node:http").ServerResponse): void => {
+const oauthSuccessPage = (res: ServerResponse): void => {
 	res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
 	res.end(HTML_SUCCESS);
 };
 
-const oauthErrorPage = (res: import("node:http").ServerResponse, error: string): void => {
+const oauthErrorPage = (res: ServerResponse, error: string): void => {
 	res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" });
 	res.end(htmlError(error));
 };
@@ -584,7 +590,7 @@ function injectCodexDefaults(init: RequestInit | undefined): RequestInit | undef
 }
 
 export function createOpenAICodexFetch(): typeof fetch {
-	return (async (input: RequestInfo | URL, init?: RequestInit) => {
+	return async (input: RequestInfo | URL, init?: RequestInit) => {
 		const session = await getValidOpenAICodexSession();
 		if (!session) {
 			throw new Error("ChatGPT sign-in required");
@@ -599,5 +605,5 @@ export function createOpenAICodexFetch(): typeof fetch {
 			...injectCodexDefaults(init),
 			headers,
 		});
-	}) as typeof fetch;
+	};
 }

@@ -33,6 +33,7 @@
 
 import type { GraphEdge } from "../../types/graph";
 import { GRANULARITY_LADDER_RULES_KEY } from "../../utils/topicHierarchy";
+import { toError } from "../../utils/toError";
 import { getData } from "../../stores/dataStore.svelte";
 import { Logger } from "../../utils/logging";
 
@@ -642,7 +643,8 @@ function openDatabase(): Promise<IDBDatabase> {
 			};
 			finish(() => resolve(db));
 		};
-		request.onerror = () => finish(() => reject(request.error));
+		request.onerror = () =>
+			finish(() => reject(toError(request.error, "Failed to open the graph cache database.")));
 	});
 }
 
@@ -653,7 +655,7 @@ async function readPersisted(): Promise<unknown> {
 			const tx = db.transaction(STORE_NAME, "readonly");
 			const request = tx.objectStore(STORE_NAME).get(RECORD_KEY);
 			request.onsuccess = () => resolve(request.result);
-			request.onerror = () => reject(request.error);
+			request.onerror = () => reject(toError(request.error, "Failed to read the graph cache."));
 		});
 	} finally {
 		db.close();
@@ -667,7 +669,7 @@ async function writePersisted(payload: PersistedTopicCaches): Promise<void> {
 			const tx = db.transaction(STORE_NAME, "readwrite");
 			tx.objectStore(STORE_NAME).put(payload, RECORD_KEY);
 			tx.oncomplete = () => resolve();
-			tx.onerror = () => reject(tx.error);
+			tx.onerror = () => reject(toError(tx.error, "Failed to write the graph cache."));
 		});
 	} finally {
 		db.close();

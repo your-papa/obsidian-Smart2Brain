@@ -152,27 +152,22 @@ function fakePlugin() {
 			workspace: { onLayoutReady: (cb: () => void) => cb() },
 			vault: { getFiles: () => vaultFiles, on: () => ({}), getAbstractFileByPath: () => null },
 			metadataCache: { getFileCache: () => null },
+			// Obsidian's vault-scoped local storage, which the crash marker persists through.
+			loadLocalStorage: (key: string) => vaultStorage.get(key) ?? null,
+			saveLocalStorage: (key: string, data: unknown | null) => {
+				if (data === null) vaultStorage.delete(key);
+				else vaultStorage.set(key, data);
+			},
 		},
 		registerEvent: () => {},
 	} as never;
 }
 
-function memoryStorage(): Storage {
-	const map = new Map<string, string>();
-	return {
-		getItem: (key: string) => map.get(key) ?? null,
-		setItem: (key: string, value: string) => void map.set(key, value),
-		removeItem: (key: string) => void map.delete(key),
-		clear: () => map.clear(),
-		key: () => null,
-		get length() {
-			return map.size;
-		},
-	} as Storage;
-}
+/** Backing map for the fake app's `loadLocalStorage` / `saveLocalStorage`. */
+const vaultStorage = new Map<string, unknown>();
 
 const platform = Platform as { isMobile: boolean };
-const MARKER_KEY = "s2b-embedding-bulk-attempts:vault-1";
+const MARKER_KEY = "s2b-embedding-bulk-attempts";
 let service: VectorStoreService | null = null;
 
 async function startService(): Promise<VectorStoreService> {
@@ -189,7 +184,7 @@ async function startService(): Promise<VectorStoreService> {
 
 beforeEach(() => {
 	vi.useFakeTimers();
-	vi.stubGlobal("localStorage", memoryStorage());
+	vaultStorage.clear();
 	stores.clear();
 	vaultFiles = [];
 	for (const key of Object.keys(indexStats)) delete indexStats[key];
@@ -226,7 +221,7 @@ describe("lazy open on mobile", () => {
 
 	it("catches up after the boot delay on mobile, and a crashed attempt lengthens that delay", async () => {
 		platform.isMobile = true;
-		localStorage.setItem(MARKER_KEY, "1"); // the previous run died
+		vaultStorage.set(MARKER_KEY, "1"); // the previous run died
 		vaultFiles = [file("a.md")];
 		await startService();
 
@@ -312,12 +307,12 @@ describe("bulk embed run", () => {
 		const svc = await startService();
 
 		const run = svc.ensureIndex(INDEX); // empty index → full build
-		await vi.waitFor(() => expect(localStorage.getItem(MARKER_KEY)).toBe("1"));
+		await vi.waitFor(() => expect(vaultStorage.get(MARKER_KEY) ?? null).toBe("1"));
 		if (!release) throw new Error("embedding call never started");
 		(release as () => void)();
 		await vi.advanceTimersByTimeAsync(1_000);
 		expect(await run).toBe(true);
-		expect(localStorage.getItem(MARKER_KEY)).toBeNull();
+		expect(vaultStorage.get(MARKER_KEY) ?? null).toBeNull();
 		expect(await stores.get(INDEX)?.countNotes()).toBe(3);
 	});
 });

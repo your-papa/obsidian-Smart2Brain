@@ -30,7 +30,7 @@ export interface HNSWWorkerResponse {
 
 let store: HNSWVectorStore | null = null;
 
-globalThis.onmessage = async (e: MessageEvent<HNSWWorkerRequest>) => {
+self.onmessage = async (e: MessageEvent<HNSWWorkerRequest>) => {
 	const { id, method, args } = e.data;
 	try {
 		let result: unknown;
@@ -154,13 +154,13 @@ globalThis.onmessage = async (e: MessageEvent<HNSWWorkerRequest>) => {
 		}
 
 		const response: HNSWWorkerResponse = { id, result };
-		globalThis.postMessage(response);
+		self.postMessage(response);
 	} catch (err: unknown) {
 		const response: HNSWWorkerResponse = {
 			id,
 			error: err instanceof Error ? err.message : String(err),
 		};
-		globalThis.postMessage(response);
+		self.postMessage(response);
 	}
 };
 

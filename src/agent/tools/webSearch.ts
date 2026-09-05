@@ -3,6 +3,7 @@ import { z } from "zod";
 import { createObsidianFetch } from "../../lib/obsidianFetch";
 import { getData } from "../../stores/dataStore.svelte";
 import { Logger } from "../../utils/logging";
+import { toError } from "../../utils/toError";
 import { resolveToolAgent } from "./toolAgentContext";
 
 const DEFAULT_MAX_RESULTS = 10;
@@ -27,9 +28,9 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
 				window.clearTimeout(timer);
 				resolve(value);
 			},
-			(error) => {
+			(error: unknown) => {
 				window.clearTimeout(timer);
-				reject(error);
+				reject(toError(error));
 			},
 		);
 	});
@@ -226,7 +227,7 @@ export function createWebSearchTool(agentId = "") {
 	// Resolve against the agent that owns this run, not the global selection — the
 	// global agent can differ in another tab, and subagents carry their own config.
 	const getToolConfig = () => resolveToolAgent(agentId).toolsConfig.web_search;
-	const fetchImpl = createObsidianFetch(globalThis.fetch);
+	const fetchImpl = createObsidianFetch(window.fetch.bind(window));
 
 	const webSearchFn = async ({ query }: { query: string }): Promise<string> => {
 		const trimmed = query?.trim();

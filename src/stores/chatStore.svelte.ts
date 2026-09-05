@@ -1,4 +1,4 @@
-import { type BaseMessage, HumanMessage, isHumanMessage } from "@langchain/core/messages";
+import { type BaseMessage, HumanMessage } from "@langchain/core/messages";
 import { Notice, type TFile } from "obsidian";
 import { SvelteMap } from "svelte/reactivity";
 import type { AgentStreamChunk, ThreadHistory } from "../agent/Agent";
@@ -335,7 +335,7 @@ export class ChatSession {
 
 		const node = this.graphState.nodes.get(checkpointId);
 		const lastMessage = node?.messages.at(-1);
-		if (!lastMessage || !isHumanMessage(lastMessage)) {
+		if (!lastMessage || !HumanMessage.isInstance(lastMessage)) {
 			return undefined;
 		}
 
@@ -1679,9 +1679,7 @@ export class SessionRegistry {
 				targetCheckpointId,
 			});
 
-			const historyWithError = history as
-				| (ThreadHistory & { lastError?: ThreadError; errorCount?: number })
-				| null;
+			const historyWithError = history;
 			const bootstrapMessages = historyWithError?.messages || [];
 			const errorCount = historyWithError?.errorCount || 0;
 			const lastErrorMessage = historyWithError?.lastError?.message;
@@ -1778,7 +1776,7 @@ export class SessionRegistry {
 			targetCheckpointId,
 		});
 
-		const historyWithError = history as (ThreadHistory & { lastError?: ThreadError; errorCount?: number }) | null;
+		const historyWithError = history;
 		session.applyGraphState(
 			graph,
 			historyWithError?.errorCount || 0,
@@ -1813,7 +1811,7 @@ export class SessionRegistry {
 		graph.activeCheckpointId = checkpointId;
 		graph.lastPersistedActiveCheckpointId = this.getLastViewedCheckpointId(history);
 
-		const historyWithError = history as (ThreadHistory & { lastError?: ThreadError; errorCount?: number }) | null;
+		const historyWithError = history;
 		session.applyGraphState(
 			graph,
 			historyWithError?.errorCount || 0,

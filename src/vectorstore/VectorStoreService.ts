@@ -71,9 +71,7 @@ interface DialogFilter {
  * Works in Obsidian desktop where `require` is exposed on `window`.
  */
 function requireNodeModule<T>(id: string): T {
-	const globalWithRequire = globalThis as typeof globalThis & {
-		require?: (id: string) => unknown;
-	};
+	const globalWithRequire = window as { require?: (id: string) => unknown };
 	if (typeof globalWithRequire.require !== "function") {
 		throw new Error(`Node module "${id}" is not available in this environment.`);
 	}
@@ -386,13 +384,13 @@ export class VectorStoreService {
 	private readonly modifyTimers = new Map<string, number>();
 	private isInitialized = false;
 	private readonly vaultId: string;
-	/** Crash-backoff marker for scheduled bulk runs (`s2b-embedding-bulk-attempts:<vaultId>`). */
+	/** Crash-backoff marker for scheduled bulk runs (`s2b-embedding-bulk-attempts`, vault-scoped). */
 	private readonly bulkAttempts: BulkAttemptMarker;
 
 	private constructor(plugin: SecondBrainPlugin) {
 		this.plugin = plugin;
 		this.vaultId = getData().vaultSlug;
-		this.bulkAttempts = new BulkAttemptMarker("embedding", this.vaultId);
+		this.bulkAttempts = new BulkAttemptMarker("embedding", plugin.app);
 	}
 
 	/** Promise tracking initialization, awaited by cleanup to avoid closing mid-init. */
@@ -987,7 +985,7 @@ export class VectorStoreService {
 			}
 			if (!inst.embeddings || inst.isIndexing) continue;
 			await this.indexDocumentForInstance(inst, file);
-			this.notifyStatsChanged(inst);
+			void this.notifyStatsChanged(inst);
 		}
 	}
 
@@ -1001,22 +999,26 @@ export class VectorStoreService {
 
 		this.modifyTimers.set(
 			file.path,
-			window.setTimeout(async () => {
+			window.setTimeout(() => {
 				this.modifyTimers.delete(file.path);
-
-				for (const inst of this.instances.values()) {
-					if (!this.isActiveIndex(inst.indexId)) {
-						inst.hasValidatedThisSession = false;
-						continue;
-					}
-					if (!inst.embeddings || inst.isIndexing) continue;
-					const storedMtime = await inst.store.getDocumentMtime(file.path);
-					if (storedMtime && storedMtime >= file.stat.mtime) continue;
-					await this.indexDocumentForInstance(inst, file);
-					this.notifyStatsChanged(inst);
-				}
+				void this.reindexModifiedFile(file);
 			}, MODIFY_DEBOUNCE_MS),
 		);
+	}
+
+	/** Re-embed a modified note in every active instance whose stored copy is older. */
+	private async reindexModifiedFile(file: TFile): Promise<void> {
+		for (const inst of this.instances.values()) {
+			if (!this.isActiveIndex(inst.indexId)) {
+				inst.hasValidatedThisSession = false;
+				continue;
+			}
+			if (!inst.embeddings || inst.isIndexing) continue;
+			const storedMtime = await inst.store.getDocumentMtime(file.path);
+			if (storedMtime && storedMtime >= file.stat.mtime) continue;
+			await this.indexDocumentForInstance(inst, file);
+			void this.notifyStatsChanged(inst);
+		}
 	}
 
 	/**
@@ -1030,7 +1032,7 @@ export class VectorStoreService {
 				continue;
 			}
 			await inst.store.remove(file.path);
-			this.notifyStatsChanged(inst);
+			void this.notifyStatsChanged(inst);
 		}
 	}
 
@@ -1048,7 +1050,7 @@ export class VectorStoreService {
 			if (inst.embeddings) {
 				await this.indexDocumentForInstance(inst, file);
 			}
-			this.notifyStatsChanged(inst);
+			void this.notifyStatsChanged(inst);
 		}
 	}
 
@@ -1605,7 +1607,7 @@ export class VectorStoreService {
 		const skippedText = skipped > 0 ? ` (${skipped} skipped)` : "";
 		const etaText = etaMs !== null ? ` (~${formatEta(etaMs)} left)` : "";
 
-		const el = notice.noticeEl;
+		const el = notice.messageEl;
 		el.empty();
 
 		const container = el.createDiv({ cls: "s2b-indexing-notice" });
@@ -1616,11 +1618,8 @@ export class VectorStoreService {
 		});
 
 		const progressContainer = container.createDiv({ cls: "s2b-indexing-progress" });
-		progressContainer.style.cssText =
-			"width: 100%; height: 6px; background: var(--background-modifier-border); border-radius: 3px; overflow: hidden; margin: 8px 0;";
-
 		const progressFill = progressContainer.createDiv({ cls: "s2b-indexing-fill" });
-		progressFill.style.cssText = `width: ${percentage}%; height: 100%; background: var(--interactive-accent); border-radius: 3px; transition: width 0.2s ease;`;
+		progressFill.setCssStyles({ width: `${percentage}%` });
 
 		container.createDiv({
 			cls: "s2b-indexing-percent",

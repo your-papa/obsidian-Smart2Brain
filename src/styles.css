@@ -1546,3 +1546,74 @@ button.s2b-pill--interactive.s2b-pill--active:hover {
 	opacity: 0.7;
 	transition: transform 500ms ease-out, opacity 500ms ease-out;
 }
+
+/* ---- Styles formerly set inline from TypeScript ---------------------------
+   Static values live here so the plugin never writes literal styles from code
+   (Obsidian's `no-static-styles-assignment` guideline); only computed values
+   — widths, positions — are still set via `setCssStyles`. */
+
+/* Smart Graph: the Pixi canvas fills its container and owns touch gestures. */
+.s2b-graph-canvas {
+	display: block;
+	width: 100%;
+	height: 100%;
+	touch-action: none;
+}
+
+/* PromptModal text input spans the modal body. */
+.s2b-prompt-input {
+	width: 100%;
+}
+
+/* Indexing progress notice (lexical + embedding): track and fill. */
+.s2b-indexing-progress {
+	width: 100%;
+	height: 6px;
+	background: var(--background-modifier-border);
+	border-radius: 3px;
+	overflow: hidden;
+	margin: 8px 0;
+}
+.s2b-indexing-fill {
+	height: 100%;
+	background: var(--interactive-accent);
+	border-radius: 3px;
+	transition: width 0.2s ease;
+}
+
+/* Modal layout (`applyModalLayout`): column-flex the modal so the content fills it. */
+.modal.s2b-modal-fill {
+	display: flex;
+	flex-direction: column;
+}
+.modal-content.s2b-modal-fill-content {
+	display: flex;
+	flex-direction: column;
+	flex: 1;
+	min-height: 0;
+}
+/* Phone sheet: push core's header/close buttons below the notch. Themes such as
+   Cupertino pin `top` with !important, so this must too. */
+.modal .s2b-modal-sheet-header-button {
+	top: calc(var(--safe-area-inset-top, 0px) + var(--size-4-3)) !important;
+}
+
+/* Search modal input: neutralise theme padding so the inline chips sit flush.
+   Themes (Cupertino, Baseline) set these with !important, hence the override. */
+.s2b-search-modal .s2b-search-input {
+	padding-right: 0 !important;
+	padding-inline-end: 0 !important;
+	margin-left: 0 !important;
+	text-indent: 0 !important;
+}
+/* Search modal glow: the gradient overlay replaces the modal's own border. */
+.s2b-search-modal.s2b-search-modal-glowing {
+	border-color: transparent !important;
+}
+.s2b-search-modal-glow-canvas {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	pointer-events: none;
+}

@@ -248,7 +248,7 @@ async function requestWithFallback(
 		const response = await Promise.race([requestUrl(requestParams), rejectOnAbort(settled)]);
 
 		const responseHeaders: Record<string, string> = {
-			...(response.headers as Record<string, string>),
+			...response.headers,
 		};
 
 		// Obsidian's requestUrl may strip the content-type header from responses.
@@ -289,12 +289,14 @@ async function requestWithFallback(
  * so concurrent users are safe. `release()` is idempotent.
  */
 let patchDepth = 0;
-let savedFetch: typeof globalThis.fetch | null = null;
+let savedFetch: typeof fetch | null = null;
+/** The window's `fetch` slot, typed as a plain function property: it is swapped, never called via `this`. */
+const fetchSlot = window as { fetch: typeof fetch };
 
 export function installObsidianFetch(): { release: () => void } {
 	if (patchDepth === 0) {
-		savedFetch = globalThis.fetch;
-		globalThis.fetch = createObsidianFetch(savedFetch);
+		savedFetch = fetchSlot.fetch;
+		fetchSlot.fetch = createObsidianFetch(savedFetch);
 	}
 	patchDepth++;
 
@@ -305,7 +307,7 @@ export function installObsidianFetch(): { release: () => void } {
 			released = true;
 			patchDepth--;
 			if (patchDepth === 0 && savedFetch) {
-				globalThis.fetch = savedFetch;
+				fetchSlot.fetch = savedFetch;
 				savedFetch = null;
 			}
 		},

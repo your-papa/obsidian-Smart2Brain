@@ -68,7 +68,7 @@ class ChatEmbed extends MarkdownRenderChild {
 		this.containerEl.addClass("s2b-chat-embed-container");
 
 		if (this.component) {
-			unmount(this.component);
+			void unmount(this.component);
 			this.component = undefined;
 		}
 
@@ -110,7 +110,7 @@ class ChatEmbed extends MarkdownRenderChild {
 
 			if (this.component) {
 				// Swap skeleton for real content via Svelte's $set equivalent.
-				unmount(this.component);
+				void unmount(this.component);
 			}
 			this.component = mount(ChatEmbedPreview, {
 				target: this.containerEl,
@@ -127,7 +127,7 @@ class ChatEmbed extends MarkdownRenderChild {
 		} catch (e) {
 			Logger.error(`Failed to render .chat embed for ${this.file.path}:`, e);
 			if (this.component) {
-				unmount(this.component);
+				void unmount(this.component);
 				this.component = undefined;
 			}
 			this.containerEl.setText("Could not load chat preview.");
@@ -136,7 +136,7 @@ class ChatEmbed extends MarkdownRenderChild {
 
 	onunload(): void {
 		if (this.component) {
-			unmount(this.component);
+			void unmount(this.component);
 			this.component = undefined;
 		}
 	}

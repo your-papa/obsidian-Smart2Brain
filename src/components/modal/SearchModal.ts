@@ -130,7 +130,7 @@ function createVaultFileSearchResult(app: App, file: TFile): SearchResult {
 	return {
 		path: file.path,
 		name: file.basename,
-		frontmatter: cache?.frontmatter as Record<string, unknown> | undefined,
+		frontmatter: cache?.frontmatter,
 	};
 }
 
@@ -563,7 +563,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 	private getSuggestionEls(): HTMLElement[] {
 		return Array.from(this.resultContainerEl?.children ?? []).filter(
 			(child): child is HTMLElement =>
-				child instanceof HTMLElement && child.classList.contains("suggestion-item"),
+				child.instanceOf(HTMLElement) && child.classList.contains("suggestion-item"),
 		);
 	}
 
@@ -748,7 +748,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		this.close();
 		for (const [index, result] of results.entries()) {
 			getData().recordRecentlyOpenedNote(result.path);
-			this.app.workspace.openLinkText(result.path, "", destination === "tab" || index > 0 ? "tab" : false);
+			void this.app.workspace.openLinkText(result.path, "", destination === "tab" || index > 0 ? "tab" : false);
 		}
 	}
 
@@ -786,7 +786,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		}
 
 		this.close();
-		this.app.workspace.openLinkText(result.path, "", destination);
+		void this.app.workspace.openLinkText(result.path, "", destination);
 	}
 
 	/**
@@ -975,7 +975,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 			this.close();
 			const leaf = this.app.workspace.getLeaf(false);
 			await leaf.openFile(file);
-			this.app.workspace.revealLeaf(leaf);
+			await this.app.workspace.revealLeaf(leaf);
 		} catch (error) {
 			Logger.error("[SearchModal] Failed to create note from query:", error);
 			new Notice("Failed to create note");
@@ -1010,7 +1010,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		this.searchResults = this.getModalRecentNotes();
 		this.hasPrimedOpenResults = true;
 
-		super.onOpen();
+		void super.onOpen();
 
 		applyPromptSafeArea(this.modalEl);
 		this.schedulePostOpenHydration();
@@ -1162,12 +1162,12 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		// Reserve a dedicated content column so wrapped chips never slide beneath the search icon.
 		inputContainer.addClass("s2b-inline-chips-container");
 
-		this.inlineInputContentEl = document.createElement("div");
+		this.inlineInputContentEl = createDiv();
 		this.inlineInputContentEl.className = "s2b-inline-input-content";
 		inputContainer.insertBefore(this.inlineInputContentEl, inputEl);
 
 		// Create the chip wrapper inside the content flow, before the input.
-		this.inlineChipsEl = document.createElement("div");
+		this.inlineChipsEl = createDiv();
 		this.inlineChipsEl.className = "s2b-inline-chips";
 		this.inlineInputContentEl.appendChild(this.inlineChipsEl);
 		this.inlineInputContentEl.appendChild(inputEl);
@@ -1256,7 +1256,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 			if (!noteIcon) {
 				this.noteIconElementCache.set(path, null);
 			} else {
-				const iconEl = document.createElement("span");
+				const iconEl = createSpan();
 				iconEl.className = "s2b-search-result-note-icon";
 				iconEl.setAttribute("aria-hidden", "true");
 				noteIcon.render(iconEl);
@@ -1273,7 +1273,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 			if (!tagIcon) {
 				this.tagIconElementCache.set(tag, null);
 			} else {
-				const iconEl = document.createElement("span");
+				const iconEl = createSpan();
 				iconEl.className = "s2b-search-result-tag-icon iconic-icon";
 				iconEl.setAttribute("aria-hidden", "true");
 				tagIcon.render(iconEl);
@@ -1286,7 +1286,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 
 	private getCachedTagPillElement(tag: string): HTMLElement {
 		if (!this.tagPillElementCache.has(tag)) {
-			const tagEl = document.createElement("span");
+			const tagEl = createSpan();
 			tagEl.className = "s2b-search-result-tag";
 
 			const tagIcon = this.getCachedTagIcon(tag);
@@ -1319,7 +1319,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 
 	private getCachedBadgeIconElement(badge: SearchResultBadge): HTMLElement {
 		if (!this.badgeIconElementCache.has(badge)) {
-			const badgeIconEl = document.createElement("span");
+			const badgeIconEl = createSpan();
 			badgeIconEl.className = "s2b-search-result-badge-icon";
 			badgeIconEl.setAttribute("aria-hidden", "true");
 			setIcon(badgeIconEl, getBadgeIconId(badge));
@@ -1349,13 +1349,12 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 			);
 		}
 
+		// The static resets live on `.s2b-search-input` (styles.css); only the
+		// theme-dependent leading inset is set here.
+		inputEl.addClass("s2b-search-input");
 		const leadingInset = hasChips || !usesCupertinoTheme ? "0" : "36px";
 		inputEl.style.setProperty("padding-left", leadingInset, "important");
 		inputEl.style.setProperty("padding-inline-start", leadingInset, "important");
-		inputEl.style.setProperty("padding-right", "0", "important");
-		inputEl.style.setProperty("padding-inline-end", "0", "important");
-		inputEl.style.setProperty("margin-left", "0", "important");
-		inputEl.style.setProperty("text-indent", "0", "important");
 	}
 
 	private getModalRecentNotes(): SearchResult[] {
@@ -1472,7 +1471,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		this.updateInlineInputSpacing();
 
 		for (const [index, filter] of this.activeFilters.entries()) {
-			const chip = chipsEl.createEl("button", { cls: "s2b-inline-chip" }) as HTMLButtonElement;
+			const chip = chipsEl.createEl("button", { cls: "s2b-inline-chip" });
 			chip.type = "button";
 
 			// Try to get an icon from Iconic / Iconize
@@ -1521,7 +1520,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 			const modeChip = chipsEl.createEl("button", {
 				cls: "s2b-inline-chip s2b-inline-chip-mode",
 				text: this.requireAllTags ? "ALL" : "ANY",
-			}) as HTMLButtonElement;
+			});
 			modeChip.type = "button";
 			modeChip.setAttribute("aria-label", "Toggle tag match mode");
 			modeChip.addEventListener("click", (evt) => {
@@ -1540,10 +1539,10 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		const borderWidth = 2;
 
 		// Hide the modal's own border so the gradient replaces it
-		this.modalEl.style.setProperty("border-color", "transparent", "important");
+		this.modalEl.addClass("s2b-search-modal-glowing");
 
 		// Create a fixed-position overlay exactly on top of the modal
-		const border = document.createElement("div");
+		const border = createDiv();
 		const modalRect = this.modalEl.getBoundingClientRect();
 		Object.assign(border.style, {
 			position: "fixed",
@@ -1558,9 +1557,9 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 		document.body.appendChild(border);
 		this.borderEl = border;
 
-		const canvas = document.createElement("canvas");
+		const canvas = createEl("canvas");
 		const dpr = window.devicePixelRatio || 1;
-		canvas.style.cssText = "position:absolute;inset:0;width:100%;height:100%;pointer-events:none";
+		canvas.addClass("s2b-search-modal-glow-canvas");
 		border.appendChild(canvas);
 
 		const animate = () => {
@@ -1620,7 +1619,7 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 			this.borderEl.remove();
 			this.borderEl = null;
 		}
-		this.modalEl.style.removeProperty("border-color");
+		this.modalEl.removeClass("s2b-search-modal-glowing");
 	}
 
 	/** Force the next getSuggestions call to re-trigger a search. */
@@ -1766,10 +1765,10 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 			badges: result.matchBadges?.join(", ") ?? "",
 		}));
 
-		console.groupCollapsed(`[S2B][SearchDebug] ${algorithm} query=\"${query}\" results=${results.length}`);
-		console.debug("filter", filter ?? null);
-		console.table(summary);
-		console.groupEnd();
+		console.debug(`[S2B][SearchDebug] ${algorithm} query="${query}" results=${results.length}`, {
+			filter: filter ?? null,
+			results: summary,
+		});
 	}
 
 	/**

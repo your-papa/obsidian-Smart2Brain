@@ -101,7 +101,7 @@ const LANGCHAIN_TROUBLESHOOT_REGEX = /\n*Troubleshooting URL: https:\/\/docs\.la
 /** Create a DocumentFragment with clickable links for any URLs in the text. */
 function createNoticeFragment(text: string): DocumentFragment {
 	const cleaned = text.replace(LANGCHAIN_TROUBLESHOOT_REGEX, "").trim();
-	const frag = document.createDocumentFragment();
+	const frag = createFragment();
 	let lastIndex = 0;
 	for (const match of cleaned.matchAll(URL_REGEX)) {
 		const url = match[0];
@@ -1678,7 +1678,7 @@ export class AgentManager {
 				configurable: { agent_id: resolvedAgentId },
 				signal,
 				attachments,
-			} as Parameters<Agent["editFromCheckpoint"]>[0]),
+			}),
 			signal,
 			chatModel,
 			"Error editing message",
@@ -1919,7 +1919,7 @@ export class AgentManager {
 		}
 		if (!leaf) return;
 		await leaf.openFile(file);
-		workspace.revealLeaf(leaf);
+		await workspace.revealLeaf(leaf);
 	}
 
 	/** Open (and reveal) the chat leaf for a given thread path. Used to navigate

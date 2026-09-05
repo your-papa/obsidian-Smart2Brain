@@ -8,7 +8,7 @@
  * observed; change the value only with a new measurement.
  */
 
-import { Platform, type TFile } from "obsidian";
+import { type App, Platform, type TFile } from "obsidian";
 import { isBinaryTextFile } from "../utils/fileFiltering";
 import { Logger } from "../utils/logging";
 
@@ -84,45 +84,43 @@ export function bulkStartDelayMs(crashedAttempts: number): number {
  * pressure, where the OS killed the process seconds into the run. Instead the
  * delay adapts to observed deaths: every bulk attempt writes this marker and a
  * completed run clears it, so a marker still present at boot means the last
- * attempt died mid-run — and the next one waits twice as long. localStorage,
- * not plugin data: it survives the kill (the plugin's data debounce may not)
- * and stays out of sync.
+ * attempt died mid-run — and the next one waits twice as long. Obsidian's
+ * vault-scoped local storage (`App.loadLocalStorage` / `saveLocalStorage`), not
+ * plugin data: it survives the kill (the plugin's data debounce may not) and
+ * stays out of sync.
  *
- * One marker per indexer per vault (`s2b-<indexer>-bulk-attempts:<vaultId>`):
- * the two indexers die independently and back off independently.
+ * One marker per indexer per vault (`s2b-<indexer>-bulk-attempts`; Obsidian
+ * scopes the key to the vault): the two indexers die independently and back
+ * off independently.
  */
 export class BulkAttemptMarker {
 	private readonly key: string;
+	private readonly storage: VaultLocalStorage;
 
-	constructor(indexer: string, vaultId: string) {
-		this.key = `s2b-${indexer}-bulk-attempts:${vaultId}`;
-	}
-
-	private get storage(): Storage | null {
-		try {
-			return typeof window !== "undefined" ? (window.localStorage ?? null) : null;
-		} catch {
-			// Accessing localStorage throws in some sandboxed contexts; treat as absent.
-			return null;
-		}
+	constructor(indexer: string, storage: VaultLocalStorage) {
+		this.key = `s2b-${indexer}-bulk-attempts`;
+		this.storage = storage;
 	}
 
 	/** Number of consecutive attempts that died mid-run (0 when the last run completed). */
 	read(): number {
-		const raw = Number(this.storage?.getItem(this.key));
+		const raw = Number(this.storage.loadLocalStorage(this.key));
 		return Number.isFinite(raw) && raw > 0 ? raw : 0;
 	}
 
 	/** Record that a run is starting. Call before the first read of the run. */
 	markAttempt(): void {
-		this.storage?.setItem(this.key, String(this.read() + 1));
+		this.storage.saveLocalStorage(this.key, String(this.read() + 1));
 	}
 
 	/** Record that the run survived (completed or was cancelled by the user). */
 	clear(): void {
-		this.storage?.removeItem(this.key);
+		this.storage.saveLocalStorage(this.key, null);
 	}
 }
+
+/** The slice of {@link App} the marker persists through (vault-scoped local storage). */
+export type VaultLocalStorage = Pick<App, "loadLocalStorage" | "saveLocalStorage">;
 
 /**
  * Run `work` after the platform-appropriate bulk start delay, logging when the

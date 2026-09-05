@@ -50,7 +50,7 @@ export class HNSWWorkerProxy implements VectorStore {
 		};
 
 		// Initialize the store inside the worker (fire-and-forget, open() will await)
-		this.call("init", [vaultId, indexId]);
+		void this.call("init", [vaultId, indexId]);
 	}
 
 	/**

@@ -134,7 +134,7 @@ export async function fetchOpenRouterModels(): Promise<Map<string, OpenRouterMod
 	}
 
 	try {
-		const response = await globalThis.fetch(OPENROUTER_MODELS_URL, {
+		const response = await window.fetch(OPENROUTER_MODELS_URL, {
 			method: "GET",
 			headers: {
 				Accept: "application/json",

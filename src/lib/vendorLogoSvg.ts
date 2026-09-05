@@ -78,7 +78,7 @@ function renderVendorLogoSvg(vendorId: string): SVGElement | null {
 	const LogoComponent = VENDOR_LOGO_COMPONENTS[vendorId];
 	if (!LogoComponent) return null;
 
-	const host = document.createElement("div");
+	const host = createDiv();
 	const instance = mount(LogoComponent, {
 		target: host,
 		props: { width: 16, height: 16 },

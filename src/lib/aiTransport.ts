@@ -107,14 +107,8 @@ export function getCurrentAiTransportModeForTest(): AiTransportMode {
 }
 
 async function getElectronNetFetch(): Promise<typeof fetch | null> {
-	const globalWithRequire = globalThis as typeof globalThis & {
-		require?: (id: string) => unknown;
-		window?: { require?: (id: string) => unknown };
-	};
-
-	const requireCandidates = [globalWithRequire.require, globalWithRequire.window?.require];
-	for (const requireFn of requireCandidates) {
-		if (typeof requireFn !== "function") continue;
+	const requireFn = (window as { require?: (id: string) => unknown }).require;
+	if (typeof requireFn === "function") {
 		try {
 			const electron = requireFn("electron") as {
 				net?: { fetch?: typeof fetch };
@@ -327,7 +321,7 @@ async function requestUrlFetch(url: string, init: RequestInit): Promise<Response
 	});
 
 	const responseHeaders: Record<string, string> = {
-		...(response.headers as Record<string, string>),
+		...response.headers,
 		"x-smart2brain-transport": "requestUrl",
 		"x-smart2brain-execution": "buffered",
 	};
@@ -465,7 +459,7 @@ function isTransportFailure(error: unknown): boolean {
 
 async function performPrimaryFetch(normalized: NormalizedRequest): Promise<Response> {
 	const electronFetch = await getElectronNetFetch();
-	const primaryFetch = electronFetch ?? globalThis.fetch.bind(globalThis);
+	const primaryFetch = electronFetch ?? window.fetch.bind(window);
 	const parsedBody = parseRequestBody(normalized.init.body);
 	const normalizedBody =
 		parsedBody && normalized.url.includes("/chat/completions")
@@ -497,7 +491,7 @@ async function performPrimaryFetch(normalized: NormalizedRequest): Promise<Respo
 			body: responseText,
 		});
 	}
-	return electronFetch ? normalizeFetchLikeResponse(response as Response) : response;
+	return electronFetch ? normalizeFetchLikeResponse(response) : response;
 }
 
 export async function performAiFetch(
@@ -556,7 +550,7 @@ export async function performAiFetch(
 }
 
 export function createAiProviderFetch(providerId: string): typeof fetch {
-	return ((input: RequestInfo | URL, init?: RequestInit) => performAiFetch(providerId, input, init)) as typeof fetch;
+	return (input: RequestInfo | URL, init?: RequestInit) => performAiFetch(providerId, input, init);
 }
 
 /**
@@ -570,10 +564,10 @@ export function createAiProviderFetch(providerId: string): typeof fetch {
  * actually takes the non-streaming path.
  */
 export function createBufferedAiProviderFetch(providerId: string): typeof fetch {
-	return ((input: RequestInfo | URL, init?: RequestInit) => {
+	return (input: RequestInfo | URL, init?: RequestInit) => {
 		const normalized = normalizeRequest(input, init);
 		const bufferedInit = isStreamingRequest(normalized.init) ? disableStreaming(normalized.init) : normalized.init;
 		Logger.debug("aiTransport.subagent_buffered_request", { providerId, url: normalized.url });
 		return requestUrlFetch(normalized.url, bufferedInit);
-	}) as typeof fetch;
+	};
 }
