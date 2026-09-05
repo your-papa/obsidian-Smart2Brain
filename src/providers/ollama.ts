@@ -11,7 +11,6 @@
  */
 
 import { Logger } from "../utils/logging";
-import { ChatOllama } from "@langchain/ollama";
 import OllamaLogo from "../components/ui/logos/OllamaLogo.svelte";
 import type {
 	AuthObject,
@@ -134,7 +133,7 @@ export const ollamaProvider: EmbeddingProviderDefinition = {
 			config.numCtx = options.contextWindow;
 		}
 
-		return createTransportedChatOllama("ollama", config as ConstructorParameters<typeof ChatOllama>[0]);
+		return createTransportedChatOllama("ollama", config);
 	},
 
 	createEmbeddingInstance: (auth: AuthObject, modelId: string) => {
@@ -157,7 +156,7 @@ export const ollamaProvider: EmbeddingProviderDefinition = {
 
 		let response: Response;
 		try {
-			response = await globalThis.fetch(`${baseUrl}/api/tags`, {
+			response = await window.fetch(`${baseUrl}/api/tags`, {
 				method: "GET",
 				headers: {
 					"Content-Type": "application/json",
@@ -188,7 +187,7 @@ export const ollamaProvider: EmbeddingProviderDefinition = {
 
 		const baseUrl = sanitizeBaseUrl(auth.baseUrl);
 
-		const response = await globalThis.fetch(`${baseUrl}/api/tags`, {
+		const response = await window.fetch(`${baseUrl}/api/tags`, {
 			method: "GET",
 			headers: {
 				"Content-Type": "application/json",

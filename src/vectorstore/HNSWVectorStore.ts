@@ -30,6 +30,7 @@ import {
 } from "./types";
 import { cosineSimilarity } from "./similarity";
 import { ChunkBatchBuilder, computeSemanticPairs, type SemanticPair } from "../utils/semanticEdges";
+import { toError } from "../utils/toError";
 
 import { deleteDatabase, getDbName } from "./types";
 import { Logger } from "../utils/logging";
@@ -145,7 +146,7 @@ function awaitRequest<T>(tx: IDBTransaction, request: IDBRequest, map: (result: 
 		const fail = (reason: unknown) => {
 			if (settled) return;
 			settled = true;
-			reject(reason);
+			reject(toError(reason, "IndexedDB request failed."));
 		};
 
 		request.onerror = () => fail(request.error);
@@ -157,7 +158,7 @@ function awaitRequest<T>(tx: IDBTransaction, request: IDBRequest, map: (result: 
 			try {
 				resolve(map(request.result as never));
 			} catch (error) {
-				reject(error);
+				reject(toError(error));
 			}
 		};
 	});
@@ -178,7 +179,7 @@ function awaitCursor<T>(
 		const fail = (reason: unknown) => {
 			if (settled) return;
 			settled = true;
-			reject(reason);
+			reject(toError(reason, "IndexedDB request failed."));
 		};
 
 		request.onerror = () => fail(request.error);
@@ -206,12 +207,12 @@ function awaitCursor<T>(
 function awaitTransaction(tx: IDBTransaction, run: () => void): Promise<void> {
 	return new Promise<void>((resolve, reject) => {
 		tx.oncomplete = () => resolve();
-		tx.onerror = () => reject(tx.error);
-		tx.onabort = () => reject(tx.error ?? new Error("IndexedDB transaction aborted."));
+		tx.onerror = () => reject(toError(tx.error, "IndexedDB transaction failed."));
+		tx.onabort = () => reject(toError(tx.error, "IndexedDB transaction aborted."));
 		try {
 			run();
 		} catch (error) {
-			reject(error);
+			reject(toError(error));
 		}
 	});
 }
@@ -243,11 +244,14 @@ export class HNSWVectorStore implements VectorStore {
 	 */
 	private static readonly SAVE_DEBOUNCE_MS = 2000;
 	private hasPendingIndexSave = false;
-	private saveIndexTimer: ReturnType<typeof setTimeout> | null = null;
+	// Timers go through `self`, not `window`: this class runs inside the HNSW Web
+	// Worker (hnswWorker.ts), where `window` is undefined. On the main thread the
+	// two are the same object, so this stays popout-window safe there as well.
+	private saveIndexTimer: number | null = null;
 
 	private scheduleIndexSave(): void {
-		if (this.saveIndexTimer !== null) clearTimeout(this.saveIndexTimer);
-		this.saveIndexTimer = setTimeout(() => {
+		if (this.saveIndexTimer !== null) self.clearTimeout(this.saveIndexTimer);
+		this.saveIndexTimer = self.setTimeout(() => {
 			this.saveIndexTimer = null;
 			void this.flushIndex();
 		}, HNSWVectorStore.SAVE_DEBOUNCE_MS);
@@ -295,17 +299,18 @@ export class HNSWVectorStore implements VectorStore {
 		return new Promise((resolve, reject) => {
 			const request = indexedDB.open(this.dbName, DB_VERSION);
 			let settled = false;
-			let blockedTimer: ReturnType<typeof setTimeout> | null = null;
+			let blockedTimer: number | null = null;
 			let upgradedFrom: number | null = null;
 
 			const finish = (fn: () => void) => {
 				if (settled) return;
 				settled = true;
-				if (blockedTimer !== null) clearTimeout(blockedTimer);
+				if (blockedTimer !== null) self.clearTimeout(blockedTimer);
 				fn();
 			};
 
-			request.onerror = () => finish(() => reject(request.error));
+			request.onerror = () =>
+				finish(() => reject(toError(request.error, "Failed to open the vector index database.")));
 
 			// The DB name is per-vault, so a second Obsidian window on the same vault
 			// opens the *same* database. When this open needs a version upgrade and
@@ -322,8 +327,8 @@ export class HNSWVectorStore implements VectorStore {
 				Logger.warn(
 					`${LOG_PREFIX} open blocked on "${this.dbName}" — another connection is still open (a second Obsidian window on this vault?). Waiting ${OPEN_BLOCKED_TIMEOUT_MS}ms for it to close.`,
 				);
-				if (blockedTimer !== null) clearTimeout(blockedTimer);
-				blockedTimer = setTimeout(() => {
+				if (blockedTimer !== null) self.clearTimeout(blockedTimer);
+				blockedTimer = self.setTimeout(() => {
 					finish(() =>
 						reject(
 							new Error(
@@ -527,7 +532,7 @@ export class HNSWVectorStore implements VectorStore {
 						vector: stored.vector,
 						level: node.level,
 						neighbors: node.neighbors,
-					} as HnswNode);
+					});
 				} else if (this.numericToId.has(stored.hnswId)) {
 					// Only rows that still have an id mapping are live; a row whose
 					// mapping is gone is mid-removal and must not come back.
@@ -635,7 +640,7 @@ export class HNSWVectorStore implements VectorStore {
 		// Cancel the pending debounced save so it can't fire after we null `db`,
 		// then flush synchronously so no incremental changes are lost on close.
 		if (this.saveIndexTimer !== null) {
-			clearTimeout(this.saveIndexTimer);
+			self.clearTimeout(this.saveIndexTimer);
 			this.saveIndexTimer = null;
 		}
 		if (this.hnswIndex && this.db && this.hasPendingIndexSave) {
@@ -762,7 +767,7 @@ export class HNSWVectorStore implements VectorStore {
 	/** Checkpoint for bulk runs: persist the graph now rather than on the debounce. */
 	async flush(): Promise<void> {
 		if (this.saveIndexTimer !== null) {
-			clearTimeout(this.saveIndexTimer);
+			self.clearTimeout(this.saveIndexTimer);
 			this.saveIndexTimer = null;
 		}
 		await this.flushIndex();
@@ -929,8 +934,8 @@ export class HNSWVectorStore implements VectorStore {
 		await new Promise<void>((resolve, reject) => {
 			const index = tx.objectStore(DOCUMENTS_STORE).index("path");
 			tx.oncomplete = () => resolve();
-			tx.onerror = () => reject(tx.error);
-			tx.onabort = () => reject(tx.error ?? new Error("IndexedDB transaction aborted."));
+			tx.onerror = () => reject(toError(tx.error, "IndexedDB transaction failed."));
+			tx.onabort = () => reject(toError(tx.error, "IndexedDB transaction aborted."));
 			paths.forEach((path, noteIndex) => {
 				const request = index.getAll(IDBKeyRange.only(path));
 				request.onsuccess = () => {
@@ -1141,7 +1146,7 @@ export class HNSWVectorStore implements VectorStore {
 			// Apply threshold if provided
 			const effectiveThreshold = threshold ?? 0;
 			return results.filter((r) => r.score >= effectiveThreshold);
-		} catch (error) {
+		} catch {
 			// Fallback to brute-force if HNSW fails
 			return this.bruteForceSearch(queryVector, topK, threshold);
 		}

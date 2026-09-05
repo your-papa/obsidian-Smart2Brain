@@ -18,6 +18,7 @@ import { type TitleBoostScale, getTitleMatchKind, matchesLeadingTitlePrefix } fr
 import { isNumericSearchTerm, normalizeSearchText, tokenizeSearchText } from "../search/searchTermUtils";
 import { getTermBoost, isStopword } from "../search/stopwords";
 import { LogLvl, Logger, getLogLevel } from "../utils/logging";
+import { toError } from "../utils/toError";
 
 import { getDbName } from "./types";
 
@@ -247,7 +248,7 @@ export class MiniSearchService {
 	/** Bumped on every mutation; lets an in-flight save detect it saved stale data. */
 	private mutationGeneration = 0;
 	private savesSuspended = false;
-	private saveTimeout: ReturnType<typeof setTimeout> | null = null;
+	private saveTimeout: number | null = null;
 	private documentPaths = new Set<string>();
 	private documentTitles = new Map<string, string>();
 	private documentAliases = new Map<string, string[]>();
@@ -297,18 +298,18 @@ export class MiniSearchService {
 		return new Promise((resolve, reject) => {
 			const request = indexedDB.open(this.dbName, DB_VERSION);
 			let settled = false;
-			let blockedTimer: ReturnType<typeof setTimeout> | null = null;
+			let blockedTimer: number | null = null;
 
 			const finish = (fn: () => void) => {
 				if (settled) return;
 				settled = true;
-				if (blockedTimer !== null) clearTimeout(blockedTimer);
+				if (blockedTimer !== null) window.clearTimeout(blockedTimer);
 				fn();
 			};
 
 			request.onerror = () => {
 				Logger.error("[MiniSearch] Failed to open database:", request.error);
-				finish(() => reject(request.error));
+				finish(() => reject(toError(request.error, "Failed to open the lexical index database.")));
 			};
 
 			// A blocked open (another connection holds an older version of this
@@ -320,8 +321,8 @@ export class MiniSearchService {
 				Logger.warn(
 					`[MiniSearch] open blocked on "${this.dbName}" — another connection is still open (a second Obsidian window on this vault?). Waiting ${OPEN_BLOCKED_TIMEOUT_MS}ms for it to close.`,
 				);
-				if (blockedTimer !== null) clearTimeout(blockedTimer);
-				blockedTimer = setTimeout(() => {
+				if (blockedTimer !== null) window.clearTimeout(blockedTimer);
+				blockedTimer = window.setTimeout(() => {
 					finish(() =>
 						reject(
 							new Error(
@@ -467,7 +468,7 @@ export class MiniSearchService {
 
 			request.onerror = () => {
 				Logger.error("[MiniSearch] Failed to save index:", request.error);
-				reject(request.error);
+				reject(toError(request.error, "Failed to save the lexical index."));
 			};
 		});
 	}
@@ -484,7 +485,7 @@ export class MiniSearchService {
 	suspendScheduledSaves(): void {
 		this.savesSuspended = true;
 		if (this.saveTimeout) {
-			clearTimeout(this.saveTimeout);
+			window.clearTimeout(this.saveTimeout);
 			this.saveTimeout = null;
 		}
 	}
@@ -523,14 +524,14 @@ export class MiniSearchService {
 
 	private scheduleSaveTimer(): void {
 		if (this.saveTimeout) {
-			clearTimeout(this.saveTimeout);
+			window.clearTimeout(this.saveTimeout);
 			this.saveTimeout = null;
 		}
 
 		// Wait 5 s, then hand off to the browser's idle scheduler.
 		// The 10 s timeout on requestIdleCallback ensures it eventually runs
 		// even on a busy browser, but never mid-keystroke or mid-animation.
-		this.saveTimeout = setTimeout(() => {
+		this.saveTimeout = window.setTimeout(() => {
 			this.saveTimeout = null;
 			requestIdleCallback(
 				() => void this.saveToStorage().catch((e) => Logger.error("[MiniSearch] Scheduled save failed:", e)),
@@ -544,7 +545,7 @@ export class MiniSearchService {
 	 */
 	async flush(): Promise<void> {
 		if (this.saveTimeout) {
-			clearTimeout(this.saveTimeout);
+			window.clearTimeout(this.saveTimeout);
 			this.saveTimeout = null;
 		}
 
@@ -1070,7 +1071,7 @@ export class MiniSearchService {
 	 */
 	close(): void {
 		if (this.saveTimeout) {
-			clearTimeout(this.saveTimeout);
+			window.clearTimeout(this.saveTimeout);
 		}
 		if (this.db) {
 			this.db.close();

@@ -50,7 +50,7 @@ function tryRequireNativeAls(): (new <T>() => AsyncLocalStorageLike<T>) | null {
 	type AlsModule = { AsyncLocalStorage?: new <T>() => AsyncLocalStorageLike<T> };
 	// Electron renderer (Obsidian desktop) exposes CommonJS `require`.
 	try {
-		const req = (globalThis as { require?: (id: string) => unknown }).require;
+		const req = (window as { require?: (id: string) => unknown }).require;
 		if (typeof req === "function") {
 			const mod = req("async_hooks") as AlsModule;
 			if (mod.AsyncLocalStorage) return mod.AsyncLocalStorage;
@@ -61,7 +61,7 @@ function tryRequireNativeAls(): (new <T>() => AsyncLocalStorageLike<T>) | null {
 	// Plain Node (e.g. Vitest) has no global `require` under ESM, but exposes the
 	// synchronous builtin accessor `process.getBuiltinModule` (Node 20.16+).
 	try {
-		const proc = (globalThis as { process?: { getBuiltinModule?: (id: string) => unknown } }).process;
+		const proc = (window as { process?: { getBuiltinModule?: (id: string) => unknown } }).process;
 		if (typeof proc?.getBuiltinModule === "function") {
 			const mod = proc.getBuiltinModule("async_hooks") as AlsModule;
 			if (mod.AsyncLocalStorage) return mod.AsyncLocalStorage;
@@ -70,7 +70,7 @@ function tryRequireNativeAls(): (new <T>() => AsyncLocalStorageLike<T>) | null {
 		// fall through
 	}
 	// A polyfilled or native global (some runtimes expose it directly).
-	const globalAls = (globalThis as { AsyncLocalStorage?: new <T>() => AsyncLocalStorageLike<T> }).AsyncLocalStorage;
+	const globalAls = (window as { AsyncLocalStorage?: new <T>() => AsyncLocalStorageLike<T> }).AsyncLocalStorage;
 	return globalAls ?? null;
 }
 

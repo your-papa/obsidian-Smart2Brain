@@ -64,14 +64,14 @@ export class LexicalSearchService {
 	private readonly plugin: SecondBrainPlugin;
 	private readonly miniSearch: MiniSearchService;
 	private readonly vaultId: string;
-	/** Crash-backoff marker for scheduled bulk runs (`s2b-lexical-bulk-attempts:<vaultId>`). */
+	/** Crash-backoff marker for scheduled bulk runs (`s2b-lexical-bulk-attempts`, vault-scoped). */
 	private readonly bulkAttempts: BulkAttemptMarker;
 
 	private constructor(plugin: SecondBrainPlugin) {
 		this.plugin = plugin;
 		this.vaultId = getData().vaultSlug;
 		this.miniSearch = new MiniSearchService(this.vaultId);
-		this.bulkAttempts = new BulkAttemptMarker("lexical", this.vaultId);
+		this.bulkAttempts = new BulkAttemptMarker("lexical", plugin.app);
 	}
 
 	static async initialize(plugin: SecondBrainPlugin): Promise<LexicalSearchService> {
@@ -284,7 +284,7 @@ export class LexicalSearchService {
 	private updateProgressNotice(notice: Notice, processed: number, total: number): void {
 		const percentage = total > 0 ? Math.round((processed / total) * 100) : 100;
 
-		const el = notice.noticeEl;
+		const el = notice.messageEl;
 		el.empty();
 		const container = el.createDiv({ cls: "s2b-indexing-notice" });
 		container.createDiv({
@@ -293,10 +293,8 @@ export class LexicalSearchService {
 		});
 
 		const progressContainer = container.createDiv({ cls: "s2b-indexing-progress" });
-		progressContainer.style.cssText =
-			"width: 100%; height: 6px; background: var(--background-modifier-border); border-radius: 3px; overflow: hidden; margin: 8px 0;";
 		const progressFill = progressContainer.createDiv({ cls: "s2b-indexing-fill" });
-		progressFill.style.cssText = `width: ${percentage}%; height: 100%; background: var(--interactive-accent); border-radius: 3px; transition: width 0.2s ease;`;
+		progressFill.setCssStyles({ width: `${percentage}%` });
 
 		container.createDiv({ cls: "s2b-indexing-percent", text: `${percentage}%` });
 	}

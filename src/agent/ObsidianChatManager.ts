@@ -545,7 +545,7 @@ export class ObsidianChatManager extends BaseCheckpointSaver {
 
 	private saveDebounced = debounce(
 		(threadId: string) => {
-			this.saveThread(threadId);
+			void this.saveThread(threadId);
 		},
 		2000,
 		true,

@@ -71,7 +71,7 @@ function normalizeToolCallMessage<TMessage>(message: TMessage): TMessage {
 		additional_kwargs?: unknown;
 		response_metadata?: unknown;
 	};
-	const messageType = typeof baseMessage._getType === "function" ? baseMessage._getType() : undefined;
+	const messageType = typeof baseMessage.type === "string" ? baseMessage.type : undefined;
 	if (messageType !== "generic") {
 		return message;
 	}
@@ -183,7 +183,7 @@ function normalizeInputMessage<TMessage>(message: TMessage): TMessage {
 		additional_kwargs?: unknown;
 		response_metadata?: unknown;
 	};
-	const messageType = typeof baseMessage._getType === "function" ? baseMessage._getType() : undefined;
+	const messageType = typeof baseMessage.type === "string" ? baseMessage.type : undefined;
 	const additionalKwargs =
 		baseMessage.additional_kwargs && typeof baseMessage.additional_kwargs === "object"
 			? { ...(baseMessage.additional_kwargs as Record<string, unknown>) }
@@ -288,7 +288,7 @@ export function createNormalizedChatModel<TModel extends BaseChatModel>(model: T
 
 			return typeof value === "function" ? value.bind(target) : value;
 		},
-	}) as TModel;
+	});
 }
 
 export function createTransportedChatOpenAI(

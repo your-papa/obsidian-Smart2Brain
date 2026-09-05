@@ -55,19 +55,28 @@ function shouldPollVisibleNotesContext(workspace: Workspace): boolean {
 	return false;
 }
 
+/** The pdf.js viewer nested inside Obsidian's PDF view (internal, untyped API). */
+interface PdfJsViewerInternal {
+	_currentPageNumber?: number;
+	currentPageNumber?: number;
+	_pages?: unknown[];
+	pagesCount?: number;
+	_pageLabels?: string[] | null;
+}
+
 function getPdfContext(view: unknown): string | undefined {
 	try {
-		// biome-ignore lint/suspicious/noExplicitAny: Obsidian internal PDF viewer API
-		const inner = (view as any)?.viewer?.child?.pdfViewer?.pdfViewer;
+		const inner = (view as { viewer?: { child?: { pdfViewer?: { pdfViewer?: PdfJsViewerInternal } } } } | null)
+			?.viewer?.child?.pdfViewer?.pdfViewer;
 		if (!inner) return undefined;
-		const page: number = inner._currentPageNumber ?? inner.currentPageNumber;
-		const total: number = inner._pages?.length ?? inner.pagesCount;
+		const page = inner._currentPageNumber ?? inner.currentPageNumber;
+		const total = inner._pages?.length ?? inner.pagesCount;
 		if (typeof page !== "number" || page <= 0 || typeof total !== "number" || total <= 0) {
 			return undefined;
 		}
 		// PDFs can define custom page labels (e.g. 0-indexed, Roman numerals).
 		// When present, show the label instead of the raw page number.
-		const labels: string[] | null = inner._pageLabels;
+		const labels = inner._pageLabels;
 		const label = labels?.[page - 1];
 		if (label != null && label !== "" && label !== String(page)) {
 			return `p. ${label} / ${total}`;

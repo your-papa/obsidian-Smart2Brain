@@ -144,7 +144,7 @@ export class PendingChangesStore {
 				const parsed = JSON.parse(raw);
 				const result = pendingChangesArraySchema.safeParse(parsed);
 				if (result.success) {
-					this.#entries = result.data as PendingChangeEntry[];
+					this.#entries = result.data;
 				} else {
 					Logger.error(
 						"[PendingChanges] Invalid data in pending-changes.json, discarding malformed entries",

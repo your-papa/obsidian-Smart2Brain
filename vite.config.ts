@@ -4,13 +4,12 @@ import { defineConfig } from "vite";
 import { copyFileSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { builtinModules } from "node:module";
 
 // Anchor all file paths to this config file's directory, NOT process.cwd():
 // builds must work identically from the main checkout and from any git
 // worktree (parallel agent slots), regardless of the caller's CWD.
 const configDir = fileURLToPath(new URL(".", import.meta.url));
-
-import builtinModules from "builtin-modules";
 
 /**
  * Route bundled Node-builtin requires through Obsidian's working `require`.
@@ -192,6 +191,7 @@ export default defineConfig(({ mode }) => {
 					"@lezer/lr",
 					"@sap-ai-sdk/langchain", // Optional dependency for SAP AI Core provider
 					...builtinModules,
+					...builtinModules.map((m) => `node:${m}`),
 				],
 			},
 			outDir: setOutDir(mode),

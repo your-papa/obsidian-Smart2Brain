@@ -197,7 +197,7 @@ async function readBoundedBody(
 export function createFetchUrlTool() {
 	const pluginData = getData();
 	const getToolConfig = () => pluginData.getSelectedAgent().toolsConfig.fetch_url;
-	const fetchImpl = createObsidianFetch(globalThis.fetch);
+	const fetchImpl = createObsidianFetch(window.fetch.bind(window));
 
 	const fetchUrlFn = async ({ url }: { url: string }): Promise<string> => {
 		const trimmed = url?.trim();

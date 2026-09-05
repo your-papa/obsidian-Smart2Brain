@@ -91,7 +91,7 @@ let cachedResponse: CachedData | null = null;
  */
 async function fetchModelInfo(baseUrl: string, modelName: string): Promise<OllamaModelInfo | null> {
 	try {
-		const response = await globalThis.fetch(`${baseUrl}/api/show`, {
+		const response = await window.fetch(`${baseUrl}/api/show`, {
 			method: "POST",
 			headers: {
 				"Content-Type": "application/json",
@@ -123,7 +123,7 @@ async function fetchModelInfo(baseUrl: string, modelName: string): Promise<Ollam
 			}
 			// Also check direct keys
 			if (data.model_info["llama.context_length"] !== undefined) {
-				contextLength = data.model_info["llama.context_length"] as number;
+				contextLength = data.model_info["llama.context_length"];
 			}
 		}
 

@@ -444,7 +444,7 @@ function resolveSegmentsByLeiden(
 			id: `leiden:${index}`,
 			label,
 			color: colorByAnchor.get(anchorOf(bestId, communityId)) ?? colors[index],
-			source: "leiden" as SegmentBy,
+			source: "leiden",
 			paths,
 			communityId,
 		};

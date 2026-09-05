@@ -38,8 +38,8 @@ import { createAsyncLocalStorage, hasNativeAsyncLocalStorage } from "./asyncLoca
  */
 export function initLangGraphAsyncContext(): void {
 	try {
-		// biome-ignore lint/suspicious/noExplicitAny: singleton accepts a duck-typed ALS
-		AsyncLocalStorageProviderSingleton.initializeGlobalInstance(createAsyncLocalStorage<any>() as any);
+		// The singleton accepts a duck-typed ALS; our shim matches its run/getStore surface.
+		AsyncLocalStorageProviderSingleton.initializeGlobalInstance(createAsyncLocalStorage<unknown>());
 		if (!hasNativeAsyncLocalStorage) {
 			Logger.info("langgraphContext: using synchronous AsyncLocalStorage shim (no node:async_hooks)");
 		}

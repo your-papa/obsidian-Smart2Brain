@@ -354,7 +354,7 @@ export default class SecondBrainPlugin extends Plugin {
 			// hotkey press moments later can't ride on a stale tap.
 			navbarTapAt = 0;
 			if (!fromNavbar || !getData().overrideMobileNavbarSearch) {
-				return (originalOnOpen as (...a: unknown[]) => unknown).apply(this, args);
+				return originalOnOpen.apply(this, args as []);
 			}
 			new SearchModal(app).open();
 		};
@@ -430,7 +430,10 @@ export default class SecondBrainPlugin extends Plugin {
 
 		// Intercept .chat file opens so they go directly to the sidebar
 		// without ever replacing the note in the main editor area.
-		const origOpenFile = WorkspaceLeaf.prototype.openFile;
+		// Read as a plain function value: it is only ever re-invoked below with an
+		// explicit receiver (`.call(leaf, …)` / `.apply(this, …)`).
+		const leafProto = WorkspaceLeaf.prototype as { openFile: WorkspaceLeaf["openFile"] };
+		const origOpenFile = leafProto.openFile;
 		const app = this.app;
 		WorkspaceLeaf.prototype.openFile = async function (file, openState) {
 			if (file.extension === "chat") {
@@ -447,7 +450,7 @@ export default class SecondBrainPlugin extends Plugin {
 							(location === "left" ? ws.getLeftLeaf(false) : ws.getRightLeaf(false));
 						if (sidebarLeaf) {
 							await origOpenFile.call(sidebarLeaf, file, openState);
-							ws.revealLeaf(sidebarLeaf);
+							await ws.revealLeaf(sidebarLeaf);
 							return;
 						}
 					}
@@ -928,7 +931,7 @@ export default class SecondBrainPlugin extends Plugin {
 			leaf = newLeaf;
 		}
 
-		workspace.revealLeaf(leaf);
+		await workspace.revealLeaf(leaf);
 	}
 
 	// DISABLED FOR INITIAL RELEASE — see the Note Context registerView block in onload().
@@ -972,6 +975,6 @@ export default class SecondBrainPlugin extends Plugin {
 			leaf = newLeaf;
 		}
 
-		workspace.revealLeaf(leaf);
+		await workspace.revealLeaf(leaf);
 	}
 }

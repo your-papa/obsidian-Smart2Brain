@@ -30,7 +30,7 @@ function resolveMaxContentLength(agentId: string): number {
 /** Extract text from a LangChain chat model response (handles both string and structured content). */
 function extractTextContent(response: { content: string | Array<Record<string, unknown>> }): string {
 	if (typeof response.content === "string") return response.content;
-	return (response.content as Array<Record<string, unknown>>)
+	return response.content
 		.filter((c): c is { type: "text"; text: string } => typeof c === "object" && "text" in c)
 		.map((c) => c.text)
 		.join("\n");

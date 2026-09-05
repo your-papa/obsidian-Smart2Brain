@@ -226,7 +226,7 @@ export const DEFAULT_SETTINGS: PluginData = {
 	// UI state
 	isVerbose: false,
 	showToolIODetails: false,
-	chatOpenLocation: "tab" as ChatOpenLocation,
+	chatOpenLocation: "tab",
 	lastActiveChatId: null,
 	onboardingComplete: false,
 	onboardingSplashSeen: false,

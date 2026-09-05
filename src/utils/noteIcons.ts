@@ -17,7 +17,7 @@ const ICONIC_COLOR_VARIABLES = new Map<string, string>([
 
 type CommunityPlugins = Record<string, unknown>;
 
-const colorResolutionElement = document.createElement("div");
+const colorResolutionElement = createDiv();
 
 interface IconizeApi {
 	setIconForNode(iconName: string, node: HTMLElement, color?: string): void;
@@ -282,10 +282,10 @@ function getIconicPathIcon(app: App, path: string, kind: PathIconKind): PathIcon
 		color: item.color ?? undefined,
 		isDefault: usingDefault,
 		render(node) {
-			const refreshIcon = plugin.fileIconManager?.refreshIcon;
-			if (typeof refreshIcon === "function") {
+			const manager = plugin.fileIconManager;
+			if (typeof manager?.refreshIcon === "function") {
 				clearNode(node);
-				refreshIcon.call(plugin.fileIconManager, item, node);
+				manager.refreshIcon(item, node);
 				return;
 			}
 

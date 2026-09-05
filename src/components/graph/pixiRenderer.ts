@@ -7,18 +7,7 @@
  * and reactive state.
  */
 
-import {
-	Application,
-	CanvasSource,
-	Container,
-	Graphics,
-	Sprite,
-	Text,
-	TextStyle,
-	Texture,
-	Ticker,
-	type PointData,
-} from "pixi.js";
+import { Application, CanvasSource, Container, Graphics, Sprite, Text, TextStyle, Texture, Ticker } from "pixi.js";
 import { Viewport } from "pixi-viewport";
 import { edgeAlphaZoomLift, nodeDrawRadius, zoomNodeScale } from "../../utils/graphUtils";
 
@@ -72,7 +61,7 @@ function resolveColor(raw: string, fallback: string): string {
 
 	try {
 		if (!_colorCtx) {
-			const c = document.createElement("canvas");
+			const c = createEl("canvas");
 			c.width = 1;
 			c.height = 1;
 			// getContext can genuinely return null (no 2D support, or a context already
@@ -380,11 +369,8 @@ export class PixiRenderer {
 		this._appInitialized = true;
 
 		// Style the canvas
-		const canvas = this.app.canvas as HTMLCanvasElement;
-		canvas.style.display = "block";
-		canvas.style.width = "100%";
-		canvas.style.height = "100%";
-		canvas.style.touchAction = "none";
+		const canvas = this.app.canvas;
+		canvas.addClass("s2b-graph-canvas");
 		containerEl.prepend(canvas);
 
 		// Context-loss hooks. Pixi's GlContextSystem registered its listeners during
@@ -471,7 +457,7 @@ export class PixiRenderer {
 		// of aliased blobs — render textures only mipmap on explicit request.
 		// Extreme zoom-ins upscale past the texture, where the vector stroke
 		// ring on the hovered node carries the sharp edge anyway.
-		const disc = document.createElement("canvas");
+		const disc = createEl("canvas");
 		disc.width = NODE_TEXTURE_SIZE;
 		disc.height = NODE_TEXTURE_SIZE;
 		const discCtx = disc.getContext("2d");
@@ -612,7 +598,7 @@ export class PixiRenderer {
 		if (this._appInitialized) {
 			// The context-loss listeners were only registered once init() got past
 			// the same gate, so they exist exactly when the app does.
-			const canvas = this.app.canvas as HTMLCanvasElement;
+			const canvas = this.app.canvas;
 			if (this._contextLostHandler) canvas.removeEventListener("webglcontextlost", this._contextLostHandler);
 			if (this._contextRestoredHandler) {
 				canvas.removeEventListener("webglcontextrestored", this._contextRestoredHandler);
@@ -639,7 +625,7 @@ export class PixiRenderer {
 	// ── Canvas access ──────────────────────────────────────
 
 	get canvas(): HTMLCanvasElement {
-		return this.app.canvas as HTMLCanvasElement;
+		return this.app.canvas;
 	}
 
 	// ── Resize ─────────────────────────────────────────────
@@ -701,7 +687,7 @@ export class PixiRenderer {
 	/** Animate the viewport to frame a bounding box. */
 	animateToFrame(centerX: number, centerY: number, scale: number, duration: number): void {
 		this.viewport.animate({
-			position: { x: centerX, y: centerY } as PointData,
+			position: { x: centerX, y: centerY },
 			scale: scale,
 			time: duration,
 			ease: "easeOutCubic",

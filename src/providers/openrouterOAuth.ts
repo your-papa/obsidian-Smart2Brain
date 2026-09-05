@@ -1,8 +1,13 @@
-import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import { Platform, requestUrl } from "obsidian";
 import { Logger } from "../utils/logging";
 import { escapeHtml } from "../utils/html";
-import { arrayBufferToBase64Url, requireNodeHttp } from "./oauthNode";
+import {
+	arrayBufferToBase64Url,
+	type NodeHttpIncomingMessage as IncomingMessage,
+	type NodeHttpServer as Server,
+	type NodeHttpServerResponse as ServerResponse,
+	requireNodeHttp,
+} from "./oauthNode";
 
 const OPENROUTER_AUTH_URL = "https://openrouter.ai/auth";
 const OPENROUTER_EXCHANGE_URL = "https://openrouter.ai/api/v1/auth/keys";
