@@ -555,7 +555,9 @@ async function handleTestConnection() {
     display: flex;
     flex-direction: column;
     gap: 16px;
-    padding: 8px 0;
+    /* Top only: the modal's own padding already separates the footer from the
+       bottom edge, and the flex gap spaces the rows. */
+    padding: 8px 0 0;
   }
 
   /* Import banner. Transient feedback for a paste — colour comes from Obsidian's
@@ -658,6 +660,10 @@ async function handleTestConnection() {
     align-items: center;
     flex-wrap: wrap;
     gap: 8px;
+    /* Core gives the footer a large top margin for modals whose body sits flush
+       against it; here the flex gap already provides the spacing, so the two
+       stacked and left a visible hole between "Test connection" and the buttons. */
+    margin-top: 0;
   }
 
   /* Phone: core stacks `.modal-button-container` into a column; the row-oriented
