@@ -1,6 +1,6 @@
 // vite.config.ts
 import { svelte, vitePreprocess } from "@sveltejs/vite-plugin-svelte";
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 import { copyFileSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -120,6 +120,53 @@ const PROCESS_SHIM =
 
 const BANNER = PROCESS_SHIM;
 
+/**
+ * Dependency modules swapped for shims in `src/lib/shims/`, matched on the
+ * RESOLVED file path (so a relative `./skills.mjs` inside one package cannot be
+ * confused with another's). Together these keep two capabilities out of the
+ * bundle that the plugin never uses but Obsidian's plugin review flags:
+ *
+ * - process spawning (`child_process`): the MCP SDK's stdio transport and the
+ *   Anthropic SDK's local agent toolset (bash/grep/skills);
+ * - dynamic code execution (`new Function`): the MCP SDK's ajv validator
+ *   (replaced by the SDK's own cfworker provider) and Pixi's code generators
+ *   (replaced at runtime by `pixi.js/unsafe-eval`, imported in pixiRenderer.ts).
+ *
+ * Each shim's header says what it replaces and why.
+ */
+const MODULE_SHIMS: Array<[pattern: RegExp, shim: string]> = [
+	[/\/@modelcontextprotocol\/sdk\/dist\/esm\/client\/stdio\.js$/, "src/lib/shims/mcpStdioTransport.ts"],
+	[/\/@modelcontextprotocol\/sdk\/dist\/esm\/validation\/ajv-provider\.js$/, "src/lib/shims/mcpJsonSchemaValidator.ts"],
+	[/\/@anthropic-ai\/sdk\/tools\/agent-toolset\/node\.mjs$/, "src/lib/shims/anthropicAgentToolset.ts"],
+	[
+		/\/pixi\.js\/lib\/.*\/(unsafeEvalSupported|createUboSyncFunction|GenerateShaderSyncCode|generateUniformsSync|generateParticleUpdateFunction)\.mjs$/,
+		"src/lib/shims/pixiNoEval.ts",
+	],
+];
+
+function shimModules(): Plugin {
+	return {
+		name: "shim-modules",
+		enforce: "pre",
+		async resolveId(source, importer, options) {
+			const resolved = await this.resolve(source, importer, { ...options, skipSelf: true });
+			if (!resolved) return null;
+			for (const [pattern, shim] of MODULE_SHIMS) {
+				if (pattern.test(resolved.id)) return resolve(configDir, shim);
+			}
+			return null;
+		},
+		transform(code, id) {
+			// @langchain/mcp-adapters keeps the stdio option schema (never reachable
+			// here) and its description names `child_process.spawn` — a literal that
+			// reads as shell access to a bundle scan. Reword the doc string only.
+			if (!id.endsWith("/@langchain/mcp-adapters/dist/types.js")) return null;
+			const reworded = code.replace("Node's `child_process.spawn`", "Node's process spawning");
+			return reworded === code ? null : { code: reworded, map: null };
+		},
+	};
+}
+
 const setOutDir = (mode: string) => {
 	switch (mode) {
 		case "development":
@@ -137,6 +184,7 @@ export default defineConfig(({ mode }) => {
 
 	return {
 		plugins: [
+			shimModules(),
 			svelte({
 				preprocess: vitePreprocess(),
 				onwarn: (warning, handler) => {

@@ -1,14 +1,13 @@
 <script lang="ts">
 import type { MultiServerMCPClient } from "@langchain/mcp-adapters";
-import { Notice, Platform } from "obsidian";
+import { Notice } from "obsidian";
 import { onMount } from "svelte";
 import { installObsidianFetch } from "../../lib/obsidianFetch";
 import type SecondBrainPlugin from "../../main";
-import type { MCPHTTPServerConfig, MCPServerConfig, MCPStdioServerConfig, MCPTransportType } from "../../types/plugin";
+import type { MCPServerConfig } from "../../types/plugin";
 import { getData } from "../../stores/dataStore.svelte";
 import { Logger } from "../../utils/logging";
 import Button from "../ui/Button.svelte";
-import Dropdown from "../ui/Dropdown.svelte";
 import Icon from "../ui/Icon.svelte";
 import Text from "../ui/Text.svelte";
 import { confirmDelete } from "./ConfirmModal";
@@ -61,24 +60,13 @@ let name = $state(initialConfig?.displayName ?? "");
 // owns that toggle. Carry the existing value through so saving an edit to a
 // disabled server doesn't silently re-enable it; new servers start enabled.
 const enabled = (() => initialConfig?.enabled ?? true)();
-// stdio is desktop-only; if a mobile user opens an existing stdio server
-// (e.g. synced from desktop), fall back to http so the dropdown selection
-// stays valid rather than showing an absent option.
-let transport = $state<MCPTransportType>(Platform.isDesktopApp ? (initialConfig?.transport ?? "http") : "http");
 
-// stdio-specific fields
-let command = $state((initialConfig as MCPStdioServerConfig)?.command ?? "");
-let args = $state((initialConfig as MCPStdioServerConfig)?.args?.join(" ") ?? "");
-let envVars = $state(
-	Object.entries((initialConfig as MCPStdioServerConfig)?.env ?? {})
-		.map(([k, v]) => `${k}=${v}`)
-		.join("\n"),
-);
-
-// HTTP-specific fields
-let url = $state((initialConfig as MCPHTTPServerConfig)?.url ?? "");
+// HTTP is the only transport: a stdio server would spawn a local process, which
+// is shell access the plugin deliberately does not ship (see the stdio shim in
+// src/lib/shims/). Pasted configs describing one are rejected with a message.
+let url = $state(initialConfig?.url ?? "");
 let headers = $state(
-	Object.entries((initialConfig as MCPHTTPServerConfig)?.headers ?? {})
+	Object.entries(initialConfig?.headers ?? {})
 		.map(([k, v]) => `${k}: ${v}`)
 		.join("\n"),
 );
@@ -90,10 +78,6 @@ let headers = $state(
 // pre-paste values are snapshotted so the banner can offer a one-click undo.
 type FormSnapshot = {
 	name: string;
-	transport: MCPTransportType;
-	command: string;
-	args: string;
-	envVars: string;
 	url: string;
 	headers: string;
 };
@@ -102,15 +86,11 @@ let importError = $state<string | null>(null);
 let importUndo = $state<FormSnapshot | null>(null);
 
 function snapshotForm(): FormSnapshot {
-	return { name, transport, command, args, envVars, url, headers };
+	return { name, url, headers };
 }
 
 function restoreForm(snapshot: FormSnapshot) {
 	name = snapshot.name;
-	transport = snapshot.transport;
-	command = snapshot.command;
-	args = snapshot.args;
-	envVars = snapshot.envVars;
 	url = snapshot.url;
 	headers = snapshot.headers;
 }
@@ -121,61 +101,9 @@ let testError = $state<string | null>(null);
 let discoveredTools = $state<{ name: string; description?: string }[]>([]);
 let testSuccess = $state(false);
 
-// Transport options. stdio spawns a local process (Node child_process), which
-// is desktop-only — AgentManager skips all MCP loading on mobile, so don't let
-// mobile users configure a transport that would silently never load.
-const transportOptions = [
-	{ display: "Remote Server (HTTP)", value: "http" as MCPTransportType },
-	...(Platform.isDesktopApp ? [{ display: "Local Command (stdio)", value: "stdio" as MCPTransportType }] : []),
-];
-
 onMount(() => {
 	modal.setTitle(isEditing ? `Edit MCP Server: ${capturedExistingConfig?.displayName}` : "Add MCP Server");
 });
-
-function parseArgs(input: string): string[] {
-	// Split by spaces, but respect quoted strings
-	const result: string[] = [];
-	let current = "";
-	let inQuote = false;
-	let quoteChar = "";
-
-	for (const char of input) {
-		if ((char === '"' || char === "'") && !inQuote) {
-			inQuote = true;
-			quoteChar = char;
-		} else if (char === quoteChar && inQuote) {
-			inQuote = false;
-			quoteChar = "";
-		} else if (char === " " && !inQuote) {
-			if (current) {
-				result.push(current);
-				current = "";
-			}
-		} else {
-			current += char;
-		}
-	}
-	if (current) {
-		result.push(current);
-	}
-	return result;
-}
-
-function parseEnvVars(input: string): Record<string, string> {
-	const result: Record<string, string> = {};
-	for (const line of input.split("\n")) {
-		const trimmed = line.trim();
-		if (!trimmed || !trimmed.includes("=")) continue;
-		const eqIndex = trimmed.indexOf("=");
-		const key = trimmed.slice(0, eqIndex).trim();
-		const value = trimmed.slice(eqIndex + 1).trim();
-		if (key) {
-			result[key] = value;
-		}
-	}
-	return result;
-}
 
 function parseHeaders(input: string): Record<string, string> {
 	const result: Record<string, string> = {};
@@ -200,7 +128,8 @@ function parseHeaders(input: string): Record<string, string> {
  * (or `mcp.servers`) and spells the transport `type` rather than `transport`.
  * A bare single-server object (no wrapper) is accepted too, since that's what
  * people often copy out of a README. Everything is normalised onto our own
- * `MCPServerConfig` shape.
+ * `MCPServerConfig` shape. Only remote (HTTP/SSE) entries qualify; a local
+ * command (stdio) entry is refused with an explanation.
  *
  * This only fills the fields — it doesn't save. The user still reviews and
  * confirms, so a malformed or hostile snippet can't configure a server behind
@@ -260,14 +189,11 @@ function applyImportedJson(text: string): string | null {
 	// the URL still lands somewhere useful rather than being dropped silently.
 	const isStdio = declared === "stdio" || (!declared && !hasUrl && hasCommand);
 
-	if (isStdio && !Platform.isDesktopApp) {
-		return "This is a local (stdio) server, which is desktop-only";
+	if (isStdio) {
+		return "This is a local command (stdio) server. Smart Second Brain only connects to MCP servers over HTTP.";
 	}
-	if (!isStdio && !hasUrl) {
+	if (!hasUrl) {
 		return "Remote server entry is missing a `url`";
-	}
-	if (isStdio && !hasCommand) {
-		return "Local server entry is missing a `command`";
 	}
 
 	// Only name an unnamed form — never clobber a name the user already typed.
@@ -279,16 +205,8 @@ function applyImportedJson(text: string): string | null {
 		name = displayName ?? entryKey ?? "";
 	}
 
-	if (isStdio) {
-		transport = "stdio";
-		command = (entry.command as string).trim();
-		args = Array.isArray(entry.args) ? entry.args.filter((a): a is string => typeof a === "string").join(" ") : "";
-		envVars = stringifyRecord(entry.env, "=");
-	} else {
-		transport = "http";
-		url = (entry.url as string).trim();
-		headers = stringifyRecord(entry.headers, ": ");
-	}
+	url = (entry.url as string).trim();
+	headers = stringifyRecord(entry.headers, ": ");
 
 	// A pasted config describes a different server than the one just probed.
 	testSuccess = false;
@@ -385,19 +303,13 @@ function validateForm(): string | null {
 		}
 	}
 
-	if (transport === "stdio") {
-		if (!command.trim()) {
-			return "Command is required for stdio transport";
-		}
-	} else {
-		if (!url.trim()) {
-			return "URL is required for HTTP transport";
-		}
-		try {
-			new URL(url.trim());
-		} catch {
-			return "Invalid URL format";
-		}
+	if (!url.trim()) {
+		return "URL is required";
+	}
+	try {
+		new URL(url.trim());
+	} catch {
+		return "Invalid URL format";
 	}
 
 	return null;
@@ -412,25 +324,13 @@ function handleSave() {
 
 	const newServerId = generateServerId(name);
 
-	let config: MCPServerConfig;
-	if (transport === "stdio") {
-		config = {
-			displayName: name.trim(),
-			transport: "stdio",
-			enabled,
-			command: command.trim(),
-			args: parseArgs(args),
-			env: parseEnvVars(envVars),
-		};
-	} else {
-		config = {
-			displayName: name.trim(),
-			transport: "http",
-			enabled,
-			url: url.trim(),
-			headers: parseHeaders(headers),
-		};
-	}
+	const config: MCPServerConfig = {
+		displayName: name.trim(),
+		transport: "http",
+		enabled,
+		url: url.trim(),
+		headers: parseHeaders(headers),
+	};
 
 	onSave(newServerId, config);
 	modal.close();
@@ -449,31 +349,6 @@ async function handleDelete() {
  */
 function buildTestConfig() {
 	const testServerId = "test-server";
-
-	if (transport === "stdio") {
-		return {
-			mcpServers: {
-				[testServerId]: {
-					transport: "stdio" as const,
-					command: command.trim(),
-					args: parseArgs(args),
-					env: parseEnvVars(envVars),
-				},
-			},
-		};
-	}
-	if (transport === "http") {
-		return {
-			mcpServers: {
-				[testServerId]: {
-					transport: "http" as const,
-					url: url.trim(),
-					headers: parseHeaders(headers),
-				},
-			},
-		};
-	}
-
 	return {
 		mcpServers: {
 			[testServerId]: {
@@ -524,8 +399,8 @@ async function handleTestConnection() {
 
 			new Notice(`Connection successful! Found ${tools.length} tool(s).`);
 		} finally {
-			// Close the client so a stdio server's spawned child process / open
-			// session doesn't dangle after a one-off connection test.
+			// Close the client so the open session doesn't dangle after a one-off
+			// connection test.
 			try {
 				await mcpClient?.close();
 			} catch (closeErr) {
@@ -584,59 +459,6 @@ async function handleTestConnection() {
       />
     </SettingContainer>
 
-    <!-- Only worth asking when there's a real choice: stdio is desktop-only, so
-         on mobile this is a single-option dropdown. -->
-    {#if transportOptions.length > 1}
-      <SettingContainer name="Transport" desc="How to connect to this server">
-        <Dropdown
-          id="mcp-server-transport"
-          type="options"
-          dropdown={transportOptions}
-          selected={transport}
-          onchange={(v) => (transport = v)}
-        />
-      </SettingContainer>
-    {/if}
-
-    {#if transport === "stdio"}
-      <SettingContainer
-        class="mcp-row--stacked"
-        name="Command"
-        desc="The executable to run, plus its arguments — or paste the server's JSON config to fill this form"
-      >
-        <div class="mcp-command-row">
-          <Text
-            id="mcp-server-command"
-            inputType="text"
-            class="mcp-command-input"
-            value={command}
-            placeholder="npx"
-            onblur={(v) => (command = v)}
-          />
-          <Text
-            id="mcp-server-arguments"
-            inputType="text"
-            class="mcp-args-input"
-            value={args}
-            placeholder="-y @modelcontextprotocol/server-filesystem /path"
-            onblur={(v) => (args = v)}
-          />
-        </div>
-      </SettingContainer>
-
-      <SettingContainer
-        class="mcp-row--stacked"
-        name="Environment variables"
-        desc="Optional — one per line, KEY=VALUE"
-      >
-        <TextArea
-          id="mcp-server-env"
-          class="mcp-textarea"
-          bind:value={envVars}
-          placeholder={"API_KEY=your-key\nDEBUG=true"}
-        />
-      </SettingContainer>
-    {:else}
       <!-- Import is advertised in the description rather than with a control:
            ⌘V into any field already does it, so a button would occupy permanent
            space to duplicate a shortcut people reach for by reflex. -->
@@ -666,7 +488,6 @@ async function handleTestConnection() {
           placeholder={"Authorization: Bearer token\nX-Custom-Header: value"}
         />
       </SettingContainer>
-    {/if}
   </SettingGroup>
 
   <!-- Test sits directly above its own results, so the outcome appears where the
@@ -808,33 +629,6 @@ async function handleTestConnection() {
   /* Inputs default to their intrinsic width, which is what truncated the URL. */
   :global(.mcp-row--stacked .setting-item-control input[type="text"]) {
     width: 100%;
-  }
-
-  /* Command + args on one line: the executable is short and fixed-ish, the
-     argument list is long, so give the args the remaining space. */
-  .mcp-command-row {
-    display: flex;
-    gap: 8px;
-    width: 100%;
-  }
-
-  .mcp-command-row :global(.mcp-command-input) {
-    flex: 0 1 30%;
-    min-width: 0;
-  }
-
-  .mcp-command-row :global(.mcp-args-input) {
-    flex: 1 1 auto;
-    min-width: 0;
-  }
-
-  /* Phone: two inputs side by side get too narrow to read. */
-  :global(.is-phone) .mcp-command-row {
-    flex-direction: column;
-  }
-
-  :global(.is-phone) .mcp-command-row :global(.mcp-command-input) {
-    flex: 1 1 auto;
   }
 
   :global(.mcp-textarea) {

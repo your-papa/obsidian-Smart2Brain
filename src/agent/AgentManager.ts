@@ -1184,30 +1184,15 @@ export class AgentManager {
 		mcpServers: Record<string, unknown> | undefined,
 	): Promise<boolean> {
 		if (!mcpServers || Object.keys(mcpServers).length === 0) return true;
-		let servers = mcpServers;
-
-		// stdio transport spawns a local process (Node child_process/stdio), which
-		// Obsidian's mobile WebView lacks. HTTP MCP has no such dependency, so on
-		// mobile drop only the stdio servers and load the rest. If that leaves no
-		// servers, skip entirely (avoids evaluating the SDK for nothing).
-		if (!Platform.isDesktopApp) {
-			const httpServers = Object.fromEntries(
-				Object.entries(mcpServers).filter(([, cfg]) => (cfg as { transport?: string })?.transport !== "stdio"),
-			);
-			const droppedStdio = Object.keys(mcpServers).length - Object.keys(httpServers).length;
-			if (droppedStdio > 0) {
-				Logger.log(`Skipping ${droppedStdio} stdio MCP server(s): stdio transport is desktop-only.`);
-			}
-			if (Object.keys(httpServers).length === 0) return true;
-			servers = httpServers;
-		}
 
 		try {
 			// Dynamically import so the MCP SDK (and its top-level Node builtin
-			// imports) is only evaluated when MCP is actually used on desktop —
-			// never at plugin load, which would crash the whole plugin.
+			// imports) is only evaluated when MCP is actually used — never at plugin
+			// load, which would crash the whole plugin. Only HTTP servers exist
+			// (the stdio transport is aliased out of the bundle, see vite.config.ts),
+			// so this works the same on desktop and mobile.
 			const { MultiServerMCPClient } = await import("@langchain/mcp-adapters");
-			const mcpConfig = { mcpServers: servers } as ConstructorParameters<typeof MultiServerMCPClient>[0];
+			const mcpConfig = { mcpServers } as ConstructorParameters<typeof MultiServerMCPClient>[0];
 			Logger.log("Initializing MCP client...", mcpConfig);
 
 			// Patch global fetch once for the manager's lifetime — MCP tools read

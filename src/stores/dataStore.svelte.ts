@@ -1078,20 +1078,11 @@ export class PluginDataStore {
 		for (const [id, config] of Object.entries(agent.mcpServers)) {
 			if (!config.enabled) continue;
 
-			if (config.transport === "stdio") {
-				result[id] = {
-					transport: "stdio",
-					command: config.command,
-					args: config.args,
-					...(config.env && Object.keys(config.env).length > 0 && { env: config.env }),
-				};
-			} else {
-				result[id] = {
-					transport: "http",
-					url: config.url,
-					...(config.headers && Object.keys(config.headers).length > 0 && { headers: config.headers }),
-				};
-			}
+			result[id] = {
+				transport: "http",
+				url: config.url,
+				...(config.headers && Object.keys(config.headers).length > 0 && { headers: config.headers }),
+			};
 		}
 
 		return result;

@@ -7,6 +7,10 @@
  * and reactive state.
  */
 
+// Pixi's eval-free code paths (uniform/UBO/shader sync without `new Function`).
+// Must run before the first renderer is created; the eval-based originals are
+// aliased out of the bundle in vite.config.ts.
+import "pixi.js/unsafe-eval";
 import { Application, CanvasSource, Container, Graphics, Sprite, Text, TextStyle, Texture, Ticker } from "pixi.js";
 import { Viewport } from "pixi-viewport";
 import { edgeAlphaZoomLift, nodeDrawRadius, zoomNodeScale } from "../../utils/graphUtils";

@@ -365,15 +365,14 @@ describe("PluginDataStore – Agent MCP Servers", () => {
 	it("should set and get MCP server for agent", () => {
 		store.setAgentMCPServer(DEFAULT_AGENT_ID, "my-server", {
 			displayName: "my-server",
-			transport: "stdio",
-			command: "npx",
-			args: ["-y", "@modelcontextprotocol/server-everything"],
+			transport: "http",
+			url: "http://localhost:3000/mcp",
 			enabled: true,
 		});
 
 		const servers = store.getAgentMCPServers(DEFAULT_AGENT_ID);
 		expect(servers["my-server"]).toBeDefined();
-		expect(servers["my-server"].transport).toBe("stdio");
+		expect(servers["my-server"].transport).toBe("http");
 		expect(servers["my-server"].enabled).toBe(true);
 	});
 
@@ -392,9 +391,8 @@ describe("PluginDataStore – Agent MCP Servers", () => {
 	it("should toggle MCP server enabled state", () => {
 		store.setAgentMCPServer(DEFAULT_AGENT_ID, "toggle-me", {
 			displayName: "toggle-me",
-			transport: "stdio",
-			command: "cmd",
-			args: [],
+			transport: "http",
+			url: "http://localhost:3000/mcp",
 			enabled: true,
 		});
 
@@ -405,16 +403,14 @@ describe("PluginDataStore – Agent MCP Servers", () => {
 	it("should convert MCP config for client (only enabled servers)", () => {
 		store.setAgentMCPServer(DEFAULT_AGENT_ID, "enabled-server", {
 			displayName: "enabled-server",
-			transport: "stdio",
-			command: "npx",
-			args: ["-y", "server"],
+			transport: "http",
+			url: "http://localhost:3001/mcp",
 			enabled: true,
 		});
 		store.setAgentMCPServer(DEFAULT_AGENT_ID, "disabled-server", {
 			displayName: "disabled-server",
-			transport: "stdio",
-			command: "npx",
-			args: [],
+			transport: "http",
+			url: "http://localhost:3002/mcp",
 			enabled: false,
 		});
 
