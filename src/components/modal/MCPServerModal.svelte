@@ -99,29 +99,59 @@ function restoreForm(snapshot: FormSnapshot) {
 // Connection probe. There is no "Test connection" button: like the provider
 // setup modal, the connection is checked automatically whenever the URL or
 // headers change, and the verdict lives in the footer next to the actions.
+//
+// The probe fires when a field is *left* (blur / Enter), not per keystroke: the
+// headers may carry a bearer token, and probing every intermediate value while
+// a URL is typed would hand that token to whichever host each prefix happens
+// to name. `url` is only committed on blur (see the field), and the headers
+// the probe sends are the last committed textarea value, `probeHeaders`.
+//
+// Editing adds one more guard: if the URL now points at a different origin
+// than the saved server and there are headers, the probe is held until the
+// user asks for it, so credentials stored for host A are never sent to host B
+// as a side effect of retyping the URL. Saving, and every agent run after it,
+// sends them anyway — that is the user's explicit decision; the hold only
+// covers the moment before it.
+//
 // `probeKey` identifies the config being checked; a result is only shown while
 // it still matches, so a stale probe finishing late can never mislabel the
-// current form, and a pending debounce reads as "checking" rather than as a
+// current form, and a pending probe reads as "checking" rather than as a
 // verdict for a config that was never probed.
 type DiscoveredTool = { name: string; description?: string };
 type ProbeResult = { key: string; ok: boolean; error?: string; tools: DiscoveredTool[] };
-type ConnectionStatus = "idle" | "checking" | "connected" | "failed";
-const PROBE_DEBOUNCE_MS = 700;
+type ConnectionStatus = "idle" | "held" | "checking" | "connected" | "failed";
 
 let probe = $state<ProbeResult | null>(null);
-const probeTarget = $derived.by(() => {
-	const trimmed = url.trim();
-	if (!trimmed) return null;
+// Seeded from the initial headers on purpose (IIFE, as the other captured initial values above).
+let probeHeaders = $state((() => headers)());
+/** Key of a cross-origin config the user explicitly asked to check anyway. */
+let heldKeyReleased = $state<string | null>(null);
+
+function originOf(value: string): string | null {
 	try {
-		new URL(trimmed);
+		return new URL(value).origin;
 	} catch {
 		return null;
 	}
-	return trimmed;
+}
+const savedOrigin = (() => (initialConfig ? originOf(initialConfig.url) : null))();
+
+const probeTarget = $derived.by(() => {
+	const trimmed = url.trim();
+	return trimmed && originOf(trimmed) !== null ? trimmed : null;
 });
-const probeKey = $derived(probeTarget === null ? null : `${probeTarget}\n${headers}`);
+const probeKey = $derived(probeTarget === null ? null : `${probeTarget}\n${probeHeaders}`);
+const probeHeld = $derived(
+	probeKey !== null &&
+		probeTarget !== null &&
+		savedOrigin !== null &&
+		probeHeaders.trim().length > 0 &&
+		originOf(probeTarget) !== savedOrigin &&
+		heldKeyReleased !== probeKey,
+);
 const connectionStatus = $derived.by<ConnectionStatus>(() => {
 	if (probeKey === null) return "idle";
+	if (probeHeld) return "held";
 	if (probe?.key !== probeKey) return "checking";
 	return probe.ok ? "connected" : "failed";
 });
@@ -130,10 +160,9 @@ const discoveredTools = $derived(connectionStatus === "connected" && probe ? pro
 $effect(() => {
 	const key = probeKey;
 	const target = probeTarget;
-	const headerText = headers;
-	if (key === null || target === null) return;
-	const timer = window.setTimeout(() => void probeConnection(key, target, headerText), PROBE_DEBOUNCE_MS);
-	return () => window.clearTimeout(timer);
+	const headerText = probeHeaders;
+	if (key === null || target === null || probeHeld) return;
+	void probeConnection(key, target, headerText);
 });
 
 onMount(() => {
@@ -242,6 +271,7 @@ function applyImportedJson(text: string): string | null {
 
 	url = (entry.url as string).trim();
 	headers = stringifyRecord(entry.headers, ": ");
+	probeHeaders = headers;
 
 	return null;
 }
@@ -481,9 +511,16 @@ async function probeConnection(key: string, target: string, headerText: string):
         name="Server URL"
         desc="The URL of the MCP server — or paste the server's JSON config to fill this form"
       >
-        <!-- Bound, not committed on blur: the probe below debounces on every
-             keystroke, so the verdict tracks what is in the field. -->
-        <Text id="mcp-server-url" inputType="text" bind:value={url} placeholder="https://mcp.example.com/mcp" />
+        <!-- Committed on blur/Enter, not per keystroke — see the probe notes in
+             the script for why the connection check must not chase typing. -->
+        <Text
+          id="mcp-server-url"
+          inputType="text"
+          value={url}
+          placeholder="https://mcp.example.com/mcp"
+          onchange={(v) => (url = v)}
+          onblur={(v) => (url = v)}
+        />
       </SettingContainer>
 
       <SettingContainer
@@ -495,6 +532,7 @@ async function probeConnection(key: string, target: string, headerText: string):
           id="mcp-server-headers"
           class="mcp-textarea"
           bind:value={headers}
+          onblur={(v) => (probeHeaders = v)}
           placeholder={"Authorization: Bearer token\nX-Custom-Header: value"}
         />
       </SettingContainer>
@@ -528,7 +566,16 @@ async function probeConnection(key: string, target: string, headerText: string):
       <Button buttonText="Delete" styles="mod-warning" onClick={handleDelete} />
     {/if}
     <div class="mcp-connection-status" role="status" aria-live="polite">
-      {#if connectionStatus === "checking"}
+      {#if connectionStatus === "held"}
+        <span class="mcp-connection-icon is-muted"><Icon name="shield-alert" size="xs" /></span>
+        <span class="mcp-connection-text is-muted">
+          Different host than the saved server — headers are not sent until you
+          <button type="button" class="mcp-connection-link" onclick={() => (heldKeyReleased = probeKey)}>
+            check now
+          </button>
+          or save.
+        </span>
+      {:else if connectionStatus === "checking"}
         <CircularLoader size={16} color="var(--text-muted)" />
         <span class="mcp-connection-text">Checking connection…</span>
       {:else if connectionStatus === "connected"}
@@ -545,8 +592,12 @@ async function probeConnection(key: string, target: string, headerText: string):
         <span class="mcp-connection-text is-muted">Enter the server URL — the connection is checked automatically.</span>
       {/if}
     </div>
-    <Button buttonText="Cancel" onClick={() => modal.close()} />
-    <Button buttonText={isEditing ? "Save" : "Add Server"} cta={true} onClick={handleSave} />
+    <!-- Kept together so a long status wraps its own text instead of splitting
+         the confirm pair onto two lines. -->
+    <div class="mcp-actions-primary">
+      <Button buttonText="Cancel" onClick={() => modal.close()} />
+      <Button buttonText={isEditing ? "Save" : "Add Server"} cta={true} onClick={handleSave} />
+    </div>
   </div>
 </div>
 
@@ -653,7 +704,6 @@ async function probeConnection(key: string, target: string, headerText: string):
   .mcp-actions {
     display: flex;
     align-items: center;
-    flex-wrap: wrap;
     gap: 8px;
     /* Core gives the footer a large top margin for modals whose body sits flush
        against it; here the flex gap already provides the spacing, so the two
@@ -668,6 +718,11 @@ async function probeConnection(key: string, target: string, headerText: string):
     align-items: stretch;
   }
 
+  :global(.is-phone) .mcp-actions-primary {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
   /* Connection verdict in the footer — mirrors `.provider-connection-status`
      in the provider setup modal. Takes the free space between the button
      groups and wraps long error messages instead of pushing the buttons out. */
@@ -675,14 +730,44 @@ async function probeConnection(key: string, target: string, headerText: string):
     display: flex;
     align-items: center;
     gap: var(--size-4-2);
-    flex: 1 1 auto;
+    /* Zero basis: the status takes whatever is left and wraps its text, rather
+       than claiming its content width and forcing the buttons onto a new line. */
+    flex: 1 1 0;
     min-width: 0;
+  }
+
+  .mcp-actions-primary {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+
+  /* Inline "check now" inside the held-status sentence: reads as a link, not a control. */
+  .mcp-connection-link {
+    display: inline;
+    padding: 0;
+    border: none;
+    box-shadow: none;
+    background: transparent;
+    color: var(--text-accent);
+    font-size: inherit;
+    text-decoration: underline;
+    cursor: pointer;
+  }
+  .mcp-connection-link:hover {
+    color: var(--text-accent-hover);
+    background: transparent;
   }
 
   .mcp-connection-icon {
     display: inline-flex;
     align-items: center;
     flex-shrink: 0;
+  }
+
+  .mcp-connection-icon.is-muted {
+    color: var(--text-muted);
   }
 
   .mcp-connection-text {
