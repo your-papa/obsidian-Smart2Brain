@@ -108,16 +108,15 @@ const sendButtonStyle = $derived.by(() => {
 	const hoverColor = "color-mix(in srgb, var(--text-accent) 84%, black 16%)";
 	const disabledColor = "color-mix(in srgb, var(--text-accent) 68%, var(--background-primary) 32%)";
 
+	// Only custom properties go inline. Sizing and colour live in the
+	// `.chat-input-container button.send-message-button` rules below — an inline
+	// `width`/`background` would beat every stylesheet rule, including the mobile
+	// touch-target sizes, which is what used to force `!important` everywhere.
 	return [
 		"--s2b-button-icon-size: var(--icon-xs)",
 		`--send-button-bg: ${baseColor}`,
 		`--send-button-bg-hover: ${hoverColor}`,
 		`--send-button-bg-disabled: ${disabledColor}`,
-		"background: var(--send-button-bg)",
-		"color: var(--text-on-accent)",
-		"width: 1.75rem",
-		"height: 1.75rem",
-		"min-width: 1.75rem",
 	].join("; ");
 });
 
@@ -1566,8 +1565,8 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
 
   /* Circular, matching the attach button (already `999px`) and the reference
      design. The 6px radius made it the odd one out in the action row. */
-  :global(.send-message-button) {
-    border-radius: 999px !important;
+  :global(.chat-input-container button.send-message-button) {
+    border-radius: 999px;
   }
 
   /* Tighter still on mobile, where vertical space is scarce and the card
@@ -1671,13 +1670,17 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
     visibility: hidden;
   }
 
-  :global(.send-message-button) {
-    background: var(--send-button-bg) !important;
-    color: var(--text-on-accent) !important;
-    width: 1.75rem !important;
-    height: 1.75rem !important;
-    min-width: 1.75rem !important;
-    min-height: 1.75rem !important;
+  /* `.chat-input-container button.…` (0,2,1) out-specifies every core button
+     and `.clickable-icon` rule, mobile variants included, so nothing here needs
+     `!important` — which also lets the touch-target rules in styles.css win on
+     specificity alone. */
+  :global(.chat-input-container button.send-message-button) {
+    background: var(--send-button-bg);
+    color: var(--text-on-accent);
+    width: 1.75rem;
+    height: 1.75rem;
+    min-width: 1.75rem;
+    min-height: 1.75rem;
     flex: 0 0 auto;
     aspect-ratio: 1;
   }
@@ -1693,32 +1696,32 @@ async function promoteVisibleNoteToAttachment(note: VisibleNote) {
   }
 
   /* Bump the send target to a comfortable touch size on mobile. */
-  :global(.is-mobile .send-message-button) {
-    width: 2.75rem !important;
-    height: 2.75rem !important;
-    min-width: 2.75rem !important;
-    min-height: 2.75rem !important;
+  :global(.is-mobile .chat-input-container button.send-message-button) {
+    width: 2.75rem;
+    height: 2.75rem;
+    min-width: 2.75rem;
+    min-height: 2.75rem;
   }
 
-  :global(.send-message-button:hover:not(:disabled)) {
-    background: var(--send-button-bg-hover) !important;
-    color: var(--text-on-accent) !important;
+  :global(.chat-input-container button.send-message-button:hover:not(:disabled)) {
+    background: var(--send-button-bg-hover);
+    color: var(--text-on-accent);
   }
 
-  :global(.send-message-button:disabled) {
-    background: var(--send-button-bg-disabled) !important;
-    color: color-mix(in srgb, var(--text-on-accent) 82%, transparent) !important;
-    opacity: 1 !important;
+  :global(.chat-input-container button.send-message-button:disabled) {
+    background: var(--send-button-bg-disabled);
+    color: color-mix(in srgb, var(--text-on-accent) 82%, transparent);
+    opacity: 1;
   }
 
-  :global(.chat-input-icon-button.clickable-icon) {
-    width: 1.75rem !important;
-    height: 1.75rem !important;
-    min-width: 1.75rem !important;
-    min-height: 1.75rem !important;
-    max-width: 1.75rem !important;
-    max-height: 1.75rem !important;
-    padding: 0 !important;
+  :global(.chat-input-container .chat-input-icon-button.clickable-icon) {
+    width: 1.75rem;
+    height: 1.75rem;
+    min-width: 1.75rem;
+    min-height: 1.75rem;
+    max-width: 1.75rem;
+    max-height: 1.75rem;
+    padding: 0;
     display: inline-flex;
     align-items: center;
     justify-content: center;

@@ -1349,9 +1349,9 @@ export class SearchModal extends SuggestModal<SearchSuggestion> {
 			);
 		}
 
-		// The static resets live on `.s2b-search-input` (styles.css); only the
-		// theme-dependent leading inset is set here.
-		inputEl.addClass("s2b-search-input");
+		// Only the theme-dependent leading inset is set here; the static resets
+		// live on `.s2b-inline-input` (styles.css). Inline `!important` because
+		// Cupertino pins `padding-inline-start` on `.prompt-input` at that priority.
 		const leadingInset = hasChips || !usesCupertinoTheme ? "0" : "36px";
 		inputEl.style.setProperty("padding-left", leadingInset, "important");
 		inputEl.style.setProperty("padding-inline-start", leadingInset, "important");
