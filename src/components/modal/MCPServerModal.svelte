@@ -8,6 +8,7 @@ import type { MCPServerConfig } from "../../types/plugin";
 import { getData } from "../../stores/dataStore.svelte";
 import { Logger } from "../../utils/logging";
 import Button from "../ui/Button.svelte";
+import CircularLoader from "../ui/CircularLoader.svelte";
 import Icon from "../ui/Icon.svelte";
 import Text from "../ui/Text.svelte";
 import { confirmDelete } from "./ConfirmModal";
@@ -95,11 +96,45 @@ function restoreForm(snapshot: FormSnapshot) {
 	headers = snapshot.headers;
 }
 
-// Test connection state
-let isTesting = $state(false);
-let testError = $state<string | null>(null);
-let discoveredTools = $state<{ name: string; description?: string }[]>([]);
-let testSuccess = $state(false);
+// Connection probe. There is no "Test connection" button: like the provider
+// setup modal, the connection is checked automatically whenever the URL or
+// headers change, and the verdict lives in the footer next to the actions.
+// `probeKey` identifies the config being checked; a result is only shown while
+// it still matches, so a stale probe finishing late can never mislabel the
+// current form, and a pending debounce reads as "checking" rather than as a
+// verdict for a config that was never probed.
+type DiscoveredTool = { name: string; description?: string };
+type ProbeResult = { key: string; ok: boolean; error?: string; tools: DiscoveredTool[] };
+type ConnectionStatus = "idle" | "checking" | "connected" | "failed";
+const PROBE_DEBOUNCE_MS = 700;
+
+let probe = $state<ProbeResult | null>(null);
+const probeTarget = $derived.by(() => {
+	const trimmed = url.trim();
+	if (!trimmed) return null;
+	try {
+		new URL(trimmed);
+	} catch {
+		return null;
+	}
+	return trimmed;
+});
+const probeKey = $derived(probeTarget === null ? null : `${probeTarget}\n${headers}`);
+const connectionStatus = $derived.by<ConnectionStatus>(() => {
+	if (probeKey === null) return "idle";
+	if (probe?.key !== probeKey) return "checking";
+	return probe.ok ? "connected" : "failed";
+});
+const discoveredTools = $derived(connectionStatus === "connected" && probe ? probe.tools : []);
+
+$effect(() => {
+	const key = probeKey;
+	const target = probeTarget;
+	const headerText = headers;
+	if (key === null || target === null) return;
+	const timer = window.setTimeout(() => void probeConnection(key, target, headerText), PROBE_DEBOUNCE_MS);
+	return () => window.clearTimeout(timer);
+});
 
 onMount(() => {
 	modal.setTitle(isEditing ? `Edit MCP Server: ${capturedExistingConfig?.displayName}` : "Add MCP Server");
@@ -208,10 +243,6 @@ function applyImportedJson(text: string): string | null {
 	url = (entry.url as string).trim();
 	headers = stringifyRecord(entry.headers, ": ");
 
-	// A pasted config describes a different server than the one just probed.
-	testSuccess = false;
-	testError = null;
-	discoveredTools = [];
 	return null;
 }
 
@@ -345,38 +376,29 @@ async function handleDelete() {
 }
 
 /**
- * Build a config object for testing from current form state
+ * The adapter wraps transport failures as `Failed to connect to streamable HTTP
+ * server "<id>, url: <url>": Error: <cause>` — the id is our internal probe
+ * label and the URL is the field right above the status, so only the cause is
+ * worth showing.
  */
-function buildTestConfig() {
-	const testServerId = "test-server";
-	return {
-		mcpServers: {
-			[testServerId]: {
-				transport: "http" as const,
-				url: url.trim(),
-				headers: parseHeaders(headers),
-			},
-		},
-	};
+function describeProbeError(err: unknown): string {
+	const message = err instanceof Error ? err.message : String(err);
+	const cause = message.replace(/^Failed to connect to [^"]*"[^"]*":\s*/, "").replace(/^Error:\s*/, "");
+	return cause.trim() || "Connection failed";
 }
 
 /**
- * Test the MCP server connection and discover tools
+ * Probe the server described by `target` + `headerText` and record the verdict
+ * under `key`. The result is dropped if the form has moved on by the time it
+ * lands (see `probeKey`).
  */
-async function handleTestConnection() {
-	// Validate form first
-	const error = validateForm();
-	if (error) {
-		new Notice(error);
-		return;
-	}
-
-	// Reset state
-	isTesting = true;
-	testError = null;
-	discoveredTools = [];
-	testSuccess = false;
-
+async function probeConnection(key: string, target: string, headerText: string): Promise<void> {
+	const config = {
+		mcpServers: {
+			"probe-server": { transport: "http" as const, url: target, headers: parseHeaders(headerText) },
+		},
+	};
+	let result: ProbeResult;
 	try {
 		// Ref-counted global-fetch patch for CORS bypass — safe under concurrency
 		// (unlike the old _originalFetch flag + finally-restore, which corrupted
@@ -384,37 +406,29 @@ async function handleTestConnection() {
 		const patch = installObsidianFetch();
 		let mcpClient: MultiServerMCPClient | undefined;
 		try {
-			const config = buildTestConfig();
-			Logger.log("Testing MCP connection with config:", config);
-
+			Logger.debug("Probing MCP connection:", config);
 			const { MultiServerMCPClient } = await import("@langchain/mcp-adapters");
 			mcpClient = new MultiServerMCPClient(config);
 			const tools = await mcpClient.getTools();
-
-			discoveredTools = tools.map((t) => ({
-				name: t.name,
-				description: (t as { description?: string }).description,
-			}));
-			testSuccess = true;
-
-			new Notice(`Connection successful! Found ${tools.length} tool(s).`);
+			result = {
+				key,
+				ok: true,
+				tools: tools.map((t) => ({ name: t.name, description: (t as { description?: string }).description })),
+			};
 		} finally {
-			// Close the client so the open session doesn't dangle after a one-off
-			// connection test.
+			// Close the client so the open session doesn't dangle after a one-off probe.
 			try {
 				await mcpClient?.close();
 			} catch (closeErr) {
-				Logger.debug("MCP client close failed after test:", closeErr);
+				Logger.debug("MCP client close failed after probe:", closeErr);
 			}
 			patch.release();
 		}
 	} catch (err) {
-		Logger.error("MCP connection test failed:", err);
-		testError = err instanceof Error ? err.message : "Connection failed";
-		new Notice(`Connection failed: ${testError}`);
-	} finally {
-		isTesting = false;
+		Logger.debug("MCP connection probe failed:", err);
+		result = { key, ok: false, error: describeProbeError(err), tools: [] };
 	}
+	if (key === probeKey) probe = result;
 }
 </script>
 
@@ -467,13 +481,9 @@ async function handleTestConnection() {
         name="Server URL"
         desc="The URL of the MCP server — or paste the server's JSON config to fill this form"
       >
-        <Text
-          id="mcp-server-url"
-          inputType="text"
-          value={url}
-          placeholder="https://mcp.example.com/mcp"
-          onblur={(v) => (url = v)}
-        />
+        <!-- Bound, not committed on blur: the probe below debounces on every
+             keystroke, so the verdict tracks what is in the field. -->
+        <Text id="mcp-server-url" inputType="text" bind:value={url} placeholder="https://mcp.example.com/mcp" />
       </SettingContainer>
 
       <SettingContainer
@@ -490,23 +500,10 @@ async function handleTestConnection() {
       </SettingContainer>
   </SettingGroup>
 
-  <!-- Test sits directly above its own results, so the outcome appears where the
-       user just clicked rather than at the far end of the modal. -->
-  <div class="mcp-test-row">
-    <Button
-      buttonText={isTesting ? "Testing…" : "Test connection"}
-      onClick={handleTestConnection}
-      disabled={isTesting}
-    />
-  </div>
-
-  <!-- Test Results -->
-  {#if testSuccess && discoveredTools.length > 0}
-    <div class="mcp-test-results success">
-      <div class="mcp-test-header">
-        <Icon name="check-circle" />
-        <span>Connection successful - {discoveredTools.length} tool(s) available</span>
-      </div>
+  <!-- Discovered tools. Shown only once the probe connects, so the panel doubles
+       as the visible proof that the URL and headers are right. -->
+  {#if connectionStatus === "connected" && discoveredTools.length > 0}
+    <div class="mcp-tools-panel">
       <div class="mcp-tools-list">
         {#each discoveredTools as tool (tool.name)}
           <div class="mcp-tool-item">
@@ -518,33 +515,36 @@ async function handleTestConnection() {
         {/each}
       </div>
     </div>
-  {:else if testSuccess && discoveredTools.length === 0}
-    <div class="mcp-test-results warning">
-      <div class="mcp-test-header">
-        <Icon name="alert-triangle" />
-        <span>Connected but no tools found</span>
-      </div>
-    </div>
-  {:else if testError}
-    <div class="mcp-test-results error">
-      <div class="mcp-test-header">
-        <Icon name="x-circle" />
-        <span>Connection failed</span>
-      </div>
-      <p class="mcp-test-error">{testError}</p>
-    </div>
   {/if}
 
-  <!-- Actions. `modal-button-container` is Obsidian's own footer class, so these
-       sit where a core modal's buttons do. Only the three verbs that resolve the
-       modal live here — Delete at the left edge, away from the confirm button so
-       a destructive click isn't adjacent to the one people aim for. Testing is a
-       form action, not a way out of the modal, so it sits with the fields above. -->
+  <!-- Footer. `modal-button-container` is Obsidian's own footer class, so the
+       buttons sit where a core modal's do. The connection verdict takes the
+       space between Delete and Cancel/Save, the same place the provider setup
+       modal reports its status: it is checked automatically, so nothing here
+       needs pressing. Delete stays at the left edge, away from the confirm
+       button, so a destructive click isn't adjacent to the one people aim for. -->
   <div class="modal-button-container mcp-actions">
     {#if isEditing}
       <Button buttonText="Delete" styles="mod-warning" onClick={handleDelete} />
     {/if}
-    <div class="flex-1"></div>
+    <div class="mcp-connection-status" role="status" aria-live="polite">
+      {#if connectionStatus === "checking"}
+        <CircularLoader size={16} color="var(--text-muted)" />
+        <span class="mcp-connection-text">Checking connection…</span>
+      {:else if connectionStatus === "connected"}
+        <span class="mcp-connection-icon is-success"><Icon name="check-circle" size="xs" /></span>
+        <span class="mcp-connection-text is-success">
+          {discoveredTools.length === 0
+            ? "Connected — no tools offered"
+            : `Connected — ${discoveredTools.length} tool${discoveredTools.length === 1 ? "" : "s"}`}
+        </span>
+      {:else if connectionStatus === "failed"}
+        <span class="mcp-connection-icon is-error"><Icon name="x-circle" size="xs" /></span>
+        <span class="mcp-connection-text is-error">{probe?.error ?? "Connection failed"}</span>
+      {:else}
+        <span class="mcp-connection-text is-muted">Enter the server URL — the connection is checked automatically.</span>
+      {/if}
+    </div>
     <Button buttonText="Cancel" onClick={() => modal.close()} />
     <Button buttonText={isEditing ? "Save" : "Add Server"} cta={true} onClick={handleSave} />
   </div>
@@ -606,11 +606,6 @@ async function handleTestConnection() {
     background: var(--background-modifier-hover);
   }
 
-  .mcp-test-row {
-    display: flex;
-    justify-content: flex-start;
-  }
-
   /* Wide-control settings row: keep the native label/description column, but let
      the control take the full width on its own line beneath it. Obsidian already
      does exactly this on phones; this opts specific desktop rows into the same
@@ -653,8 +648,8 @@ async function handleTestConnection() {
   }
 
   /* `modal-button-container` supplies the border, padding and spacing; this only
-     adds what it doesn't: a flex row so the `.flex-1` spacer can push Cancel/Save
-     right while Delete/Test stay left, and wrapping for narrow panes. */
+     adds what it doesn't: a flex row so the status can fill the middle and push
+     Cancel/Save right while Delete stays left, and wrapping for narrow panes. */
   .mcp-actions {
     display: flex;
     align-items: center;
@@ -673,56 +668,51 @@ async function handleTestConnection() {
     align-items: stretch;
   }
 
-  /* Test Results Styles */
-  .mcp-test-results {
+  /* Connection verdict in the footer — mirrors `.provider-connection-status`
+     in the provider setup modal. Takes the free space between the button
+     groups and wraps long error messages instead of pushing the buttons out. */
+  .mcp-connection-status {
+    display: flex;
+    align-items: center;
+    gap: var(--size-4-2);
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .mcp-connection-icon {
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+  }
+
+  .mcp-connection-text {
+    font-size: var(--font-ui-small);
+    overflow-wrap: anywhere;
+  }
+
+  .mcp-connection-text.is-muted {
+    color: var(--text-muted);
+  }
+
+  .is-success {
+    color: var(--text-success, #4caf50);
+  }
+
+  .mcp-connection-text.is-success {
+    font-weight: 500;
+  }
+
+  .is-error {
+    color: var(--text-error, #f44336);
+  }
+
+  .mcp-tools-panel {
     padding: 12px;
     border-radius: 6px;
     border: 1px solid var(--background-modifier-border);
   }
 
-  .mcp-test-results.success {
-    background: rgba(var(--color-green-rgb, 76, 175, 80), 0.1);
-    border-color: var(--text-success, #4caf50);
-  }
-
-  .mcp-test-results.warning {
-    background: rgba(var(--color-yellow-rgb, 255, 193, 7), 0.1);
-    border-color: var(--text-warning, #ffc107);
-  }
-
-  .mcp-test-results.error {
-    background: rgba(var(--color-red-rgb, 244, 67, 54), 0.1);
-    border-color: var(--text-error, #f44336);
-  }
-
-  .mcp-test-header {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-weight: 500;
-  }
-
-  .mcp-test-results.success .mcp-test-header {
-    color: var(--text-success, #4caf50);
-  }
-
-  .mcp-test-results.warning .mcp-test-header {
-    color: var(--text-warning, #ffc107);
-  }
-
-  .mcp-test-results.error .mcp-test-header {
-    color: var(--text-error, #f44336);
-  }
-
-  .mcp-test-error {
-    margin: 8px 0 0 0;
-    font-size: 0.85rem;
-    color: var(--text-muted);
-    font-family: var(--font-monospace);
-  }
-
   .mcp-tools-list {
-    margin-top: 12px;
     display: flex;
     flex-direction: column;
     gap: 6px;
