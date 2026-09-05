@@ -159,7 +159,19 @@ const discoveredTools = $derived(connectionStatus === "connected" && probe ? pro
 // Like the provider modal's Done: the confirm button only unlocks once the
 // connection has actually validated, so a server can't be saved on a URL that
 // was never reached — and a held (cross-origin) probe has to be released first.
-const canSave = $derived(connectionStatus === "connected");
+// The one exception is an edit that leaves the connection alone (a rename, or
+// no change at all): that must stay saveable while the server happens to be
+// down, so it is gated on the *saved* config being untouched rather than on a
+// live probe of it.
+function normalizeHeaders(record: Record<string, string> | undefined): string {
+	return JSON.stringify(Object.entries(record ?? {}).sort(([a], [b]) => a.localeCompare(b)));
+}
+const connectionUnchanged = $derived(
+	initialConfig !== null &&
+		url.trim() === initialConfig.url &&
+		normalizeHeaders(parseHeaders(headers)) === normalizeHeaders(initialConfig.headers),
+);
+const canSave = $derived(connectionStatus === "connected" || (isEditing && connectionUnchanged));
 
 $effect(() => {
 	const key = probeKey;
