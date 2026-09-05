@@ -24,6 +24,11 @@ export function createUboSyncFunction(): never {
 	return notInstalled("createUboSyncFunction");
 }
 
+/** Pixi ≥ 8.20 renamed `createUboSyncFunction` to `compileBufferSync`. */
+export function compileBufferSync(): never {
+	return notInstalled("compileBufferSync");
+}
+
 export function generateShaderSyncCode(): never {
 	return notInstalled("generateShaderSyncCode");
 }
