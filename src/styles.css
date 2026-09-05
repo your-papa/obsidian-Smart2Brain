@@ -1,6 +1,9 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+/* Tailwind layers, pulled in as imports rather than the `@tailwind` at-rules so
+   the source stylesheet stays valid CSS for any linter that doesn't know
+   Tailwind (Obsidian's plugin review, for one). Same output either way. */
+@import "tailwindcss/base.css";
+@import "tailwindcss/components.css";
+@import "tailwindcss/utilities.css";
 
 /* Hide scrollbar utility */
 .scrollbar-hide {
@@ -280,8 +283,6 @@ button.s2b-pill--interactive:hover {
 	border-radius: 999px;
 	border: 1px solid var(--tag-border-color, var(--background-modifier-border));
 	background: none;
-	background-color: var(--tag-background, color-mix(in srgb, var(--text-accent) 10%, transparent)) !important;
-	box-shadow: none !important;
 	color: var(--tag-color, var(--text-accent));
 	font-size: 0.72em;
 	font-family: inherit;
@@ -310,8 +311,20 @@ button.s2b-pill--interactive:hover {
 	stroke: currentColor;
 }
 
+/* The chip is a <button>: core styles buttons by element with a fill and a
+   shadow, and the `.is-mobile`/`.prompt-input-container` rules that restyle
+   them out-specify a lone class. Naming the element and the ancestor wins on
+   specificity, so no `!important` is needed. */
+.s2b-search-modal button.s2b-inline-chip {
+	background-color: var(--tag-background, color-mix(in srgb, var(--text-accent) 10%, transparent));
+	box-shadow: none;
+}
+
+.s2b-search-modal button.s2b-inline-chip:hover {
+	background-color: var(--tag-background-hover, color-mix(in srgb, var(--text-accent) 10%, transparent));
+}
+
 .s2b-inline-chip:hover {
-	background-color: var(--tag-background-hover, color-mix(in srgb, var(--text-accent) 10%, transparent)) !important;
 	border-color: var(
 		--tag-border-color-hover,
 		color-mix(in srgb, var(--interactive-accent) 35%, var(--background-modifier-border))
@@ -669,10 +682,15 @@ button.s2b-pill--interactive:hover {
 	font-size: var(--font-smallest);
 }
 
-/* Smart Graph View */
+/* Smart Graph View. The container IS the leaf's `.view-content`; naming the
+   ancestor out-specifies core's `.workspace-leaf-content .view-content`
+   padding without `!important`. */
+.workspace-leaf-content .view-content.smart-graph-container,
 .smart-graph-container {
-	padding: 0 !important;
 	overflow: hidden;
+}
+.workspace-leaf-content .view-content.smart-graph-container {
+	padding: 0;
 }
 
 .smart-graph-container .view-content {
@@ -1609,8 +1627,10 @@ button.s2b-pill--interactive.s2b-pill--active:hover {
 	text-indent: 0 !important;
 }
 /* Search modal glow: the gradient overlay replaces the modal's own border. */
-.s2b-search-modal.s2b-search-modal-glowing {
-	border-color: transparent !important;
+/* SuggestModal's element carries `.prompt`, not `.modal`; naming it beats core's
+   `.prompt` border and the `.is-mobile .prompt` variant on specificity. */
+.prompt.s2b-search-modal.s2b-search-modal-glowing {
+	border-color: transparent;
 }
 .s2b-search-modal-glow-canvas {
 	position: absolute;
