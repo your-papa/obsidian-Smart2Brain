@@ -144,17 +144,58 @@ const MODULE_SHIMS: Array<[pattern: RegExp, shim: string]> = [
 	],
 ];
 
-function shimModules(): Plugin {
+/**
+ * Patterns that must not survive into the production bundle. Checked after
+ * minification, so comments (which mention these names freely) are gone and
+ * only live code and string literals remain. A hit fails the build — that is
+ * the point: a dependency moving a file out from under {@link MODULE_SHIMS}
+ * must surface as a red build, not as a quietly restored capability.
+ */
+const FORBIDDEN_BUNDLE_PATTERNS: Array<[label: string, pattern: RegExp]> = [
+	["child_process", /child_process/],
+	["spawn()", /\.spawn\(/],
+	["execFile", /execFile/],
+	["new Function()", /new Function\(/],
+	["eval()", /[^\w.$]eval\(/],
+];
+
+function shimModules(isProduction: boolean): Plugin {
+	const applied = new Set<number>();
 	return {
 		name: "shim-modules",
 		enforce: "pre",
 		async resolveId(source, importer, options) {
 			const resolved = await this.resolve(source, importer, { ...options, skipSelf: true });
 			if (!resolved) return null;
-			for (const [pattern, shim] of MODULE_SHIMS) {
-				if (pattern.test(resolved.id)) return resolve(configDir, shim);
+			for (const [index, [pattern, shim]] of MODULE_SHIMS.entries()) {
+				if (pattern.test(resolved.id)) {
+					applied.add(index);
+					return resolve(configDir, shim);
+				}
 			}
 			return null;
+		},
+		generateBundle(_options, bundle) {
+			const missing = MODULE_SHIMS.filter((_, index) => !applied.has(index)).map(([pattern]) => String(pattern));
+			if (missing.length > 0) {
+				throw new Error(
+					`shim-modules: no dependency module matched ${missing.join(", ")} — did a package move the file? ` +
+						"Update MODULE_SHIMS in vite.config.ts.",
+				);
+			}
+			if (!isProduction) return;
+			for (const output of Object.values(bundle)) {
+				if (output.type !== "chunk") continue;
+				for (const [label, pattern] of FORBIDDEN_BUNDLE_PATTERNS) {
+					const match = pattern.exec(output.code);
+					if (!match) continue;
+					const at = Math.max(0, match.index - 80);
+					throw new Error(
+						`shim-modules: production bundle ${output.fileName} still contains ${label} near: ` +
+							`…${output.code.slice(at, match.index + 80)}…`,
+					);
+				}
+			}
 		},
 		transform(code, id) {
 			// @langchain/mcp-adapters keeps the stdio option schema (never reachable
@@ -184,7 +225,7 @@ export default defineConfig(({ mode }) => {
 
 	return {
 		plugins: [
-			shimModules(),
+			shimModules(!isDevelopment),
 			svelte({
 				preprocess: vitePreprocess(),
 				onwarn: (warning, handler) => {
