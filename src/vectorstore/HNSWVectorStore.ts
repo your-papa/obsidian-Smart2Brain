@@ -244,11 +244,14 @@ export class HNSWVectorStore implements VectorStore {
 	 */
 	private static readonly SAVE_DEBOUNCE_MS = 2000;
 	private hasPendingIndexSave = false;
+	// Timers go through `self`, not `window`: this class runs inside the HNSW Web
+	// Worker (hnswWorker.ts), where `window` is undefined. On the main thread the
+	// two are the same object, so this stays popout-window safe there as well.
 	private saveIndexTimer: number | null = null;
 
 	private scheduleIndexSave(): void {
-		if (this.saveIndexTimer !== null) window.clearTimeout(this.saveIndexTimer);
-		this.saveIndexTimer = window.setTimeout(() => {
+		if (this.saveIndexTimer !== null) self.clearTimeout(this.saveIndexTimer);
+		this.saveIndexTimer = self.setTimeout(() => {
 			this.saveIndexTimer = null;
 			void this.flushIndex();
 		}, HNSWVectorStore.SAVE_DEBOUNCE_MS);
@@ -302,7 +305,7 @@ export class HNSWVectorStore implements VectorStore {
 			const finish = (fn: () => void) => {
 				if (settled) return;
 				settled = true;
-				if (blockedTimer !== null) window.clearTimeout(blockedTimer);
+				if (blockedTimer !== null) self.clearTimeout(blockedTimer);
 				fn();
 			};
 
@@ -324,8 +327,8 @@ export class HNSWVectorStore implements VectorStore {
 				Logger.warn(
 					`${LOG_PREFIX} open blocked on "${this.dbName}" — another connection is still open (a second Obsidian window on this vault?). Waiting ${OPEN_BLOCKED_TIMEOUT_MS}ms for it to close.`,
 				);
-				if (blockedTimer !== null) window.clearTimeout(blockedTimer);
-				blockedTimer = window.setTimeout(() => {
+				if (blockedTimer !== null) self.clearTimeout(blockedTimer);
+				blockedTimer = self.setTimeout(() => {
 					finish(() =>
 						reject(
 							new Error(
@@ -637,7 +640,7 @@ export class HNSWVectorStore implements VectorStore {
 		// Cancel the pending debounced save so it can't fire after we null `db`,
 		// then flush synchronously so no incremental changes are lost on close.
 		if (this.saveIndexTimer !== null) {
-			window.clearTimeout(this.saveIndexTimer);
+			self.clearTimeout(this.saveIndexTimer);
 			this.saveIndexTimer = null;
 		}
 		if (this.hnswIndex && this.db && this.hasPendingIndexSave) {
@@ -764,7 +767,7 @@ export class HNSWVectorStore implements VectorStore {
 	/** Checkpoint for bulk runs: persist the graph now rather than on the debounce. */
 	async flush(): Promise<void> {
 		if (this.saveIndexTimer !== null) {
-			window.clearTimeout(this.saveIndexTimer);
+			self.clearTimeout(this.saveIndexTimer);
 			this.saveIndexTimer = null;
 		}
 		await this.flushIndex();
