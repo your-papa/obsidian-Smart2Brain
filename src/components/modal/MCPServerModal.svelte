@@ -156,6 +156,10 @@ const connectionStatus = $derived.by<ConnectionStatus>(() => {
 	return probe.ok ? "connected" : "failed";
 });
 const discoveredTools = $derived(connectionStatus === "connected" && probe ? probe.tools : []);
+// Like the provider modal's Done: the confirm button only unlocks once the
+// connection has actually validated, so a server can't be saved on a URL that
+// was never reached — and a held (cross-origin) probe has to be released first.
+const canSave = $derived(connectionStatus === "connected");
 
 $effect(() => {
 	const key = probeKey;
@@ -377,6 +381,7 @@ function validateForm(): string | null {
 }
 
 function handleSave() {
+	if (!canSave) return;
 	const error = validateForm();
 	if (error) {
 		new Notice(error);
@@ -596,7 +601,7 @@ async function probeConnection(key: string, target: string, headerText: string):
          the confirm pair onto two lines. -->
     <div class="mcp-actions-primary">
       <Button buttonText="Cancel" onClick={() => modal.close()} />
-      <Button buttonText={isEditing ? "Save" : "Add Server"} cta={true} onClick={handleSave} />
+      <Button buttonText={isEditing ? "Save" : "Add Server"} cta={canSave} disabled={!canSave} onClick={handleSave} />
     </div>
   </div>
 </div>
