@@ -126,8 +126,10 @@ const BANNER = PROCESS_SHIM;
  * confused with another's). Together these keep two capabilities out of the
  * bundle that the plugin never uses but Obsidian's plugin review flags:
  *
- * - process spawning (`child_process`): the MCP SDK's stdio transport and the
- *   Anthropic SDK's local agent toolset (bash/grep/skills);
+ * - process spawning (`child_process`): the MCP SDK's stdio transport. (The
+ *   Anthropic SDK's local agent toolset used to need a shim too; since
+ *   @anthropic-ai/sdk 0.120 the package maps it to a browser stub itself, and
+ *   the forbidden-pattern scan below is what keeps that honest.)
  * - dynamic code execution (`new Function`): the MCP SDK's ajv validator
  *   (replaced by the SDK's own cfworker provider) and Pixi's code generators
  *   (replaced at runtime by `pixi.js/unsafe-eval`, imported in pixiRenderer.ts).
@@ -137,9 +139,8 @@ const BANNER = PROCESS_SHIM;
 const MODULE_SHIMS: Array<[pattern: RegExp, shim: string]> = [
 	[/\/@modelcontextprotocol\/sdk\/dist\/esm\/client\/stdio\.js$/, "src/lib/shims/mcpStdioTransport.ts"],
 	[/\/@modelcontextprotocol\/sdk\/dist\/esm\/validation\/ajv-provider\.js$/, "src/lib/shims/mcpJsonSchemaValidator.ts"],
-	[/\/@anthropic-ai\/sdk\/tools\/agent-toolset\/node\.mjs$/, "src/lib/shims/anthropicAgentToolset.ts"],
 	[
-		/\/pixi\.js\/lib\/.*\/(unsafeEvalSupported|createUboSyncFunction|GenerateShaderSyncCode|generateUniformsSync|generateParticleUpdateFunction)\.mjs$/,
+		/\/pixi\.js\/lib\/.*\/(unsafeEvalSupported|createUboSyncFunction|compileBufferSync|GenerateShaderSyncCode|generateUniformsSync|generateParticleUpdateFunction)\.mjs$/,
 		"src/lib/shims/pixiNoEval.ts",
 	],
 ];
@@ -201,8 +202,10 @@ function shimModules(isProduction: boolean): Plugin {
 			// @langchain/mcp-adapters keeps the stdio option schema (never reachable
 			// here) and its description names `child_process.spawn` — a literal that
 			// reads as shell access to a bundle scan. Reword the doc string only.
+			// Matched on the module token alone — the surrounding prose (and its
+			// apostrophe) has already changed once between adapter versions.
 			if (!id.endsWith("/@langchain/mcp-adapters/dist/types.js")) return null;
-			const reworded = code.replace("Node's `child_process.spawn`", "Node's process spawning");
+			const reworded = code.replaceAll("`child_process.spawn`", "process spawning").replaceAll("child_process", "child process");
 			return reworded === code ? null : { code: reworded, map: null };
 		},
 	};
